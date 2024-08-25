@@ -3,7 +3,14 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.9.34728.123
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT", "rPDU2MQTT\rPDU2MQTT.csproj", "{9A53818A-4415-4C29-976C-D625454EB330}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "rPDU2MQTT", "rPDU2MQTT\rPDU2MQTT.csproj", "{9A53818A-4415-4C29-976C-D625454EB330}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{2E135745-EA9F-4734-90F9-68518A38A390}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "workflows", "workflows", "{86F9A45C-0034-425C-9BC7-63173827CE01}"
+	ProjectSection(SolutionItems) = preProject
+		.github\workflows\docker-publish.yml = .github\workflows\docker-publish.yml
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,6 +25,9 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{86F9A45C-0034-425C-9BC7-63173827CE01} = {2E135745-EA9F-4734-90F9-68518A38A390}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {22826ED9-5C8B-4039-8116-C122A5795C87}
