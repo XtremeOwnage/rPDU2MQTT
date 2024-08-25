@@ -59,11 +59,6 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHostedService<HomeAssistantDiscoveryService>();
 
     })
-    .ConfigureServices((context, services) =>
-    {
-
-
-    })
     .ConfigureLogging(logging =>
     {
         logging.ClearProviders();
@@ -75,24 +70,5 @@ var host = Host.CreateDefaultBuilder(args)
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
 await client.ConnectAsync();
-
-
-//while (true)
-//{
-//   await client.PublishAsync(new HiveMQtt.MQTT5.Types.MQTT5PublishMessage
-//    {
-//        Topic = "TestTopic",
-//        PayloadAsString = "Testing",
-//        QoS = HiveMQtt.MQTT5.Types.QualityOfService.AtMostOnceDelivery
-//    });
-
-//}
-
-
-
-
-
-
-// Use the configurations as needed
 
 host.Run();
