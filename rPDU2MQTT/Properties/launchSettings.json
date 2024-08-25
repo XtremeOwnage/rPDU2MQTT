@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "rPDU2MQTT": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
