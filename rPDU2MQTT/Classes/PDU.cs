@@ -71,8 +71,9 @@ public partial class PDU
         {
             if (entity is Outlet o)
             {
-                entity.Entity_Name = o.GetOverrideOrDefault(key, config.Overrides.OutletID, FormatName: true);
-                entity.Entity_DisplayName = o.GetOverrideOrDefault(key, config.Overrides.OutletName, FormatName: false);
+                int k = int.TryParse(key, out int s) ? s + 1 : 0; //Note- the plus one, is so the number aligns with what is seen on the GUI.
+                entity.Entity_Name = o.GetOverrideOrDefault(k, config.Overrides.OutletID, FormatName: true);
+                entity.Entity_DisplayName = o.GetOverrideOrDefault(k, config.Overrides.OutletName, FormatName: false);
             }
             else
             {
@@ -94,8 +95,10 @@ public partial class PDU
         {
             // We want to override the default key here- to give a nice, readable key.
             entity.Record_Key = entity.Type;
-            entity.Entity_Name = entity.GetEntityName();
-            entity.Entity_DisplayName = entity.Type;
+
+            var suffix = entity.GetOverrideOrDefault(entity.Type, config.Overrides.MeasurementID, entity.Type, true);
+            entity.Entity_Name = entity.GetEntityName(suffix);
+            entity.Entity_DisplayName = entity.GetOverrideOrDefault(entity.Type, config.Overrides.MeasurementName, entity.Type, false);
         }
     }
 }

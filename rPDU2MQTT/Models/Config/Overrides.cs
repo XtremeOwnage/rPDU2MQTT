@@ -27,4 +27,14 @@ public class Overrides
     /// This maps to <see cref="Models.HomeAssistant.baseClasses.baseEntity.DisplayName"/>, ie, "name"
     /// </remarks>
     public Dictionary<int, string> OutletName { get; set; } = new();
+
+    /// <summary>
+    /// Allows overriding the generated Entity ID for measurements.
+    /// </summary>
+    public Dictionary<string, string> MeasurementID { get; set; } = new();
+
+    /// <summary>
+    /// Allows overriding the generated Entity Name for measurements.
+    /// </summary>
+    public Dictionary<string, string> MeasurementName { get; set; } = new();
 }
