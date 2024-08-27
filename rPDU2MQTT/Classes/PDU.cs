@@ -41,7 +41,9 @@ public partial class PDU
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
-        data.Entity_Identifier = $"rPDU2MQTT";
+
+        data.Entity_Identifier = Coalesce(config.Overrides.PduID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides.PduName, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
 
         // Propagate down the parent, and identifier.
         data.Devices.SetParentAndIdentifier(data);
@@ -65,38 +67,12 @@ public partial class PDU
     }
     private void processChildDevice<T>(Dictionary<string, T> entities) where T : NamedEntityWithMeasurements
     {
-        // Retreive / Generate "entity_id" for each outlet.
-        string getEntityID(string key, Outlet outlet)
-        {
-            if (int.TryParse(key, out int num) && config.Overrides.OutletID.ContainsKey(num + 1))
-            {
-                var newValue = config.Overrides.OutletID[num + 1].FormatName();
-                this.log.LogDebug($"Overriding entity_id for outlet '{key}' to '{newValue}'");
-                return newValue;
-            }
-            else
-                return $"outlet_{key}";
-        }
-
-        // Retreive / Generate "name" for each outlet. 
-        string getName(string key, Outlet outlet)
-        {
-            if (int.TryParse(key, out int num) && config.Overrides.OutletName.ContainsKey(num + 1))
-            {
-                var newValue = config.Overrides.OutletName[num + 1];
-                this.log.LogDebug($"Overriding entity Name for outlet '{key}' to '{newValue}'");
-                return newValue;
-            }
-            else
-                return (outlet.Label ?? outlet.Name);
-        }
-
         foreach (var (key, entity) in entities)
         {
             if (entity is Outlet o)
             {
-                entity.Entity_Name = getEntityID(key, o);
-                entity.Entity_DisplayName = getName(key, o);
+                entity.Entity_Name = o.GetOverrideOrDefault(key, config.Overrides.OutletID, FormatName: true);
+                entity.Entity_DisplayName = o.GetOverrideOrDefault(key, config.Overrides.OutletName, FormatName: false);
             }
             else
             {
