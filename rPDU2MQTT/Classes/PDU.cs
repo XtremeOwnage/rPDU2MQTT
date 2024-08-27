@@ -1,4 +1,6 @@
-﻿using rPDU2MQTT.Extensions;
+﻿using Microsoft.Extensions.Logging;
+using NLog.Fluent;
+using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Interfaces;
 using rPDU2MQTT.Models.Config;
@@ -18,6 +20,7 @@ public partial class PDU
     private PduConfig pduConfig => config.PDU;
     private readonly Config config;
     private readonly HttpClient http;
+    private readonly ILogger<PDU> log;
 
     /// <summary>
     /// Dummy device which represents the device itself.
@@ -29,10 +32,11 @@ public partial class PDU
     /// </summary>
     public BaseEntity entity_Root { get; init; }
 
-    public PDU(Config config, HttpClient http)
+    public PDU(Config config, HttpClient http, ILogger<PDU> log)
     {
         this.config = config;
         this.http = http;
+        this.log = log;
 
         //Setup a hierarchy of MQTT paths / devices.
 
@@ -83,25 +87,44 @@ public partial class PDU
     }
     private void processChildDevice<T>(Dictionary<string, T> entities) where T : NamedEntityWithMeasurements
     {
-        string getOutletName(string key, Outlet outlet)
+        // Retreive / Generate "entity_id" for each outlet.
+        string getEntityID(string key, Outlet outlet)
         {
-            if (int.TryParse(key, out int num) && pduConfig.OutletNameOverride.ContainsKey(num + 1))
-                return pduConfig.OutletNameOverride[num + 1];
+            if (int.TryParse(key, out int num) && config.Overrides.OutletID.ContainsKey(num + 1))
+            {
+                var newValue = config.Overrides.OutletID[num + 1].FormatName();
+                this.log.LogDebug($"Overriding entity_id for outlet '{key}' to '{newValue}'");
+                return newValue;
+            }
             else
-                return (outlet.Label ?? outlet.Name).FormatName();
+                return $"outlet_{key}";
+        }
+
+        // Retreive / Generate "name" for each outlet. 
+        string getName(string key, Outlet outlet)
+        {
+            if (int.TryParse(key, out int num) && config.Overrides.OutletName.ContainsKey(num + 1))
+            {
+                var newValue = config.Overrides.OutletName[num + 1];
+                this.log.LogDebug($"Overriding entity Name for outlet '{key}' to '{newValue}'");
+                return newValue;
+            }
+            else
+                return (outlet.Label ?? outlet.Name);
         }
 
         foreach (var (key, entity) in entities)
         {
-            entity.Entity_Name = entity switch
+            if (entity is Outlet o)
             {
-                // Outlets have adjustable overrides for names.
-                Outlet outlet => getOutletName(key, outlet),
-
-                // Default- Format the label, if exists. Otherwise, format the name.
-                _ => (entity.Label ?? entity.Name).FormatName(),
-            };
-            entity.Entity_DisplayName = (entity.Label ?? entity.Name);
+                entity.Entity_Name = getEntityID(key, o);
+                entity.Entity_DisplayName = getName(key, o);
+            }
+            else
+            {
+                entity.Entity_Name = (entity.Label ?? entity.Name).FormatName();
+                entity.Entity_DisplayName = (entity.Label ?? entity.Name);
+            }
 
             // All measurements will be stored into a sub-key.
             entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements));

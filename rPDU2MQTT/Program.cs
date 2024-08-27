@@ -22,6 +22,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.Configure<PduConfig>(context.Configuration.GetSection("Pdu"));
         services.Configure<ActionsConfig>(context.Configuration.GetSection("Actions"));
         services.Configure<HomeAssistantConfig>(context.Configuration.GetSection("HomeAssistant"));
+        services.Configure<Overrides>(context.Configuration.GetSection("Overrides"));
 
         //Bind MQTT
         var mqttConfig = context.Configuration.GetSection("Mqtt").Get<MQTTConfig>() ?? throw new NullReferenceException("Unable to load MQTT configuration.");
@@ -50,8 +51,10 @@ var host = Host.CreateDefaultBuilder(args)
         {
             var cfg = sp.GetRequiredService<Config>();
             var fac = sp.GetService<IHttpClientFactory>();
+            var logFac = sp.GetService<ILoggerFactory>();
             var hc = fac.CreateClient("pdu");
-            return new PDU(cfg, hc);
+            var log = logFac.CreateLogger<PDU>();
+            return new PDU(cfg, hc, log);
         });
 
 
