@@ -1,46 +1,24 @@
 ﻿using Microsoft.Extensions.Logging;
-using NLog.Fluent;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
-using rPDU2MQTT.Interfaces;
-using rPDU2MQTT.Models.Config;
-using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDUResponse;
 using System.Net.Http.Json;
-using System.Reflection;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace rPDU2MQTT.Classes;
 
 public partial class PDU
 {
-    public string DeviceID => config.PDU.DeviceId;
-    private PduConfig pduConfig => config.PDU;
     private readonly Config config;
     private readonly HttpClient http;
     private readonly ILogger<PDU> log;
-
-    /// <summary>
-    /// Dummy device which represents the device itself.
-    /// </summary>
-    public BaseEntity entity_Device { get; init; }
-
-    /// <summary>
-    /// Dummy device which represents the root entity. (aka, top level MQTT key)
-    /// </summary>
-    public BaseEntity entity_Root { get; init; }
 
     public PDU(Config config, HttpClient http, ILogger<PDU> log)
     {
         this.config = config;
         this.http = http;
         this.log = log;
-
-        //Setup a hierarchy of MQTT paths / devices.
-
-
     }
 
     /// <summary>
