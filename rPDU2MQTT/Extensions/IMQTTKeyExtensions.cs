@@ -84,22 +84,4 @@ public static class IMQTTKeyExtensions
         return result.FormatName();
     }
 
-    /// <summary>
-    /// Sets all properties of <see cref="IMQTTKey"/>.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="IMQTTKey.Record_Key"/> is set to key from device.
-    /// </remarks>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="Items"></param>
-    /// <param name="Parent"></param>
-    public static void SetParentAndIdentifier<T>(this Dictionary<string, T> Items, IMQTTKey Parent) where T : BaseEntity
-    {
-        foreach (var (key, item) in Items)
-        {
-            item.Record_Parent = Parent;
-            item.Record_Key = key;
-            item.Entity_Identifier = Parent.CreateChildIdentifier(key);
-        }
-    }
 }

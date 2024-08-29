@@ -20,8 +20,6 @@ public class BaseEntity : IMQTTKey
             Entity_Identifier = Parent.CreateChildIdentifier(Path.ToJsonString())
         };
     }
-    #region IMQTTKey
-
     /// <inheritdoc cref="IMQTTKey.Entity_Identifier"/>
     /// <remarks>
     /// This should only bet set by <see cref="Classes.PDU"/>
@@ -42,6 +40,11 @@ public class BaseEntity : IMQTTKey
     /// </remarks>
     [JsonIgnore]
     public IMQTTKey? Record_Parent { get; set; }
-    #endregion
+
+    /// <summary>
+    /// Determine if this entity is enabled, and should be used.
+    /// </summary>
+    [JsonIgnore]
+    public bool Entity_Enabled { get; set; } = true;
 
 }

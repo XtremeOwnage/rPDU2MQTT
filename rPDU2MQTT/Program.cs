@@ -23,6 +23,8 @@ var host = Host.CreateDefaultBuilder(args)
         services.Configure<ActionsConfig>(context.Configuration.GetSection("Actions"));
         services.Configure<HomeAssistantConfig>(context.Configuration.GetSection("HomeAssistant"));
         services.Configure<Overrides>(context.Configuration.GetSection("Overrides"));
+        services.Configure<OutletOverrides>(context.Configuration.GetSection("Outlets"));
+        services.Configure<MeasurementOverrides>(context.Configuration.GetSection("Measurements"));
 
         //Bind MQTT
         var mqttConfig = context.Configuration.GetSection("Mqtt").Get<MQTTConfig>() ?? throw new NullReferenceException("Unable to load MQTT configuration.");

@@ -56,6 +56,9 @@ public partial class PDU
     {
         foreach (var (key, device) in devices)
         {
+            // Remove any disabled outlets.
+            config.Outlets.RemoveDisabledRecords(device.Outlets);
+
             // Propagate down the parent, and identifier.
             device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity));
             device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets));
@@ -72,14 +75,16 @@ public partial class PDU
             if (entity is Outlet o)
             {
                 int k = int.TryParse(key, out int s) ? s + 1 : 0; //Note- the plus one, is so the number aligns with what is seen on the GUI.
-                entity.Entity_Name = o.GetOverrideOrDefault(k, config.Overrides.OutletID, FormatName: true);
-                entity.Entity_DisplayName = o.GetOverrideOrDefault(k, config.Overrides.OutletName, FormatName: false);
+                entity.ApplyOverrides(k.ToString(), config.Outlets);
             }
             else
             {
                 entity.Entity_Name = (entity.Label ?? entity.Name).FormatName();
                 entity.Entity_DisplayName = (entity.Label ?? entity.Name);
             }
+
+            // Remove any disabled measurements.
+            config.Measurements.RemoveDisabledRecords(entity.Measurements, o => o.Type);
 
             // All measurements will be stored into a sub-key.
             entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements));
@@ -95,10 +100,10 @@ public partial class PDU
         {
             // We want to override the default key here- to give a nice, readable key.
             entity.Record_Key = entity.Type;
+            entity.ApplyOverrides(entity.Type, config.Measurements, DefaultName: entity.Type, DefaultDisplayName: entity.Type);
 
-            var suffix = entity.GetOverrideOrDefault(entity.Type, config.Overrides.MeasurementID, entity.Type, true);
-            entity.Entity_Name = entity.GetEntityName(suffix);
-            entity.Entity_DisplayName = entity.GetOverrideOrDefault(entity.Type, config.Overrides.MeasurementName, entity.Type, false);
+            //SInce- ApplyNameOverridesReturnIsValid already set the EntityName, we are just going to append a suffix to it.
+            entity.Entity_Name = entity.GetEntityName(entity.Entity_Name);
         }
     }
 }
