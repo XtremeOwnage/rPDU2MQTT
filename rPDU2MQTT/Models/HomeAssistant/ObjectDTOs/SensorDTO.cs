@@ -5,4 +5,4 @@ namespace rPDU2MQTT.Models.HomeAssistant.ObjectDTOs;
 
 public record EntityDTO(string EntitySuffix);
 
-public record SensorDTO(StateClass StateClass, DeviceClass SensorClass, string EntitySuffix);
+public record SensorDTO(StateClass StateClass, DeviceClass SensorClass);

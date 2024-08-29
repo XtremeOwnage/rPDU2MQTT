@@ -3,7 +3,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Services;
@@ -12,8 +11,11 @@ var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((context, config) =>
     {
         config.SetBasePath(Directory.GetCurrentDirectory())
-              .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
-              .AddEnvironmentVariables();
+            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+            // Check /Config directory.
+            .SetBasePath("/config")
+            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables();
     })
     .ConfigureServices((context, services) =>
     {
@@ -22,6 +24,9 @@ var host = Host.CreateDefaultBuilder(args)
         services.Configure<PduConfig>(context.Configuration.GetSection("Pdu"));
         services.Configure<ActionsConfig>(context.Configuration.GetSection("Actions"));
         services.Configure<HomeAssistantConfig>(context.Configuration.GetSection("HomeAssistant"));
+        services.Configure<Overrides>(context.Configuration.GetSection("Overrides"));
+        services.Configure<OutletOverrides>(context.Configuration.GetSection("Outlets"));
+        services.Configure<MeasurementOverrides>(context.Configuration.GetSection("Measurements"));
 
         //Bind MQTT
         var mqttConfig = context.Configuration.GetSection("Mqtt").Get<MQTTConfig>() ?? throw new NullReferenceException("Unable to load MQTT configuration.");
@@ -50,8 +55,10 @@ var host = Host.CreateDefaultBuilder(args)
         {
             var cfg = sp.GetRequiredService<Config>();
             var fac = sp.GetService<IHttpClientFactory>();
+            var logFac = sp.GetService<ILoggerFactory>();
             var hc = fac.CreateClient("pdu");
-            return new PDU(cfg, hc);
+            var log = logFac.CreateLogger<PDU>();
+            return new PDU(cfg, hc, log);
         });
 
 

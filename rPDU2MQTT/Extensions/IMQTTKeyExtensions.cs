@@ -59,44 +59,29 @@ public static class IMQTTKeyExtensions
     /// </summary>
     /// <param name="Device"></param>
     /// <returns></returns>
-    public static string GetEntityName(this IMQTTKey Device)
+    public static string GetEntityName(this IMQTTKey Device, string Suffix)
     {
         string getObjectID(IMQTTKey? cur)
         {
             //If- the current device is null- just return the unique identifier.
             if (cur is null)
-                return Device.Entity_Identifier;
+                return $"{Device.Entity_Identifier}_{Suffix}";
 
             //If- this is a dummy entity used for organization, skip it, and recurse to the parent.
             if (cur is DummyEntity && cur.Record_Parent is not null)
                 return getObjectID(cur.Record_Parent);
 
             if (cur is NamedEntityWithMeasurements cd)
-                return $"{cd.Entity_Name}_{Device.Record_Key}";
+                return $"{cd.Entity_Name}_{Suffix}";
 
             //Recurse up another level.
             return getObjectID(cur.Record_Parent);
         }
 
-        return getObjectID(Device);
+        var result = getObjectID(Device);
+
+
+        return result.FormatName();
     }
 
-    /// <summary>
-    /// Sets all properties of <see cref="IMQTTKey"/>.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="IMQTTKey.Record_Key"/> is set to key from device.
-    /// </remarks>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="Items"></param>
-    /// <param name="Parent"></param>
-    public static void SetParentAndIdentifier<T>(this Dictionary<string, T> Items, IMQTTKey Parent) where T : BaseEntity
-    {
-        foreach (var (key, item) in Items)
-        {
-            item.Record_Parent = Parent;
-            item.Record_Key = key;
-            item.Entity_Identifier = Parent.CreateChildIdentifier(key);
-        }
-    }
 }

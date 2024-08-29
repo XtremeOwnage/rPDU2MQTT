@@ -37,7 +37,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                 {
                     //If we are unable to parse this measurement as valid, skip to the next.
                     var dto = measurement.TryParseValue();
-                    if (dto is null || dto.EntitySuffix is null)
+                    if (dto is null)
                         continue;
 
                     Sensors.Add(CreateSensorDiscovery(measurement, ParentDevice, dto));
@@ -55,13 +55,12 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                 {
                     //If we are unable to parse this measurement as valid, skip to the next.
                     var dto = measurement.TryParseValue();
-                    if (dto is null || dto.EntitySuffix is null)
+                    if (dto is null)
                         continue;
 
                     Sensors.Add(CreateSensorDiscovery(measurement, childDevice, dto));
                 }
             }
-
         }
 
         log.LogInformation("Publishing discovery messages");

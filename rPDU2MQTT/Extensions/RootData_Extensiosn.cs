@@ -21,7 +21,7 @@ public static class RootData_Extensiosn
             Model = data.Sys.ModelNumber,
             SerialNumber = data.Sys.SerialNumber,
             SoftwareVersion = data.Sys.AppVersion,
-            Name = data.Sys.Label ?? data.Sys.Name,
+            Name = data.Entity_DisplayName,
         };
     }
 }

@@ -17,12 +17,12 @@ public static class MeasurementHelper
         {
             "currentcrestfactor" => null,
             "balance" => null,
-            "apparentpower" => new SensorDTO(StateClass.Measurement, DeviceClass.ApparentPower, "apparentPower"),
-            "realpower" => new SensorDTO(StateClass.Measurement, DeviceClass.Power, "power"),
-            "energy" => new SensorDTO(StateClass.TotalIncreasing, DeviceClass.Energy, "energy"),
-            "powerfactor" => new SensorDTO(StateClass.Measurement, DeviceClass.PowerFactor, "powerFactor"),
-            "current" => new SensorDTO(StateClass.Measurement, DeviceClass.Current, "current"),
-            "voltage" => new SensorDTO(StateClass.Measurement, DeviceClass.Voltage, "voltage"),
+            "apparentpower" => new SensorDTO(StateClass.Measurement, DeviceClass.ApparentPower),
+            "realpower" => new SensorDTO(StateClass.Measurement, DeviceClass.Power),
+            "energy" => new SensorDTO(StateClass.TotalIncreasing, DeviceClass.Energy),
+            "powerfactor" => new SensorDTO(StateClass.Measurement, DeviceClass.PowerFactor),
+            "current" => new SensorDTO(StateClass.Measurement, DeviceClass.Current),
+            "voltage" => new SensorDTO(StateClass.Measurement, DeviceClass.Voltage),
             _ => null
         };
     }
