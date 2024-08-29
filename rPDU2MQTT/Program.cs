@@ -97,4 +97,6 @@ logger.LogInformation($"Connecting to MQTT Broker at {client.Options.Host}:{clie
 
 await client.ConnectAsync();
 
+logger.LogInformation("Successfully connected to broker!");
+
 host.Run();
