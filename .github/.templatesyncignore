@@ -1,0 +1,7 @@
+.github/workflows/*
+.github/workflows/update-labels.yml
+.github/dependabot.yml.*
+profile/*
+README.md
+SECURITY.md
+LICENSE
