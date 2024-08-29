@@ -3,7 +3,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Services;
@@ -12,8 +11,11 @@ var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((context, config) =>
     {
         config.SetBasePath(Directory.GetCurrentDirectory())
-              .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
-              .AddEnvironmentVariables();
+            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+            // Check /Config directory.
+            .SetBasePath("/config")
+            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+            .AddEnvironmentVariables();
     })
     .ConfigureServices((context, services) =>
     {
