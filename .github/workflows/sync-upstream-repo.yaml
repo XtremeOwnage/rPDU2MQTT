@@ -1,0 +1,62 @@
+name: Sync Upstream Repo
+on:
+  # Allow manually triggering this job.
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Should a dry-run be performed? Will not perform any changes."
+        required: false
+        default: false
+        type: boolean
+      delete-other:
+        description: "Should labels not defined in configuration be deleted?"
+        required: false
+        default: false
+        type: boolean    
+        
+jobs:
+  sync-labels:
+    # This job syncs labels from an upstream template repo.
+    name: Sync Labels    
+    runs-on: ubuntu-latest
+    permissions:
+      # This job will need write permissions to issues (to manage labels)
+      issues: write
+    steps:
+    - uses: EndBug/label-sync@v2
+      with:
+        # Use config from a repository containing defaults.
+        config-file: https://raw.githubusercontent.com/${{ vars.TEMPLATE_REPO }}/${{ vars.TEMPLATE_REPO_BRANCH }}/.github/labels.yml
+
+        # If you want the action just to show you the preview of the changes, without actually editing the labels, set this to true
+        dry-run: ${{ inputs.dry-run }}
+        
+        # This, will delete other lables not defined.
+        delete-other-labels: ${{ inputs.delete-other }}
+        
+  sync-template-repo:
+    # This job will sync issue templates, and other files from an upstream repo.
+    name: Sync Template Repo 
+    runs-on: ubuntu-latest
+    needs: sync-labels
+    # https://docs.github.com/en/actions/using-jobs/assigning-permissions-to-jobs
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # To use this repository's private action, you must check out the repository
+      - name: Checkout
+        # Checkout the current repo.
+        # https://github.com/actions/checkout#usage        
+        uses: actions/checkout@v4
+
+      - name: actions-template-sync
+        # Syncs files from a template repo, to the current repo.
+        # https://github.com/marketplace/actions/actions-template-sync
+        uses: AndreasAugustin/actions-template-sync@v2
+        with:
+          source_repo_path: ${{ vars.TEMPLATE_REPO }}
+          upstream_branch: ${{ vars.TEMPLATE_REPO_BRANCH }}
+          pr_labels: area/github/templates,kind/documentation,priority/normal,triage/accepted
+          pr_title: Merge defaults from ${{ vars.TEMPLATE_REPO }}/${{ vars.TEMPLATE_REPO_BRANCH }}
