@@ -1,0 +1,46 @@
+name: 'Manage Lifecycle for Issues and PRs'
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+  - cron: '30 1 * * *'
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      # Documentation: https://github.com/actions/stale
+    - uses: actions/stale@v4
+      with:
+        # Labels
+        # Only issues with these labels are checked.
+        # only-labels: lifecycle/new, lifecycle/active, lifecycle/stale
+
+        # Exempt / Frozen
+        exempt-issue-labels: 'lifecycle/frozen'
+        exempt-pr-labels: 'lifecycle/frozen'
+
+        # Active To Stale
+        days-before-stale: ${{ vars.LIFECYCLE_DAYS_BEFORE_STALE }}
+        stale-issue-label: 'lifecycle/stale'
+        stale-issue-message: 'This issue is stale because it has been open ${{ vars.LIFECYCLE_DAYS_BEFORE_STALE }} days with no activity. Remove stale label or comment or this will be closed in ${{ vars.LIFECYCLE_DAYS_BEFORE_ABANDON }} days.'
+        stale-pr-label: 'lifecycle/stale'
+        stale-pr-message: 'This PR is stale because it has been open ${{ vars.LIFECYCLE_DAYS_BEFORE_STALE }} days with no activity. Remove stale label or comment or this will be closed in ${{ vars.LIFECYCLE_DAYS_BEFORE_ABANDON }} days.'
+        labels-to-remove-when-stale: lifecycle/new, lifecycle/active
+        
+        # Stale -> Active
+        remove-stale-when-updated: true
+        labels-to-add-when-unstale: 'lifecycle/active'
+
+        # Stale -> Abandoned / Rotten / Closed
+        days-before-close: ${{ vars.LIFECYCLE_DAYS_BEFORE_ABANDON }}
+        close-issue-label: 'lifecycle/abandoned'
+        close-issue-message: 'This issue has been closed due to extended inactivity.'
+        close-pr-label: 'lifecycle/abandoned'
+        close-pr-message: 'This PR has been closed due to extended inactivity.'
+        
+        # Exemptions
+        exempt-all-milestones: true
+        exempt-all-assignees: true
+        exempt-draft-pr: true
