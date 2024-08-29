@@ -1,0 +1,145 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configuration
+  namespace: rpdu2mqtt
+data:
+  appsettings.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "System.Net.Http.HttpClient": "Warning",
+          "rPDU2MQTT.*": "Debug"
+        }
+      },
+      "Mqtt": {
+        // Add your MQTT Username and Password here.
+        "Username": "user",
+        "Password": "password",
+
+        // This will be the parent topic in MQTT, where keys are published to.
+        "ParentTopic": "Rack_PDU",
+
+        // This is the client-ID used.
+        "ClientID": "rpdu2mqtt",
+
+        // Set this to the host / ip of your MQTT server.
+        "Host": "localhost",
+        "Port": 1883,
+        "KeepAlive": 60
+      },
+      "Pdu": {
+        // Add your PDU's device ID here.
+        "DeviceId": "A0AE260C851900C3",
+
+        // Set to the URL, or IP for your PDU.
+        "Url": "http://your-pdu-ip-or-dns/",
+
+        // This is how often sensors will be published to MQTT (in seconds)
+        "PollInterval": 5,
+
+        // Timeout for requests to/from the PDU, in seconds.
+        "Timeout": 5
+      },
+      // This section allows overriding the generated entity_id, and names for various objects.
+      // Note- ID / entity_id, will only be set when the entity is created.
+      // Do not touch or change it throug here after it has been created! Otherwise, you can end up with duplicates, or other issues.
+      // "Name" can be freely updated, and home assistant will reflect updated names instantly (after the discovery runs)
+      "Overrides": {
+        // Allows overriding the generated identifier for the PDU. Leave blank to disable.
+        // Warning- Do not change after creation! This is the root, unique identifier used, and should not change!
+        // IF, you change this, you will have a lot of duplicated devices, and entities!!!!!!
+        "PduID": null,
+
+        // Allows overriding the generated entity name for the PDU. Leave blank to disable.
+        // This- can be changed at any time, and will update the name of the Device which represents the PDU.
+        // If null, this will default to the PDU's configured label.
+        "PduName": "Rack-PDU-1"
+      },
+      "Outlets": {
+        // The "entity_id" can be overridden, and customized for each outlet.
+        // By default, if not specified, an entity ID will be automatically generated from the labels configured via the PDU.
+        // Note- don't change this after initial discovery. Will cause problems.
+        "ID": {
+          //"1": "kube02",
+          //"2": "dell_md1220",
+          //"3": "outlet_3"
+          //..
+        },
+        // The "name" can be overridden, and customized for each outlet.
+        // This, represents the "display name", which is the human-readable, pretty version.
+        // By default, if not specified, this will be automatically generated from the labels configured via the PDU.
+        "Name": {
+          //"1": "Proxmox: Kube02",
+          //"2": "Dell: MD1220",
+          //"3": "Outlet 3 Friendly Name"
+          //..
+        },
+
+        ///Allows enabling, or disabling specific devices.
+        // Disabled devices will not be discovered or published to MQTT.
+        "Enabled": {
+          "1": true,
+          "2": true,
+          "3": true
+        }
+      },
+      "Measurements": {
+        // This allows customizing the entity IDs generated for metrics.
+        // All measurement entity_ids will start with the generated ID for the device they belong to.
+        // ie, {device_name}_power, device_energy
+        // Output Format will be {EntityID}_{MeasurementID}
+        // Both measurement ID, and Name, is based on the data type presented from the PDU.
+        // This will affect ALL devices and entities, using measurements.
+        // Note- changing the ID only customizes the suffix.
+        "ID": {
+          "apparentpower": null,
+          "realpower": "power",
+          "energy": null,
+          "powerFactor": null,
+          "current": null,
+          "voltage": null
+        },
+
+        //Customize the names for measurements.
+        //Output Format will be {Entity Name} {Measurement Name}
+        "Name": {
+          "apparentpower": "Apparent Power",
+          "realpower": "Power",
+          "energy": "Energy",
+          "powerFactor": "Power Factor",
+          "current": "Current",
+          "voltage": "Voltage"
+        },
+
+        //Allow enabling, or disabling publishing specific measurement types.
+        //This applies to all entity types.
+        "Enabled": {
+          "apparentpower": true,
+          "realpower": true,
+          "energy": true,
+          "powerFactor": true,
+          "current": true,
+          "voltage": true,
+
+          // These are not enabled- because they don't quite map to anything useful.
+          "balance": false,
+          "currentCrestFactor": false
+        }
+      },
+
+      // Ignore this section for now...
+      "Actions": {
+        "Enabled": false,
+        "Username": "actionsUser",
+        "Password": "actionsPass"
+      },
+      "HomeAssistant": {
+        "DiscoveryEnabled": true,
+        "DiscoveryTopic": "homeassistant/discovery",
+        "DiscoveryInterval": 300,
+        // Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
+        "SensorExpireAfterSeconds": 300
+      }
+    }

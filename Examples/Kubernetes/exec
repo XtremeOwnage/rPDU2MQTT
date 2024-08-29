@@ -1,0 +1,3 @@
+ns="rpdu2mqtt"
+kubectl exec -it -n $ns $(kubectl get pod -n $ns -l role=app -o jsonpath='{.items[0].metadata.name}') -- $1
+
