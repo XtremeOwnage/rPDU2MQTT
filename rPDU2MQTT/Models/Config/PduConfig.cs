@@ -27,4 +27,8 @@ public class PduConfig
     [Range(1, int.MaxValue, ErrorMessage = "PollInterval must be greater than 0.")]
     [Display(Description = "The polling interval for the PDU in seconds.")]
     public int PollInterval { get; set; } = 5;
+
+    [Range(1, 60 * 10, ErrorMessage = "Expected timeout between 1 second, and 10 minutes.")]
+    [Display(Description = "Http timeout for requests to PDU")]
+    public int Timeout { get; set; } = 5;
 }
