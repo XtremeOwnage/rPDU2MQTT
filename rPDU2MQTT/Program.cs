@@ -10,12 +10,28 @@ using rPDU2MQTT.Services;
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((context, config) =>
     {
-        config.SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
+        if (Directory.Exists("/config"))
+        {
+            Console.WriteLine($"Found /config directory");
+            Console.WriteLine($"/config.appsettings.json exists: {File.Exists("/config/appsettings.json")}");
+
             // Check /Config directory.
-            .SetBasePath("/config")
-            .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
-            .AddEnvironmentVariables();
+            config
+                .SetBasePath("/config")
+                .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true);
+        }
+        else
+        {
+            Console.WriteLine($"Did not find /config directory. Using {Directory.GetCurrentDirectory()}");
+            Console.WriteLine($"appsettings.json exists: {File.Exists("appsettings.json")}");
+            //Check for configuration files in the current directory.
+            config.SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true);
+        }
+
+
+        config.AddEnvironmentVariables();
+
     })
     .ConfigureServices((context, services) =>
     {
@@ -73,9 +89,12 @@ var host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
-
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
+var logger = host.Services.GetRequiredService<ILogger<IHiveMQClient>>();
+
+logger.LogInformation($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
+
 await client.ConnectAsync();
 
 host.Run();
