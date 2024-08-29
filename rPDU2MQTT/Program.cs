@@ -64,6 +64,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddHttpClient("pdu", client =>
         {
             client.BaseAddress = new Uri(pduConfiguration.Url);
+            client.Timeout = TimeSpan.FromSeconds(pduConfiguration.Timeout);
         });
 
         //Configure Services
