@@ -1,0 +1,7 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: rpdu2mqtt
+  labels:
+    name: rPDU2MQTT
+    backup-policy: daily-backup
