@@ -1,21 +1,15 @@
-﻿namespace rPDU2MQTT.Models.Config;
+﻿using YamlDotNet.Serialization;
+
+namespace rPDU2MQTT.Models.Config;
 
 /// <summary>
 /// Configuration settings for the MQTT broker.
 /// </summary>
+[YamlSerializable]
 public class MQTTConfig
 {
-    /// <summary>
-    /// Gets or sets the username for connecting to the MQTT broker.
-    /// </summary>
-    [Display(Description = "The username for connecting to the MQTT broker.")]
-    public string? Username { get; set; } = null;
-
-    /// <summary>
-    /// Gets or sets the password for connecting to the MQTT broker.
-    /// </summary>
-    [Display(Description = "The password for connecting to the MQTT broker.")]
-    public string? Password { get; set; } = null;
+    [YamlMember(Alias = "Credentials", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Optional credentials to connect to MQTT")]
+    public Schemas.Credentials? Credentials { get; set; } = null;
 
     /// <summary>
     /// Gets or sets the client-id for connecting to the MQTT broker.

@@ -1,5 +1,6 @@
-﻿namespace rPDU2MQTT.Models.Config;
-#nullable disable
+﻿using YamlDotNet.Serialization;
+
+namespace rPDU2MQTT.Models.Config;
 
 /// <summary>
 /// Configuration settings for the PDU.
@@ -24,4 +25,7 @@ public class PduConfig
     [Range(1, 60 * 10, ErrorMessage = "Expected timeout between 1 second, and 10 minutes.")]
     [Display(Description = "Http timeout for requests to PDU")]
     public int Timeout { get; set; } = 5;
+
+    [YamlMember(Alias = "Actions", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Configuration to enable write actions via PDU")]
+    public ActionsConfig? Actions { get; set; } = null;
 }

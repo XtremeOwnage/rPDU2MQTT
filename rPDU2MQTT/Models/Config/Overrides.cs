@@ -1,26 +1,20 @@
-﻿using System.Text.Json.Serialization;
+﻿using rPDU2MQTT.Models.Config.Schemas;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
+[YamlSerializable]
 public class Overrides
 {
-    /// <summary>
-    /// Allows overriding the generated entity ID for the PDU.
-    /// </summary>
-    public string? PduID { get; set; } = null;
+    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding values for the PDU itself.")]
+    public EntityOverride? PDU { get; set; }
 
-    /// <summary>
-    /// Allows overriding the generated entity name for the PDU.
-    /// </summary>
-    public string? PduName { get; set; } = null;
+    [YamlMember(Alias = "Devices", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding configuration for individual devices.")]
+    public Dictionary<string, EntityOverride?>? Devices { get; set; }
+
+    [YamlMember(Alias = "Outlets", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding values for individual outlets.")]
+    public Dictionary<int, EntityOverride?>? Outlets { get; set; }
+
+    [YamlMember(Alias = "Measurements", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding individual measurements")]
+    public Dictionary<string, EntityOverride?>? Measurements { get; set; }
 }
-
-/// <summary>
-/// Defines overrides for measurements.
-/// </summary>
-public class MeasurementOverrides : TypeOverride { }
-
-/// <summary>
-/// Defines overrides for outlets.
-/// </summary>
-public class OutletOverrides : TypeOverride { }
