@@ -7,13 +7,6 @@
 public class PduConfig
 {
     /// <summary>
-    /// Gets or sets the device ID of the PDU.
-    /// </summary>
-    [Required(ErrorMessage = "DeviceId is required.")]
-    [Display(Description = "The device ID of the PDU.")]
-    public string DeviceId { get; set; }
-
-    /// <summary>
     /// Gets or sets the URL of the PDU API.
     /// </summary>
     [Required(ErrorMessage = "Url is required.")]
