@@ -12,7 +12,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(ILogger<HomeAssistantDiscoveryService> log, ServiceDependancies deps) : base(deps, log) { }
+    public HomeAssistantDiscoveryService(ILogger<HomeAssistantDiscoveryService> log, MQTTServiceDependancies deps) : base(deps, log) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {

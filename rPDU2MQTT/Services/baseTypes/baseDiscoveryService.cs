@@ -14,7 +14,7 @@ namespace rPDU2MQTT.Services.baseTypes;
 
 public abstract class baseDiscoveryService : baseMQTTTService
 {
-    public baseDiscoveryService(ServiceDependancies deps, ILogger log) : base(deps, log, deps.Cfg.HASS.DiscoveryInterval) { }
+    public baseDiscoveryService(MQTTServiceDependancies deps, ILogger log) : base(deps, log, deps.Cfg.HASS.DiscoveryInterval) { }
 
     public Sensor CreateSensorDiscovery(Measurement measurement, DiscoveryDevice Device, SensorDTO dto)
     {
@@ -73,7 +73,7 @@ public abstract class baseDiscoveryService : baseMQTTTService
 
             Console.WriteLine(msg.PayloadAsString);
 
-            await this.Publish(msg, cancellationToken);
+            //await this.Publish(msg, cancellationToken);
         }
     }
 }
