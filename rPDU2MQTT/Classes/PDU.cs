@@ -43,6 +43,7 @@ public partial class PDU
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
+        data.URL = http.BaseAddress.ToString();
 
         data.Entity_Identifier = Coalesce(config.Overrides?.PDU?.ID, "rPDU2MQTT")!;
         data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;

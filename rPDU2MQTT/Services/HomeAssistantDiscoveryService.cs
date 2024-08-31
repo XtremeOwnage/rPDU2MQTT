@@ -17,7 +17,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     protected override async Task Execute(CancellationToken cancellationToken)
     {
         var data = await pdu.GetRootData_Public(cancellationToken);
-        var ParentDevice = data.GetDiscoveryDevice(this.cfg.PDU.Url);
+        var ParentDevice = data.GetDiscoveryDevice();
 
         log.LogDebug("Starting discovery job.");
 

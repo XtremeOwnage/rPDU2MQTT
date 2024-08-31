@@ -6,6 +6,12 @@ namespace rPDU2MQTT.Models.PDU;
 
 public partial class RootData : NamedEntity
 {
+    /// <summary>
+    /// This is the URL used.
+    /// </summary>
+    [JsonIgnore]
+    public string URL { get; set; } = string.Empty;
+
     [JsonPropertyName("sys")]
     public Sys Sys { get; set; }
 
