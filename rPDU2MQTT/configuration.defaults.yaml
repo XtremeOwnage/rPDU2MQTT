@@ -46,9 +46,10 @@ Pdu:
 
     # Configuration needed to allow write-actions.
     # Aka- this enables the ability to toggle switches, or alter configuration.
-    # If this is false, rPDU2MQTT won't "change" anything on the PDU.
-    Actions:
-        Enabled: false
+    # If this is false, rPDU2MQTT won't "change" anything on the PDU. 
+    # (this- includes changing the status of a switch, aka, turning it on or off)
+    # This, defaults to false.
+    ActionsEnabled: true
 
 
 # This section allows overriding the generated entity_id, name, and enabled/disabled, for various objects.

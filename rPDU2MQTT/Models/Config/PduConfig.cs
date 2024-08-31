@@ -28,10 +28,10 @@ public class PduConfig
     [Display(Description = "The polling interval for the PDU in seconds.")]
     public int PollInterval { get; set; } = 5;
 
-    [Range(1, 60 * 10, ErrorMessage = "Expected timeout between 1 second, and 10 minutes.")]
-    [Display(Description = "Http timeout for requests to PDU")]
-    public int Timeout { get; set; } = 5;
-
-    [YamlMember(Alias = "Actions", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Configuration to enable write actions via PDU")]
-    public ActionsConfig? Actions { get; set; } = null;
+    [YamlMember(Alias = "ActionsEnabled", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Configuration to enable write actions via PDU")]
+    /// <summary>
+    /// Gets or sets a value indicating whether actions are enabled.
+    /// </summary>
+    [Display(Description = "Indicates whether actions are enabled.")]
+    public bool ActionsEnabled { get; set; } = false;
 }
