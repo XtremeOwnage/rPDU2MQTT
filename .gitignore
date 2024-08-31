@@ -363,4 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 
 /rPDU2MQTT/appsettings.Development.json
-/rPDU2MQTT/configuration.yaml
+/rPDU2MQTT/config.yaml
