@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Services;
 
 namespace rPDU2MQTT.Startup;
@@ -18,56 +19,55 @@ public static class ServiceConfiguration
         // Bind Configuration
         services.AddSingleton(cfg);
 
-        bool mqttEnabled = !string.IsNullOrEmpty(cfg.MQTT?.Host);
-        if (!mqttEnabled)
-            Console.WriteLine("Error: No MQTT configuration found. MQTT-related services will not be started.");
+        // Bind IHiveMQClient
+        services.AddSingleton<IHiveMQClient, HiveMQClient>((sp) =>
+        {
+            ThrowError.TestRequiredConfigurationSection(cfg.MQTT, "MQTT");
+            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection, "MQTT.Connection");
+            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Host");
+            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
-        if (mqttEnabled)
-            // Bind IHiveMQClient
-            services.AddSingleton<IHiveMQClient, HiveMQClient>((sp) =>
-            {
-                if (cfg.MQTT is null)
-                    throw new Exception("Configuration: MQTT is required.");
+            var mqttBuilder = new HiveMQClientOptionsBuilder()
+                .WithBroker(cfg.MQTT.Connection.Host)
+                .WithPort(cfg.MQTT.Connection.Port!.Value)
+                .WithClientId(cfg.MQTT.ClientID ?? "rpdu2mqtt");
 
-                var mqttBuilder = new HiveMQClientOptionsBuilder()
-                    .WithBroker(cfg.MQTT?.Host ?? throw new Exception("Configuration: MQTT.Host is required."))
-                    .WithPort(cfg.MQTT.Port)
-                    .WithClientId(cfg.MQTT.ClientID ?? "rpdu2mqtt");
+            if (cfg.MQTT.Credentials?.Username is not null)
+                mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
 
-                if (cfg.MQTT.Credentials?.Username is not null)
-                    mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
+            if (cfg.MQTT.Credentials?.Password is not null)
+                mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
 
-                if (cfg.MQTT.Credentials?.Password is not null)
-                    mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
-
-                // Return new client, with options applied.
-                return new HiveMQClient(mqttBuilder.Build());
-            });
+            // Return new client, with options applied.
+            return new HiveMQClient(mqttBuilder.Build());
+        });
 
         // Create HttpClient for PDU.
         services.AddHttpClient<PDU>(client =>
         {
-            client.BaseAddress = new Uri(cfg.PDU.Url);
-            client.Timeout = TimeSpan.FromSeconds(cfg.PDU.Timeout);
+            ThrowError.TestRequiredConfigurationSection(cfg.PDU, "PDU");
+            ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection, "PDU.Connection");
+            ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection.Host, "PDU.Connection.Host");
+            UriBuilder uriBuilder = new UriBuilder();
+
+            uriBuilder.Host = cfg.PDU.Connection.Host;
+            uriBuilder.Port = cfg.PDU.Connection.Port ?? 80;
+
+            client.BaseAddress = uriBuilder.Uri;
+            client.Timeout = TimeSpan.FromSeconds(cfg.PDU.Connection.TimeoutSecs ?? 15);
         });
 
         //Configure Services
         services.AddSingleton<PDU>();
 
+        services.AddSingleton<MQTTServiceDependancies>();
 
-        if (mqttEnabled)
-        {
-            services.AddSingleton<MQTTServiceDependancies>();
+        // Created hosted services.
+        services.AddHostedService<MQTTPublishingService>();
 
-            // Created hosted services.
-            services.AddHostedService<MQTTPublishingService>();
-
-            if (cfg.HASS.DiscoveryEnabled)
-                services.AddHostedService<HomeAssistantDiscoveryService>();
-        }
+        if (cfg.HASS.DiscoveryEnabled)
+            services.AddHostedService<HomeAssistantDiscoveryService>();
         else
-        {
-            Console.WriteLine("MQTT Publishing and Discovery services disabled, due to MQTT Configuration missing.");
-        }
+            Console.WriteLine($"Home Assistant Discovery Disabled.");
     }
 }
