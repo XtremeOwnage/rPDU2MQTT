@@ -73,7 +73,7 @@ public abstract class baseDiscoveryService : baseMQTTTService
 
             Console.WriteLine(msg.PayloadAsString);
 
-            //await this.Publish(msg, cancellationToken);
+            await this.Publish(msg, cancellationToken);
         }
     }
 }
