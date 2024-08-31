@@ -25,4 +25,9 @@ public class Connection
     [Display(Name = "Connection Timeout", Description = "Default connection timeout.")]
     [Description("Default connection timeout.")]
     public int? TimeoutSecs { get; set; } = 15;
+
+    [YamlMember(Alias = "Scheme", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Name = "Connection Scheme", Description = "Connection scheme used")]
+    [Description("Default connection scheme.")]
+    public string? Scheme { get; set; }
 }

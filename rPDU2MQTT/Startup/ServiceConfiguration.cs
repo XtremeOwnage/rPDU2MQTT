@@ -42,6 +42,9 @@ public static class ServiceConfiguration
             return new HiveMQClient(mqttBuilder.Build());
         });
 
+        //Configure Services
+        services.AddSingleton<PDU>();
+
         // Create HttpClient for PDU.
         services.AddHttpClient<PDU>(client =>
         {
@@ -53,12 +56,21 @@ public static class ServiceConfiguration
             uriBuilder.Host = cfg.PDU.Connection.Host;
             uriBuilder.Port = cfg.PDU.Connection.Port ?? 80;
 
+            if (!string.IsNullOrEmpty(cfg.PDU.Connection.Scheme))
+                uriBuilder.Scheme = cfg.PDU.Connection.Scheme;
+            else
+                uriBuilder.Scheme = uriBuilder.Port switch
+                {
+                    80 => "http",
+                    443 => "https",
+                    _ => uriBuilder.Scheme
+                };
+
             client.BaseAddress = uriBuilder.Uri;
             client.Timeout = TimeSpan.FromSeconds(cfg.PDU.Connection.TimeoutSecs ?? 15);
         });
 
-        //Configure Services
-        services.AddSingleton<PDU>();
+
 
         services.AddSingleton<MQTTServiceDependancies>();
 

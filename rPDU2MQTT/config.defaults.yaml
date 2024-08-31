@@ -27,6 +27,10 @@ Mqtt:
 Pdu:
     # (Required) Connection details for MQTT server
     Connection:
+        # Sets Scheme used.
+        # If, not provided, will use http for port 80, and https for port 443. Otherwise, will default to http
+        Scheme: http / https
+
         # Set this to the host / ip of your PDU
         Host: "localhost"
 
