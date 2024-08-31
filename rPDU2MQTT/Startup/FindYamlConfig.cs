@@ -52,7 +52,20 @@ internal class FindYamlConfig
 
     public static Config GetConfig()
     {
-        var ds = new DeserializerBuilder();
+        var ds = new DeserializerBuilder()
+            // Ignore case when deserializing
+            .WithCaseInsensitivePropertyMatching()
+            // Ignore fields.
+            .IgnoreFields()
+            // Ignore any non-required properties missing
+            .IgnoreUnmatchedProperties()
+            // Enforce Nullability
+            .WithEnforceNullability()
+            // Check for duplicate keys
+            .WithDuplicateKeyChecking()
+            // Enforce required attributes
+            .WithEnforceRequiredMembers();
+
         IDeserializer s = ds.Build();
 
         using var stream = File.OpenRead(Find());
