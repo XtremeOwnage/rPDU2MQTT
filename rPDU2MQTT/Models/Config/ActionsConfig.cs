@@ -14,6 +14,5 @@ public class ActionsConfig
     public bool Enabled { get; set; } = false;
 
 
-    [YamlMember(Alias = "Credentials", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Optional credentials to enable write-actions for PDU")]
-    public Schemas.Credentials? Credentials { get; set; }
+
 }

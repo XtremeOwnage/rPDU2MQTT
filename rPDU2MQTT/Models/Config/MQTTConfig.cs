@@ -1,4 +1,5 @@
-﻿using YamlDotNet.Serialization;
+﻿using rPDU2MQTT.Models.Config.Schemas;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -25,18 +26,11 @@ public class MQTTConfig
     public string ParentTopic { get; set; } = "Rack_PDU";
 
     /// <summary>
-    /// Gets or sets the host of the MQTT broker.
+    /// Gets or sets the connection details for MQTT Broker.
     /// </summary>
-    [Required(ErrorMessage = "Host is required.")]
-    [Display(Description = "The host of the MQTT broker.")]
-    public string Host { get; set; } = "localhost";
-
-    /// <summary>
-    /// Gets or sets the port of the MQTT broker.
-    /// </summary>
-    [Range(0, 65535, ErrorMessage = "Port must be between 0 and 65535.")]
-    [Display(Description = "The port of the MQTT broker.")]
-    public int Port { get; set; } = 1883;
+    [Required(ErrorMessage = "Connection is required")]
+    [Display(Description = "Connection details for MQTT Broker")]
+    public Connection Connection { get; set; } = new Connection();
 
     /// <summary>
     /// Gets or sets the keepalive interval for the MQTT connection in seconds.

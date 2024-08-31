@@ -11,29 +11,45 @@ Mqtt:
     # This is the client-ID used.
     ClientID: "rpdu2mqtt"
 
-    # Set this to the host / ip of your MQTT server.
-    Host: "localhost"
-    Port: 1883
     KeepAlive: 60
 
+    # Connection details for MQTT server
+    Connection:
+        # Set this to the host / ip of your MQTT server.
+        Host: "localhost"
+
+        # Set this to the port of your MQTT server
+        Port: 1883
+
+        # Timeout (in seconds) for connection.
+        Timeout: 15
+
 Pdu:
-    # Set to the URL, or IP for your PDU.
-    Url: "http://your-pdu-ip-or-dns/"
+    # (Required) Connection details for MQTT server
+    Connection:
+        # Set this to the host / ip of your PDU
+        Host: "localhost"
+
+        # Set this to the port of your PDU
+        Port: 1883
+
+        # Timeout (in seconds) for requests.
+        Timeout: 15
+
+    # (Optional) Credentials to connect to MQTT server
+    Credentials:
+        Username: "actionsUser"
+        Password: "actionsPass"
 
     # This is how often sensors will be published to MQTT (in seconds)
     PollInterval: 5
 
-    # Timeout for requests to/from the PDU, in seconds.
-    Timeout: 5
-
     # Configuration needed to allow write-actions.
+    # Aka- this enables the ability to toggle switches, or alter configuration.
+    # If this is false, rPDU2MQTT won't "change" anything on the PDU.
     Actions:
         Enabled: false
 
-        # Optional Credentials.
-        Credentials:
-            Username: "actionsUser"
-            Password: "actionsPass"
 
 # This section allows overriding the generated entity_id, name, and enabled/disabled, for various objects.
 # Note- ID / entity_id, will only be set when the entity is created.

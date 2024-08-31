@@ -1,4 +1,5 @@
-﻿using YamlDotNet.Serialization;
+﻿using rPDU2MQTT.Models.Config.Schemas;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -8,12 +9,17 @@ namespace rPDU2MQTT.Models.Config;
 public class PduConfig
 {
     /// <summary>
-    /// Gets or sets the URL of the PDU API.
+    /// Gets or sets the connection details for MQTT Broker.
     /// </summary>
-    [Required(ErrorMessage = "Url is required.")]
-    [Url(ErrorMessage = "Url must be a valid URL.")]
-    [Display(Description = "The URL of the PDU API.")]
-    public string Url { get; set; }
+    [Required(ErrorMessage = "Connection is required")]
+    [Display(Description = "Connection details for PDU")]
+    public Connection Connection { get; set; } = new Connection();
+
+    /// <summary>
+    /// Credentials used when connection to PDU.
+    /// </summary>
+    [YamlMember(Alias = "Credentials", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    public Schemas.Credentials? Credentials { get; set; } = null;
 
     /// <summary>
     /// Gets or sets the polling interval for the PDU in seconds.
