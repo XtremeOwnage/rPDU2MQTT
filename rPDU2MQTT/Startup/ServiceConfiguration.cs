@@ -30,7 +30,8 @@ public static class ServiceConfiguration
             var mqttBuilder = new HiveMQClientOptionsBuilder()
                 .WithBroker(cfg.MQTT.Connection.Host)
                 .WithPort(cfg.MQTT.Connection.Port!.Value)
-                .WithClientId(cfg.MQTT.ClientID ?? "rpdu2mqtt");
+                .WithClientId(cfg.MQTT.ClientID ?? "rpdu2mqtt")
+                .WithAutomaticReconnect(true);
 
             if (cfg.MQTT.Credentials?.Username is not null)
                 mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
