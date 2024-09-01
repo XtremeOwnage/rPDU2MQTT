@@ -1,15 +1,9 @@
 ﻿using HiveMQtt.Client;
 using HiveMQtt.MQTT5.Types;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.Converters;
-using rPDU2MQTT.Models.HomeAssistant;
-using rPDU2MQTT.Models.HomeAssistant.Enums;
-using rPDU2MQTT.Models.PDU;
 using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 
 namespace rPDU2MQTT.Services.baseTypes;
 
@@ -19,7 +13,6 @@ namespace rPDU2MQTT.Services.baseTypes;
 public abstract class baseMQTTTService : IHostedService, IDisposable
 {
     private readonly int interval;
-    protected ILogger log { get; init; }
     private IHiveMQClient mqtt { get; init; }
     private PeriodicTimer timer;
     private Task timerTask = Task.CompletedTask;
@@ -28,11 +21,10 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
-    protected baseMQTTTService(MQTTServiceDependancies dependancies, ILogger log) : this(dependancies, log, dependancies.Cfg.PDU.PollInterval) { }
-    protected baseMQTTTService(MQTTServiceDependancies dependancies, ILogger log, int Interval)
+    protected baseMQTTTService(MQTTServiceDependancies dependancies) : this(dependancies, dependancies.Cfg.PDU.PollInterval) { }
+    protected baseMQTTTService(MQTTServiceDependancies dependancies, int Interval)
     {
         interval = Interval;
-        this.log = log;
         mqtt = dependancies.Mqtt;
         cfg = dependancies.Cfg;
         pdu = dependancies.PDU;
@@ -54,14 +46,14 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        log.LogInformation($"{GetType().Name} is starting.");
+        Log.Information($"{GetType().Name} is starting.");
 
         timerTask = Task.Run(() => timerTaskExecution(cancellationToken).Wait());
 
         //Kick off the first one manually.
         await Execute(cancellationToken);
 
-        log.LogInformation($"{GetType().Name} is running.");
+        Log.Information($"{GetType().Name} is running.");
     }
 
     private async Task timerTaskExecution(CancellationToken cancellationToken)
@@ -74,11 +66,11 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     public Task StopAsync(CancellationToken stoppingToken)
     {
-        log.LogInformation($"{GetType().Name} is stopping.");
+        Log.Information($"{GetType().Name} is stopping.");
 
         //Do Something?
 
-        log.LogInformation($"{GetType().Name} has stopped.");
+        Log.Information($"{GetType().Name} has stopped.");
 
         return Task.CompletedTask;
     }
@@ -114,7 +106,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
             return Task.CompletedTask;
 
         if (!mqtt.IsConnected())
-            log.LogError("MQTT Broker is not connected!!!!!");
+            Log.Error("MQTT Broker is not connected!!!!!");
 
         return mqtt.PublishAsync(msg, cancellationToken);
     }

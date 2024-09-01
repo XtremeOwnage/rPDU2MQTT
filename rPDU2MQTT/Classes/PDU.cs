@@ -29,9 +29,9 @@ public partial class PDU
     /// <returns></returns>
     public async Task<RootData> GetRootData_Public(CancellationToken cancellationToken)
     {
-        log.LogDebug("Querying /api");
+        Log.Debug("Querying /api");
         var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
-        log.LogDebug($"Query response {model.RetCode}");
+        Log.Debug($"Query response {model.RetCode}");
 
         //Process device data.
         processData(model.Data, cancellationToken);

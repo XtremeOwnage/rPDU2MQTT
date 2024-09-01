@@ -93,6 +93,6 @@ public static class ServiceConfiguration
         if (cfg.HASS.DiscoveryEnabled)
             services.AddHostedService<HomeAssistantDiscoveryService>();
         else
-            Console.WriteLine($"Home Assistant Discovery Disabled.");
+            Log.Warning($"Home Assistant Discovery Disabled.");
     }
 }

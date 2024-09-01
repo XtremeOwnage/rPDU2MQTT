@@ -19,7 +19,7 @@ logging.AddConsole();
 var client = host.Services.GetRequiredService<IHiveMQClient>();
 var logger = host.Services.GetRequiredService<ILogger<IHiveMQClient>>();
 
-logger.LogInformation($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
+Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 
 await client.ConnectAsync();
 
