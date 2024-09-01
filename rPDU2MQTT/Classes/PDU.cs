@@ -4,6 +4,7 @@ using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDUResponse;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
 
 namespace rPDU2MQTT.Classes;
@@ -33,12 +34,12 @@ public partial class PDU
         log.LogDebug($"Query response {model.RetCode}");
 
         //Process device data.
-        processData(model.Data);
+        processData(model.Data, cancellationToken);
 
         return model.Data;
     }
 
-    public void processData(RootData data)
+    public async void processData(RootData data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
@@ -51,14 +52,20 @@ public partial class PDU
         // Propagate down the parent, and identifier.
         data.Devices.SetParentAndIdentifier(data, (k, v) => k);
 
+        // Populate Name, DisplayName, and Enabled for devices.
+        data.Devices.SetEntityNameAndEnabled(config.Overrides!, (k, d) => d.Name, (k, d) => d.Label);
+
         //Process devices
-        processDevices(data.Devices);
+        await processRecursive(data.Devices, data, cancellationToken);
     }
 
-    private void processDevices(Dictionary<string, Device> devices)
+    private async Task processRecursive<TEntity, TParent>([AllowNull] TEntity entity, TParent? parent, CancellationToken cancellationToken)
+        where TEntity : BaseEntity
+        where TParent : NamedEntity
     {
-        //devices.SetEntityNameAndEnabled(config.Overrides, null, null);
-        foreach (var (key, device) in devices)
+        if (entity is null)
+            return;
+        else if (entity is Device device)
         {
             // Propagate down the parent, and identifier.
             device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), (k, v) => k);
@@ -72,24 +79,43 @@ public partial class PDU
             device.Outlets.PruneDisabled();
             device.Entity.PruneDisabled();
 
-            // Update properties for children.
-            processChildDevice(device.Entity);
-            processChildDevice(device.Outlets);
+            // Recurse to the next tier.
+            await processRecursive(device.Outlets, device, cancellationToken);
+            await processRecursive(device.Entity, device, cancellationToken);
         }
-    }
-    private void processChildDevice<TKey, TEntity>(Dictionary<TKey, TEntity> entities) where TEntity : NamedEntityWithMeasurements
-    {
-        foreach (var (_, entity) in entities)
+        else if (entity is NamedEntityWithMeasurements nem)
         {
             // All measurements will be stored into a sub-key.
-            entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
+            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
 
             // Set Overrides
             Func<string, Measurement, string> MeasurementNamingFunc = (k, m) => m.Type;
 
-            entity.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
-            entity.Measurements.PruneDisabled();
-            entity.Measurements.SetEntityNamePrefix(entity.Entity_Name);
+            nem.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
+            nem.Measurements.PruneDisabled();
+
+            if (entity is Entity)
+                // For entities- these belong directly to a "Device"
+                // We want to set the prefix to the parent device's name.
+                nem.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+            else
+                // We want to prefix the measurements, with the outlet name.
+                // ie, mydevice_power
+                nem.Measurements.SetEntityNamePrefix(nem.Entity_Name);
         }
+        else
+        {
+            if (System.Diagnostics.Debugger.IsAttached)
+                System.Diagnostics.Debugger.Break();
+        }
+    }
+
+    private async Task processRecursive<TKey, TEntity, TParent>(Dictionary<TKey, TEntity> entities, TParent parent, CancellationToken cancellationToken)
+        where TKey : notnull
+        where TEntity : notnull, BaseEntity
+        where TParent : NamedEntity
+    {
+        foreach (var (_, entity) in entities)
+            await processRecursive(entity, parent, cancellationToken);
     }
 }
