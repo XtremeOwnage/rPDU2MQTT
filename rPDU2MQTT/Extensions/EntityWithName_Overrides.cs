@@ -38,9 +38,9 @@ public static class EntityWithName_Overrides
             {
                 // We are adding + 1 to the outlet's key- because the PDU gives data 0-based. However, when the entities are viewed through
                 // its UI, they are 1-based. This corrects that.
-                (int k, Outlet o) => overrides.Outlets!.TryGetValue(k + 1, out var outletOverride) ? outletOverride : null,
-                (string k, Device o) => overrides.Devices!.TryGetValue(k, out var outletOverride) ? outletOverride : null,
-                (string k, Measurement o) => overrides.Measurements!.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
+                (int k, Outlet o) => overrides.Outlets.TryGetValue(k + 1, out var outletOverride) ? outletOverride : null,
+                (string k, Device o) => overrides.Devices.TryGetValue(k, out var outletOverride) ? outletOverride : null,
+                (string k, Measurement o) => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 _ => null
             };
 

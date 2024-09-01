@@ -10,10 +10,8 @@ public static class StringHelper
     public static string? Coalesce(params string?[] values)
     {
         foreach (var value in values)
-        {
             if (!string.IsNullOrWhiteSpace(value))
-                return value;
-        }
+                return value;        
 
         return null;
     }
