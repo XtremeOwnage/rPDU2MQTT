@@ -14,7 +14,7 @@ public static class ServiceConfiguration
         // While- we can request services when building dependancies-
         // Need the configuration DURING service collection initilization- 
         // Because it determiens which hosted services we want to add.
-        Config cfg = FindYamlConfig.GetConfig() ?? throw new Exception("Unable to load configuration");
+        Config cfg = YamlConfigLoader.GetConfig() ?? throw new Exception("Unable to load configuration");
 
         // Bind Configuration
         services.AddSingleton(cfg);

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace rPDU2MQTT.Startup;
 
-public static class ConfigLoader
+public static class JsonConfigLoader
 {
     /// <summary>
     /// This loads configuration from appsettings.json, and appsettings.$ENV.json

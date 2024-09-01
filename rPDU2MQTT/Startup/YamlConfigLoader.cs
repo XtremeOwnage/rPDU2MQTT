@@ -7,7 +7,7 @@ namespace rPDU2MQTT.Startup;
 /// <summary>
 /// This class, validates a YAML configuration exists, and returns the path.
 /// </summary>
-internal class FindYamlConfig
+internal class YamlConfigLoader
 {
     public static string Find()
     {
