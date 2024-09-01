@@ -19,4 +19,7 @@ public class Config
 
     [YamlMember(Alias = "Overrides", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Overrides")]
     public Overrides Overrides { get; set; } = new Overrides();
+
+    [YamlMember(Alias = "Logging")]
+    public LoggingConfig Logging { get; set; } = new LoggingConfig();
 }
