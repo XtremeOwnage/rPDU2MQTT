@@ -113,7 +113,8 @@ public abstract class baseDiscoveryService : baseMQTTTService
             PayloadAsString = System.Text.Json.JsonSerializer.Serialize<T>(sensor, this.jsonOptions)
         };
 
-        Console.WriteLine(msg.PayloadAsString);
+        if (cfg.Debug.PrintDiscovery)
+            log.LogDebug(msg.PayloadAsString);
 
         return this.Publish(msg, cancellationToken);
     }

@@ -20,7 +20,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 {
     private readonly int interval;
     protected ILogger log { get; init; }
-    protected IHiveMQClient mqtt { get; init; }
+    private IHiveMQClient mqtt { get; init; }
     private PeriodicTimer timer;
     private Task timerTask = Task.CompletedTask;
     protected Config cfg { get; }
@@ -110,6 +110,9 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     /// <returns></returns>
     protected Task Publish(MQTT5PublishMessage msg, CancellationToken cancellationToken)
     {
+        if (cfg.Debug.PublishMessages == false)
+            return Task.CompletedTask;
+
         if (!mqtt.IsConnected())
             log.LogError("MQTT Broker is not connected!!!!!");
 

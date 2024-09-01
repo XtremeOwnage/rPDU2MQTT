@@ -19,4 +19,7 @@ public class Config
 
     [YamlMember(Alias = "Overrides", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Overrides")]
     public Overrides Overrides { get; set; } = new Overrides();
+
+    [YamlMember(Alias = "Debug", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Settings for debugging and diagnostics.")]
+    public DebugConfig Debug { get; set; } = new DebugConfig();
 }
