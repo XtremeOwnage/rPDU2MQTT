@@ -19,33 +19,4 @@ public static class IEntityWithState_Extensions
     {
         return MQTTHelper.JoinPaths(Entity.GetTopicPath(), Entity.State_Topic);
     }
-
-    public static BinarySensorDiscovery CreateStateDiscovery<T>(this T item, DiscoveryDevice Device) where T : NamedEntity, IEntityWithState
-    {
-        var sensor = new BinarySensorDiscovery
-        {
-            //Identifying Details
-            ID = item.Entity_Identifier + "_state",
-            Name = item.Entity_Name + "_state",
-            DisplayName = $"State",
-
-            //Device Details
-            Device = Device,
-
-            //Sensor Specific Details
-            EntityType = Models.HomeAssistant.Enums.EntityType.BinarySensor,
-            EntityCategory = null,
-
-            //State - Pulled from IEntityWithState
-            StateTopic = item.GetStateTopic(),
-            ValueTemplate = item.State_ValueTemplate,
-            PayloadOn = item.State_On,
-            PayloadOff = item.State_Off,
-
-            //Availbility
-            //Availability = outlet.GetAvailability()
-        };
-
-        return sensor;
-    }
 }
