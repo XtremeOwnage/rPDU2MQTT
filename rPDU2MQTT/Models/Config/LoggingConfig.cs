@@ -15,13 +15,15 @@ public class LoggingConfig
     public LoggingTargetConfiguration Console { get; set; } = new LoggingTargetConfiguration()
     {
         Enabled = true,
-        Severity = LogEventLevel.Information,
+        Severity = LogEventLevel.Information,        
     };
 
     [YamlMember(Alias = "File")]
-    public LoggingTargetConfiguration File { get; set; } = new LoggingTargetConfiguration()
+    public FileLoggingTargetConfiguration File { get; set; } = new FileLoggingTargetConfiguration()
     {
         Enabled = false,
-        Severity = LogEventLevel.Debug
+        Severity = LogEventLevel.Debug,
+        FileRetention = 30,
+        FileRollover = RollingInterval.Day,
     };
 }

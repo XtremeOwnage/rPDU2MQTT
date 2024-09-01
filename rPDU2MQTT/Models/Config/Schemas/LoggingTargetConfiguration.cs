@@ -10,5 +10,4 @@ public class LoggingTargetConfiguration
 
     public bool Enabled { get; set; } = false;
 
-    public string? Path { get; set; } = null;
 }
