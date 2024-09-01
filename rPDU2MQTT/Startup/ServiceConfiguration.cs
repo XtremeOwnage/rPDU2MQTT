@@ -19,6 +19,9 @@ public static class ServiceConfiguration
         // Bind Configuration
         services.AddSingleton(cfg);
 
+        // Configure Logging.
+        services.ConfigureLogging(cfg);
+
         // Bind IHiveMQClient
         services.AddSingleton<IHiveMQClient, HiveMQClient>((sp) =>
         {
