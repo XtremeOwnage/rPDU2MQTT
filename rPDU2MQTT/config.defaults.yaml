@@ -24,6 +24,9 @@ Mqtt:
         # Timeout (in seconds) for connection.
         Timeout: 15
 
+        # (Optional) Enable or Disable Certificate Validation. Defaults to true.
+        ValidateCertificate: true
+
 Pdu:
     # (Required) Connection details for MQTT server
     Connection:
@@ -39,6 +42,9 @@ Pdu:
 
         # Timeout (in seconds) for requests.
         Timeout: 15
+
+        # (Optional) Enable or Disable Certificate Validation. Defaults to true.
+        ValidateCertificate: true
 
     # (Optional) Credentials to connect to MQTT server
     Credentials:

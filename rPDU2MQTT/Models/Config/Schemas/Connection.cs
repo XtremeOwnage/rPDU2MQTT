@@ -30,4 +30,9 @@ public class Connection
     [Display(Name = "Connection Scheme", Description = "Connection scheme used")]
     [Description("Default connection scheme.")]
     public string? Scheme { get; set; }
+
+    [DefaultValue(true)]
+    [Display(Name = "Validate Certificate", Description = "Enables certificate validation")]
+    [YamlMember(Alias = "ValidateCertificate")]
+    public bool? ValidateCertificate { get; set; } = true;
 }

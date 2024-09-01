@@ -47,7 +47,7 @@ public static class ServiceConfiguration
         services.AddSingleton<PDU>();
 
         // Create HttpClient for PDU.
-        services.AddHttpClient<PDU>(client =>
+        var pduHttpClient = services.AddHttpClient<PDU>(client =>
         {
             ThrowError.TestRequiredConfigurationSection(cfg.PDU, "PDU");
             ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection, "PDU.Connection");
@@ -71,6 +71,18 @@ public static class ServiceConfiguration
             client.Timeout = TimeSpan.FromSeconds(cfg.PDU.Connection.TimeoutSecs ?? 15);
         });
 
+        if (cfg.PDU.Connection.ValidateCertificate == false)
+        {
+            pduHttpClient.ConfigurePrimaryHttpMessageHandler(() =>
+            {
+                // Return HttpClientHandler with certificate validation completely disabled.
+                return new HttpClientHandler
+                {
+                    ClientCertificateOptions = ClientCertificateOption.Manual,
+                    ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+                };
+            });
+        }
 
 
         services.AddSingleton<MQTTServiceDependancies>();
