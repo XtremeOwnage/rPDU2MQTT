@@ -8,6 +8,7 @@ using rPDU2MQTT.Startup;
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .WriteTo.Console()
+    .MinimumLevel.Is(Serilog.Events.LogEventLevel.Verbose)
     .CreateLogger();
 
 var host = Host.CreateDefaultBuilder(args)
