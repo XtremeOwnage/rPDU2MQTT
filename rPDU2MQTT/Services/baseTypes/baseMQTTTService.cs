@@ -110,14 +110,13 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     /// <returns></returns>
     protected Task Publish(MQTT5PublishMessage msg, CancellationToken cancellationToken)
     {
+        if (cfg.Debug.PublishMessages == false)
+            return Task.CompletedTask;
+
         if (!mqtt.IsConnected())
             log.LogError("MQTT Broker is not connected!!!!!");
 
-        return cfg.Debug.PublishMessages switch
-        {
-            false => Task.CompletedTask,
-            _ => mqtt.PublishAsync(msg, cancellationToken);
-        };
+        return mqtt.PublishAsync(msg, cancellationToken);
     }
 
     /// <summary>
