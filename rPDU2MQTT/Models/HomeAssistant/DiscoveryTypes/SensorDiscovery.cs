@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 
-public class Sensor : baseSensorEntity
+public class SensorDiscovery : baseSensorEntity
 {
     [JsonPropertyName("device_class")]
     public DeviceClass? SensorClass { get; set; }
