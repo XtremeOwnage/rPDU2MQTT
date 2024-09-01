@@ -6,7 +6,7 @@ using rPDU2MQTT.Startup;
 using System.Runtime.InteropServices;
 
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureAppConfiguration(ConfigLoader.Configure)
+    .ConfigureAppConfiguration(o => { o.AddEnvironmentVariables(); })
     .ConfigureServices(ServiceConfiguration.Configure)
     .ConfigureLogging(logging =>
     {
