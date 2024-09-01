@@ -40,7 +40,7 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState
     public A0Ae260C851900C3Alarm Alarm { get; set; }
 
     [JsonPropertyName("layout")]
-    public Dictionary<string, string[]> Layout { get; set; }
+    public Dictionary<int, string[]> Layout { get; set; }
 
     [JsonPropertyName("entity")]
     public Dictionary<string, Entity> Entity { get; set; }
