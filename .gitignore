@@ -362,5 +362,4 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-/rPDU2MQTT/appsettings.Development.json
 /rPDU2MQTT/config.yaml

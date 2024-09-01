@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using rPDU2MQTT.Extensions;
+﻿using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
@@ -13,13 +12,11 @@ public partial class PDU
 {
     private readonly Config config;
     private readonly HttpClient http;
-    private readonly ILogger<PDU> log;
 
-    public PDU(Config config, [DisallowNull, NotNull] HttpClient http, ILogger<PDU> log)
+    public PDU(Config config, [DisallowNull, NotNull] HttpClient http)
     {
         this.config = config;
         this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
-        this.log = log;
     }
 
     /// <summary>
@@ -29,9 +26,9 @@ public partial class PDU
     /// <returns></returns>
     public async Task<RootData> GetRootData_Public(CancellationToken cancellationToken)
     {
-        log.LogDebug("Querying /api");
+        Log.Debug("Querying /api");
         var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
-        log.LogDebug($"Query response {model.RetCode}");
+        Log.Debug($"Query response {model.RetCode}");
 
         //Process device data.
         processData(model.Data, cancellationToken);

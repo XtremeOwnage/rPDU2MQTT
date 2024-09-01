@@ -22,4 +22,7 @@ public class Config
 
     [YamlMember(Alias = "Debug", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Settings for debugging and diagnostics.")]
     public DebugConfig Debug { get; set; } = new DebugConfig();
+
+    [YamlMember(Alias = "Logging")]
+    public LoggingConfig Logging { get; set; } = new LoggingConfig();
 }

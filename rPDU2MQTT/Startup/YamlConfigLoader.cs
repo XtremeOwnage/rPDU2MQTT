@@ -1,17 +1,15 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using rPDU2MQTT.Classes;
+﻿using rPDU2MQTT.Classes;
 using System.Runtime.InteropServices;
 using YamlDotNet.Serialization;
-
 namespace rPDU2MQTT.Startup;
 /// <summary>
 /// This class, validates a YAML configuration exists, and returns the path.
 /// </summary>
-internal class FindYamlConfig
+internal class YamlConfigLoader
 {
     public static string Find()
     {
-        Console.WriteLine("Attempting to locate configuration file.");
+        Log.Information("Attempting to locate configuration file.");
 
         // Before starting- we need to validate a configuration file exists.
         string[] SearchPaths = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) switch
@@ -32,18 +30,20 @@ internal class FindYamlConfig
         foreach (var file in combinations)
         {
             if (File.Exists(file))
+            {
+                Log.Information($"Found config file at {file}");
                 return file;
+            }
         }
 
         /// At this point, we cannot find a configuration.
         /// Print an error to the console, and lets add a sleep / delay
-        /// before throwing the exception.
-        /// 
+        /// before throwing the exception.        
 
-        Console.WriteLine("Unable to locate config.yaml. Paths searched:");
+        Log.Error("Unable to locate config.yaml. Paths searched:");
         foreach (var file in combinations)
-            Console.WriteLine($"\t{file}");
-        Console.WriteLine("Restarting in 15 seconds.");
+            Log.Error($"\t{file}");
+        Log.Information("Restarting in 15 seconds.");
 
         System.Threading.Thread.Sleep(TimeSpan.FromSeconds(15));
 

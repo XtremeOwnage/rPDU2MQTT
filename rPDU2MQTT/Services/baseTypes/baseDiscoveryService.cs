@@ -14,7 +14,7 @@ namespace rPDU2MQTT.Services.baseTypes;
 
 public abstract class baseDiscoveryService : baseMQTTTService
 {
-    public baseDiscoveryService(MQTTServiceDependancies deps, ILogger log) : base(deps, log, deps.Cfg.HASS.DiscoveryInterval) { }
+    public baseDiscoveryService(MQTTServiceDependancies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
 
     /// <summary>
     /// Publish a discovery message for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>
@@ -105,7 +105,7 @@ public abstract class baseDiscoveryService : baseMQTTTService
     {
         var topic = $"{cfg.HASS.DiscoveryTopic}/{sensor.EntityType.ToJsonString()}/{sensor.ID}/config";
 
-        log.LogDebug($"Publishing Discovery of type {sensor.EntityType.ToJsonString()} for {sensor.ID} to {topic}");
+        Log.Debug($"Publishing Discovery of type {sensor.EntityType.ToJsonString()} for {sensor.ID} to {topic}");
 
         var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
         {
@@ -114,7 +114,7 @@ public abstract class baseDiscoveryService : baseMQTTTService
         };
 
         if (cfg.Debug.PrintDiscovery)
-            log.LogDebug(msg.PayloadAsString);
+            Log.Debug(msg.PayloadAsString);
 
         return this.Publish(msg, cancellationToken);
     }
