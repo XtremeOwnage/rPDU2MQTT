@@ -15,15 +15,15 @@ public static class MeasurementHelper
     {
         return measurement.Type.ToLower() switch
         {
-            "currentcrestfactor" => null,
-            "balance" => null,
+            //"currentcrestfactor" => new SensorDTO(StateClass.Measurement, DeviceClass.Unknown),
+            //"balance" => new SensorDTO(StateClass.Measurement, DeviceClass.Unknown),
             "apparentpower" => new SensorDTO(StateClass.Measurement, DeviceClass.ApparentPower),
             "realpower" => new SensorDTO(StateClass.Measurement, DeviceClass.Power),
             "energy" => new SensorDTO(StateClass.TotalIncreasing, DeviceClass.Energy),
             "powerfactor" => new SensorDTO(StateClass.Measurement, DeviceClass.PowerFactor),
             "current" => new SensorDTO(StateClass.Measurement, DeviceClass.Current),
             "voltage" => new SensorDTO(StateClass.Measurement, DeviceClass.Voltage),
-            _ => null
+            _ => new SensorDTO(StateClass.Measurement, DeviceClass.Unknown)
         };
     }
 }

@@ -1,5 +1,4 @@
 ﻿namespace rPDU2MQTT.Models.Config;
-#nullable disable
 
 /// <summary>
 /// Configuration settings for Home Assistant integration.
@@ -16,12 +15,12 @@ public class HomeAssistantConfig
     /// Gets or sets the discovery topic for Home Assistant.
     /// </summary>
     [Display(Description = "The discovery topic for Home Assistant.")]
-    public string DiscoveryTopic { get; set; }
+    public string? DiscoveryTopic { get; set; }
 
     /// <summary>
     /// How often should discovery data be published?
     /// </summary>
-    public int DiscoveryInterval { get; set; }
+    public int DiscoveryInterval { get; set; } = 300;
 
     /// <summary>
     ///  Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.

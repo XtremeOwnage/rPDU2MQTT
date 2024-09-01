@@ -4,6 +4,7 @@ using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDUResponse;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
 
 namespace rPDU2MQTT.Classes;
@@ -33,79 +34,88 @@ public partial class PDU
         log.LogDebug($"Query response {model.RetCode}");
 
         //Process device data.
-        processData(model.Data);
+        processData(model.Data, cancellationToken);
 
         return model.Data;
     }
 
-    public void processData(RootData data)
+    public async void processData(RootData data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
+        data.URL = http.BaseAddress.ToString();
 
-        data.Entity_Identifier = Coalesce(config.Overrides.PduID, "rPDU2MQTT")!;
-        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides.PduName, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
+        data.Entity_Identifier = Coalesce(config.Overrides?.PDU?.ID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
 
         // Propagate down the parent, and identifier.
-        data.Devices.SetParentAndIdentifier(data);
+        data.Devices.SetParentAndIdentifier(data, (k, v) => k);
+
+        // Populate Name, DisplayName, and Enabled for devices.
+        data.Devices.SetEntityNameAndEnabled(config.Overrides!, (k, d) => d.Name, (k, d) => d.Label);
 
         //Process devices
-        processDevices(data.Devices);
+        await processRecursive(data.Devices, data, cancellationToken);
     }
 
-    private void processDevices(Dictionary<string, Device> devices)
+    private async Task processRecursive<TEntity, TParent>([AllowNull] TEntity entity, TParent? parent, CancellationToken cancellationToken)
+        where TEntity : BaseEntity
+        where TParent : NamedEntity
     {
-        foreach (var (key, device) in devices)
+        if (entity is null)
+            return;
+        else if (entity is Device device)
         {
-            // Remove any disabled outlets.
-            config.Outlets.RemoveDisabledRecords(device.Outlets);
-
             // Propagate down the parent, and identifier.
-            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity));
-            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets));
+            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), (k, v) => k);
+            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), (k, v) => k.ToString());
 
-            // Update properties for children.
-            processChildDevice(device.Entity);
-            processChildDevice(device.Outlets);
+            // Set Overrides
+            device.Outlets.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseEntityName, DefaultNames.UseEntityLabel);
+            device.Entity.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseEntityName, DefaultNames.UseEntityLabel);
+
+            // Prune disabled items.
+            device.Outlets.PruneDisabled();
+            device.Entity.PruneDisabled();
+
+            // Recurse to the next tier.
+            await processRecursive(device.Outlets, device, cancellationToken);
+            await processRecursive(device.Entity, device, cancellationToken);
         }
-    }
-    private void processChildDevice<T>(Dictionary<string, T> entities) where T : NamedEntityWithMeasurements
-    {
-        foreach (var (key, entity) in entities)
+        else if (entity is NamedEntityWithMeasurements nem)
         {
-            if (entity is Outlet o)
-            {
-                int k = int.TryParse(key, out int s) ? s + 1 : 0; //Note- the plus one, is so the number aligns with what is seen on the GUI.
-                entity.ApplyOverrides(k.ToString(), config.Outlets);
-            }
-            else
-            {
-                entity.Entity_Name = (entity.Label ?? entity.Name).FormatName();
-                entity.Entity_DisplayName = (entity.Label ?? entity.Name);
-            }
-
-            // Remove any disabled measurements.
-            config.Measurements.RemoveDisabledRecords(entity.Measurements, o => o.Type);
-
             // All measurements will be stored into a sub-key.
-            entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements));
+            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
 
-            // Update properties for measurements.
-            processMeasurements(entity.Measurements);
+            // Set Overrides
+            Func<string, Measurement, string> MeasurementNamingFunc = (k, m) => m.Type;
+
+            nem.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
+            nem.Measurements.PruneDisabled();
+
+            if (entity is Entity)
+                // For entities- these belong directly to a "Device"
+                // We want to set the prefix to the parent device's name.
+                nem.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+            else
+                // We want to prefix the measurements, with the outlet name.
+                // ie, mydevice_power
+                nem.Measurements.SetEntityNamePrefix(nem.Entity_Name);
+        }
+        else
+        {
+            if (System.Diagnostics.Debugger.IsAttached)
+                System.Diagnostics.Debugger.Break();
         }
     }
 
-    private void processMeasurements<T>(Dictionary<string, T> measurements) where T : Measurement
+    private async Task processRecursive<TKey, TEntity, TParent>(Dictionary<TKey, TEntity> entities, TParent parent, CancellationToken cancellationToken)
+        where TKey : notnull
+        where TEntity : notnull, BaseEntity
+        where TParent : NamedEntity
     {
-        foreach (var (key, entity) in measurements)
-        {
-            // We want to override the default key here- to give a nice, readable key.
-            entity.Record_Key = entity.Type;
-            entity.ApplyOverrides(entity.Type, config.Measurements, DefaultName: entity.Type, DefaultDisplayName: entity.Type);
-
-            //SInce- ApplyNameOverridesReturnIsValid already set the EntityName, we are just going to append a suffix to it.
-            entity.Entity_Name = entity.GetEntityName(entity.Entity_Name);
-        }
+        foreach (var (_, entity) in entities)
+            await processRecursive(entity, parent, cancellationToken);
     }
 }

@@ -10,11 +10,11 @@ public static class RootData_Extensiosn
     /// <param name="data"></param>
     /// <param name="DeviceURL"></param>
     /// <returns></returns>
-    public static DiscoveryDevice GetDiscoveryDevice(this RootData data, string DeviceURL)
+    public static DiscoveryDevice GetDiscoveryDevice(this RootData data)
     {
         return new DiscoveryDevice
         {
-            ConfigurationUrl = DeviceURL,
+            ConfigurationUrl = data.URL,
             HardwareVersion = data.Sys.Version,
             Manufacturer = data.Sys.Oem,
             UniqueIdentifier = data.Entity_Identifier,

@@ -1,9 +1,11 @@
 ﻿using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
-using rPDU2MQTT.Helpers;
-using rPDU2MQTT.Models.HomeAssistant.baseClasses;
+using rPDU2MQTT.Models.HomeAssistant;
+using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Services.baseTypes;
+using System.Diagnostics.CodeAnalysis;
 
 namespace rPDU2MQTT.Services;
 
@@ -12,61 +14,83 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(ILogger<HomeAssistantDiscoveryService> log, ServiceDependancies deps) : base(deps, log) { }
+    public HomeAssistantDiscoveryService(ILogger<HomeAssistantDiscoveryService> log, MQTTServiceDependancies deps) : base(deps, log) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
         var data = await pdu.GetRootData_Public(cancellationToken);
-        var ParentDevice = data.GetDiscoveryDevice(this.cfg.PDU.Url);
+        var pduDevice = data.GetDiscoveryDevice();
 
         log.LogDebug("Starting discovery job.");
 
-        List<baseEntity> Sensors = new();
-
-        foreach (var device in data.Devices.Values)
-        {
-            foreach (var entity in device.Entity.Values)
-            {
-                //So... I only have a single-phase PDU.
-                // Duct-tape to just attach phase-A data to the primary device.
-                // If- this integration ever gets used for a dual-phase PDU, this will need to be updated.
-                if (entity.Label != "Input")
-                    continue;
-
-                foreach (var measurement in entity.Measurements.Values)
-                {
-                    //If we are unable to parse this measurement as valid, skip to the next.
-                    var dto = measurement.TryParseValue();
-                    if (dto is null)
-                        continue;
-
-                    Sensors.Add(CreateSensorDiscovery(measurement, ParentDevice, dto));
-                }
-            }
-
-            //if(false)
-            foreach (var outlet in device.Outlets.Values)
-            {
-                var childDevice = ParentDevice.CreateChild(outlet);
-
-                Sensors.Add(outlet.CreateStateDiscovery(childDevice));
-
-                foreach (var measurement in outlet.Measurements.Values)
-                {
-                    //If we are unable to parse this measurement as valid, skip to the next.
-                    var dto = measurement.TryParseValue();
-                    if (dto is null)
-                        continue;
-
-                    Sensors.Add(CreateSensorDiscovery(measurement, childDevice, dto));
-                }
-            }
-        }
-
-        log.LogInformation("Publishing discovery messages");
-
-        await this.PublishDeviceSensors(Sensors, cancellationToken);
+        // Recursively discover everything.
+        await recursiveDiscovery(data.Devices, pduDevice, cancellationToken);
 
         log.LogInformation("Discovery information published.");
     }
+
+
+    protected async Task recursiveDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+    {
+        if (entity is null)
+            return;
+        else if (entity is Device device)
+        {
+            // Create a device, to represent this device.
+            var newParent = parent.CreateChild(device);
+
+            // Discover outlets.
+            await recursiveDiscovery(device.Outlets, newParent, cancellationToken);
+
+            #region Hack - Discover Entities
+            // Discover Entity
+            // Hack- but, for my testing data, my PDU exposes four seperate entities.
+            // (outlets) -> (breaker0, breaker1) -> (phase0)
+            // And, total0
+            // I don't really see any value in getting the data for the breakers, as it doesn't really correspond to any useful data.
+            // As such- the phase0, and total0 entities are the only interesting ones...
+            // And, as it turns out- they both expose the same data, but, phase0 exposes more sensors (such as voltage, and other data that does not total very well)
+            // So- Only want to discover the ROOT value.
+            // To do this- we are just going to find the entity, at the top of the layout.
+
+            // In my testing, the root entity, contains a single name, "entity/phase0". So- this next line, extracts, "phase0"
+            var rootEntityName = device.Layout[0].First().Split("/", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Last();
+
+            var rootEntity = device.Entity
+                .Where(o => o.Key == rootEntityName)
+                .Select(o => o.Value)
+                .FirstOrDefault();
+
+            await recursiveDiscovery(rootEntity!, newParent, cancellationToken);
+            #endregion
+
+        }
+        else if (entity is Outlet outlet)
+        {
+            // Create a device to represent the outlet.
+            var newParent = parent.CreateChild(outlet);
+
+            // Discover outlet's state.
+            await DiscoverStateAsync(outlet, newParent, cancellationToken);
+
+            // Discover measurements
+            await recursiveDiscovery(outlet.Measurements, newParent, cancellationToken);
+        }
+        else if (entity is Entity pduEntity)
+        {
+            // Discover measurements
+            await recursiveDiscovery(pduEntity.Measurements, parent, cancellationToken);
+        }
+        else if(entity is Measurement measurement)
+        {
+            await DiscoverMeasurementAsync(measurement, parent, cancellationToken);
+        }
+    }
+
+    protected async Task recursiveDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+    {
+        foreach (var (_, entity) in entities)
+            await recursiveDiscovery(entity, parent, cancellationToken);
+    }
+
 }

@@ -1,0 +1,145 @@
+Mqtt:
+    # Optional Credentials.
+    Credentials:
+        # Add your MQTT Username and Password here.
+        Username: "user"
+        Password: "password"
+
+    # This will be the parent topic in MQTT, where keys are published to.
+    ParentTopic: "Rack_PDU"
+
+    # This is the client-ID used.
+    ClientID: "rpdu2mqtt"
+
+    KeepAlive: 60
+
+    # Connection details for MQTT server
+    Connection:
+        # Set this to the host / ip of your MQTT server.
+        Host: "localhost"
+
+        # Set this to the port of your MQTT server
+        Port: 1883
+
+        # Timeout (in seconds) for connection.
+        Timeout: 15
+
+Pdu:
+    # (Required) Connection details for MQTT server
+    Connection:
+        # Sets Scheme used.
+        # If, not provided, will use http for port 80, and https for port 443. Otherwise, will default to http
+        Scheme: http / https
+
+        # Set this to the host / ip of your PDU
+        Host: "localhost"
+
+        # Set this to the port of your PDU
+        Port: 1883
+
+        # Timeout (in seconds) for requests.
+        Timeout: 15
+
+    # (Optional) Credentials to connect to MQTT server
+    Credentials:
+        Username: "actionsUser"
+        Password: "actionsPass"
+
+    # This is how often sensors will be published to MQTT (in seconds)
+    PollInterval: 5
+
+    # Configuration needed to allow write-actions.
+    # Aka- this enables the ability to toggle switches, or alter configuration.
+    # If this is false, rPDU2MQTT won't "change" anything on the PDU. 
+    # (this- includes changing the status of a switch, aka, turning it on or off)
+    # This, defaults to false.
+    ActionsEnabled: true
+
+
+# This section allows overriding the generated entity_id, name, and enabled/disabled, for various objects.
+# Note- ID / entity_id, will only be set when the entity is created.
+# Do not touch or change it through here after it has been created! Otherwise, you can end up with duplicates, or other issues.
+# "Name" can be freely updated, and home assistant will reflect updated names instantly (after the discovery runs)
+
+# Device / Entity Hierarchy:
+# PDU > Devices > [Entities, Outlets] > Measurements
+Overrides:
+    # Override details about the PDU itself.
+    PDU:
+        ID: null,
+        Name: "Your-PDU"
+        # Not- sure why you would want to set this to false... But, the option exists..
+        Enabled: true
+
+    # Override details regarding devices exposed by the PDU.
+    Devices:
+        # Place your serial number here as the key.
+        A0AE260C851900C3:
+            ID:
+            Name:
+            Enabled: true
+
+        YOUR-SERIAL-NUMBER:
+            ID:
+            Name:
+            Enabled: true
+
+    # Customize individual outlets.
+    # These are number-based, start at 1. 
+    # "Outlet 1" in the PDU corresponds to 1, for example. 
+    # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
+    Outlets:
+        1:
+            ID: kube02
+            Name: "Proxmox: Kube02"
+            Enabled: true
+        2:
+            ID: dell_md1220
+            Name: "Dell: MD1220"
+            Enabled: true
+
+        # Empty record.
+        3:
+            ID:
+            Name:
+            Enabled:
+    
+    # Customize how metrics are sent to services.
+    # The entity ID used for metrics, is [DEVICE_ID]_[METRIC_TYPE]
+    # The "ID" field here, will be used instead of "METRIC_TYPE"
+    # The "Name" field here, maps back to a "Human Readable Version"
+    # These overrides affect measurements from all entity types (PDU, Devices, Entities, Outlets, etc...)
+    Measurements:
+        apparentPower:
+            ID:
+            Name: Apparent Power
+            Enabled: true
+        realPower:
+            ID: power
+            Name: Power
+            Enabled: true
+        energy:
+            ID: energy
+            Name: Energy
+            Enabled: true
+        powerFactor:
+            Name: Power Factor
+            Enabled: true
+        current: 
+            Name: Current
+            Enabled: true
+        voltage:
+            Name: Voltage
+            Enabled: true
+        # These measurements, didn't seem very useful, and don't map back to home assistant very well...
+        currentCrestFactor:
+            Enabled: false
+        balance:
+            Enabled: false
+
+HomeAssistant:
+    DiscoveryEnabled: true
+    DiscoveryTopic: "homeassistant/discovery"
+    DiscoveryInterval: 300
+    # Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
+    SensorExpireAfterSeconds: 300

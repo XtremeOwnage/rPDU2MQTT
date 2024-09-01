@@ -9,8 +9,8 @@ namespace rPDU2MQTT.Services.baseTypes;
 
 public abstract class basePublishingService : baseMQTTTService
 {
-    protected basePublishingService(ILogger log, ServiceDependancies dependancies) : base(dependancies, log, dependancies.Cfg.PDU.PollInterval) { }
-    protected basePublishingService(ServiceDependancies dependancies, ILogger log, int Interval) : base(dependancies, log, Interval) { }
+    protected basePublishingService(ILogger log, MQTTServiceDependancies dependancies) : base(dependancies, log, dependancies.Cfg.PDU.PollInterval) { }
+    protected basePublishingService(MQTTServiceDependancies dependancies, ILogger log, int Interval) : base(dependancies, log, Interval) { }
 
     /// <summary>
     /// Publish a series of measurements under <paramref name="Topic"/>

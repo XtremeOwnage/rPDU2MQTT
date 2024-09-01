@@ -28,8 +28,8 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
-    protected baseMQTTTService(ServiceDependancies dependancies, ILogger log) : this(dependancies, log, dependancies.Cfg.PDU.PollInterval) { }
-    protected baseMQTTTService(ServiceDependancies dependancies, ILogger log, int Interval)
+    protected baseMQTTTService(MQTTServiceDependancies dependancies, ILogger log) : this(dependancies, log, dependancies.Cfg.PDU.PollInterval) { }
+    protected baseMQTTTService(MQTTServiceDependancies dependancies, ILogger log, int Interval)
     {
         interval = Interval;
         this.log = log;
@@ -110,6 +110,9 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     /// <returns></returns>
     protected Task Publish(MQTT5PublishMessage msg, CancellationToken cancellationToken)
     {
+        if (!mqtt.IsConnected())
+            log.LogError("MQTT Broker is not connected!!!!!");
+
         return mqtt.PublishAsync(msg, cancellationToken);
     }
 

@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 /// </summary>
 public enum DeviceClass
 {
+    [JsonPropertyName("")]
+    Unknown = 0,
     /// <summary>
     /// Date.
     /// Unit of measurement: None

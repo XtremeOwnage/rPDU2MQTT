@@ -17,7 +17,7 @@ namespace rPDU2MQTT.Models.HomeAssistant.baseClasses;
 // Why didn't I just use Newtonsoft.
 [JsonDerivedType(typeof(baseSensorEntity))]
 [JsonDerivedType(typeof(BinarySensorDiscovery))]
-[JsonDerivedType(typeof(Sensor))]
+[JsonDerivedType(typeof(SensorDiscovery))]
 [JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = nameof(JsonPolyMorphicTypeName), UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor)]
 public abstract class baseEntity : IBaseDiscovery
 {
