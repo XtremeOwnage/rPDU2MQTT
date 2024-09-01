@@ -194,3 +194,8 @@ Logging:
         # (Optional). Default: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
         # For details: https://github.com/serilog/serilog/wiki/Formatting-Output
         Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
+
+        # Set to the path where you wish to output a log file.
+        # (Optional). Default: Not Specified
+        # Example: /config/mylog.log
+        Path: null
