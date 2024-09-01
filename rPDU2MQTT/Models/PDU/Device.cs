@@ -1,27 +1,18 @@
-﻿using rPDU2MQTT.Helpers;
-using rPDU2MQTT.Interfaces;
-using rPDU2MQTT.Models.PDU.DummyDevices;
+﻿using rPDU2MQTT.Interfaces;
+using rPDU2MQTT.Models.PDU.basePDU;
 using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU;
 
-public partial class Device : BaseEntity, IEntityWithState
+public partial class Device : EntityWithNameAndLabel, IEntityWithState
 {
     #region State
     string IEntityWithState.State_On => "normal";
     string IEntityWithState.State_Off => "";
     #endregion
 
-    [JsonPropertyName("label")]
-    public string Label { get; set; }
-
-    [JsonPropertyName("name")]
-    public string Name { get; set; }
-
     [JsonPropertyName("state")]
     public string State { get; set; }
-
-
 
     [JsonPropertyName("order")]
     public long Order { get; set; }
