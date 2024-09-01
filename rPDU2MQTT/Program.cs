@@ -1,4 +1,5 @@
 ﻿using HiveMQtt.Client;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,7 @@ var host = Host.CreateDefaultBuilder(args)
     .ConfigureLogging(logging =>
     {
         logging.ClearProviders();
-logging.AddConsole();
+        logging.AddConsole();
     })
     .Build();
 
@@ -27,6 +28,6 @@ Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Opt
 
 await client.ConnectAsync();
 
-logger.LogInformation("Successfully connected to broker!");
+Log.Information("Successfully connected to broker!");
 
 host.Run();
