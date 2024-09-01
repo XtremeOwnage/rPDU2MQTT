@@ -199,3 +199,14 @@ Logging:
         # (Optional). Default: Not Specified
         # Example: /config/mylog.log
         Path: null
+
+        # File Rollover
+        # Options:
+        # - Infinite = Files will never rollover.
+        # - Year, Month, Day, Hour, Minute = Files will rollover this often.
+        # (Optional.) Default: Day
+        FileRollover: Day
+
+        # The number of rolled over logs which will be retained.
+        # Example, if RolloverMode=Day, and this is set to 30, you will retain ~30 days of logs.
+        FileRetention: 30
