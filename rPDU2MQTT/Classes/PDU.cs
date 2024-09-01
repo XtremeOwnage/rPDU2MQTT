@@ -15,10 +15,10 @@ public partial class PDU
     private readonly HttpClient http;
     private readonly ILogger<PDU> log;
 
-    public PDU(Config config, HttpClient http, ILogger<PDU> log)
+    public PDU(Config config, [DisallowNull, NotNull] HttpClient http, ILogger<PDU> log)
     {
         this.config = config;
-        this.http = http;
+        this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
         this.log = log;
     }
 
@@ -44,7 +44,7 @@ public partial class PDU
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
-        data.URL = http.BaseAddress.ToString();
+        data.URL = http.BaseAddress!.ToString();
 
         data.Entity_Identifier = Coalesce(config.Overrides?.PDU?.ID, "rPDU2MQTT")!;
         data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
