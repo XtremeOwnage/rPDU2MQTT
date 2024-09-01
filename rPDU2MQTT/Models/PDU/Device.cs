@@ -43,7 +43,7 @@ public partial class Device : BaseEntity, IEntityWithState
     public long LifetimeEnergy { get; set; }
 
     [JsonPropertyName("outlet")]
-    public Dictionary<string, Outlet> Outlets { get; set; }
+    public Dictionary<int, Outlet> Outlets { get; set; }
 
     [JsonPropertyName("alarm")]
     public A0Ae260C851900C3Alarm Alarm { get; set; }
