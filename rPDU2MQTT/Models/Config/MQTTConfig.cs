@@ -1,4 +1,5 @@
 ﻿using rPDU2MQTT.Models.Config.Schemas;
+using System.ComponentModel;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
@@ -23,7 +24,8 @@ public class MQTTConfig
     /// </summary>
     [Required(ErrorMessage = "ParentTopic is required.")]
     [Display(Description = "The parent topic for MQTT messages.")]
-    public string ParentTopic { get; set; } = "Rack_PDU";
+    [DefaultValue("rPDU2MQTT")]
+    public string ParentTopic { get; set; } = "rPDU2MQTT";
 
     /// <summary>
     /// Gets or sets the connection details for MQTT Broker.
