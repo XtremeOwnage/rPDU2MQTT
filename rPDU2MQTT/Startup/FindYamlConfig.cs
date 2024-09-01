@@ -32,7 +32,10 @@ internal class FindYamlConfig
         foreach (var file in combinations)
         {
             if (File.Exists(file))
+            {
+                Console.WriteLine($"Found config file at {file}");
                 return file;
+            }
         }
 
         /// At this point, we cannot find a configuration.
