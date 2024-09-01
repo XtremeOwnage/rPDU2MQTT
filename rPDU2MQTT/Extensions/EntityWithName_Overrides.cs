@@ -36,14 +36,23 @@ public static class EntityWithName_Overrides
         {
             EntityOverride? entityOverride = (key, entity) switch
             {
-                (int k, Outlet o) => overrides.Outlets!.TryGetValue(k, out var outletOverride) ? outletOverride : null,
+                // We are adding + 1 to the outlet's key- because the PDU gives data 0-based. However, when the entities are viewed through
+                // its UI, they are 1-based. This corrects that.
+                (int k, Outlet o) => overrides.Outlets!.TryGetValue(k + 1, out var outletOverride) ? outletOverride : null,
                 (string k, Device o) => overrides.Devices!.TryGetValue(k, out var outletOverride) ? outletOverride : null,
                 (string k, Measurement o) => overrides.Measurements!.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 _ => null
             };
 
             // If overrides are defined, use those.
-            if (entityOverride is not null)
+            if (entityOverride is not null && entity is Measurement m)
+            {
+                // Measurements inherits part of the parents name. aka, "outlet_1_power"
+                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(key, entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
+                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(key, entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
+                entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
+            }
+            else if (entityOverride is not null)
             {
                 entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(key, entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
                 entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(key, entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
@@ -51,7 +60,7 @@ public static class EntityWithName_Overrides
             }
             else // No overrides defined. Set defaults.
             {
-                entity.Entity_Name = DefaultNameFunc!.Invoke(key, entity);
+                entity.Entity_Name = DefaultNameFunc!.Invoke(key, entity).FormatName();
                 entity.Entity_DisplayName = DefaultDisplayNameFunc!.Invoke(key, entity);
                 entity.Entity_Enabled = true;
             }
@@ -75,38 +84,20 @@ public static class EntityWithName_Overrides
     }
 
     /// <summary>
-    /// Sets <see cref="IMQTTKey.Record_Key"/> for all items in dictionary based on <paramref name="ValueFunc"/>
+    /// Set a prefix for all contained entities. (This- is used to prefix measurements, with the parent's ID.)
     /// </summary>
     /// <typeparam name="TKey"></typeparam>
     /// <typeparam name="TEntity"></typeparam>
     /// <param name="entities"></param>
-    /// <param name="ValueFunc"></param>
-    public static void SetRecordKey<TKey, TEntity>([DisallowNull] this Dictionary<TKey, TEntity> entities, [DisallowNull] Func<TKey, TEntity, string> ValueFunc)
-         where TKey : notnull
-         where TEntity : notnull, NamedEntity
+    /// <param name="Prefix"></param>
+    public static void SetEntityNamePrefix<TKey, TEntity>([DisallowNull] this Dictionary<TKey, TEntity> entities, string Prefix)
+    where TKey : notnull
+    where TEntity : notnull, NamedEntity
     {
-        foreach (var (key, entity) in entities)
-            entity.Record_Key = ValueFunc!.Invoke(key, entity);
+        foreach (var (_, entity) in entities)
+            entity.Entity_Name = $"{Prefix}_{entity.Entity_Name}";
     }
 
-
-    private static bool caseInsensitiveLookup<TValue>(this Dictionary<string, TValue> Dictionary, string Key, out TValue Result, TValue DefaultValue)
-    {
-        var match = Dictionary.Keys.FirstOrDefault(o => string.Equals(o, Key, StringComparison.OrdinalIgnoreCase));
-        if (match is null)
-        {
-            Result = DefaultValue;
-            return false;
-        }
-
-        Result = Dictionary[match];
-
-        if (Result is null)
-            return false;
-        if (Result is string s)
-            return !string.IsNullOrWhiteSpace(s);
-        return Result is not null;
-    }
 
     /// <summary>
     /// Sets all properties of <see cref="IMQTTKey"/>.
@@ -114,16 +105,17 @@ public static class EntityWithName_Overrides
     /// <remarks>
     /// <see cref="IMQTTKey.Record_Key"/> is set to key from device.
     /// </remarks>
-    /// <typeparam name="T"></typeparam>
+    /// <typeparam name="TEntity"></typeparam>
     /// <param name="Items"></param>
     /// <param name="Parent"></param>
-    public static void SetParentAndIdentifier<T>(this Dictionary<string, T> Items, IMQTTKey Parent) where T : BaseEntity
+    public static void SetParentAndIdentifier<TKey, TEntity>(this Dictionary<TKey, TEntity> Items, IMQTTKey Parent, [DisallowNull] Func<TKey, TEntity, string>? IdentifierFunc) where TEntity : BaseEntity
     {
         foreach (var (key, item) in Items)
         {
+            string childKey = IdentifierFunc.Invoke(key, item);
             item.Record_Parent = Parent;
-            item.Record_Key = key;
-            item.Entity_Identifier = Parent.CreateChildIdentifier(key);
+            item.Record_Key = childKey;
+            item.Entity_Identifier = Parent.CreateChildIdentifier(childKey);
         }
     }
 

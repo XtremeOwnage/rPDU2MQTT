@@ -49,7 +49,7 @@ public partial class PDU
         data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
 
         // Propagate down the parent, and identifier.
-        data.Devices.SetParentAndIdentifier(data);
+        data.Devices.SetParentAndIdentifier(data, (k, v) => k);
 
         //Process devices
         processDevices(data.Devices);
@@ -61,8 +61,8 @@ public partial class PDU
         foreach (var (key, device) in devices)
         {
             // Propagate down the parent, and identifier.
-            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity));
-            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets));
+            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), (k, v) => k);
+            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), (k, v) => k.ToString());
 
             // Set Overrides
             device.Outlets.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseEntityName, DefaultNames.UseEntityLabel);
@@ -77,19 +77,19 @@ public partial class PDU
             processChildDevice(device.Outlets);
         }
     }
-    private void processChildDevice<T>(Dictionary<string, T> entities) where T : NamedEntityWithMeasurements
+    private void processChildDevice<TKey, TEntity>(Dictionary<TKey, TEntity> entities) where TEntity : NamedEntityWithMeasurements
     {
-        foreach (var (key, entity) in entities)
+        foreach (var (_, entity) in entities)
         {
             // All measurements will be stored into a sub-key.
-            entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements));
+            entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
 
             // Set Overrides
-            entity.Measurements.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseMeasurementType, DefaultNames.UseMeasurementType);
-            entity.Measurements.PruneDisabled();
+            Func<string, Measurement, string> MeasurementNamingFunc = (k, m) => m.Type;
 
-            // Set MQTT "Key" for measurements, to correspond to measurement type. (EntityName, contains the type)
-            entity.Measurements.SetRecordKey((_, e) => e.Entity_Name);
+            entity.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
+            entity.Measurements.PruneDisabled();
+            entity.Measurements.SetEntityNamePrefix(entity.Entity_Name);
         }
     }
 }
