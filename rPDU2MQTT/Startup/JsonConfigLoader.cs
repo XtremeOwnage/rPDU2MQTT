@@ -15,9 +15,9 @@ public static class JsonConfigLoader
         string baseConfig = "appsettings.json";
         string envSpecificConfig = $"appsettings.{context.HostingEnvironment.EnvironmentName}.json";
 
-        Console.WriteLine("Loading JSON Configuration");
-        Console.WriteLine($"{baseConfig} exists: {File.Exists(baseConfig)}");
-        Console.WriteLine($"{envSpecificConfig} exists: {File.Exists(envSpecificConfig)}");
+        Log.Information("Loading JSON Configuration");
+        Log.Information($"{baseConfig} exists: {File.Exists(baseConfig)}");
+        Log.Information($"{envSpecificConfig} exists: {File.Exists(envSpecificConfig)}");
 
         //Check for configuration files in the current directory.
         config
