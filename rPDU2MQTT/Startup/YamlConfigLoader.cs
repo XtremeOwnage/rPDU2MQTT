@@ -32,7 +32,7 @@ internal class YamlConfigLoader
         {
             if (File.Exists(file))
             {
-                Console.WriteLine($"Found config file at {file}");
+                Log.Information($"Found config file at {file}");
                 return file;
             }
         }
