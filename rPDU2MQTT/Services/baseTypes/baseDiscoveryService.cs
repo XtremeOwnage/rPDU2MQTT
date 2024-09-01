@@ -2,13 +2,11 @@
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
-using rPDU2MQTT.Interfaces;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
-using rPDU2MQTT.Models.HomeAssistant.ObjectDTOs;
 using rPDU2MQTT.Models.PDU;
-using rPDU2MQTT.Models.PDU.DummyDevices;
 
 namespace rPDU2MQTT.Services.baseTypes;
 
@@ -16,8 +14,11 @@ public abstract class baseDiscoveryService : baseMQTTTService
 {
     public baseDiscoveryService(MQTTServiceDependancies deps, ILogger log) : base(deps, log, deps.Cfg.HASS.DiscoveryInterval) { }
 
-    public Sensor CreateSensorDiscovery(Measurement measurement, DiscoveryDevice Device, SensorDTO dto)
+    public Sensor CreateSensorDiscovery(Measurement measurement, DiscoveryDevice Device)
     {
+        //If we are unable to parse this measurement as valid, skip to the next.
+        var dto = measurement.TryParseValue();
+
         var sensor = new Sensor
         {
             //Identifying Details

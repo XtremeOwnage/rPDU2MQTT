@@ -35,12 +35,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
                 foreach (var measurement in entity.Measurements.Values)
                 {
-                    //If we are unable to parse this measurement as valid, skip to the next.
-                    var dto = measurement.TryParseValue();
-                    if (dto is null)
-                        continue;
-
-                    Sensors.Add(CreateSensorDiscovery(measurement, ParentDevice, dto));
+                    Sensors.Add(CreateSensorDiscovery(measurement, ParentDevice));
                 }
             }
 
@@ -58,7 +53,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                     if (dto is null)
                         continue;
 
-                    Sensors.Add(CreateSensorDiscovery(measurement, childDevice, dto));
+                    Sensors.Add(CreateSensorDiscovery(measurement, childDevice));
                 }
             }
         }
