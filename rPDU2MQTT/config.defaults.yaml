@@ -160,3 +160,37 @@ Debug:
     # This is used to test the entire program, WITHOUT sending messages.
     # Default: true
     PublishMessages: true
+
+# Optional settings used to configure logging.
+Logging:
+    # Supported Severity Values: Verbose,Debug,Information,Warning,Error,Fatal    
+
+    # Customize messages printed to Console / stdout
+    Console:
+        # Should messages be printed to stdout/console?
+        # (Optional). Default: true
+        Enabled: true
+
+        # Only messages with this severity or higher will be printed.
+        # (Optional). Default: Information
+        Severity: Information
+
+        # Allows customizing the format of log messages.
+        # (Optional). Default: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+        # For details: https://github.com/serilog/serilog/wiki/Formatting-Output
+        Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
+
+    # Customize logging to file.
+    File:
+        # Should messages be saved to a file?
+        # (Optional). Default: false
+        Enabled: false
+
+        # Only messages with this severity or higher will be printed.
+        # (Optional). Default: Information
+        Severity: Debug
+
+        # Allows customizing the format of log messages.
+        # (Optional). Default: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+        # For details: https://github.com/serilog/serilog/wiki/Formatting-Output
+        Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
