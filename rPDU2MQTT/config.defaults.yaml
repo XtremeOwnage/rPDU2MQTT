@@ -149,3 +149,64 @@ HomeAssistant:
     DiscoveryInterval: 300
     # Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
     SensorExpireAfterSeconds: 300
+
+# These settings are used when debugging, or when additional data or diagnostics is needed.
+Debug:
+    # When enabled, discovery messages will be formatted, and printed to console.
+    # Default: false
+    PrintDiscovery: false
+
+    # When set to false, this will prevent messages from being published to the MQTT Broker.
+    # This is used to test the entire program, WITHOUT sending messages.
+    # Default: true
+    PublishMessages: true
+
+# Optional settings used to configure logging.
+Logging:
+    # Supported Severity Values: Verbose,Debug,Information,Warning,Error,Fatal    
+
+    # Customize messages printed to Console / stdout
+    Console:
+        # Should messages be printed to stdout/console?
+        # (Optional). Default: true
+        Enabled: true
+
+        # Only messages with this severity or higher will be printed.
+        # (Optional). Default: Information
+        Severity: Information
+
+        # Allows customizing the format of log messages.
+        # (Optional). Default: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+        # For details: https://github.com/serilog/serilog/wiki/Formatting-Output
+        Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
+
+    # Customize logging to file.
+    File:
+        # Should messages be saved to a file?
+        # (Optional). Default: false
+        Enabled: false
+
+        # Only messages with this severity or higher will be printed.
+        # (Optional). Default: Information
+        Severity: Debug
+
+        # Allows customizing the format of log messages.
+        # (Optional). Default: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+        # For details: https://github.com/serilog/serilog/wiki/Formatting-Output
+        Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
+
+        # Set to the path where you wish to output a log file.
+        # (Optional). Default: Not Specified
+        # Example: /config/mylog.log
+        Path: null
+
+        # File Rollover
+        # Options:
+        # - Infinite = Files will never rollover.
+        # - Year, Month, Day, Hour, Minute = Files will rollover this often.
+        # (Optional.) Default: Day
+        FileRollover: Day
+
+        # The number of rolled over logs which will be retained.
+        # Example, if RolloverMode=Day, and this is set to 30, you will retain ~30 days of logs.
+        FileRetention: 30

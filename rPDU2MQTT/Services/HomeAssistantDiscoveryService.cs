@@ -14,19 +14,19 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(ILogger<HomeAssistantDiscoveryService> log, MQTTServiceDependancies deps) : base(deps, log) { }
+    public HomeAssistantDiscoveryService(MQTTServiceDependancies deps) : base(deps) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
         var data = await pdu.GetRootData_Public(cancellationToken);
         var pduDevice = data.GetDiscoveryDevice();
 
-        log.LogDebug("Starting discovery job.");
+        Log.Debug("Starting discovery job.");
 
         // Recursively discover everything.
         await recursiveDiscovery(data.Devices, pduDevice, cancellationToken);
 
-        log.LogInformation("Discovery information published.");
+        Log.Information("Discovery information published.");
     }
 
 
@@ -81,7 +81,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Discover measurements
             await recursiveDiscovery(pduEntity.Measurements, parent, cancellationToken);
         }
-        else if(entity is Measurement measurement)
+        else if (entity is Measurement measurement)
         {
             await DiscoverMeasurementAsync(measurement, parent, cancellationToken);
         }

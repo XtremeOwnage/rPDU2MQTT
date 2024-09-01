@@ -1,17 +1,23 @@
 ﻿using HiveMQtt.Client;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Startup;
-using System.Runtime.InteropServices;
+
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .MinimumLevel.Is(Serilog.Events.LogEventLevel.Verbose)
+    .CreateLogger();
 
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureAppConfiguration(ConfigLoader.Configure)
+    .ConfigureAppConfiguration(o => { o.AddEnvironmentVariables(); })
     .ConfigureServices(ServiceConfiguration.Configure)
     .ConfigureLogging(logging =>
     {
         logging.ClearProviders();
-logging.AddConsole();
+        logging.AddConsole();
     })
     .Build();
 
@@ -19,10 +25,10 @@ logging.AddConsole();
 var client = host.Services.GetRequiredService<IHiveMQClient>();
 var logger = host.Services.GetRequiredService<ILogger<IHiveMQClient>>();
 
-logger.LogInformation($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
+Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 
 await client.ConnectAsync();
 
-logger.LogInformation("Successfully connected to broker!");
+Log.Information("Successfully connected to broker!");
 
 host.Run();

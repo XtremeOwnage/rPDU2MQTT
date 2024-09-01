@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using rPDU2MQTT.Classes;
+﻿using rPDU2MQTT.Classes;
 using rPDU2MQTT.Services.baseTypes;
 
 namespace rPDU2MQTT.Services;
@@ -9,7 +8,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class MQTTPublishingService : basePublishingService
 {
-    public MQTTPublishingService(ILogger<MQTTPublishingService> log, MQTTServiceDependancies deps) : base(log, deps) { }
+    public MQTTPublishingService(MQTTServiceDependancies deps) : base(deps) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
@@ -17,7 +16,7 @@ public class MQTTPublishingService : basePublishingService
         foreach (var device in rootData.Devices.Values)
         {
             await PublishState(device, cancellationToken);
-            
+
             foreach (var entity in device.Entity.Values)
             {
                 await PublishName(entity, cancellationToken);
