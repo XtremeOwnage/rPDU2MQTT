@@ -1,5 +1,4 @@
 ﻿using rPDU2MQTT.Classes;
-using Serilog;
 using System.Runtime.InteropServices;
 using YamlDotNet.Serialization;
 namespace rPDU2MQTT.Startup;
