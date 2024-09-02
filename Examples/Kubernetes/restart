@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# This script, just restarts the container. (Will pull down a new image version too, if available.)
+
+ns="rpdu2mqtt"
+kubectl delete pod -n $ns -l role=app
+
