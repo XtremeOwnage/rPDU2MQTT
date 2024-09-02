@@ -73,6 +73,29 @@ internal class YamlConfigLoader
 
         var cfg = s.Deserialize<Config>(sr);
 
-        return cfg;
+        return InitializeConfig(cfg);
+    }
+
+    /// <summary>
+    /// Just initializes values to default values.
+    /// </summary>
+    /// <param name="config"></param>
+    private static Config InitializeConfig(Config config)
+    {
+        // This- method exists, because apparently when you have an empty dictionary defined
+        // yamldotnet, produces a null dictionary in return.
+        // Instead of writing a custom deserializer, or screwing around reading tickets for 30 minutes-
+        // I wrote this code. It works. it does the job. It ensures there isn't a null value.
+        // KISS.
+        config ??= new Config();
+
+        config.Overrides ??= new Models.Config.Overrides();
+        config.Overrides.PDU ??= new Models.Config.Schemas.EntityOverride();
+        config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
+        config.Overrides.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
+        config.Overrides.Measurements ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
+
+
+        return config;
     }
 }
