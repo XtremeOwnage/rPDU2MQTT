@@ -2,7 +2,7 @@
 
 ### What is rPDU2MQTT?
 
-This is a simple container-based service, which queries data from a vertiv pdu unit, and submits the data to your MQTT broker.
+This is a simple container-based service, which queries data from a Vertiv pdu unit, and submits the data to your MQTT broker.
 
 If- you wish to learn more about these PDU units, I created at [blog post](https://static.xtremeownage.com/blog/2024/metered-switch-pdu/) detailing the units, with capabilities, and available configuration.
 
@@ -26,6 +26,16 @@ If you are unable to get this working as expected, there are a few options avail
 First- sending a message in [My Discord](https://static.xtremeownage.com/discord), is the preferred option. Just- make sure to take @XtremeOwnage.
 
 As well- you can submit a [New Issue](https://github.com/XtremeOwnage/rPDU2MQTT/issues/new/choose).
+
+## I wish to contribute
+
+Normally, products have an entire section of documentation for developers, coding standards, linters, etc....
+
+This is a pretty small project. I don't have those things.
+
+If, you see an issue, or a feature you wish to work on, just comment into the issue to let others know you are working on it. 
+
+When your all done, open a [New Pull Request](https://github.com/XtremeOwnage/rPDU2MQTT/compare) and we will work together to ensure it meets the few standards present here.
 
 ## Other Q&A
 
