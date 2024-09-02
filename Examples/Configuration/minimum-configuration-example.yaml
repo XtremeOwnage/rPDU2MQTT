@@ -1,0 +1,18 @@
+## This represents the minimum amount of configuration options needed for a working service.
+
+Mqtt:
+    Connection:
+        Host: "your-mqtt-broker-ip-or-hostname"
+        Port: 1883 
+    Credentials:
+        Username: "admin"
+        Password: "password"
+
+PDU:
+    Connection:        
+        Host: your-pdu-ip-or-hostname
+        Port: 80
+
+HomeAssistant:
+    DiscoveryEnabled: true
+    DiscoveryTopic: "homeassistant"
