@@ -46,10 +46,10 @@ Pdu:
         # (Optional) Enable or Disable Certificate Validation. Defaults to true.
         ValidateCertificate: true
 
-    # (Optional) Credentials to connect to MQTT server
+    # (Optional) Credentials to connect to PDU.
     Credentials:
-        Username: "actionsUser"
-        Password: "actionsPass"
+        Username: "user"
+        Password: "password"
 
     # This is how often sensors will be published to MQTT (in seconds)
     PollInterval: 5
