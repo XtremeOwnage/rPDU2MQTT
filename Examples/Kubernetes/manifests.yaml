@@ -1,0 +1,122 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: rpdu2mqtt
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configuration
+  namespace: rpdu2mqtt
+data:
+  config.yaml: |
+    Mqtt:
+        Connection:
+            Host: "192.168.1.1" # Update to the IP of your MQTT broker.
+            Port: 1883 
+        Credentials:
+            Username: "admin"
+            Password: "password"
+
+        ParentTopic: "Rack_PDU"
+
+    PDU:
+        Connection:        
+            Host: 192.168.1.2   # Update to the IP of your PDU.
+            Port: 80
+            
+        PollInterval: 5
+    Overrides:
+        PDU: 
+            Name: "Your PDU"
+
+        Devices:
+            YOUR-SERIAL-NUMBER:
+                ID: your_pdu
+                Name: MY PDU
+                Enabled: true
+
+
+        Measurements:
+            # I override the names, to give a more usable display name.
+            # Also- I change the ID, to be a bit shorter for power.
+            apparentPower:
+                Name: Apparent Power
+            realPower:
+                ID: power
+                Name: Power
+            energy:
+                Name: Energy
+            powerFactor:
+                Name: Power Factor
+            current: 
+                Name: Current
+            voltage:
+                Name: Voltage
+            # I recommend leaving these disabled, unless you have a use-case for them.
+            currentCrestFactor:
+                Enabled: false
+            balance:
+                Enabled: false
+
+    HomeAssistant:
+        DiscoveryEnabled: true
+        DiscoveryTopic: "homeassistant"
+
+        # Short discovery interval is used for testing.
+        DiscoveryInterval: 30
+
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    role: app
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: rpdu2mqtt
+      role: app
+  template:
+    metadata:
+      labels:
+        app: rpdu2mqtt
+        role: app
+    spec:
+      dnsPolicy: ClusterFirst
+      containers:
+      - image: ghcr.io/xtremeownage/rpdu2mqtt:main
+        name: app
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          runAsUser: 1654
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: config-files
+          mountPath: /config   
+        resources:
+          limits:
+            memory: 800Mi
+            cpu: 300m
+          requests:
+            memory: 100Mi
+            cpu: 100m
+      volumes:
+      - name: config-files
+        configMap:
+          name: configuration
+          defaultMode: 0777
+          
