@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  rpdu2mqtt:
+    image: ghcr.io/xtremeownage/rpdu2mqtt:main
+    container_name: rpdu2mqtt
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+    restart: unless-stopped
