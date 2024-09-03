@@ -39,7 +39,7 @@ Name it: Something spicey e.g. `rpdu2mqtt`
 Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
  - Note: You can [select different sources by utilizing](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pulling-container-images) a 'colon' or '@' (:main - main branch, :latest - most recent tagged release, :v0.2.1 - specific tagged branch, @sha256: - specific commit)
 
-Network Type: `Bridge` - Though, choose whatever makes sense. See below.
+Network Type: `Bridge` - Though, choose whatever makes sense. (See below.)
 
 Click: `Add another Path, Port, Variable, Lable or Device`
 
