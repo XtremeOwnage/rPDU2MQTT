@@ -18,11 +18,12 @@ For help on setting up `config.yaml`, please see [Configuration Documentation](.
 
 ## Step 2: Create & Upload the `config.yaml` to your storage location
 
-Create a folder `rpdu2mqtt` and sub-folder `config` to stor ethe `config.yaml` configuration file.
+Create a folder 'rpdu2mqtt' and sub-folder 'config' to store the 'config.yaml' configuration file.
 
 IE: `mnt/user/appdata/rpdu2mqtt/config`
 
 Note: You could store (and subsequently map) this anywhere, but I think it makes most sense to store in the predefined docker storage location
+Note2: The 'config' sub-folder is unecessary
 
 ## Step 3: Deploy the Service
 
