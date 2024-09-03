@@ -1,6 +1,6 @@
 # Deploying `rpdu2mqtt` with unRAID
 
-This guide will help you deploy the `rpdu2mqtt` service using unRAID
+This guide will help you deploy the `rpdu2mqtt` service using the [unRAID server](https://unraid.net/) platform GUI
 
 ## Prerequisites
 
