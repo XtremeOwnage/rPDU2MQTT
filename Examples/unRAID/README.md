@@ -48,7 +48,9 @@ Click: `Add`
 
 Click: `Apply`
 
-The container should pull and then start automatically
+The container should pull from the repository and then start automatically.
+
+Check for any errors.
 
 Click: `Done`
 
