@@ -39,7 +39,7 @@ Name it: `config`
 
 Container Path: `/config`
 
-Host Path: `/mnt/user/appdata/rpdu2mqtt/config` [Map to your config.yaml location]
+Host Path: `/mnt/user/appdata/rpdu2mqtt/` [Map to your config.yaml location]
 
 Click: `Add`
 
