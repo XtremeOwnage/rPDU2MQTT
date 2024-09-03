@@ -22,7 +22,7 @@ Use any text editor and save as `config.yaml` or `config.yml`
 
 Create a folder `rpdu2mqtt` and sub-folder `config` to store the `config.yaml` configuration file.
 
-IE: `mnt/user/appdata/rpdu2mqtt/config`
+E.g: `mnt/user/appdata/rpdu2mqtt/config`
 
 *Note1: You could store (and subsequently map) this anywhere, but I think it makes most sense to store in the predefined docker storage location*
 
@@ -34,7 +34,7 @@ Navigate to the docker tab in unRAID.
 
 Scroll down & Click: `Add Container`
 
-Name it: `rpdu2mqtt`
+Name it: Something spicey e.g. `rpdu2mqtt`
 
 Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
  - Note: You can [select different sources by utilizing](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pulling-container-images) a 'colon' or '@' (:main - main branch, :latest - most recent tagged release, :v0.2.1 - specific tagged branch, @sha256: - specific commit)
