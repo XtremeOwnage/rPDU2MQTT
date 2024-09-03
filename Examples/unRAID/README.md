@@ -39,7 +39,9 @@ Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
 Click: `Add another Path, Port, Variable, Lable or Device`
 
 Name it: `config`
+
 Container Path: `/config
+
 Host Path: `/mnt/user/appdata/rpdu2mqtt/config
 
 ## Step 4: Verify the Deployment
