@@ -54,12 +54,10 @@ Click: `Done`
 
 ## Step 4: Verify the Deployment
 
-To ensure the service is running correctly, refresh the unRAID page to see if rpdu2mqtt container stops unexpectedly.
+To ensure the service is running correctly, refresh the unRAID page to see if the rpdu2mqtt container stoped unexpectedly.
+
+This will show the status of the `rpdu2mqtt` container faster than waiting for an auto-refresh.
 
 Common issues are due to a malformed `config.yaml` file.
 
-This will show the status of the `rpdu2mqtt` container.
-
-You can also view the logs to check for any errors or important information:
-
-Use the GUI to click on the Logs button and launch a window showing docker log messages
+You can also view the logs to check for any errors or important information by clickign on the container icon and selecting the logs menu item in the context menu.
