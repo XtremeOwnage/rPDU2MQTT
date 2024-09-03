@@ -2,6 +2,8 @@
 
 This guide will help you deploy the `rpdu2mqtt` service using the [unRAID server](https://unraid.net/) platform GUI
 
+*Note: [Will become a CA app](https://github.com/XtremeOwnage/rPDU2MQTT/issues/26#issue-2499508619) eventually. (Making this guide obsolete)*
+
 ## Prerequisites
 
 Before you begin it is *highly recommended* you have access to the docker appdata folder `mnt/user/appdata`
