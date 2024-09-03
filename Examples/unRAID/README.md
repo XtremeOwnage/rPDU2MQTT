@@ -4,10 +4,11 @@ This guide will help you deploy the `rpdu2mqtt` service using unRAID
 
 ## Prerequisites
 
-Before you begin you need access to your docker appdata folder 
+Before you begin you need access to your docker appdata folder `mnt/user/appdata`
 
-- [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
+Two methods:
+ - (rootshare)[https://forums.unraid.net/topic/58053-video-guide-how-to-setup-a-root-share-in-unraid-1-share-to-rule-them-all/]
+ - (Dynamix File Manager)[https://forums.unraid.net/topic/120982-dynamix-file-manager/]
 
 ## Step 1: Prepare the Configuration File
 
