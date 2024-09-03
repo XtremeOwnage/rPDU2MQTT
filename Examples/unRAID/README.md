@@ -16,6 +16,8 @@ Create a `config.yaml` file that will be used to configure the `rpdu2mqtt` servi
 
 For help on setting up `config.yaml`, please see [Configuration Documentation](./../../docs/Configuration.md)
 
+Use any text editor and save as `config.yaml` or `config.yml`
+
 ## Step 2: Create & Upload the `config.yaml` to your storage location
 
 Create a folder `rpdu2mqtt` and sub-folder `config` to store the `config.yaml` configuration file.
