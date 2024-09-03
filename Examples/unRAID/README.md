@@ -18,7 +18,7 @@ For help on setting up `config.yaml`, please see [Configuration Documentation](.
 
 ## Step 2: Create & Upload the `config.yaml` to your storage location
 
-Create a folder 'rpdu2mqtt' and sub-folder 'config' to store the 'config.yaml' configuration file.
+Create a folder `rpdu2mqtt` and sub-folder `config` to store the `config.yaml` configuration file.
 
 IE: `mnt/user/appdata/rpdu2mqtt/config`
 
@@ -33,7 +33,7 @@ Scroll down & Click: `Add Container`
 
 Name it: `rpdu2mqtt`
 
-Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
+Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
  - Note: You can [select different sources by utilizing](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pulling-container-images) a 'colon' or '@' (:main - main branch, :latest - most recent tagged release, :v0.2.1 - specific tagged branch, @sha256: - specific commit)
 
 Click: `Add another Path, Port, Variable, Lable or Device`
