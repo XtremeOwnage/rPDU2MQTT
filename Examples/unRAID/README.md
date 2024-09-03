@@ -16,29 +16,19 @@ Create a `config.yaml` file that will be used to configure the `rpdu2mqtt` servi
 
 For help on setting up `config.yaml`, please see [Configuration Documentation](./../../docs/Configuration.md)
 
-```bash
-touch config.yaml
-```
-
 Populate the `config.yaml` file with your desired configuration settings.
 
-## Step 2: Create the Docker Compose File
+## Step 2: Create & Upload the `config.yaml` to your storage location
 
-Create a `docker-compose.yml`. 
+`mnt/user/appdata/rpdu2mqtt/config`
 
-See [docker-compose.yaml](./docker-compose.yaml)
-
-This file defines the Docker service and specifies the necessary security and resource constraints.
+Note: you could store (and subsequently map) this anywhere, but I think it makes most sense to store in the predefined docker storage location
 
 ## Step 3: Deploy the Service
 
-Navigate to the directory containing your `docker-compose.yml` and `config.yaml` files, then deploy the service using Docker Compose:
+Navigate to the docker tab in unRAID.
 
-```bash
-docker-compose up -d
-```
 
-This command will download the required Docker image and start the `rpdu2mqtt` service in detached mode.
 
 ## Step 4: Verify the Deployment
 
