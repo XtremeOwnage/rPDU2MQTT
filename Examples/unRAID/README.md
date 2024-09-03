@@ -54,7 +54,7 @@ Click: `Done`
 
 ## Step 4: Verify the Deployment
 
-To ensure the service is running correctly, refresh the unRAID page to see if the rpdu2mqtt container stoped unexpectedly.
+To ensure the service is running correctly, refresh the unRAID page to see if the `rpdu2mqtt` container stoped unexpectedly.
 
 This will show the status of the `rpdu2mqtt` container faster than waiting for an auto-refresh.
 
