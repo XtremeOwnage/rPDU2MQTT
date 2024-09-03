@@ -40,22 +40,26 @@ Click: `Add another Path, Port, Variable, Lable or Device`
 
 Name it: `config`
 
-Container Path: `/config
+Container Path: `/config`
 
-Host Path: `/mnt/user/appdata/rpdu2mqtt/config
+Host Path: `/mnt/user/appdata/rpdu2mqtt/config` [Map to your config.yaml location]
+
+Click: `Add`
+
+Click: `Apply`
+
+The container should pull and then start automatically
+
+Click: `Done`
 
 ## Step 4: Verify the Deployment
 
-To ensure the service is running correctly, use the following command:
+To ensure the service is running correctly, refresh the unRAID page to see if rpdu2mqtt container stops unexpectedly.
 
-```bash
-docker-compose ps
-```
+Common issues are due to a malformed `config.yaml` file.
 
 This will show the status of the `rpdu2mqtt` container.
 
 You can also view the logs to check for any errors or important information:
 
-```bash
-docker-compose logs -f
-```
+Use the GUI to click on the Logs button and launch a window showing docker log messages
