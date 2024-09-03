@@ -28,7 +28,7 @@ Navigate to the docker tab in unRAID.
 
 Scroll down & Click: `Add Container`
 
-Name it: Something spicey e.g. `rpdu2mqtt`
+Name it: Something e.g. `rpdu2mqtt`
 
 Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
  - Note: You can [select different sources by utilizing](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pulling-container-images) a 'colon' or '@' (:main - main branch, :latest - most recent tagged release, :v0.2.1 - specific tagged branch, @sha256: - specific commit)
@@ -55,10 +55,10 @@ Click: `Done`
 
 ## Step 4: Verify the Deployment
 
-To ensure the service is running correctly, refresh the unRAID page to see if the `rpdu2mqtt` container stoped unexpectedly.
+To ensure the service is running correctly, refresh the unRAID page to see if the `rpdu2mqtt` container stopped unexpectedly.
 
 This will show the status of the `rpdu2mqtt` container faster than waiting for an auto-refresh.
 
 Common issues are due to a malformed `config.yaml` file.
 
-You can also view the logs to check for any errors or important information by clickign on the container icon and selecting the logs menu item in the context menu.
+You can also view the logs to check for any errors or important information by clicking on the container icon and selecting the logs menu item in the context menu.
