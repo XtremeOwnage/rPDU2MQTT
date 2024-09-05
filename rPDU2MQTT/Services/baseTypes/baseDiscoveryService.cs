@@ -110,7 +110,8 @@ public abstract class baseDiscoveryService : baseMQTTTService
         var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
         {
             ContentType = "json",
-            PayloadAsString = System.Text.Json.JsonSerializer.Serialize<T>(sensor, this.jsonOptions)
+            PayloadAsString = System.Text.Json.JsonSerializer.Serialize<T>(sensor, this.jsonOptions),
+            Retain = cfg.HASS.DiscoveryRetain,
         };
 
         if (cfg.Debug.PrintDiscovery)

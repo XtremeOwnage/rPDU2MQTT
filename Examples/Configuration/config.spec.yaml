@@ -144,9 +144,26 @@ Overrides:
             Enabled: false
 
 HomeAssistant:
+    # Is home assistant mQTT-discovery enabled?
+    # If you want to manually create entities, or, just want your PDU data pushed to MQTT without home-assistant, change to false.
+    # (Optional) Default: false
     DiscoveryEnabled: true
+
+    # Should discovery messages  be retained? Strongly recommend leaving this to true!
+    # (Optional) Default: true
+    DiscoveryRetain: true
+
+    # This is the home-assistant discovery topic.
+    # Should prob leave this set as-is.
     DiscoveryTopic: "homeassistant/discovery"
+
+    # How often should discovery messages be sent?
+    # 0 = Send Once at startup.
+    # Note, if you have DiscoveryRetain=true, the only benefit to running more discovery jobs- is to update the names of entityes
+    # based on labels set in the PDU.
+    # (Optional) Default: 0
     DiscoveryInterval: 300
+
     # Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
     SensorExpireAfterSeconds: 300
 
