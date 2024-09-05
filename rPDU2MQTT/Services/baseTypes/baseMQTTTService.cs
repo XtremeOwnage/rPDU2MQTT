@@ -12,9 +12,8 @@ namespace rPDU2MQTT.Services.baseTypes;
 /// </summary>
 public abstract class baseMQTTTService : IHostedService, IDisposable
 {
-    private readonly int interval;
     private IHiveMQClient mqtt { get; init; }
-    private PeriodicTimer timer;
+    private PeriodicTimer? timer;
     private Task timerTask = Task.CompletedTask;
     protected Config cfg { get; }
     protected PDU pdu { get; }
@@ -24,11 +23,16 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     protected baseMQTTTService(MQTTServiceDependancies dependancies) : this(dependancies, dependancies.Cfg.PDU.PollInterval) { }
     protected baseMQTTTService(MQTTServiceDependancies dependancies, int Interval)
     {
-        interval = Interval;
         mqtt = dependancies.Mqtt;
         cfg = dependancies.Cfg;
         pdu = dependancies.PDU;
-        timer = new PeriodicTimer(TimeSpan.FromSeconds(Interval));
+
+        // If the interval is 0, don't create a timer.
+        if (Interval <= 0)
+            timer = null;
+        else
+            timer = new PeriodicTimer(TimeSpan.FromSeconds(Interval));
+
         jsonOptions = new System.Text.Json.JsonSerializerOptions
         {
             WriteIndented = true,
@@ -46,6 +50,14 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (timer is null)
+        {
+            Log.Information($"{GetType().Name} - performing single discovery.");
+            await Execute(cancellationToken);
+            return;
+
+        }
+
         Log.Information($"{GetType().Name} is starting.");
 
         timerTask = Task.Run(() => timerTaskExecution(cancellationToken).Wait());
@@ -53,6 +65,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         //Kick off the first one manually.
         await Execute(cancellationToken);
 
+        // Log message to indicate the service has been started.
         Log.Information($"{GetType().Name} is running.");
     }
 
@@ -75,9 +88,14 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
+    ~baseMQTTTService()
+    {
+        Log.Debug($"{GetType().Name} has been finalized");
+    }
+
     public void Dispose()
     {
-        timer.Dispose();
+        timer?.Dispose();
     }
 
     /// <summary>

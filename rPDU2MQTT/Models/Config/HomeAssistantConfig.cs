@@ -20,7 +20,15 @@ public class HomeAssistantConfig
     /// <summary>
     /// How often should discovery data be published?
     /// </summary>
-    public int DiscoveryInterval { get; set; } = 300;
+    /// <remarks>
+    /// A value of 0, will run a single discovery, and not run a re-discovery until the application is restarted.
+    /// </remarks>
+    public int DiscoveryInterval { get; set; } = 0;
+
+    /// <summary>
+    /// Should discovery messages be retained?
+    /// </summary>
+    public bool DiscoveryRetain { get; set; } = true;
 
     /// <summary>
     ///  Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
