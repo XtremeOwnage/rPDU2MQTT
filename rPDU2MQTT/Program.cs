@@ -23,7 +23,6 @@ var host = Host.CreateDefaultBuilder(args)
 
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
-var logger = host.Services.GetRequiredService<ILogger<IHiveMQClient>>();
 
 Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 

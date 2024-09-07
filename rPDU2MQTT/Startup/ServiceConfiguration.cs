@@ -30,11 +30,16 @@ public static class ServiceConfiguration
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Host");
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
+            var lwt = new LastWillAndTestament(
+                MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "Status"), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
+
             var mqttBuilder = new HiveMQClientOptionsBuilder()
                 .WithBroker(cfg.MQTT.Connection.Host)
                 .WithPort(cfg.MQTT.Connection.Port!.Value)
-                .WithClientId(cfg.MQTT.ClientID ?? "rpdu2mqtt")
-                .WithAutomaticReconnect(true);
+                .WithClientId((cfg.MQTT.ClientID ?? "rpdu2mqtt") + Guid.NewGuid().ToString())
+                .WithAutomaticReconnect(true)
+                .WithKeepAlive(cfg.MQTT.KeepAlive)
+                .WithLastWillAndTestament(lwt);
 
             if (cfg.MQTT.Credentials?.Username is not null)
                 mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
@@ -43,7 +48,13 @@ public static class ServiceConfiguration
                 mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
 
             // Return new client, with options applied.
-            return new HiveMQClient(mqttBuilder.Build());
+            var x = new HiveMQClient(mqttBuilder.Build());
+
+            // While we are here- lets go ahead and create / bind the event handler.
+            services.AddSingleton<MqttEventHandler>(new MqttEventHandler(x));
+            return x;
+
+            
         });
 
         //Configure Services
