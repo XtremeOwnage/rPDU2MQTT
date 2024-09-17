@@ -52,7 +52,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     {
         if (timer is null)
         {
-            Log.Information($"{GetType().Name} - performing single discovery.");
+            Log.Information($"{GetType().Name} - performing single execution.");
             await Execute(cancellationToken);
             return;
 
@@ -73,7 +73,16 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     {
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            await Execute(cancellationToken);
+            try
+            {
+                Log.Debug($"{GetType().Name} - start.");
+                await Execute(cancellationToken);
+                Log.Debug($"{GetType().Name} - finish.");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"Exception occured in {this.GetType().Name}'s processing loop.");
+            }
         }
     }
 
