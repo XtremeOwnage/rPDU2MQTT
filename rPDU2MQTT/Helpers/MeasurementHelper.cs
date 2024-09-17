@@ -23,7 +23,15 @@ public static class MeasurementHelper
             "powerfactor" => new SensorDTO(StateClass.Measurement, DeviceClass.PowerFactor),
             "current" => new SensorDTO(StateClass.Measurement, DeviceClass.Current),
             "voltage" => new SensorDTO(StateClass.Measurement, DeviceClass.Voltage),
-            _ => new SensorDTO(StateClass.Measurement, DeviceClass.Unknown)
-        };
+            "accumulatedco2" => new SensorDTO(StateClass.TotalIncreasing, DeviceClass.CarbonDioxide),
+            "instantaneousco2" => new SensorDTO(StateClass.Measurement, DeviceClass.CarbonDioxide),
+            _ => unknownSensor()
+        }; 
+
+        SensorDTO unknownSensor()
+        {
+            Log.Error($"Unknown measurement type: {measurement.Entity_DisplayName}");
+            return new SensorDTO(StateClass.Measurement, DeviceClass.Unknown);
+        }
     }
 }

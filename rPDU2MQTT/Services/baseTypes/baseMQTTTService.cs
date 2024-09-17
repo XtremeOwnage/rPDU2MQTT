@@ -52,10 +52,9 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     {
         if (timer is null)
         {
-            Log.Information($"{GetType().Name} - performing single discovery.");
-            await Execute(cancellationToken);
+            Log.Information($"{GetType().Name} - performing single execution.");
+            await tick(cancellationToken);
             return;
-
         }
 
         Log.Information($"{GetType().Name} is starting.");
@@ -63,7 +62,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         timerTask = Task.Run(() => timerTaskExecution(cancellationToken).Wait());
 
         //Kick off the first one manually.
-        await Execute(cancellationToken);
+        await tick(cancellationToken);
 
         // Log message to indicate the service has been started.
         Log.Information($"{GetType().Name} is running.");
@@ -72,8 +71,20 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     private async Task timerTaskExecution(CancellationToken cancellationToken)
     {
         while (await timer.WaitForNextTickAsync(cancellationToken))
+            await tick(cancellationToken);
+    }
+
+    private async Task tick(CancellationToken cancellationToken)
+    {
+        try
         {
+            Log.Debug($"{GetType().Name} - start.");
             await Execute(cancellationToken);
+            Log.Debug($"{GetType().Name} - finish.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, $"Exception occured in {this.GetType().Name}'s processing loop.");
         }
     }
 

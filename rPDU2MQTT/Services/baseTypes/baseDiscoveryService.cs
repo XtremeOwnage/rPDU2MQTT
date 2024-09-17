@@ -27,6 +27,9 @@ public abstract class baseDiscoveryService : baseMQTTTService
         //If we are unable to parse this measurement as valid, skip to the next.
         var dto = measurement.TryParseValue();
 
+        if(dto is null)
+            return Task.CompletedTask;
+
         var discovery = new SensorDiscovery
         {
             //Identifying Details
