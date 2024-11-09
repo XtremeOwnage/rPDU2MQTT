@@ -12,8 +12,9 @@ public class MQTTPublishingService : basePublishingService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var rootData = await pdu.GetRootData_Public(cancellationToken);
-        foreach (var device in rootData.Devices.Values)
+        var Devices = await pdu.GetRootData_Public(cancellationToken);
+
+        foreach (var device in Devices.SelectMany(o => o.Devices.Select(d => d.Value)))
         {
             await PublishState(device, cancellationToken);
 

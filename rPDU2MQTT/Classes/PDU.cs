@@ -2,9 +2,11 @@
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
+using rPDU2MQTT.Models.PDU.OneView;
 using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
+using System.Reflection;
 
 namespace rPDU2MQTT.Classes;
 
@@ -12,6 +14,14 @@ public partial class PDU
 {
     private readonly Config config;
     private readonly HttpClient http;
+
+    /// <summary>
+    /// A flag which determines if we should leverage the ONEView API, instead of the direct API.
+    /// </summary>
+    /// <remarks>
+    /// Detection of ONEView is performed on the first polling interval.
+    /// </remarks>
+    private bool? useOneView { get; set; } = null;
 
     public PDU(Config config, [DisallowNull, NotNull] HttpClient http)
     {
@@ -24,16 +34,53 @@ public partial class PDU
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<RootData> GetRootData_Public(CancellationToken cancellationToken)
+    public async Task<List<RootData>> GetRootData_Public(CancellationToken cancellationToken)
     {
-        Log.Debug("Querying /api");
-        var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
-        Log.Debug($"Query response {model.RetCode}");
+        if (useOneView is null)
+        {
+            var resp = await http.GetFromJsonAsync<GetResponse<bool>>("/api/conf/oneview/enabled", options: Models.PDU.Converter.Settings, cancellationToken);
+            this.useOneView = resp.Data;
+            if (useOneView == true)
+                Log.Debug("Detected OneView. Will use /oneview for collecting data.");
+            else
+                Log.Debug("OneView is not enabled. Using /api.");
+        }
 
-        //Process device data.
-        processData(model.Data, cancellationToken);
+        if (useOneView is null)
+            throw new Exception("Failed to determine if Device Aggregation is enabled.");
 
-        return model.Data;
+        if (useOneView == true)
+        {
+            // View ONE-View API
+            Log.Debug("Querying /oneview");
+            var model = await http.GetFromJsonAsync<GetResponse<OneViewRootData>>("/oneview", options: Models.PDU.Converter.Settings, cancellationToken);
+            Log.Debug($"Query response {model.RetCode}");
+            var data = model.Data.Hosts;
+
+            foreach (var (mac, host) in data)
+            {
+                //Process individual hosts.
+                processData(host.Cache, cancellationToken);
+            }
+
+            //System.Diagnostics.Debugger.Break();
+
+            // Return all detected devices.
+            return data.Select(o => o.Value.Cache).ToList();
+        }
+        else
+        {
+            // If Single-Device
+            Log.Debug("Querying /api");
+            var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
+            Log.Debug($"Query response {model.RetCode}");
+
+            // Process single-device data.
+            processData(model.Data, cancellationToken);
+
+            // Return the single model.
+            return [model.Data];
+        }
     }
 
     public async void processData(RootData data, CancellationToken cancellationToken)
