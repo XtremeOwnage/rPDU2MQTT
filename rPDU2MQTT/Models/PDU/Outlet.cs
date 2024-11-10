@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU;
 
-[System.Diagnostics.DebuggerDisplay("Outlet: { EntityName }")]
+[System.Diagnostics.DebuggerDisplay("Outlet: { Entity_Name }")]
 public partial class Outlet : NamedEntityWithMeasurements, IEntityWithState
 {
     [JsonPropertyName("poaAction")]
