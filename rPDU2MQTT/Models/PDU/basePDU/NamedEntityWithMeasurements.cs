@@ -1,4 +1,4 @@
-﻿using rPDU2MQTT.Interfaces;
+﻿using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.PDU.basePDU;
 using System.Text.Json.Serialization;
 
@@ -10,5 +10,6 @@ namespace rPDU2MQTT.Models.PDU.DummyDevices;
 public class NamedEntityWithMeasurements : EntityWithNameAndLabel
 {
     [JsonPropertyName("measurement")]
-    public Dictionary<string, Measurement> Measurements { get; set; }
+    [JsonConverter(typeof(DictionaryToListConverter<Measurement, string>))]
+    public List<Measurement> Measurements { get; set; }
 }

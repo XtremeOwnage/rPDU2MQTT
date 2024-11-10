@@ -6,7 +6,6 @@ using rPDU2MQTT.Models.PDU.OneView;
 using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
-using System.Reflection;
 
 namespace rPDU2MQTT.Classes;
 
@@ -57,7 +56,7 @@ public partial class PDU
             Log.Debug($"Query response {model.RetCode}");
             var data = model.Data.Hosts;
 
-            foreach (var (mac, host) in data)
+            foreach (var host in data)
             {
                 //Process individual hosts.
                 processData(host.Cache, cancellationToken);
@@ -66,7 +65,7 @@ public partial class PDU
             //System.Diagnostics.Debugger.Break();
 
             // Return all detected devices.
-            return data.Select(o => o.Value.Cache).ToList();
+            return data.Select(o => o.Cache).ToList();
         }
         else
         {
@@ -94,13 +93,13 @@ public partial class PDU
         data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.rPDU2MQTT?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
 
         // Propagate down the parent, and identifier.
-        data.Devices.SetParentAndIdentifier(data, (k, v) => k);
+        data.Devices.SetParentAndIdentifier(data, o => o.Key);
 
         // Populate Name, DisplayName, and Enabled for devices.
-        data.Devices.SetEntityNameAndEnabled(config.Overrides!, (k, d) => d.Name, (k, d) => d.Label);
+        data.Devices.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
 
         //Process devices
-        await processRecursive(data.Devices, data, cancellationToken);
+        await processListRecursive(data.Devices, data, cancellationToken);
     }
 
     private async Task processRecursive<TEntity, TParent>([AllowNull] TEntity entity, TParent? parent, CancellationToken cancellationToken)
@@ -112,8 +111,8 @@ public partial class PDU
         else if (entity is Device device)
         {
             // Propagate down the parent, and identifier.
-            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), (k, v) => k);
-            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), (k, v) => k.ToString());
+            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), o => o.Key);
+            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), o => o.Key.ToString());
 
             // Set Overrides
             device.Outlets.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseEntityName, DefaultNames.UseEntityLabel);
@@ -124,16 +123,16 @@ public partial class PDU
             device.Entity.PruneDisabled();
 
             // Recurse to the next tier.
-            await processRecursive(device.Outlets, device, cancellationToken);
-            await processRecursive(device.Entity, device, cancellationToken);
+            await processListRecursive(device.Outlets, device, cancellationToken);
+            await processListRecursive(device.Entity, device, cancellationToken);
         }
         else if (entity is NamedEntityWithMeasurements nem)
         {
             // All measurements will be stored into a sub-key.
-            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
+            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
 
             // Set Overrides
-            Func<string, Measurement, string> MeasurementNamingFunc = (k, m) => m.Type;
+            Func<Measurement, string> MeasurementNamingFunc = o => o.Type;
 
             nem.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
             nem.Measurements.PruneDisabled();
@@ -154,12 +153,11 @@ public partial class PDU
         }
     }
 
-    private async Task processRecursive<TKey, TEntity, TParent>(Dictionary<TKey, TEntity> entities, TParent parent, CancellationToken cancellationToken)
-        where TKey : notnull
+    private async Task processListRecursive<TEntity, TParent>(List<TEntity> entities, TParent parent, CancellationToken cancellationToken)
         where TEntity : notnull, BaseEntity
         where TParent : NamedEntity
     {
-        foreach (var (_, entity) in entities)
+        foreach (var entity in entities)
             await processRecursive(entity, parent, cancellationToken);
     }
 }

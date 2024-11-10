@@ -1,14 +1,21 @@
 ﻿using rPDU2MQTT.Interfaces;
+using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.PDU.basePDU;
 using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU;
 
-public partial class Device : EntityWithNameAndLabel, IEntityWithState
+public partial class Device : EntityWithNameAndLabel, IEntityWithState, IDictionaryKey<string>
 {
     #region State
     string IEntityWithState.State_On => "normal";
     string IEntityWithState.State_Off => "";
+    #endregion
+
+    #region IDictionaryKey
+    /// <inheritdoc cref="IDictionaryKey{TKeyType}.Key"/>>
+    [JsonIgnore]
+    public string Key { get; set; }
     #endregion
 
     [JsonPropertyName("state")]
@@ -34,14 +41,17 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState
     public long LifetimeEnergy { get; set; }
 
     [JsonPropertyName("outlet")]
-    public Dictionary<int, Outlet> Outlets { get; set; }
+    [JsonConverter(typeof(DictionaryToListConverter<Outlet, int>))]
+    public List<Outlet> Outlets { get; set; }
 
     [JsonPropertyName("alarm")]
     public A0Ae260C851900C3Alarm Alarm { get; set; }
 
     [JsonPropertyName("layout")]
+    [JsonConverter(typeof(DictionaryToListConverter<string[], int>))]
     public Dictionary<int, string[]> Layout { get; set; }
 
     [JsonPropertyName("entity")]
-    public Dictionary<string, Entity> Entity { get; set; }
+    [JsonConverter(typeof(DictionaryToListConverter<Entity, string>))]
+    public List<Entity> Entity { get; set; }
 }

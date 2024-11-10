@@ -23,12 +23,11 @@ public static class EntityWithName_Overrides
     /// <param name="DefaultDisplayNameFunc">A function that provides the default display name for an entity based on the key and the entity itself. If null, it defaults to <paramref name="DefaultNameFunc"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="DefaultNameFunc"/> is null.</exception>
     /// <exception cref="Exception">Thrown when unable to determine the entity ID or name, or if any other unexpected error occurs during processing.</exception>
-    public static void SetEntityNameAndEnabled<TKey, TEntity>(
-        [DisallowNull] this Dictionary<TKey, TEntity> entities
+    public static void SetEntityNameAndEnabled<TEntity>(
+        [DisallowNull] this List<TEntity> entities
         , [DisallowNull] Overrides overrides
-        , [DisallowNull] Func<TKey, TEntity, string> DefaultNameFunc
-        , [DisallowNull] Func<TKey, TEntity, string> DefaultDisplayNameFunc)
-        where TKey : notnull
+        , [DisallowNull] Func<TEntity, string> DefaultNameFunc
+        , [DisallowNull] Func<TEntity, string> DefaultDisplayNameFunc)
         where TEntity : notnull, NamedEntity
     {
         if (DefaultNameFunc is null)
@@ -36,17 +35,17 @@ public static class EntityWithName_Overrides
 
         DefaultDisplayNameFunc ??= DefaultNameFunc;
 
-        foreach (var (key, entity) in entities)
+        foreach (var entity in entities)
         {
             var d = entity.TryGetDevice();
 
-            EntityOverride? entityOverride = (key, entity) switch
+            EntityOverride? entityOverride = entity switch
             {
                 // We are adding + 1 to the outlet's key- because the PDU gives data 0-based. However, when the entities are viewed through
                 // its UI, they are 1-based. This corrects that.
-                (int k, Outlet o) => (k, o).TryGetOverride(overrides),
-                (string k, Device o) => (k, o).TryGetOverride(overrides),
-                (string k, Measurement o) => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
+                Outlet o => o.TryGetOverride(overrides),
+                Device o => o.TryGetOverride(overrides),
+                Measurement o => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 _ => null
             };
 
@@ -54,20 +53,20 @@ public static class EntityWithName_Overrides
             if (entityOverride is not null && entity is Measurement m)
             {
                 // Measurements inherits part of the parents name. aka, "outlet_1_power"
-                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(key, entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
-                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(key, entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
+                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
+                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
                 entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
             }
             else if (entityOverride is not null)
             {
-                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(key, entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
-                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(key, entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
+                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
+                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
                 entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
             }
             else // No overrides defined. Set defaults.
             {
-                entity.Entity_Name = DefaultNameFunc!.Invoke(key, entity).FormatName();
-                entity.Entity_DisplayName = DefaultDisplayNameFunc!.Invoke(key, entity);
+                entity.Entity_Name = DefaultNameFunc!.Invoke(entity).FormatName();
+                entity.Entity_DisplayName = DefaultDisplayNameFunc!.Invoke(entity);
                 entity.Entity_Enabled = true;
             }
         }
@@ -76,18 +75,11 @@ public static class EntityWithName_Overrides
     /// <summary>
     /// Prune disabled items from dictionary.
     /// </summary>
-    /// <typeparam name="TKey"></typeparam>
     /// <typeparam name="TEntity"></typeparam>
     /// <param name="entities"></param>
-    public static void PruneDisabled<TKey, TEntity>([DisallowNull] this Dictionary<TKey, TEntity> entities)
-     where TKey : notnull
-     where TEntity : notnull, NamedEntity
-    {
-        var disabled = entities.Where(o => o.Value.Entity_Enabled == false).ToArray();
+    public static void PruneDisabled<TEntity>([DisallowNull] this List<TEntity> entities)
+     where TEntity : notnull, NamedEntity => entities.RemoveAll(o => o.Entity_Enabled == false);
 
-        foreach (var entity in disabled)
-            entities.Remove(entity.Key);
-    }
 
     /// <summary>
     /// Set a prefix for all contained entities. (This- is used to prefix measurements, with the parent's ID.)
@@ -96,13 +88,9 @@ public static class EntityWithName_Overrides
     /// <typeparam name="TEntity"></typeparam>
     /// <param name="entities"></param>
     /// <param name="Prefix"></param>
-    public static void SetEntityNamePrefix<TKey, TEntity>([DisallowNull] this Dictionary<TKey, TEntity> entities, string Prefix)
-    where TKey : notnull
-    where TEntity : notnull, NamedEntity
-    {
-        foreach (var (_, entity) in entities)
-            entity.Entity_Name = $"{Prefix}_{entity.Entity_Name}";
-    }
+    public static void SetEntityNamePrefix<TEntity>([DisallowNull] this List<TEntity> entities, string Prefix)
+    where TEntity : notnull, NamedEntity => entities.ForEach(o => o.Entity_Name = $"{Prefix}_{o.Entity_Name}");
+
 
 
     /// <summary>
@@ -114,11 +102,12 @@ public static class EntityWithName_Overrides
     /// <typeparam name="TEntity"></typeparam>
     /// <param name="Items"></param>
     /// <param name="Parent"></param>
-    public static void SetParentAndIdentifier<TKey, TEntity>(this Dictionary<TKey, TEntity> Items, IMQTTKey Parent, [DisallowNull] Func<TKey, TEntity, string>? IdentifierFunc) where TEntity : BaseEntity
+    public static void SetParentAndIdentifier<TEntity>(this List<TEntity> Items, IMQTTKey Parent, [DisallowNull] Func<TEntity, string>? IdentifierFunc)
+        where TEntity : BaseEntity
     {
-        foreach (var (key, item) in Items)
+        foreach (var item in Items)
         {
-            string childKey = IdentifierFunc.Invoke(key, item);
+            string childKey = IdentifierFunc.Invoke(item);
             item.Record_Parent = Parent;
             item.Record_Key = childKey;
             item.Entity_Identifier = Parent.CreateChildIdentifier(childKey);
@@ -149,15 +138,14 @@ public static class EntityWithName_Overrides
     /// <param name="pair"></param>
     /// <param name="overrides"></param>
     /// <returns></returns>
-    public static EntityOverride? TryGetOverride(this (int Key, Outlet Outlet) pair, Overrides overrides)
+    public static EntityOverride? TryGetOverride(this Outlet Outlet, Overrides overrides)
     {
-        var device = pair.Outlet.TryGetDevice();
+        var device = Outlet.TryGetDevice();
         if (device is not null)
         {
-            var deviceOverrides = (device.Record_Key, device).TryGetOverride(overrides);
-            if (deviceOverrides is not null && deviceOverrides.Outlets.TryGetValue(pair.Key + 1, out var outletOverride))
+            var deviceOverrides = device.TryGetOverride(overrides);
+            if (deviceOverrides is not null && deviceOverrides.Outlets.TryGetValue(Outlet.Key + 1, out var outletOverride))
                 return outletOverride;
-
         }
 
         return null;
@@ -169,9 +157,9 @@ public static class EntityWithName_Overrides
     /// <param name="device"></param>
     /// <param name="overrides"></param>
     /// <returns></returns>
-    public static DeviceOverride? TryGetOverride(this (string Key, Device Device) device, Overrides overrides)
+    public static DeviceOverride? TryGetOverride(this Device Device, Overrides overrides)
     {
-        if (overrides.Devices.TryGetValue(device.Key, out var outletOverride))
+        if (overrides.Devices.TryGetValue(Device.Key, out var outletOverride))
             return outletOverride;
 
         return null;

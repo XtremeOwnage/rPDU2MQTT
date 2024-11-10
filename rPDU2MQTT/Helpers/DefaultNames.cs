@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Helpers;
 /// </summary>
 public static class DefaultNames
 {
-    public static string UseEntityName<TKey, TEntity>(TKey key, TEntity entity) where TEntity : EntityWithNameAndLabel => entity.Name;
-    public static string UseEntityLabel<TKey, TEntity>(TKey key, TEntity entity) where TEntity : EntityWithNameAndLabel => entity.Label ?? entity.Name;
-    public static string UseMeasurementType<TKey, TEntity>(TKey key, TEntity entity) where TEntity : Measurement => entity.Type;
+    public static string UseEntityName<TEntity>(TEntity entity) where TEntity : EntityWithNameAndLabel => entity.Name;
+    public static string UseEntityLabel<TEntity>(TEntity entity) where TEntity : EntityWithNameAndLabel => entity.Label ?? entity.Name;
+    public static string UseMeasurementType<TEntity>(TEntity entity) where TEntity : Measurement => entity.Type;
 }

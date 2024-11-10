@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using rPDU2MQTT.Models.Converters;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -15,9 +15,9 @@ public partial class OneViewRootData
     [JsonPropertyName("info")]
     public OneViewInfo Info { get; set; }
 
-    //ToDo... Fix Later...
-    //[JsonPropertyName("group")]
-    //public Group Group { get; set; }
+    [JsonPropertyName("group")]
+    [JsonConverter(typeof(DictionaryToListConverter<OneViewGroup, string>))]
+    public List<OneViewGroup> Groups { get; set; }
 
     /// <summary>
     /// CLI info? ToDo - Document exact purpose.
@@ -29,5 +29,6 @@ public partial class OneViewRootData
     /// Dictionary of hosts, Key is MAC Address
     /// </summary>
     [JsonPropertyName("host")]
-    public Dictionary<string, OneViewHost> Hosts { get; set; } = new();
+    [JsonConverter(typeof(DictionaryToListConverter<OneViewHost, string>))]
+    public List<OneViewHost> Hosts { get; set; } = new();
 }

@@ -1,4 +1,5 @@
 ﻿using rPDU2MQTT.Interfaces;
+using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using System.Text.Json.Serialization;
 
@@ -19,7 +20,8 @@ public partial class RootData : NamedEntity
     public DataConf Conf { get; set; }
 
     [JsonPropertyName("dev")]
-    public Dictionary<string, Device> Devices { get; set; }
+    [JsonConverter(typeof(DictionaryToListConverter<Device, string>))]
+    public List<Device> Devices { get; set; }
 
     [JsonPropertyName("auth")]
     public DataAuth Auth { get; set; }

@@ -14,17 +14,17 @@ public class MQTTPublishingService : basePublishingService
     {
         var Devices = await pdu.GetRootData_Public(cancellationToken);
 
-        foreach (var device in Devices.SelectMany(o => o.Devices.Select(d => d.Value)))
+        foreach (var device in Devices.SelectMany(o => o.Devices))
         {
             await PublishState(device, cancellationToken);
 
-            foreach (var entity in device.Entity.Values)
+            foreach (var entity in device.Entity)
             {
                 await PublishName(entity, cancellationToken);
                 await PublishUniqueIdentifier(entity, cancellationToken);
                 await PublishMeasurements(entity.Measurements, cancellationToken);
             }
-            foreach (var outlet in device.Outlets.Values)
+            foreach (var outlet in device.Outlets)
             {
                 await PublishName(outlet, cancellationToken);
                 await PublishUniqueIdentifier(outlet, cancellationToken);

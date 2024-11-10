@@ -1,9 +1,16 @@
-﻿using System.Text.Json.Serialization;
+﻿using rPDU2MQTT.Interfaces;
+using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU.OneView;
 
-public class OneViewHost
+public class OneViewHost : IDictionaryKey<string>
 {
+    #region IDictionaryKey
+    /// <inheritdoc cref="IDictionaryKey{TKeyType}.Key"/>>
+    [JsonIgnore]
+    public string Key { get; set; }
+    #endregion
+
     [JsonPropertyName("snmpInstance")]
     public long SnmpInstance { get; set; }
 

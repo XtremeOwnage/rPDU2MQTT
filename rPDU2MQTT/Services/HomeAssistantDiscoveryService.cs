@@ -61,7 +61,6 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             var rootEntity = device.Entity
                 .Where(o => o.Key == rootEntityName)
-                .Select(o => o.Value)
                 .FirstOrDefault();
 
             await recursiveDiscovery(rootEntity!, newParent, cancellationToken);
@@ -90,6 +89,12 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
     }
 
+    protected async Task recursiveDiscovery<TEntity>(List<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) 
+        where TEntity : BaseEntity
+    {
+        foreach (var entity in entities)
+            await recursiveDiscovery(entity, parent, cancellationToken);
+    }
     protected async Task recursiveDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
     {
         foreach (var (_, entity) in entities)

@@ -19,9 +19,9 @@ public abstract class basePublishingService : baseMQTTTService
     /// <param name="Measurements"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    protected async Task PublishMeasurements(Dictionary<string, Measurement> Measurements, CancellationToken cancellationToken)
+    protected async Task PublishMeasurements(List<Measurement> Measurements, CancellationToken cancellationToken)
     {
-        foreach (var measurement in Measurements.Values)
+        foreach (var measurement in Measurements)
         {
             var topic = measurement.GetTopicPath();
             await PublishString(topic, measurement.Value, cancellationToken);
