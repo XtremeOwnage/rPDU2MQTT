@@ -145,7 +145,7 @@ public partial class PDU
             else
                 // We want to prefix the measurements, with the outlet name.
                 // ie, mydevice_power
-                nem.Measurements.SetEntityNamePrefix(nem.Entity_Name);
+                nem.Measurements.SetEntityNamePrefix(string.Join('_', parent.Entity_Name, nem.Entity_Name).FormatName());
         }
         else
         {
