@@ -6,8 +6,8 @@ namespace rPDU2MQTT.Models.Config;
 [YamlSerializable]
 public class Overrides
 {
-    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding values for the PDU itself.")]
-    public EntityOverride PDU { get; set; } = new();
+    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding values for the rPDU2MQTT.")]
+    public EntityOverride rPDU2MQTT { get; set; } = new();
 
 
     [YamlMember(Alias = "Devices", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding configuration for individual devices.")]

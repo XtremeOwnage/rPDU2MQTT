@@ -90,7 +90,7 @@ internal class YamlConfigLoader
         config ??= new Config();
 
         config.Overrides ??= new Models.Config.Overrides();
-        config.Overrides.PDU ??= new Models.Config.Schemas.EntityOverride();
+        config.Overrides.rPDU2MQTT ??= new Models.Config.Schemas.EntityOverride();
         config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
         config.Overrides.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
         config.Overrides.Measurements ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();

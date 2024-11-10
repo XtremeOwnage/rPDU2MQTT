@@ -71,7 +71,7 @@ Pdu:
 # PDU > Devices > [Entities, Outlets] > Measurements
 Overrides:
     # Override details about the PDU itself.
-    PDU:
+    rPDU2MQTT:
         ID: null,
         Name: "Your-PDU"
         # Not- sure why you would want to set this to false... But, the option exists..

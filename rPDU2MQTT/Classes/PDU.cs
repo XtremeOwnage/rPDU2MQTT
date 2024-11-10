@@ -90,8 +90,8 @@ public partial class PDU
         data.Record_Key = config.MQTT.ParentTopic;
         data.URL = http.BaseAddress!.ToString();
 
-        data.Entity_Identifier = Coalesce(config.Overrides?.PDU?.ID, "rPDU2MQTT")!;
-        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
+        data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.rPDU2MQTT?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
 
         // Propagate down the parent, and identifier.
         data.Devices.SetParentAndIdentifier(data, (k, v) => k);
