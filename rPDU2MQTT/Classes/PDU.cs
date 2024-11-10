@@ -73,7 +73,8 @@ public partial class PDU
         }
     }
 
-    public async void processData(RootData data, CancellationToken cancellationToken)
+
+    private async void processData(RootData data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
