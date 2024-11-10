@@ -1,6 +1,7 @@
 ﻿using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace rPDU2MQTT.Classes;
 
@@ -20,9 +21,17 @@ public class PduApiHandler
 
     public async Task<T> GetAsync<T>(string Path, CancellationToken cancellationToken)
     {
-        Log.Debug($"[PduApiHandler] Querying {Path}");
-        var result = await http.GetFromJsonAsync<GetResponse<T>>("/api/conf/oneview/enabled", options: Models.PDU.Converter.Settings, cancellationToken);
-        Log.Debug($"[PduApiHandler] Response Code: {result.RetCode}");
-        return result.Data;
+        try
+        {
+            Log.Debug($"[PduApiHandler] Querying {Path}");
+            var result = await http.GetFromJsonAsync<GetResponse<T>>(Path, options: Models.PDU.Converter.Settings, cancellationToken);
+            Log.Debug($"[PduApiHandler] Response Code: {result.RetCode}");
+            return result.Data;
+        }
+        catch (JsonException jex)
+        {
+            Log.Error($"[PduApiHandler] Json Error Occured: {jex.ToString()}");
+            throw;
+        }
     }
 }
