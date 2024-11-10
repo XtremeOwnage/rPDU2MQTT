@@ -71,9 +71,17 @@ internal class YamlConfigLoader
         using var stream = File.OpenRead(Find());
         using var sr = new StreamReader(stream);
 
+        try
+        {
         var cfg = s.Deserialize<Config>(sr);
 
         return InitializeConfig(cfg);
+    }
+        catch(YamlException ex)
+        {
+            Log.Fatal($"Error while parsing YAML Config. Error on Line {ex.Start.Line}");
+            throw;
+        }
     }
 
     /// <summary>
