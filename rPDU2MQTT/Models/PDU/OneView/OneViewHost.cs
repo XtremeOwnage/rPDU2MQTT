@@ -26,9 +26,12 @@ public class OneViewHost
     [JsonPropertyName("snmpPort")]
     public long SnmpPort { get; set; }
 
+    /// <summary>
+    /// This appears to be a reference to the group this PDU is assigned to.
+    /// </summary>
     [JsonPropertyName("group")]
-    [JsonConverter(typeof(ParseStringConverter))]
-    public long Group { get; set; }
+    //[JsonConverter(typeof(ParseStringConverter))]   
+    public string? Group { get; set; }
 
     [JsonPropertyName("order")]
     public long Order { get; set; }
