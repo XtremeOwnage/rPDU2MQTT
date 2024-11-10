@@ -142,8 +142,8 @@ Overrides:
             Enabled: false
         balance:
             Enabled: false
-            # These sensors are just an approximation of co2 produced from the amount of fossil-fuels which would need to be burned
-            # to produces equivalent amount of energy.
+        # These sensors are just an approximation of co2 produced from the amount of fossil-fuels which would need to be burned
+        # to produces equivalent amount of energy.
         accumulatedCo2:
             Enabled: false
         instantaneousCo2:
