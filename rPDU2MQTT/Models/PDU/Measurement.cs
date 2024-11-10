@@ -1,5 +1,5 @@
 ﻿using rPDU2MQTT.Interfaces;
-using rPDU2MQTT.Models.PDU.DummyDevices;
+using rPDU2MQTT.Models.PDU.basePDU;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 
@@ -19,19 +19,4 @@ public partial class Measurement : baseMeasurement, IDictionaryKey<string>
 
     [JsonPropertyName("value")]
     public string Value { get; set; }
-
-    [JsonPropertyName("displayEnabled")]
-    public bool DisplayEnabled { get; set; }
-
-    [JsonPropertyName("datalogEnabled")]
-    public bool DatalogEnabled { get; set; }
-
-    [JsonPropertyName("state")]
-    public string State { get; set; }
-
-    [JsonPropertyName("units")]
-    public string Units { get; set; }
-
-    [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
 }

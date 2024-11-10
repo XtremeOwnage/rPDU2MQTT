@@ -5,7 +5,7 @@ using rPDU2MQTT.Models.PDU.DummyDevices;
 namespace rPDU2MQTT.Models.PDU;
 
 public partial class Entity : NamedEntityWithMeasurements, IDictionaryKey<string>
-{ 
+{
     #region IDictionaryKey
     /// <inheritdoc cref="IDictionaryKey{TKeyType}.Key"/>>
     [JsonIgnore]
