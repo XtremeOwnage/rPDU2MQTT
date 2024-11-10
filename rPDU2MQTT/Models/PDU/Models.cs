@@ -891,15 +891,6 @@ public partial class Usb
 }
 
 
-public partial class A0Ae260C851900C3Alarm
-{
-    [JsonPropertyName("severity")]
-    public string Severity { get; set; }
-
-    [JsonPropertyName("state")]
-    public string State { get; set; }
-}
-
 public partial class A0Ae260C851900C3Conf
 {
     [JsonPropertyName("outletControlEnabled")]
@@ -1035,7 +1026,7 @@ public partial class State
     public long SystemTime { get; set; }
 
     [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
+    public Alarm Alarm { get; set; }
 }
 
 internal static class Converter

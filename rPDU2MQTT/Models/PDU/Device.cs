@@ -45,7 +45,7 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState, IDiction
     public List<Outlet> Outlets { get; set; }
 
     [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
+    public Alarm Alarm { get; set; }
 
     [JsonPropertyName("layout")]
     [JsonConverter(typeof(DictionaryToListConverter<string[], int>))]

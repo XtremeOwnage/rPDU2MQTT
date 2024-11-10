@@ -32,7 +32,7 @@ public partial class Outlet : NamedEntityWithMeasurements, IEntityWithState, IDi
     public string Mode { get; set; }
 
     [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
+    public Alarm Alarm { get; set; }
 
     [JsonPropertyName("timeToAction")]
     public long TimeToAction { get; set; }

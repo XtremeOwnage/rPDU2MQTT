@@ -13,7 +13,7 @@ public partial class Entity : NamedEntityWithMeasurements, IDictionaryKey<string
     #endregion
 
     [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
+    public Alarm Alarm { get; set; }
 
     [JsonPropertyName("conf")]
     public Action Conf { get; set; }
