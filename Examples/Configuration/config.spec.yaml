@@ -85,31 +85,39 @@ Overrides:
             Name:
             Enabled: true
 
+            # Customize individual outlets for this device (PDU)
+            # These are number-based, start at 1. 
+            # "Outlet 1" in the PDU corresponds to 1, for example. 
+            # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
+            Outlets:        
+                1:
+                    # Set both ID (entity name), and Display Name
+                    ID: kube02
+                    Name: "Proxmox: Kube02"
+                    Enabled: true
+                2:
+                    # Only set ID.
+                    ID: dell_md1220
+           
+                3:
+                    # Disable Outlet #3
+                    Enabled: false
+
         YOUR-SERIAL-NUMBER:
             ID:
             Name:
             Enabled: true
 
-    # Customize individual outlets.
-    # These are number-based, start at 1. 
-    # "Outlet 1" in the PDU corresponds to 1, for example. 
-    # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
-    Outlets:
-        1:
-            ID: kube02
-            Name: "Proxmox: Kube02"
-            Enabled: true
-        2:
-            ID: dell_md1220
-            Name: "Dell: MD1220"
-            Enabled: true
+            ## Outlet overrides for 'YOUR-SERIAL-NUMBER'
+            Outlets:
+                1:
+                    # Override outlet 1, for PDU with serial number 'YOUR-SERIAL-NUMBER'
+                    ID: your_entity_name
+                    Name: "Your Entity Name"
+                    Enabled: true
+                2:
+                    Enabled: true
 
-        # Empty record.
-        3:
-            ID:
-            Name:
-            Enabled:
-    
     # Customize how metrics are sent to services.
     # The entity ID used for metrics, is [DEVICE_ID]_[METRIC_TYPE]
     # The "ID" field here, will be used instead of "METRIC_TYPE"

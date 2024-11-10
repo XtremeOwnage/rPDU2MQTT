@@ -1,5 +1,6 @@
 ﻿using rPDU2MQTT.Classes;
 using System.Runtime.InteropServices;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 namespace rPDU2MQTT.Startup;
 /// <summary>
@@ -73,10 +74,10 @@ internal class YamlConfigLoader
 
         try
         {
-        var cfg = s.Deserialize<Config>(sr);
+            var cfg = s.Deserialize<Config>(sr);
 
-        return InitializeConfig(cfg);
-    }
+            return InitializeConfig(cfg);
+        }
         catch(YamlException ex)
         {
             Log.Fatal($"Error while parsing YAML Config. Error on Line {ex.Start.Line}");
@@ -99,9 +100,10 @@ internal class YamlConfigLoader
 
         config.Overrides ??= new Models.Config.Overrides();
         config.Overrides.rPDU2MQTT ??= new Models.Config.Schemas.EntityOverride();
-        config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
-        config.Overrides.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
+        config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.DeviceOverride?>();
         config.Overrides.Measurements ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
+        foreach (var (_, dvc) in config.Overrides.Devices)
+            dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
 
         return config;

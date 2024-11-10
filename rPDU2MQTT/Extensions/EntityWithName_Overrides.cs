@@ -23,7 +23,11 @@ public static class EntityWithName_Overrides
     /// <param name="DefaultDisplayNameFunc">A function that provides the default display name for an entity based on the key and the entity itself. If null, it defaults to <paramref name="DefaultNameFunc"/>.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="DefaultNameFunc"/> is null.</exception>
     /// <exception cref="Exception">Thrown when unable to determine the entity ID or name, or if any other unexpected error occurs during processing.</exception>
-    public static void SetEntityNameAndEnabled<TKey, TEntity>([DisallowNull] this Dictionary<TKey, TEntity> entities, [DisallowNull] Overrides overrides, [DisallowNull] Func<TKey, TEntity, string> DefaultNameFunc, [DisallowNull] Func<TKey, TEntity, string> DefaultDisplayNameFunc)
+    public static void SetEntityNameAndEnabled<TKey, TEntity>(
+        [DisallowNull] this Dictionary<TKey, TEntity> entities
+        , [DisallowNull] Overrides overrides
+        , [DisallowNull] Func<TKey, TEntity, string> DefaultNameFunc
+        , [DisallowNull] Func<TKey, TEntity, string> DefaultDisplayNameFunc)
         where TKey : notnull
         where TEntity : notnull, NamedEntity
     {
@@ -34,12 +38,14 @@ public static class EntityWithName_Overrides
 
         foreach (var (key, entity) in entities)
         {
+            var d = entity.TryGetDevice();
+
             EntityOverride? entityOverride = (key, entity) switch
             {
                 // We are adding + 1 to the outlet's key- because the PDU gives data 0-based. However, when the entities are viewed through
                 // its UI, they are 1-based. This corrects that.
-                (int k, Outlet o) => overrides.Outlets.TryGetValue(k + 1, out var outletOverride) ? outletOverride : null,
-                (string k, Device o) => overrides.Devices.TryGetValue(k, out var outletOverride) ? outletOverride : null,
+                (int k, Outlet o) => (k, o).TryGetOverride(overrides),
+                (string k, Device o) => (k, o).TryGetOverride(overrides),
                 (string k, Measurement o) => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 _ => null
             };
@@ -117,6 +123,58 @@ public static class EntityWithName_Overrides
             item.Record_Key = childKey;
             item.Entity_Identifier = Parent.CreateChildIdentifier(childKey);
         }
+    }
+
+    /// <summary>
+    /// Try and resolve an Entities' parent device.
+    /// </summary>
+    /// <typeparam name="TEntity"></typeparam>
+    /// <param name="Entity"></param>
+    /// <returns></returns>
+    public static Device? TryGetDevice<TEntity>(this TEntity Entity) where TEntity : IMQTTKey
+    {
+        if (Entity is Device device)
+            return device;
+
+        if (Entity.Record_Parent is not null)
+            return TryGetDevice(Entity.Record_Parent);
+
+        // No device?
+        return null;
+    }
+
+    /// <summary>
+    /// Try and resolve overrides for an outlet.
+    /// </summary>
+    /// <param name="pair"></param>
+    /// <param name="overrides"></param>
+    /// <returns></returns>
+    public static EntityOverride? TryGetOverride(this (int Key, Outlet Outlet) pair, Overrides overrides)
+    {
+        var device = pair.Outlet.TryGetDevice();
+        if (device is not null)
+        {
+            var deviceOverrides = (device.Record_Key, device).TryGetOverride(overrides);
+            if (deviceOverrides is not null && deviceOverrides.Outlets.TryGetValue(pair.Key + 1, out var outletOverride))
+                return outletOverride;
+
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Try and resolve overrides for a device.
+    /// </summary>
+    /// <param name="device"></param>
+    /// <param name="overrides"></param>
+    /// <returns></returns>
+    public static DeviceOverride? TryGetOverride(this (string Key, Device Device) device, Overrides overrides)
+    {
+        if (overrides.Devices.TryGetValue(device.Key, out var outletOverride))
+            return outletOverride;
+
+        return null;
     }
 
 }
