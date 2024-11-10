@@ -61,7 +61,7 @@ public static class ServiceConfiguration
         services.AddSingleton<PDU>();
 
         // Create HttpClient for PDU.
-        var pduHttpClient = services.AddHttpClient<PDU>(client =>
+        var pduHttpClient = services.AddHttpClient<PduApiHandler>(client =>
         {
             ThrowError.TestRequiredConfigurationSection(cfg.PDU, "PDU");
             ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection, "PDU.Connection");

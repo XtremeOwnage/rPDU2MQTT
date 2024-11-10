@@ -3,16 +3,14 @@ using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDU.OneView;
-using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Http.Json;
 
 namespace rPDU2MQTT.Classes;
 
 public partial class PDU
 {
     private readonly Config config;
-    private readonly HttpClient http;
+    private readonly PduApiHandler api;
 
     /// <summary>
     /// A flag which determines if we should leverage the ONEView API, instead of the direct API.
@@ -22,10 +20,10 @@ public partial class PDU
     /// </remarks>
     private bool? useOneView { get; set; } = null;
 
-    public PDU(Config config, [DisallowNull, NotNull] HttpClient http)
+    public PDU(Config config, PduApiHandler api)
     {
         this.config = config;
-        this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
+        this.api = api;
     }
 
     /// <summary>
@@ -37,8 +35,7 @@ public partial class PDU
     {
         if (useOneView is null)
         {
-            var resp = await http.GetFromJsonAsync<GetResponse<bool>>("/api/conf/oneview/enabled", options: Models.PDU.Converter.Settings, cancellationToken);
-            this.useOneView = resp.Data;
+            this.useOneView = await api.GetAsync<bool>("/api/conf/oneview/enabled", cancellationToken);
             if (useOneView == true)
                 Log.Debug("Detected OneView. Will use /oneview for collecting data.");
             else
@@ -51,12 +48,9 @@ public partial class PDU
         if (useOneView == true)
         {
             // View ONE-View API
-            Log.Debug("Querying /oneview");
-            var model = await http.GetFromJsonAsync<GetResponse<OneViewRootData>>("/oneview", options: Models.PDU.Converter.Settings, cancellationToken);
-            Log.Debug($"Query response {model.RetCode}");
-            var data = model.Data.Hosts;
+            var data = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
 
-            foreach (var host in data)
+            foreach (var host in data.Hosts)
             {
                 //Process individual hosts.
                 processData(host.Cache, cancellationToken);
@@ -65,20 +59,17 @@ public partial class PDU
             //System.Diagnostics.Debugger.Break();
 
             // Return all detected devices.
-            return data.Select(o => o.Cache).ToList();
+            return data.Hosts.Select(o => o.Cache).ToList();
         }
         else
         {
-            // If Single-Device
-            Log.Debug("Querying /api");
-            var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
-            Log.Debug($"Query response {model.RetCode}");
+            var model = await api.GetAsync<RootData>("/api", cancellationToken);
 
             // Process single-device data.
-            processData(model.Data, cancellationToken);
+            processData(model, cancellationToken);
 
             // Return the single model.
-            return [model.Data];
+            return [model];
         }
     }
 
@@ -87,7 +78,7 @@ public partial class PDU
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
-        data.URL = http.BaseAddress!.ToString();
+        data.URL = api.BaseAddress;
 
         data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
         data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.rPDU2MQTT?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
