@@ -18,8 +18,10 @@ public sealed class DictionaryToListConverter<TObject, TKey> : JsonConverter<Lis
 {
     public override List<TObject>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
+        //Console.WriteLine(reader.ToJsonString());
+
         Type expectedType = typeof(Dictionary<TKey, TObject>);
-        Console.WriteLine(reader.ToJsonString());
+
         var newDictionary = JsonSerializer.Deserialize(ref reader, expectedType, options) as Dictionary<TKey, TObject>;
 
         if (newDictionary is null)
