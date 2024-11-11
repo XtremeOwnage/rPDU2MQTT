@@ -19,14 +19,14 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     protected override async Task Execute(CancellationToken cancellationToken)
     {
         Log.Debug("Starting discovery job.");
-        var Devices = await pdu.GetRootData_Public(cancellationToken);
+        var data = await pdu.GetRootData_Public(cancellationToken);
 
-        foreach (var data in Devices)
+        foreach (rPDU pdu in data.PDUs)
         {
-            var pduDevice = data.GetDiscoveryDevice();
+            var pduDevice = pdu.GetDiscoveryDevice();
 
             // Recursively discover everything.
-            await recursiveDiscovery(data.Devices, pduDevice, cancellationToken);
+            await recursiveDiscovery(pdu.Devices, pduDevice, cancellationToken);
 
         }
         Log.Information("Discovery information published.");
@@ -89,7 +89,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
     }
 
-    protected async Task recursiveDiscovery<TEntity>(List<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) 
+    protected async Task recursiveDiscovery<TEntity>(List<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken)
         where TEntity : BaseEntity
     {
         foreach (var entity in entities)

@@ -12,9 +12,10 @@ public class MQTTPublishingService : basePublishingService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var Devices = await pdu.GetRootData_Public(cancellationToken);
+        var data = await pdu.GetRootData_Public(cancellationToken);
 
-        foreach (var device in Devices.SelectMany(o => o.Devices))
+        // Run through each device.
+        foreach (var device in data.Devices)
         {
             await PublishState(device, cancellationToken);
 
@@ -32,5 +33,7 @@ public class MQTTPublishingService : basePublishingService
                 await PublishMeasurements(outlet.Measurements, cancellationToken);
             }
         }
+
+        //foreach(var root in dev)
     }
 }

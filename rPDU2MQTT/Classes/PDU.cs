@@ -31,7 +31,7 @@ public partial class PDU
     /// </summary>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<List<RootData>> GetRootData_Public(CancellationToken cancellationToken)
+    public async Task<PduData> GetRootData_Public(CancellationToken cancellationToken)
     {
         if (useOneView is null)
         {
@@ -56,20 +56,27 @@ public partial class PDU
                 processData(host.Cache, cancellationToken);
             }
 
-            //System.Diagnostics.Debugger.Break();
-
-            // Return all detected devices.
-            return data.Hosts.Select(o => o.Cache).ToList();
+            // Return the single model.
+            return new PduData
+            {
+                PDUs = data.Hosts.Select(o => o.Cache).ToArray(),
+                Devices = data.Hosts.SelectMany(o => o.Cache.Devices).ToList(),
+                Groups = data.Groups
+            };
         }
         else
         {
-            var model = await api.GetAsync<RootData>("/api", cancellationToken);
+            var model = await api.GetAsync<rPDU>("/api", cancellationToken);
 
             // Process single-device data.
             processData(model, cancellationToken);
 
             // Return the single model.
-            return [model];
+            return new PduData
+            {
+                PDUs = [model],
+                Devices = model.Devices
+            };
         }
     }
 

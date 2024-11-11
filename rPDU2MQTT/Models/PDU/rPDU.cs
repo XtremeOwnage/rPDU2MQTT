@@ -5,7 +5,10 @@ using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU;
 
-public partial class RootData : NamedEntity
+/// <summary>
+/// This class represents a physical Vertiv rPDU.
+/// </summary>
+public partial class rPDU : NamedEntity
 {
     /// <summary>
     /// This is the URL used.
