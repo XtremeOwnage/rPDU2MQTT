@@ -21,4 +21,19 @@ public enum MqttPath
 
     [JsonPropertyName("identifier")]
     UniqueIdentifier,
+
+    [JsonPropertyName("Groups")]
+    Groups,
+
+    [JsonPropertyName("avg")]
+    Average,
+
+    [JsonPropertyName("sum")]
+    Sum,
+
+    [JsonPropertyName("min")]
+    Minimum,
+
+    [JsonPropertyName("max")]
+    Maximum,
 }
