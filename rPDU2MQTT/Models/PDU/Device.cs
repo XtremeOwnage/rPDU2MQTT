@@ -48,7 +48,7 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState, IDiction
     public Alarm Alarm { get; set; }
 
     [JsonPropertyName("layout")]
-    [JsonConverter(typeof(DictionaryToListConverter<string[], int>))]
+    //[JsonConverter(typeof(DictionaryToListConverter<string[], int>))]
     public Dictionary<int, string[]> Layout { get; set; }
 
     [JsonPropertyName("entity")]
