@@ -1,4 +1,5 @@
 ﻿using rPDU2MQTT.Models.Converters;
+using rPDU2MQTT.Models.PDU.DummyDevices;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -7,7 +8,7 @@ namespace rPDU2MQTT.Models.PDU.OneView;
 /// <summary>
 /// Base data response-type from ONE-View.
 /// </summary>
-public partial class OneViewRootData
+public partial class OneViewRootData : NamedEntity
 {
     [JsonPropertyName("conf")]
     public OneViewConf Conf { get; set; }

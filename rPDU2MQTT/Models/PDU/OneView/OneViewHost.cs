@@ -28,7 +28,7 @@ public class OneViewHost : IDictionaryKey<string>
     public string State { get; set; }
 
     [JsonPropertyName("cache")]
-    public RootData Cache { get; set; }
+    public rPDU Cache { get; set; }
 
     [JsonPropertyName("snmpPort")]
     public long SnmpPort { get; set; }
