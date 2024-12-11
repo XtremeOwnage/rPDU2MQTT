@@ -50,11 +50,8 @@ public partial class PDU
             // View ONE-View API
             var data = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
 
-            foreach (var host in data.Hosts)
-            {
-                //Process individual hosts.
-                processData(host.Cache, cancellationToken);
-            }
+            // Process data.
+            processOneViewData(data, cancellationToken);
 
             // Return the single model.
             return new PduData
@@ -80,8 +77,30 @@ public partial class PDU
         }
     }
 
+    private async void processOneViewData(OneViewRootData data, CancellationToken cancellationToken)
+    {
+        //Set basic details.
+        data.Record_Parent = null;
+        data.Record_Key = config.MQTT.ParentTopic;
+        //data.URL = api.BaseAddress;
 
-    private async void processData(RootData data, CancellationToken cancellationToken)
+        data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = "OneView"; // Coalesce(config.Overrides?.rPDU2MQTT?.Name, "rPDU2MQTT")!;
+
+        // Propagate down the parent, and identifier.
+        data.Groups.SetParentAndIdentifier(BaseEntity.FromDevice(data, MqttPath.Groups), o => o.Key);
+
+        // Populate Name, DisplayName, and Enabled for devices.
+        data.Groups.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
+
+        // Process Groups.
+        await processListRecursive(data.Groups, data, cancellationToken);
+
+        //Process individual hosts, as if they were stand-alone hosts.
+        data.Hosts.ForEach(o => processData(o.Cache, cancellationToken));
+
+    }
+    private async void processData(rPDU data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
@@ -144,6 +163,27 @@ public partial class PDU
                 // We want to prefix the measurements, with the outlet name.
                 // ie, mydevice_power
                 nem.Measurements.SetEntityNamePrefix(string.Join('_', parent.Entity_Name, nem.Entity_Name).FormatName());
+        }
+        else if (entity is OneViewGroup grp)
+        {
+            // Propagate down the parent, and identifier.
+            //grp.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), o => o.Key);
+            //grp.Entity.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), o => o.Key.ToString());
+
+            if (grp.Entity?.PduTotal?.Measurements?.Any() ?? false)
+                grp.Entity.PduTotal.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+
+            foreach (var outlet in grp.Entity.Outlets)
+            {
+                // All measurements will be stored into a sub-key.
+                outlet.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
+                outlet.Measurements.SetEntityNameAndEnabled(config.Overrides, o => o.Type, DefaultNames.UseMeasurementType);
+                outlet.Measurements.PruneDisabled();
+
+                outlet.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+            }
+
+
         }
         else
         {
