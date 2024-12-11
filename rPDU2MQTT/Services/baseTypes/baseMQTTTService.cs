@@ -123,6 +123,15 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         return Publish(msg, cancellationToken);
     }
 
+    protected Task PublishObjectasJSON<TObject>(string Topic, TObject Obj, CancellationToken cancellationToken)
+    {
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtMostOnceDelivery);
+        msg.PayloadAsString = System.Text.Json.JsonSerializer.Serialize<TObject>(Obj, this.jsonOptions);
+        return Publish(msg, cancellationToken);
+    }
+
+
+
     /// <summary>
     /// Publishes the specified message.
     /// </summary>
