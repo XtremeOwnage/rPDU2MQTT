@@ -34,6 +34,15 @@ public class MQTTPublishingService : basePublishingService
             }
         }
 
-        //foreach(var root in dev)
+        foreach (var group in data.Groups)
+        {
+            await PublishName(group, cancellationToken);
+            await PublishUniqueIdentifier(group, cancellationToken);
+
+            foreach (var outlet in group.Entity.Outlets)
+            {
+                await PublishOneViewGroupMeasurements(outlet.Measurements, cancellationToken);
+            }
+        }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Configuration.UserSecrets;
+using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
@@ -25,6 +26,31 @@ public abstract class basePublishingService : baseMQTTTService
         {
             var topic = measurement.GetTopicPath();
             await PublishString(topic, measurement.Value, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Publish a series of measurements under <paramref name="Topic"/>
+    /// </summary>
+    /// <param name="Topic"></param>
+    /// <param name="Measurements"></param>
+    /// <param name="cancellationToken"></param>
+    /// <returns></returns>
+    protected async Task PublishOneViewGroupMeasurements(List<GroupMeasurement> Measurements, CancellationToken cancellationToken)
+    {
+        Dictionary<MqttPath, Func<GroupMeasurement, string>> getMeasurements = new()
+        {
+            {MqttPath.Average, o => o.AvgValue },
+            {MqttPath.Sum, o => o.SumValue },
+            {MqttPath.Minimum, o => o.MinValue },
+            {MqttPath.Maximum, o => o.MaxValue },
+         };
+        foreach (var measurement in Measurements)
+        {
+            var topic = measurement.GetTopicPath();
+            await PublishObjectasJSON< IAggregateMeasurement>(topic, measurement, cancellationToken);
+
+
         }
     }
 
