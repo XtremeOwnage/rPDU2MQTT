@@ -17,7 +17,7 @@ public static class MQTTHelper
             return string.Empty;
         }
 
-        return string.Join("/", paths.Select(p => p.Trim('/')));
+        return string.Join("/", paths.Where(o => !string.IsNullOrEmpty(o)).Select(p => p.Trim('/')));
     }
 
     public static string JoinPaths(string basePath, MqttPath path)
