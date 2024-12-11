@@ -157,6 +157,23 @@ Overrides:
         instantaneousCo2:
             Enabled: false
 
+    # This section specifically overrides details related to OneView groups. (Requires device aggregation on Vertiv rPDU)
+    OneviewGroups:
+        # Customize how metrics are sent to services.
+        # The entity ID used for metrics, is [DEVICE_ID]_[METRIC_TYPE]
+        # The "ID" field here, will be used instead of "METRIC_TYPE"
+        # The "Name" field here, maps back to a "Human Readable Version"
+        # These overrides affect OneView Group measurements.
+        Measurements:
+            realPower:
+                ID: power_sum
+                Name: Power (Sum)
+                Enabled: true
+            energy:
+                ID: energy_sum
+                Name: Energy (Sum)
+                Enabled: true
+
 HomeAssistant:
     # Is home assistant mQTT-discovery enabled?
     # If you want to manually create entities, or, just want your PDU data pushed to MQTT without home-assistant, change to false.

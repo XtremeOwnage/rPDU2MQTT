@@ -46,11 +46,19 @@ public static class EntityWithName_Overrides
                 Outlet o => o.TryGetOverride(overrides),
                 Device o => o.TryGetOverride(overrides),
                 Measurement o => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
+                GroupMeasurement o => overrides.GroupOverrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 _ => null
             };
 
             // If overrides are defined, use those.
             if (entityOverride is not null && entity is Measurement m)
+            {
+                // Measurements inherits part of the parents name. aka, "outlet_1_power"
+                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
+                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
+                entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
+            }
+            else if (entityOverride is not null && entity is GroupMeasurement gm)
             {
                 // Measurements inherits part of the parents name. aka, "outlet_1_power"
                 entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");

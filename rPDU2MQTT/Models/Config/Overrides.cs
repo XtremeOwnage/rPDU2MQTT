@@ -14,4 +14,7 @@ public class Overrides
 
     [YamlMember(Alias = "Measurements", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allows overriding individual measurements")]
     public Dictionary<string, EntityOverride?> Measurements { get; set; } = new();
+
+    [YamlMember(Alias = "OneviewGroups", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Overrides specific to Oneview groups")]
+    public OneviewGroupOverrides GroupOverrides { get; set; } = new();
 }
