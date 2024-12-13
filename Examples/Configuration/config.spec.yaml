@@ -188,6 +188,14 @@ Overrides:
                 Name: Group 2 Name
                 Enabled: true
 
+            # Disable unassigned group by default.
+            unassigned:
+                enabled: false
+
+            # Disable total group by default.
+            total:
+                enabled: false
+
 HomeAssistant:
     # Is home assistant mQTT-discovery enabled?
     # If you want to manually create entities, or, just want your PDU data pushed to MQTT without home-assistant, change to false.
