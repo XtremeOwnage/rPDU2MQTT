@@ -87,19 +87,35 @@ public partial class PDU
         data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
         data.Entity_Name = data.Entity_DisplayName = "OneView"; // Coalesce(config.Overrides?.rPDU2MQTT?.Name, "rPDU2MQTT")!;
 
-        // Propagate down the parent, and identifier.
-        data.Groups.SetParentAndIdentifier(BaseEntity.FromDevice(data, MqttPath.Groups), o => o.Key);
+        // Process groups.
+        processOneViewGroups(data, data.Groups, cancellationToken);
 
-        // Populate Name, DisplayName, and Enabled for devices.
-        data.Groups.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
-
-        // Process Groups.
-        await processListRecursive(data.Groups, data, cancellationToken);
 
         //Process individual hosts, as if they were stand-alone hosts.
         data.Hosts.ForEach(o => processData(o.Cache, cancellationToken));
 
     }
+
+    private async void processOneViewGroups(OneViewRootData Parent, List<OneViewGroup> Groups, CancellationToken cancellationToken)
+    {
+        // Create a child-object named "Groups"
+        var Entity_Groups = BaseEntity.FromDevice(Parent, MqttPath.Groups);
+
+        // Propagate down the parent, and identifier.
+        Groups.SetParentAndIdentifier(Entity_Groups, o => o.Key);
+
+        // Populate Name, DisplayName, and Enabled for devices.
+        Groups.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
+
+        // Remove disabled items.
+        Groups.PruneDisabled();
+
+        // Process Groups.
+        await processListRecursive(Groups, Parent, cancellationToken);
+    }
+
+
+
     private async void processData(rPDU data, CancellationToken cancellationToken)
     {
         //Set basic details.

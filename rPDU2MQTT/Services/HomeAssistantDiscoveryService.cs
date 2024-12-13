@@ -4,6 +4,7 @@ using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
+using rPDU2MQTT.Models.PDU.OneView;
 using rPDU2MQTT.Services.baseTypes;
 using System.Diagnostics.CodeAnalysis;
 
@@ -21,12 +22,23 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         Log.Debug("Starting discovery job.");
         var data = await pdu.GetRootData_Public(cancellationToken);
 
-        foreach (rPDU pdu in data.PDUs)
+        // Discover PDUs, Outlets, etc...
+        foreach (rPDU nestedPDU in data.PDUs)
         {
-            var pduDevice = pdu.GetDiscoveryDevice();
+            var pduDevice = nestedPDU.GetDiscoveryDevice();
 
             // Recursively discover everything.
-            await recursiveDiscovery(pdu.Devices, pduDevice, cancellationToken);
+            await recursiveDiscovery(nestedPDU.Devices, pduDevice, cancellationToken);
+        }
+
+        var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice() ?? null;
+
+        #region Discover OneView Groups
+
+        // Discover Groups.
+        if (firstPDU is not null)
+            await recursiveDiscovery(data.Groups, firstPDU, cancellationToken);
+        #endregion
 
         }
         Log.Information("Discovery information published.");
@@ -87,9 +99,23 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         {
             await DiscoverMeasurementAsync(measurement, parent, cancellationToken);
         }
+        else if (entity is GroupMeasurement groupMeasurement)
+        {
+            await GroupMeasurement_Discover_Min(groupMeasurement, parent, cancellationToken);
+    }
+        else if (entity is OneViewGroup group)
+        {
+            // Create a device to represent the group.
+            var newParent = parent.CreateChild(group);
+
+
+            // Discover measurements.
+            await recursiveDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, cancellationToken);
+
+        }
     }
 
-    protected async Task recursiveDiscovery<TEntity>(List<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken)
+    protected async Task recursiveDiscovery<TEntity>(IEnumerable<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken)
         where TEntity : BaseEntity
     {
         foreach (var entity in entities)
