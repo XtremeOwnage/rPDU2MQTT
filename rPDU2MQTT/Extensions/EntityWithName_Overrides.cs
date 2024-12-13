@@ -4,6 +4,7 @@ using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.Config.Schemas;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
+using rPDU2MQTT.Models.PDU.OneView;
 using System.Diagnostics.CodeAnalysis;
 
 namespace rPDU2MQTT.Extensions;
@@ -47,25 +48,12 @@ public static class EntityWithName_Overrides
                 Device o => o.TryGetOverride(overrides),
                 Measurement o => overrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
                 GroupMeasurement o => overrides.GroupOverrides.Measurements.TryGetValue(o.Type, out var outletOverride) ? outletOverride : null,
+                OneViewGroup o => o.TryGetOverride(overrides),
                 _ => null
             };
 
-            // If overrides are defined, use those.
-            if (entityOverride is not null && entity is Measurement m)
-            {
-                // Measurements inherits part of the parents name. aka, "outlet_1_power"
-                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
-                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
-                entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
-            }
-            else if (entityOverride is not null && entity is GroupMeasurement gm)
-            {
-                // Measurements inherits part of the parents name. aka, "outlet_1_power"
-                entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
-                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
-                entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
-            }
-            else if (entityOverride is not null)
+
+            if (entityOverride is not null)
             {
                 entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
                 entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
@@ -169,6 +157,31 @@ public static class EntityWithName_Overrides
     {
         if (overrides.Devices.TryGetValue(Device.Key, out var outletOverride))
             return outletOverride;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Try and resolve overrides for a Oneview Group.
+    /// </summary>
+    /// <param name="Group"></param>
+    /// <param name="overrides"></param>
+    /// <returns></returns>
+    public static EntityOverride? TryGetOverride(this OneViewGroup Group, Overrides overrides)
+    {
+        // Match based on the user defined label.
+        if (overrides.GroupOverrides.Overrides.TryGetValue(Group.Label, out var r3))
+            return r3;
+
+        // First- try to match based on the ID.
+        if (overrides.GroupOverrides.Overrides.TryGetValue(Group.Key, out var r1))
+            return r1;
+
+        // Next- try to match based on the name.
+        if (overrides.GroupOverrides.Overrides.TryGetValue(Group.Name, out var r2))
+            return r2;
+
+
 
         return null;
     }
