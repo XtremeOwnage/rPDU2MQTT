@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using rPDU2MQTT.Classes;
+﻿using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.PDU;
@@ -40,7 +39,6 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             await recursiveDiscovery(data.Groups, firstPDU, cancellationToken);
         #endregion
 
-        }
         Log.Information("Discovery information published.");
     }
 
@@ -84,6 +82,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Create a device to represent the outlet.
             var newParent = parent.CreateChild(outlet);
 
+            // Remap Make/Model, IF specified in the configuration.
+            RemapColumns(newParent, "Outlet", outlet.Name);
+
             // Discover outlet's state.
             await DiscoverStateAsync(outlet, newParent, cancellationToken);
 
@@ -102,16 +103,17 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         else if (entity is GroupMeasurement groupMeasurement)
         {
             await GroupMeasurement_Discover_Min(groupMeasurement, parent, cancellationToken);
-    }
+        }
         else if (entity is OneViewGroup group)
         {
             // Create a device to represent the group.
             var newParent = parent.CreateChild(group);
 
+            // Remap Make/Model, IF specified in the configuration.
+            RemapColumns(newParent, "Oneview Group", group.Label);
 
             // Discover measurements.
             await recursiveDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, cancellationToken);
-
         }
     }
 
@@ -126,5 +128,4 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         foreach (var (_, entity) in entities)
             await recursiveDiscovery(entity, parent, cancellationToken);
     }
-
 }

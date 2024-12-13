@@ -122,6 +122,26 @@ public abstract class baseDiscoveryService : baseMQTTTService
 
         return this.Publish(msg, cancellationToken);
     }
+
+    /// <summary>
+    /// If the configuration allows remapping make/model, this method will do it automatially.
+    /// </summary>
+    /// <param name="discoveryDevice"></param>
+    /// <param name="Make">This will be the value placed into the Manufacturer column, if enabled.</param>
+    /// <param name="Model">This will be the value APPENDED to the parent device's name, if enabled.</param>
+    protected void RemapColumns(DiscoveryDevice discoveryDevice, string Make, string Model)
+    {
+        var parent = discoveryDevice.ParentDevice;
+        if (parent is null)
+            return;
+
+        if (cfg.PDU.RemapModel)
+            discoveryDevice.Model = $"{parent.Name} {Model}";
+
+        if (cfg.PDU.RemapManufacturer)
+            discoveryDevice.Manufacturer = Make;
+
+    }
 }
 
 

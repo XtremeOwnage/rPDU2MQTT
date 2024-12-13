@@ -61,6 +61,16 @@ Pdu:
     # This, defaults to false.
     ActionsEnabled: true
 
+    # When false, the model column for each outlet/device, will be set to the parent PDU's model.
+    # When true, the model for individual outlets/plugs, will be set to "{PDU Name} Outlet { Outlet Number }"
+    # This exists, to allow EASILY viewing which devices are plugged into which outlet, on which PDU.
+    RemapModel: true
+
+    # When false, the manufacturer column for each outlet/device, will be set to the parent PDU's manufactuer. (GEI in my testing)
+    # When true, the manufacturer for individual outlets/plugs, will be set to Outlet, Group, etc, to reflect the type of device.
+    # This exists, to make the manufacturer column a bit more useful.
+    RemapMake: true
+
 
 # This section allows overriding the generated entity_id, name, and enabled/disabled, for various objects.
 # Note- ID / entity_id, will only be set when the entity is created.

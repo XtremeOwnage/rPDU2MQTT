@@ -38,4 +38,20 @@ public class PduConfig
     /// </summary>
     [Display(Description = "Indicates whether actions are enabled.")]
     public bool ActionsEnabled { get; set; }
+
+    [DefaultValue(false)]
+    [YamlMember(Alias = "RemapModel", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Enables remapping the model column for devices to display data related to which PDU, Outlet.")]
+    /// <summary>
+    /// Gets or sets a value indicating whether actions are enabled.
+    /// </summary>
+    [Display(Description = "This setting can be enabled, which will remap the model value for individual outlets to provide more contextual information.")]
+    public bool RemapModel { get; set; }
+
+    [DefaultValue(false)]
+    [YamlMember(Alias = "RemapMake", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Enables remapping the manufacturer column for devices to display the type of entity. Aka, Outlet, Group, etc..")]
+    /// <summary>
+    /// Gets or sets a value indicating whether actions are enabled.
+    /// </summary>
+    [Display(Description = "This setting can be enabled, which will remap the manufacturer value for individual outlets to provide more contextual information.")]
+    public bool RemapManufacturer { get; set;}
 }
