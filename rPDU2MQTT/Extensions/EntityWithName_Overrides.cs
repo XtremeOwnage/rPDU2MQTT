@@ -62,8 +62,9 @@ public static class EntityWithName_Overrides
             }
             else // No overrides defined. Set defaults.
             {
-                entity.Entity_Name = DefaultNameFunc!.Invoke(entity).FormatName();
-                entity.Entity_DisplayName = DefaultDisplayNameFunc!.Invoke(entity);
+                // Fall back to the identifier/name so a null default name doesn't throw.
+                entity.Entity_Name = Coalesce(DefaultNameFunc?.Invoke(entity), entity.Entity_Name, entity.Entity_Identifier)?.FormatName() ?? throw new Exception("Unable to determine entity name.");
+                entity.Entity_DisplayName = Coalesce(DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName, entity.Entity_Name) ?? throw new Exception("Unable to determine entity display name.");
                 entity.Entity_Enabled = true;
             }
         }

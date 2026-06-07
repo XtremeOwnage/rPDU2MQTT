@@ -26,10 +26,8 @@ public class EnumToPropertyNameConverter: JsonConverter<object>
         }
         else
         {
-            // Note- the expected attributes SHOULD be attached....
-            if (System.Diagnostics.Debugger.IsAttached)
-                System.Diagnostics.Debugger.Break();
-
+            // The expected [JsonPropertyName] attribute should always be attached to enum members.
+            Log.Warning($"Enum value '{value}' ({value.GetType().Name}) has no JsonPropertyName attribute; writing null.");
             writer.WriteNullValue();
         }
     }

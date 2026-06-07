@@ -1,7 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Interfaces;
-using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 using rPDU2MQTT.Models.HomeAssistant.Enums;
 using rPDU2MQTT.Models.HomeAssistant.Interfaces;
@@ -37,15 +36,6 @@ public abstract class baseEntity : IBaseDiscovery
     [JsonPropertyName("payload_not_available")]
     public string? PayloadNotAvailable { get; set; } = "offline";
     #endregion
-
-    /// <summary>
-    /// Sub-class which holds properties related to JSON Attributes.
-    /// </summary>
-    /// <remarks>
-    /// If, this is not <see langword="null"/>, its properties will be flattened onto the parent object.
-    /// </remarks>
-    [JsonConverter(typeof(FlattenNullableObjectToParentObjectConverter))]
-    public JsonAttributeSettings? JsonAttributes { get; set; } = null;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
     /// <summary>

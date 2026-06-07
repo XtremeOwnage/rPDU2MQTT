@@ -163,6 +163,8 @@ public partial class PDU
         }
         else if (entity is NamedEntityWithMeasurements nem)
         {
+            ArgumentNullException.ThrowIfNull(parent);
+
             // All measurements will be stored into a sub-key.
             nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
 
@@ -175,7 +177,7 @@ public partial class PDU
             if (entity is Entity)
                 // For entities- these belong directly to a "Device"
                 // We want to set the prefix to the parent device's name.
-                nem.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+                nem.Measurements.SetEntityNamePrefix(parent.Entity_Name);
             else
                 // We want to prefix the measurements, with the outlet name.
                 // ie, mydevice_power
@@ -183,12 +185,13 @@ public partial class PDU
         }
         else if (entity is OneViewGroup grp)
         {
-            // Propagate down the parent, and identifier.
-            //grp.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), o => o.Key);
-            //grp.Entity.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), o => o.Key.ToString());
+            ArgumentNullException.ThrowIfNull(parent);
 
-            if (grp.Entity?.PduTotal?.Measurements?.Any() ?? false)
-                grp.Entity.PduTotal.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+            if (grp.Entity is null)
+                return;
+
+            if (grp.Entity.PduTotal?.Measurements?.Any() ?? false)
+                grp.Entity.PduTotal.Measurements.SetEntityNamePrefix(parent.Entity_Name);
 
             foreach (var outlet in grp.Entity.Outlets)
             {
@@ -197,15 +200,12 @@ public partial class PDU
                 outlet.Measurements.SetEntityNameAndEnabled(config.Overrides, o => o.Type, DefaultNames.UseMeasurementType);
                 outlet.Measurements.PruneDisabled();
 
-                outlet.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+                outlet.Measurements.SetEntityNamePrefix(parent.Entity_Name);
             }
-
-
         }
         else
         {
-            if (System.Diagnostics.Debugger.IsAttached)
-                System.Diagnostics.Debugger.Break();
+            Log.Warning($"Unhandled entity type in processRecursive: {entity.GetType().Name}");
         }
     }
 
