@@ -26,8 +26,33 @@ var client = host.Services.GetRequiredService<IHiveMQClient>();
 
 Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 
-await client.ConnectAsync();
+// The broker may not be reachable yet (e.g. still starting up alongside us in a
+// container). Retry the initial connection with a backoff before giving up, rather
+// than crashing with an unhandled exception. Once connected, the client is configured
+// to automatically reconnect, so we only need to handle the very first connect here.
+const int maxAttempts = 10;
+var retryDelay = TimeSpan.FromSeconds(5);
 
-Log.Information("Successfully connected to broker!");
+for (int attempt = 1; ; attempt++)
+{
+    try
+    {
+        await client.ConnectAsync();
+        Log.Information("Successfully connected to broker!");
+        break;
+    }
+    catch (Exception ex) when (attempt < maxAttempts)
+    {
+        Log.Warning($"Failed to connect to MQTT broker at {client.Options.Host}:{client.Options.Port} (attempt {attempt}/{maxAttempts}): {ex.Message}. Retrying in {retryDelay.TotalSeconds:0}s...");
+        await Task.Delay(retryDelay);
+    }
+    catch (Exception ex)
+    {
+        Log.Fatal(ex, $"Unable to connect to MQTT broker at {client.Options.Host}:{client.Options.Port} after {maxAttempts} attempts. Exiting.");
+        return 1;
+    }
+}
 
 host.Run();
+
+return 0;
