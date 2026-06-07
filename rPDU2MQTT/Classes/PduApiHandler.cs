@@ -25,6 +25,10 @@ public class PduApiHandler
         {
             Log.Debug($"[PduApiHandler] Querying {Path}");
             var result = await http.GetFromJsonAsync<GetResponse<T>>(Path, options: Models.PDU.Converter.Settings, cancellationToken);
+
+            if (result is null)
+                throw new Exception($"[PduApiHandler] Received a null/empty response from {Path}");
+
             Log.Debug($"[PduApiHandler] Response Code: {result.RetCode}");
             return result.Data;
         }

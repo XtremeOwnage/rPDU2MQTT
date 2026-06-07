@@ -51,7 +51,7 @@ public partial class PDU
             var data = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
 
             // Process data.
-            processOneViewData(data, cancellationToken);
+            await processOneViewData(data, cancellationToken);
 
             // Return the single model.
             return new PduData
@@ -66,7 +66,7 @@ public partial class PDU
             var model = await api.GetAsync<rPDU>("/api", cancellationToken);
 
             // Process single-device data.
-            processData(model, cancellationToken);
+            await processData(model, cancellationToken);
 
             // Return the single model.
             return new PduData
@@ -77,7 +77,7 @@ public partial class PDU
         }
     }
 
-    private async void processOneViewData(OneViewRootData data, CancellationToken cancellationToken)
+    private async Task processOneViewData(OneViewRootData data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
@@ -88,15 +88,16 @@ public partial class PDU
         data.Entity_Name = data.Entity_DisplayName = "OneView"; // Coalesce(config.Overrides?.rPDU2MQTT?.Name, "rPDU2MQTT")!;
 
         // Process groups.
-        processOneViewGroups(data, data.Groups, cancellationToken);
+        await processOneViewGroups(data, data.Groups, cancellationToken);
 
 
         //Process individual hosts, as if they were stand-alone hosts.
-        data.Hosts.ForEach(o => processData(o.Cache, cancellationToken));
+        foreach (var host in data.Hosts)
+            await processData(host.Cache, cancellationToken);
 
     }
 
-    private async void processOneViewGroups(OneViewRootData Parent, List<OneViewGroup> Groups, CancellationToken cancellationToken)
+    private async Task processOneViewGroups(OneViewRootData Parent, List<OneViewGroup> Groups, CancellationToken cancellationToken)
     {
         // Create a child-object named "Groups"
         var Entity_Groups = BaseEntity.FromDevice(Parent, MqttPath.Groups);
@@ -116,7 +117,7 @@ public partial class PDU
 
 
 
-    private async void processData(rPDU data, CancellationToken cancellationToken)
+    private async Task processData(rPDU data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;

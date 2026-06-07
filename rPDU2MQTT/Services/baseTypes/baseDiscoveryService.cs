@@ -27,7 +27,7 @@ public abstract class baseDiscoveryService : baseMQTTTService
         //If we are unable to parse this measurement as valid, skip to the next.
         var dto = measurement.TryParseValue();
 
-        if(dto is null)
+        if (dto is null)
             return Task.CompletedTask;
 
         var discovery = new SensorDiscovery
@@ -87,6 +87,44 @@ public abstract class baseDiscoveryService : baseMQTTTService
 
         return PushDiscoveryMessage(discovery, cancellationToken);
     }
+
+    protected Task GroupMeasurement_Discover_Min(GroupMeasurement measurement, DiscoveryDevice Parent, CancellationToken cancellationToken)
+    {
+        //If we are unable to parse this measurement as valid, skip to the next.
+        var dto = measurement.TryParseValue();
+
+        if (dto is null)
+            return Task.CompletedTask;
+
+        var disc = new SensorDiscovery
+        {
+            //Identifying Details
+            ID = measurement.Entity_Identifier,
+            Name = measurement.Entity_Name,
+            DisplayName = measurement.Entity_DisplayName,
+
+            //Device Details
+            Device = Parent,
+
+            //Sensor Specific Details
+            EntityType = Models.HomeAssistant.Enums.EntityType.Sensor,
+            EntityCategory = null,  // Leave null, as there is not a category for "sensors".
+            SensorClass = dto.SensorClass,
+            StateClass = dto.StateClass,
+
+            //Specific to this sensor.
+            StateTopic = measurement.GetTopicPath(),
+            UnitOfMeasurement = measurement.Units,
+            ValueTemplate = "{{ value_json.sum }}",
+
+
+            // Availability
+            //Availability = new Models.HomeAssistant.baseClasses.EntityAvailability
+        };
+
+        return PushDiscoveryMessage(disc, cancellationToken);
+    }
+
 
     /// <summary>
     /// Bulk publish all discoveries.
