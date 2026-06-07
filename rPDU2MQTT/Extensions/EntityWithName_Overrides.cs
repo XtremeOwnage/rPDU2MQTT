@@ -56,7 +56,8 @@ public static class EntityWithName_Overrides
             if (entityOverride is not null)
             {
                 entity.Entity_Name = Coalesce(entityOverride.ID, DefaultNameFunc?.Invoke(entity), entity.Entity_Name)?.FormatName() ?? throw new Exception("Unable to determine entity ID.");
-                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName) ?? throw new Exception("Unable to determine entity name.");
+                // Fall back to Entity_Name so a missing display name doesn't throw.
+                entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName, entity.Entity_Name) ?? throw new Exception("Unable to determine entity name.");
                 entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
             }
             else // No overrides defined. Set defaults.

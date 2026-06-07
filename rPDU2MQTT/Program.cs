@@ -26,10 +26,7 @@ var client = host.Services.GetRequiredService<IHiveMQClient>();
 
 Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 
-// The broker may not be reachable yet (e.g. still starting up alongside us in a
-// container). Retry the initial connection with a backoff before giving up, rather
-// than crashing with an unhandled exception. Once connected, the client is configured
-// to automatically reconnect, so we only need to handle the very first connect here.
+// Retry the initial connect (broker may still be starting up); the client auto-reconnects afterward.
 const int maxAttempts = 10;
 var retryDelay = TimeSpan.FromSeconds(5);
 
@@ -37,7 +34,15 @@ for (int attempt = 1; ; attempt++)
 {
     try
     {
-        await client.ConnectAsync();
+        var result = await client.ConnectAsync();
+
+        // A refused connection (e.g. bad credentials) is not transient, so fail fast.
+        if (result.ReasonCode != HiveMQtt.MQTT5.ReasonCodes.ConnAckReasonCode.Success)
+        {
+            Log.Fatal($"MQTT broker refused the connection: {result.ReasonCode} ({result.ReasonString}). Check the configured credentials and permissions.");
+            return 1;
+        }
+
         Log.Information("Successfully connected to broker!");
         break;
     }

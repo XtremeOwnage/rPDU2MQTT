@@ -55,23 +55,11 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
-    /// Publish a discovery message for an aggregate group measurement.
+    /// Publish a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
     /// </summary>
-    /// <remarks>
-    /// A group measurement is published to MQTT as a JSON object exposing avg/sum/min/max
-    /// (see <see cref="Interfaces.IAggregateMeasurement"/>). This publishes a single sensor
-    /// bound to the <c>sum</c> value.
-    /// </remarks>
     protected Task DiscoverGroupMeasurementAsync(GroupMeasurement measurement, DiscoveryDevice Parent, CancellationToken cancellationToken)
         => DiscoverMeasurement(measurement, Parent, "{{ value_json.sum }}", cancellationToken);
 
-    /// <summary>
-    /// Shared implementation for publishing a sensor discovery for a measurement.
-    /// </summary>
-    /// <param name="measurement">The measurement to describe.</param>
-    /// <param name="Parent">The parent device this sensor belongs to.</param>
-    /// <param name="valueTemplate">The Home Assistant value template used to extract the value from the state topic.</param>
-    /// <param name="cancellationToken"></param>
     private Task DiscoverMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate, CancellationToken cancellationToken)
     {
         //If we are unable to parse this measurement as valid, skip to the next.

@@ -143,9 +143,8 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         if (cfg.Debug.PublishMessages == false)
             return Task.CompletedTask;
 
-        if (!mqtt.IsConnected())
-            Log.Error("MQTT Broker is not connected!!!!!");
-
+        // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
+        // publish failures surface in tick(). No need to check connectivity per message.
         return mqtt.PublishAsync(msg, cancellationToken);
     }
 
