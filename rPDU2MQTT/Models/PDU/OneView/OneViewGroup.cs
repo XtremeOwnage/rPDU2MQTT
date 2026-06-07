@@ -12,14 +12,10 @@ public class OneViewGroup : EntityWithNameAndLabel, IDictionaryKey<string>
     public string Key { get; set; }
     #endregion
 
-    [JsonPropertyName("label")]
-    public string Label { get; set; }
+    // Name and Label are inherited from EntityWithNameAndLabel.
 
     [JsonPropertyName("snmpInstance")]
     public long SnmpInstance { get; set; }
-
-    [JsonPropertyName("name")]
-    public string Name { get; set; }
 
     [JsonPropertyName("order")]
     public long Order { get; set; }

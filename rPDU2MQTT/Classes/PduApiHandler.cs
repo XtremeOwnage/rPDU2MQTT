@@ -17,7 +17,7 @@ public class PduApiHandler
         this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
     }
 
-    public string BaseAddress => http.BaseAddress.ToString();
+    public string BaseAddress => http.BaseAddress?.ToString() ?? string.Empty;
 
     public async Task<T> GetAsync<T>(string Path, CancellationToken cancellationToken)
     {

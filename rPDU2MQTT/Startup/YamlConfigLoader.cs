@@ -103,7 +103,8 @@ internal class YamlConfigLoader
         config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.DeviceOverride?>();
         config.Overrides.Measurements ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
         foreach (var (_, dvc) in config.Overrides.Devices)
-            dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
+            if (dvc is not null)
+                dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
 
         return config;

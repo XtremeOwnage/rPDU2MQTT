@@ -126,7 +126,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             collectDiscovery(entity, parent, components);
     }
 
-    private void collectDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
+    private void collectDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, List<baseEntity> components) where TKey : notnull where TEntity : BaseEntity
     {
         foreach (var (_, entity) in entities)
             collectDiscovery(entity, parent, components);
