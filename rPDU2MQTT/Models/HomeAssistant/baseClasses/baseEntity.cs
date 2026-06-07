@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Interfaces;
 using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
@@ -50,10 +51,13 @@ public abstract class baseEntity : IBaseDiscovery
     /// <summary>
     /// This is the type of entity this object represents.
     /// </summary>
-    /// <remarks>
-    /// Note- this is not serialized here.
-    /// </remarks>
     public virtual EntityType EntityType { get; set; }
+
+    /// <summary>
+    /// The component platform (domain) this entity maps to, used in device-based discovery.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public string Platform => EntityType.ToJsonString();
 
     /// <summary>
     /// The category of the entity. When set, the entity category must be diagnostic for sensors.
@@ -83,16 +87,11 @@ public abstract class baseEntity : IBaseDiscovery
     #endregion
 
     /// <summary>
-    /// This is the device for which this entity will belong to.
+    /// The device this entity belongs to. Used to group entities into a single device-based
+    /// discovery payload; the device block itself is published once at the payload root.
     /// </summary>
-    [JsonPropertyName("device")]
-    public required DiscoveryDevice Device { get; init; }
-
-    /// <summary>
-    /// Identifies the application that produced this discovery.
-    /// </summary>
-    [JsonPropertyName("origin")]
-    public DiscoveryOrigin Origin { get; set; } = DiscoveryOrigin.Default;
+    [JsonIgnore]
+    public DiscoveryDevice Device { get; init; } = null!;
 
     /// <summary>
     /// Icon for the entity.

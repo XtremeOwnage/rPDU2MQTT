@@ -17,17 +17,15 @@ public abstract class baseDiscoveryService : baseMQTTService
     public baseDiscoveryService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
 
     /// <summary>
-    /// Publish a discovery message for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>
+    /// Build a sensor discovery for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>.
+    /// Returns <see langword="null"/> if the measurement cannot be parsed.
     /// </summary>
-    /// <param name="measurement"></param>
-    /// <param name="Parent"></param>
-    /// <param name="cancellationToken"></param>
-    public Task DiscoverMeasurementAsync(Measurement measurement, DiscoveryDevice Parent, CancellationToken cancellationToken)
-        => DiscoverMeasurement(measurement, Parent, "{{ value }}", cancellationToken);
+    public baseEntity? BuildMeasurement(Measurement measurement, DiscoveryDevice Parent)
+        => BuildMeasurement((baseMeasurement)measurement, Parent, "{{ value }}");
 
-    public Task DiscoverStateAsync<T>(T item, DiscoveryDevice Parent, CancellationToken cancellationToken) where T : NamedEntity, IEntityWithState
+    public BinarySensorDiscovery BuildState<T>(T item, DiscoveryDevice Parent) where T : NamedEntity, IEntityWithState
     {
-        var discovery = new BinarySensorDiscovery
+        return new BinarySensorDiscovery
         {
             //Identifying Details
             ID = item.Entity_Identifier + "_state",
@@ -49,25 +47,23 @@ public abstract class baseDiscoveryService : baseMQTTService
 
             AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
-
-        return PushDiscoveryMessage(discovery, cancellationToken);
     }
 
     /// <summary>
-    /// Publish a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
+    /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
     /// </summary>
-    protected Task DiscoverGroupMeasurementAsync(GroupMeasurement measurement, DiscoveryDevice Parent, CancellationToken cancellationToken)
-        => DiscoverMeasurement(measurement, Parent, "{{ value_json.sum }}", cancellationToken);
+    protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)
+        => BuildMeasurement(measurement, Parent, "{{ value_json.sum }}");
 
-    private Task DiscoverMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate, CancellationToken cancellationToken)
+    private SensorDiscovery? BuildMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate)
     {
         //If we are unable to parse this measurement as valid, skip to the next.
         var dto = measurement.TryParseValue();
 
         if (dto is null)
-            return Task.CompletedTask;
+            return null;
 
-        var discovery = new SensorDiscovery
+        return new SensorDiscovery
         {
             //Identifying Details
             ID = measurement.Entity_Identifier,
@@ -90,37 +86,36 @@ public abstract class baseDiscoveryService : baseMQTTService
 
             AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
-
-        return PushDiscoveryMessage(discovery, cancellationToken);
     }
-
 
     /// <summary>
-    /// Bulk publish all discoveries.
+    /// Publish device-based discovery: one retained message per device containing all of its
+    /// entities as components.
     /// </summary>
-    /// <remarks>
-    /// This will automatically split results by Device, and EntityType.
-    /// </remarks>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="Discoveries"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    protected async Task PushDiscoveryMessages<T>(List<T> Discoveries, CancellationToken cancellationToken) where T : baseEntity
+    protected async Task PublishDeviceDiscoveries(IEnumerable<baseEntity> components, CancellationToken cancellationToken)
     {
-        foreach (T sensor in Discoveries)
-            await PushDiscoveryMessage(sensor, cancellationToken);
+        foreach (var group in components.GroupBy(c => c.Device.UniqueIdentifier))
+        {
+            var device = new DeviceDiscovery
+            {
+                Device = group.First().Device,
+                Components = group.ToDictionary(c => c.ID, c => c),
+            };
+
+            await PublishDeviceDiscovery(device, cancellationToken);
+        }
     }
 
-    protected Task PushDiscoveryMessage<T>(T sensor, CancellationToken cancellationToken) where T : baseEntity
+    private Task PublishDeviceDiscovery(DeviceDiscovery device, CancellationToken cancellationToken)
     {
-        var topic = $"{cfg.HASS.DiscoveryTopic}/{sensor.EntityType.ToJsonString()}/{sensor.ID}/config";
+        var topic = $"{cfg.HASS.DiscoveryTopic}/device/{device.Device.UniqueIdentifier}/config";
 
-        Log.Debug($"Publishing Discovery of type {sensor.EntityType.ToJsonString()} for {sensor.ID} to {topic}");
+        Log.Debug($"Publishing device discovery for {device.Device.UniqueIdentifier} ({device.Components.Count} components) to {topic}");
 
         var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
         {
             ContentType = "json",
-            PayloadAsString = System.Text.Json.JsonSerializer.Serialize<T>(sensor, this.jsonOptions),
+            PayloadAsString = System.Text.Json.JsonSerializer.Serialize(device, this.jsonOptions),
             Retain = cfg.HASS.DiscoveryRetain,
         };
 

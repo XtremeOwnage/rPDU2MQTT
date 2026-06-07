@@ -1,6 +1,7 @@
-﻿using rPDU2MQTT.Classes;
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.HomeAssistant;
+using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDU.OneView;
@@ -21,29 +22,28 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         Log.Debug("Starting discovery job.");
         var data = await pdu.GetRootData_Public(cancellationToken);
 
+        // Collect every entity, then publish one device-based discovery message per device.
+        var components = new List<baseEntity>();
+
         // Discover PDUs, Outlets, etc...
         foreach (rPDU nestedPDU in data.PDUs)
         {
             var pduDevice = nestedPDU.GetDiscoveryDevice();
-
-            // Recursively discover everything.
-            await recursiveDiscovery(nestedPDU.Devices, pduDevice, cancellationToken);
+            collectDiscovery(nestedPDU.Devices, pduDevice, components);
         }
 
-        var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice() ?? null;
-
-        #region Discover OneView Groups
-
-        // Discover Groups.
+        // Discover OneView Groups.
+        var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
         if (firstPDU is not null)
-            await recursiveDiscovery(data.Groups, firstPDU, cancellationToken);
-        #endregion
+            collectDiscovery(data.Groups, firstPDU, components);
+
+        await PublishDeviceDiscoveries(components, cancellationToken);
 
         Log.Information("Discovery information published.");
     }
 
 
-    protected async Task recursiveDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+    private void collectDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
     {
         if (entity is null)
             return;
@@ -53,7 +53,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             var newParent = parent.CreateChild(device);
 
             // Discover outlets.
-            await recursiveDiscovery(device.Outlets, newParent, cancellationToken);
+            collectDiscovery(device.Outlets, newParent, components);
 
             #region Hack - Discover Entities
             // Discover Entity
@@ -73,7 +73,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                 .Where(o => o.Key == rootEntityName)
                 .FirstOrDefault();
 
-            await recursiveDiscovery(rootEntity!, newParent, cancellationToken);
+            collectDiscovery(rootEntity!, newParent, components);
             #endregion
 
         }
@@ -86,23 +86,25 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             RemapColumns(newParent, "Outlet", outlet.Name);
 
             // Discover outlet's state.
-            await DiscoverStateAsync(outlet, newParent, cancellationToken);
+            components.Add(BuildState(outlet, newParent));
 
             // Discover measurements
-            await recursiveDiscovery(outlet.Measurements, newParent, cancellationToken);
+            collectDiscovery(outlet.Measurements, newParent, components);
         }
         else if (entity is Entity pduEntity)
         {
             // Discover measurements
-            await recursiveDiscovery(pduEntity.Measurements, parent, cancellationToken);
+            collectDiscovery(pduEntity.Measurements, parent, components);
         }
         else if (entity is Measurement measurement)
         {
-            await DiscoverMeasurementAsync(measurement, parent, cancellationToken);
+            if (BuildMeasurement(measurement, parent) is { } sensor)
+                components.Add(sensor);
         }
         else if (entity is GroupMeasurement groupMeasurement)
         {
-            await DiscoverGroupMeasurementAsync(groupMeasurement, parent, cancellationToken);
+            if (BuildGroupMeasurement(groupMeasurement, parent) is { } sensor)
+                components.Add(sensor);
         }
         else if (entity is OneViewGroup group)
         {
@@ -113,19 +115,20 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             RemapColumns(newParent, "Oneview Group", group.Label);
 
             // Discover measurements.
-            await recursiveDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, cancellationToken);
+            collectDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, components);
         }
     }
 
-    protected async Task recursiveDiscovery<TEntity>(IEnumerable<TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken)
+    private void collectDiscovery<TEntity>(IEnumerable<TEntity> entities, DiscoveryDevice parent, List<baseEntity> components)
         where TEntity : BaseEntity
     {
         foreach (var entity in entities)
-            await recursiveDiscovery(entity, parent, cancellationToken);
+            collectDiscovery(entity, parent, components);
     }
-    protected async Task recursiveDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+
+    private void collectDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
     {
         foreach (var (_, entity) in entities)
-            await recursiveDiscovery(entity, parent, cancellationToken);
+            collectDiscovery(entity, parent, components);
     }
 }
