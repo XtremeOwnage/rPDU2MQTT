@@ -15,6 +15,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     private IHiveMQClient mqtt { get; init; }
     private PeriodicTimer? timer;
     private Task timerTask = Task.CompletedTask;
+    private readonly CancellationTokenSource stoppingCts = new();
     protected Config cfg { get; }
     protected PDU pdu { get; }
 
@@ -59,7 +60,8 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
         Log.Information($"{GetType().Name} is starting.");
 
-        timerTask = Task.Run(() => timerTaskExecution(cancellationToken).Wait());
+        // Run the periodic loop in the background; it stops when stoppingCts is cancelled.
+        timerTask = timerTaskExecution(stoppingCts.Token);
 
         //Kick off the first one manually.
         await tick(cancellationToken);
@@ -70,8 +72,15 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
     private async Task timerTaskExecution(CancellationToken cancellationToken)
     {
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-            await tick(cancellationToken);
+        try
+        {
+            while (await timer!.WaitForNextTickAsync(cancellationToken))
+                await tick(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when the service is stopping.
+        }
     }
 
     private async Task tick(CancellationToken cancellationToken)
@@ -88,15 +97,15 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         }
     }
 
-    public Task StopAsync(CancellationToken stoppingToken)
+    public async Task StopAsync(CancellationToken stoppingToken)
     {
         Log.Information($"{GetType().Name} is stopping.");
 
-        //Do Something?
+        // Signal the periodic loop to stop, then wait for it to drain (bounded by the host's stop token).
+        await stoppingCts.CancelAsync();
+        await Task.WhenAny(timerTask, Task.Delay(Timeout.Infinite, stoppingToken));
 
         Log.Information($"{GetType().Name} has stopped.");
-
-        return Task.CompletedTask;
     }
 
     ~baseMQTTService()
@@ -106,6 +115,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
     public void Dispose()
     {
+        stoppingCts.Dispose();
         timer?.Dispose();
     }
 
