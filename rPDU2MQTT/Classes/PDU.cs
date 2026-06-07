@@ -27,6 +27,12 @@ public partial class PDU
     }
 
     /// <summary>
+    /// Turn an outlet on or off (only used when PDU.ActionsEnabled is true).
+    /// </summary>
+    public Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+        => api.SetOutletStateAsync(deviceId, outletIndex, on, cancellationToken);
+
+    /// <summary>
     /// Pull all public data.
     /// </summary>
     /// <param name="cancellationToken"></param>

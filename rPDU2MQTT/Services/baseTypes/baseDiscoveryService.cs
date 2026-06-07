@@ -50,6 +50,33 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
+    /// Build a switch discovery so a controllable outlet can be toggled from Home Assistant.
+    /// The switch shares the outlet's existing state topic and adds a command topic.
+    /// </summary>
+    public SwitchDiscovery BuildSwitch<T>(T item, DiscoveryDevice Parent) where T : NamedEntity, IEntityWithState
+    {
+        return new SwitchDiscovery
+        {
+            ID = item.Entity_Identifier + "_switch",
+            Name = item.Entity_Name + "_switch",
+            DisplayName = "Switch",
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Switch,
+
+            StateTopic = item.GetStateTopic(),
+            ValueTemplate = item.State_ValueTemplate,
+            StateOn = item.State_On,
+            StateOff = item.State_Off,
+            PayloadOn = item.State_On,
+            PayloadOff = item.State_Off,
+            CommandTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.Set.ToJsonString()),
+
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    /// <summary>
     /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
     /// </summary>
     protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)

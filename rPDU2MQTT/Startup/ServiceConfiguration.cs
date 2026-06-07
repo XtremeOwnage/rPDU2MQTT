@@ -108,5 +108,9 @@ public static class ServiceConfiguration
             services.AddHostedService<HomeAssistantDiscoveryService>();
         else
             Log.Warning($"Home Assistant Discovery Disabled.");
+
+        // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
+        if (cfg.PDU.ActionsEnabled)
+            services.AddHostedService<OutletCommandService>();
     }
 }

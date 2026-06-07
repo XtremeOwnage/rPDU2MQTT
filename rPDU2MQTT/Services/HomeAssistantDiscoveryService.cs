@@ -89,6 +89,10 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Discover outlet's state.
             components.Add(BuildState(outlet, newParent));
 
+            // When write-actions are enabled, also expose the outlet as a controllable switch.
+            if (cfg.PDU.ActionsEnabled)
+                components.Add(BuildSwitch(outlet, newParent));
+
             // Discover measurements
             collectDiscovery(outlet.Measurements, newParent, components);
         }

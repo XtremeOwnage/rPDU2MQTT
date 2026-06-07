@@ -37,13 +37,12 @@ Grouped by priority. None of these are started yet.
 
 ## 🟢 Features / nice-to-have
 
-- [ ] **Contextual default device names** — default child names like "Outlet 1" are ambiguous
-  when multiple PDUs are present. Prefix them with the parent, e.g. "PDU 1 Outlet 1",
-  "PDU 2 Outlet 3", so they're distinguishable out of the box.
-- [ ] **Device relationships / hierarchy** — represent parent→child device ownership (a PDU owns
-  its outlets/entities). `via_device` is already emitted, but the parent PDU device isn't
-  published with full info (HA only auto-stubs it). Publish parent devices and ensure the
-  ownership hierarchy shows properly in HA.
+- [x] **Contextual default device names** — outlet device names are now prefixed with their PDU
+  (e.g. "Rack-PDU-1 Dell: r730XD") so they're unambiguous across multiple PDUs.
+- [x] **Device relationships / hierarchy** — verified: each outlet's `via_device` points to its
+  PDU, and the PDU devices publish full info and own their outlets. Remaining (optional): the
+  OneView aggregation root is still a bare stub (it has no entities of its own); naming it via
+  device-discovery is unverified, so left as-is.
 - [ ] **Outlet on/off control (required)** — must be able to toggle outlets on/off, gated by
   the config (`Enable_Actions`). The app is currently read-only; add `switch` entities + MQTT
   command topics and wire the commands back to the PDU API.

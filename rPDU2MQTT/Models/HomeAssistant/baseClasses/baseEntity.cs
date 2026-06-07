@@ -18,6 +18,7 @@ namespace rPDU2MQTT.Models.HomeAssistant.baseClasses;
 [JsonDerivedType(typeof(baseSensorEntity))]
 [JsonDerivedType(typeof(BinarySensorDiscovery))]
 [JsonDerivedType(typeof(SensorDiscovery))]
+[JsonDerivedType(typeof(SwitchDiscovery))]
 [JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = nameof(JsonPolyMorphicTypeName), UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor)]
 public abstract class baseEntity : IBaseDiscovery
 {
