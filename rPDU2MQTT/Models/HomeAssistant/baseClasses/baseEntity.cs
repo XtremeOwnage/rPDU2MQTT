@@ -23,14 +23,19 @@ public abstract class baseEntity : IBaseDiscovery
 {
     [JsonIgnore]
     public string JsonPolyMorphicTypeName { get; set; }
+    #region Availability
     /// <summary>
-    /// Sub-class to hold topics relating to availability.
+    /// Topic carrying the bridge's online/offline status (its MQTT birth/LWT message).
     /// </summary>
-    /// <remarks>
-    /// If, this is not <see langword="null"/>, its properties will be flattened onto the parent object.
-    /// </remarks>
-    [JsonConverter(typeof(FlattenNullableObjectToParentObjectConverter))]
-    public EntityAvailability? Availability { get; set; } = null;
+    [JsonPropertyName("availability_topic")]
+    public string? AvailabilityTopic { get; set; }
+
+    [JsonPropertyName("payload_available")]
+    public string? PayloadAvailable { get; set; } = "online";
+
+    [JsonPropertyName("payload_not_available")]
+    public string? PayloadNotAvailable { get; set; } = "offline";
+    #endregion
 
     /// <summary>
     /// Sub-class which holds properties related to JSON Attributes.
@@ -82,6 +87,12 @@ public abstract class baseEntity : IBaseDiscovery
     /// </summary>
     [JsonPropertyName("device")]
     public required DiscoveryDevice Device { get; init; }
+
+    /// <summary>
+    /// Identifies the application that produced this discovery.
+    /// </summary>
+    [JsonPropertyName("origin")]
+    public DiscoveryOrigin Origin { get; set; } = DiscoveryOrigin.Default;
 
     /// <summary>
     /// Icon for the entity.

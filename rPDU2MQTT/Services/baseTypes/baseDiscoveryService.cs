@@ -47,8 +47,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOn = item.State_On,
             PayloadOff = item.State_Off,
 
-            //Availbility
-            //Availability = outlet.GetAvailability()
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
 
         return PushDiscoveryMessage(discovery, cancellationToken);
@@ -89,9 +88,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             UnitOfMeasurement = measurement.Units,
             ValueTemplate = valueTemplate,
 
-
-            // Availability
-            //Availability = new Models.HomeAssistant.baseClasses.EntityAvailability
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
 
         return PushDiscoveryMessage(discovery, cancellationToken);

@@ -31,7 +31,7 @@ public static class ServiceConfiguration
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
             var lwt = new LastWillAndTestament(
-                MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "Status"), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
+                MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
 
             var mqttBuilder = new HiveMQClientOptionsBuilder()
                 .WithBroker(cfg.MQTT.Connection.Host)

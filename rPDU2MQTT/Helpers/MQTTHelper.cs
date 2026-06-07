@@ -5,6 +5,12 @@ namespace rPDU2MQTT.Helpers;
 
 public static class MQTTHelper
 {
+    /// <summary>Topic suffix (under the parent topic) for the bridge's LWT/birth availability status.</summary>
+    public const string StatusSuffix = "Status";
+
+    /// <summary>Full availability status topic for the configured parent topic.</summary>
+    public static string StatusTopic(string parentTopic) => JoinPaths(parentTopic, StatusSuffix);
+
     /// <summary>
     /// Joins multiple paths into a single MQTT path, ensuring there are no extra slashes.
     /// </summary>
