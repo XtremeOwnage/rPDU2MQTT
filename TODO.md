@@ -43,9 +43,11 @@ Grouped by priority. None of these are started yet.
   PDU, and the PDU devices publish full info and own their outlets. Remaining (optional): the
   OneView aggregation root is still a bare stub (it has no entities of its own); naming it via
   device-discovery is unverified, so left as-is.
-- [ ] **Outlet on/off control (required)** — must be able to toggle outlets on/off, gated by
-  the config (`Enable_Actions`). The app is currently read-only; add `switch` entities + MQTT
-  command topics and wire the commands back to the PDU API.
+- [~] **Outlet on/off control** — implemented (opt-in via `ActionsEnabled`): a `switch` entity
+  per outlet, a command-topic subscriber (`OutletCommandService`), and `PduApiHandler` token
+  auth + `SetOutletStateAsync`. TWO follow-ups: (1) the config key is `ActionsEnabled`, but the
+  sample/your config uses `Enable_Actions` — reconcile the key. (2) the PDU control
+  endpoint/payload is from the Geist/Vertiv spec and is UNVERIFIED against live hardware.
 - [ ] **Alarm integration** — the PDUs expose alarm functionality (there's already an `Alarm`
   model on measurements/devices). Surface these as HA entities (e.g. `binary_sensor` /
   problem device_class, or an alarm panel) so PDU alarms show up in HA.
