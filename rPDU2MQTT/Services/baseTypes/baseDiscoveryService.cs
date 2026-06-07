@@ -77,6 +77,32 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
+    /// Build a "problem" binary sensor reflecting an entity's alarm state.
+    /// </summary>
+    public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent)
+    {
+        return new BinarySensorDiscovery
+        {
+            ID = item.Entity_Identifier + "_alarm",
+            Name = item.Entity_Name + "_alarm",
+            DisplayName = "Alarm",
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.BinarySensor,
+            EntityCategory = EntityCategory.Diagnostic,
+            DeviceClass = "problem",
+
+            StateTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.Alarm.ToJsonString()),
+            // Map the raw alarm state: "none" -> no problem, anything else -> problem.
+            ValueTemplate = "{{ 'OFF' if value == 'none' else 'ON' }}",
+            PayloadOn = "ON",
+            PayloadOff = "OFF",
+
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    /// <summary>
     /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
     /// </summary>
     protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)

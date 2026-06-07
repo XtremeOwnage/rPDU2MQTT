@@ -88,8 +88,11 @@ Pdu:
   PollInterval: 5  # Adjust the polling interval as needed
 ```
 
-### Actions Enabled (Not yet implemented!)
-Enable or disable the ability to perform write-actions on the PDU (e.g., toggling switches).
+### Actions Enabled
+Enable or disable the ability to perform write-actions on the PDU (e.g., toggling outlets).
+When enabled, each outlet is also published as a Home Assistant `switch`, and the bridge
+subscribes to its command topic to relay on/off commands to the PDU. Requires PDU
+`Credentials`. Disabled by default.
 
 ```yaml
 Pdu:

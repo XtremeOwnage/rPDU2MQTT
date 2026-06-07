@@ -52,6 +52,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Create a device, to represent this device.
             var newParent = parent.CreateChild(device);
 
+            // Device-level alarm.
+            components.Add(BuildAlarm(device, newParent));
+
             // Discover outlets.
             collectDiscovery(device.Outlets, newParent, components);
 
@@ -88,6 +91,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Discover outlet's state.
             components.Add(BuildState(outlet, newParent));
+
+            // Outlet-level alarm.
+            components.Add(BuildAlarm(outlet, newParent));
 
             // When write-actions are enabled, also expose the outlet as a controllable switch.
             if (cfg.PDU.ActionsEnabled)

@@ -16,6 +16,9 @@ public enum MqttPath
     [JsonPropertyName("set")]
     Set,
 
+    [JsonPropertyName("alarm")]
+    Alarm,
+
     [JsonPropertyName("measurements")]
     Measurements,
 

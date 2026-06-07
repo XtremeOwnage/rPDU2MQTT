@@ -18,6 +18,7 @@ public class MQTTPublishingService : basePublishingService
         foreach (var device in data.Devices)
         {
             await PublishState(device, cancellationToken);
+            await PublishAlarm(device, device.Alarm, cancellationToken);
 
             foreach (var entity in device.Entity)
             {
@@ -30,6 +31,7 @@ public class MQTTPublishingService : basePublishingService
                 await PublishName(outlet, cancellationToken);
                 await PublishUniqueIdentifier(outlet, cancellationToken);
                 await PublishState(outlet, cancellationToken);
+                await PublishAlarm(outlet, outlet.Alarm, cancellationToken);
                 await PublishMeasurements(outlet.Measurements, cancellationToken);
             }
         }

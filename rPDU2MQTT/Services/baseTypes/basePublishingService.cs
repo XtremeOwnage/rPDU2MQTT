@@ -70,6 +70,16 @@ public abstract class basePublishingService : baseMQTTService
     }
 
     /// <summary>
+    /// Publish an entity's alarm state ("none" when there is no active alarm).
+    /// </summary>
+    protected async Task PublishAlarm<T>(T Entity, Alarm? alarm, CancellationToken cancellationToken)
+        where T : IMQTTKey
+    {
+        var topic = MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.Alarm.ToJsonString());
+        await PublishString(topic, alarm?.State ?? "none", cancellationToken);
+    }
+
+    /// <summary>
     /// Publish entities Unique Identifier.
     /// </summary>
     /// <typeparam name="T"></typeparam>
