@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class MQTTPublishingService : basePublishingService
 {
-    public MQTTPublishingService(MQTTServiceDependancies deps) : base(deps) { }
+    public MQTTPublishingService(MQTTServiceDependencies deps) : base(deps) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {

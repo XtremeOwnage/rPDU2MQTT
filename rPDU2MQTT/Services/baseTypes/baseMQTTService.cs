@@ -10,7 +10,7 @@ namespace rPDU2MQTT.Services.baseTypes;
 /// <summary>
 /// Represents a base hosted service, which interacts with MQTT.
 /// </summary>
-public abstract class baseMQTTTService : IHostedService, IDisposable
+public abstract class baseMQTTService : IHostedService, IDisposable
 {
     private IHiveMQClient mqtt { get; init; }
     private PeriodicTimer? timer;
@@ -20,12 +20,12 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
-    protected baseMQTTTService(MQTTServiceDependancies dependancies) : this(dependancies, dependancies.Cfg.PDU.PollInterval) { }
-    protected baseMQTTTService(MQTTServiceDependancies dependancies, int Interval)
+    protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.PDU.PollInterval) { }
+    protected baseMQTTService(MQTTServiceDependencies dependencies, int Interval)
     {
-        mqtt = dependancies.Mqtt;
-        cfg = dependancies.Cfg;
-        pdu = dependancies.PDU;
+        mqtt = dependencies.Mqtt;
+        cfg = dependencies.Cfg;
+        pdu = dependencies.PDU;
 
         // If the interval is 0, don't create a timer.
         if (Interval <= 0)
@@ -99,7 +99,7 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    ~baseMQTTTService()
+    ~baseMQTTService()
     {
         Log.Debug($"{GetType().Name} has been finalized");
     }

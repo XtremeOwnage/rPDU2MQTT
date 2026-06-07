@@ -11,7 +11,7 @@ public static class ServiceConfiguration
 {
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
-        // While- we can request services when building dependancies-
+        // While- we can request services when building dependencies-
         // Need the configuration DURING service collection initilization- 
         // Because it determiens which hosted services we want to add.
         Config cfg = YamlConfigLoader.GetConfig() ?? throw new Exception("Unable to load configuration");
@@ -99,7 +99,7 @@ public static class ServiceConfiguration
         }
 
 
-        services.AddSingleton<MQTTServiceDependancies>();
+        services.AddSingleton<MQTTServiceDependencies>();
 
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();

@@ -3,11 +3,11 @@
 namespace rPDU2MQTT.Classes;
 
 /// <summary>
-/// Just a helper class, to reduce the constructor size when passing these dependanceies.
+/// Just a helper class, to reduce the constructor size when passing these dependencies.
 /// </summary>
-public class MQTTServiceDependancies
+public class MQTTServiceDependencies
 {
-    public MQTTServiceDependancies(IHiveMQClient mqtt, Config cfg, PDU pdu)
+    public MQTTServiceDependencies(IHiveMQClient mqtt, Config cfg, PDU pdu)
     {
         Mqtt = mqtt;
         Cfg = cfg;

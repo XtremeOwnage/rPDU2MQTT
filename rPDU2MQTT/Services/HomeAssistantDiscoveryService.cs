@@ -14,7 +14,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(MQTTServiceDependancies deps) : base(deps) { }
+    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps) : base(deps) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
@@ -102,7 +102,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
         else if (entity is GroupMeasurement groupMeasurement)
         {
-            await GroupMeasurement_Discover_Min(groupMeasurement, parent, cancellationToken);
+            await DiscoverGroupMeasurementAsync(groupMeasurement, parent, cancellationToken);
         }
         else if (entity is OneViewGroup group)
         {

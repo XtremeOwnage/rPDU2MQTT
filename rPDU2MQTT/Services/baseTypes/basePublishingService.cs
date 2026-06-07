@@ -8,10 +8,10 @@ using rPDU2MQTT.Models.PDU;
 
 namespace rPDU2MQTT.Services.baseTypes;
 
-public abstract class basePublishingService : baseMQTTTService
+public abstract class basePublishingService : baseMQTTService
 {
-    protected basePublishingService(MQTTServiceDependancies dependancies) : base(dependancies, dependancies.Cfg.PDU.PollInterval) { }
-    protected basePublishingService(MQTTServiceDependancies dependancies, int Interval) : base(dependancies, Interval) { }
+    protected basePublishingService(MQTTServiceDependencies dependencies) : base(dependencies, dependencies.Cfg.PDU.PollInterval) { }
+    protected basePublishingService(MQTTServiceDependencies dependencies, int Interval) : base(dependencies, Interval) { }
 
     /// <summary>
     /// Publish a series of measurements under <paramref name="Topic"/>
