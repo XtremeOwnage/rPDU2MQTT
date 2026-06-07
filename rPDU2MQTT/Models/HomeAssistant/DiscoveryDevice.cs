@@ -39,8 +39,20 @@ public record DiscoveryDevice
     [JsonConverter(typeof(DeviceToUniqueIdentifierConverter))]
     public DiscoveryDevice? ParentDevice { get; set; }
 
-    public DiscoveryDevice CreateChild(NamedEntity entity)
+    /// <summary>
+    /// Create a child device of this one.
+    /// </summary>
+    /// <param name="entity">The entity the child device represents.</param>
+    /// <param name="prefixWithParentName">
+    /// When true, prefix the child's name with this device's name (e.g. "Rack-PDU-1 Outlet 1"),
+    /// so names stay unambiguous across multiple parents.
+    /// </param>
+    public DiscoveryDevice CreateChild(NamedEntity entity, bool prefixWithParentName = false)
     {
-        return this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = entity.Entity_DisplayName };
+        var name = prefixWithParentName
+            ? $"{Name} {entity.Entity_DisplayName}"
+            : entity.Entity_DisplayName;
+
+        return this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = name };
     }
 }

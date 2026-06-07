@@ -79,8 +79,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
         else if (entity is Outlet outlet)
         {
-            // Create a device to represent the outlet.
-            var newParent = parent.CreateChild(outlet);
+            // Create a device to represent the outlet. Prefix with the PDU name so outlets
+            // stay distinguishable across multiple PDUs (e.g. "Rack-PDU-1 Dell: r730XD").
+            var newParent = parent.CreateChild(outlet, prefixWithParentName: true);
 
             // Remap Make/Model, IF specified in the configuration.
             RemapColumns(newParent, "Outlet", outlet.Name);
