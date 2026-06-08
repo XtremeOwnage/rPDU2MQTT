@@ -67,7 +67,7 @@ public class PduApiHandler
         };
 
         Log.Information($"[PduApiHandler] Setting outlet {deviceId}/{outletIndex} -> {action}");
-        var response = await http.PostAsJsonAsync(path, body, cancellationToken);
+        var response = await PostJsonWithRetryAsync(path, body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
 
         if (!response.IsSuccessStatusCode || result is null || result.RetCode != 0)
@@ -96,7 +96,7 @@ public class PduApiHandler
         var hashedPassword = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(creds.Password))).ToLowerInvariant();
         var body = new { cmd = "login", data = new { password = hashedPassword } };
 
-        var response = await http.PostAsJsonAsync($"/api/auth/{Uri.EscapeDataString(creds.Username)}", body, cancellationToken);
+        var response = await PostJsonWithRetryAsync($"/api/auth/{Uri.EscapeDataString(creds.Username)}", body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<AuthData>>(cancellationToken);
 
         if (!response.IsSuccessStatusCode || result is null || result.RetCode != 0 || string.IsNullOrEmpty(result.Data?.Token))
@@ -104,6 +104,27 @@ public class PduApiHandler
 
         authToken = result.Data.Token;
         return authToken;
+    }
+
+    /// <summary>
+    /// POST JSON, retrying once on a transport error. The PDU's embedded HTTP server drops idle
+    /// keep-alive connections, and HttpClient does not auto-retry POSTs, so a pooled-but-dead
+    /// connection surfaces as "connection forcibly closed". A retry uses a fresh connection.
+    /// </summary>
+    private async Task<HttpResponseMessage> PostJsonWithRetryAsync<TBody>(string path, TBody body, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 2;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await http.PostAsJsonAsync(path, body, cancellationToken);
+            }
+            catch (HttpRequestException ex) when (attempt < maxAttempts)
+            {
+                Log.Debug($"[PduApiHandler] POST {path} transport error ({ex.Message}); retrying on a fresh connection.");
+            }
+        }
     }
 
     private sealed class AuthData
