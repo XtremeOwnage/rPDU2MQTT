@@ -17,6 +17,12 @@ public abstract class baseDiscoveryService : baseMQTTService
     public baseDiscoveryService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
 
     /// <summary>
+    /// How long a state may go without an update before HA marks it unavailable. Derived from the
+    /// poll interval (with a floor) so it scales with the configured polling cadence.
+    /// </summary>
+    private TimeSpan StateExpiry => TimeSpan.FromSeconds(Math.Max(cfg.PDU.PollInterval * 3, 60));
+
+    /// <summary>
     /// Build a sensor discovery for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>.
     /// Returns <see langword="null"/> if the measurement cannot be parsed.
     /// </summary>
@@ -45,6 +51,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOn = item.State_On,
             PayloadOff = item.State_Off,
 
+            ExpireAfter = StateExpiry,
             AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
     }
@@ -98,6 +105,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOn = "ON",
             PayloadOff = "OFF",
 
+            ExpireAfter = StateExpiry,
             AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
     }
@@ -137,6 +145,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             UnitOfMeasurement = measurement.Units,
             ValueTemplate = valueTemplate,
 
+            ExpireAfter = StateExpiry,
             AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
     }

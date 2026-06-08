@@ -128,14 +128,14 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     /// <returns></returns>
     protected Task PublishString(string Topic, string Message, CancellationToken cancellationToken)
     {
-        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtMostOnceDelivery);
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery);
         msg.PayloadAsString = Message;
         return Publish(msg, cancellationToken);
     }
 
     protected Task PublishObjectasJSON<TObject>(string Topic, TObject Obj, CancellationToken cancellationToken)
     {
-        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtMostOnceDelivery);
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery);
         msg.PayloadAsString = System.Text.Json.JsonSerializer.Serialize<TObject>(Obj, this.jsonOptions);
         return Publish(msg, cancellationToken);
     }
