@@ -2,6 +2,7 @@ using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 
 namespace rPDU2MQTT.Classes;
@@ -112,14 +113,18 @@ public class PduApiHandler
     /// </summary>
     private async Task<HttpResponseMessage> PostJsonWithRetryAsync<TBody>(string path, TBody body, CancellationToken cancellationToken)
     {
+        // Serialize to a string and send as StringContent so the request carries a Content-Length.
+        // The PDU's embedded HTTP server rejects chunked request bodies (which JsonContent uses,
+        // since it streams without a known length) and resets the connection. Also force HTTP/1.1
+        // and disable Expect: 100-continue for the same reason.
+        var json = JsonSerializer.Serialize(body);
+
         const int maxAttempts = 2;
         for (int attempt = 1; ; attempt++)
         {
-            // The PDU's embedded HTTP server resets POSTs that use Expect: 100-continue or
-            // HTTP/2+. Force HTTP/1.1 and disable 100-continue so the body is sent immediately.
             using var request = new HttpRequestMessage(HttpMethod.Post, path)
             {
-                Content = JsonContent.Create(body),
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
                 Version = System.Net.HttpVersion.Version11,
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
             };
