@@ -141,12 +141,18 @@ public abstract class baseDiscoveryService : baseMQTTService
         };
     }
 
+    // Device discovery topics published on the previous run, so we can clear ones that disappear.
+    private readonly HashSet<string> publishedDeviceTopics = new();
+
     /// <summary>
     /// Publish device-based discovery: one retained message per device containing all of its
-    /// entities as components.
+    /// entities as components. Devices that were published previously but are no longer present
+    /// have their retained discovery message cleared so they don't linger in Home Assistant.
     /// </summary>
     protected async Task PublishDeviceDiscoveries(IEnumerable<baseEntity> components, CancellationToken cancellationToken)
     {
+        var currentTopics = new HashSet<string>();
+
         foreach (var group in components.GroupBy(c => c.Device.UniqueIdentifier))
         {
             var device = new DeviceDiscovery
@@ -155,13 +161,25 @@ public abstract class baseDiscoveryService : baseMQTTService
                 Components = group.ToDictionary(c => c.ID, c => c),
             };
 
+            currentTopics.Add(DeviceTopic(device.Device.UniqueIdentifier));
             await PublishDeviceDiscovery(device, cancellationToken);
         }
+
+        foreach (var staleTopic in publishedDeviceTopics.Except(currentTopics))
+        {
+            Log.Information($"Clearing stale discovery topic {staleTopic}");
+            await ClearRetained(staleTopic, cancellationToken);
+        }
+
+        publishedDeviceTopics.Clear();
+        publishedDeviceTopics.UnionWith(currentTopics);
     }
+
+    private string DeviceTopic(string deviceIdentifier) => $"{cfg.HASS.DiscoveryTopic}/device/{deviceIdentifier}/config";
 
     private Task PublishDeviceDiscovery(DeviceDiscovery device, CancellationToken cancellationToken)
     {
-        var topic = $"{cfg.HASS.DiscoveryTopic}/device/{device.Device.UniqueIdentifier}/config";
+        var topic = DeviceTopic(device.Device.UniqueIdentifier);
 
         Log.Debug($"Publishing device discovery for {device.Device.UniqueIdentifier} ({device.Components.Count} components) to {topic}");
 
@@ -174,6 +192,18 @@ public abstract class baseDiscoveryService : baseMQTTService
 
         if (cfg.Debug.PrintDiscovery)
             Log.Debug(msg.PayloadAsString);
+
+        return this.Publish(msg, cancellationToken);
+    }
+
+    /// <summary>Clear a retained topic by publishing a zero-length retained message.</summary>
+    private Task ClearRetained(string topic, CancellationToken cancellationToken)
+    {
+        var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
+        {
+            PayloadAsString = string.Empty,
+            Retain = true,
+        };
 
         return this.Publish(msg, cancellationToken);
     }
