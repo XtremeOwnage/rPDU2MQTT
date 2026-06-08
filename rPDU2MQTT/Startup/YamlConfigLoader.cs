@@ -106,6 +106,10 @@ internal class YamlConfigLoader
             if (dvc is not null)
                 dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
+        // Backwards-compatible alias: Enable_Actions -> ActionsEnabled.
+        if (config.PDU.EnableActionsAlias.HasValue)
+            config.PDU.ActionsEnabled = config.PDU.EnableActionsAlias.Value;
+
         ApplyEnvironmentOverrides(config);
 
         return config;

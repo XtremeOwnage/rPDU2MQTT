@@ -111,6 +111,12 @@ public static class ServiceConfiguration
 
         // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
         if (cfg.PDU.ActionsEnabled)
+        {
+            if (string.IsNullOrEmpty(cfg.PDU.Credentials?.Username) || string.IsNullOrEmpty(cfg.PDU.Credentials?.Password))
+                Log.Warning("PDU.ActionsEnabled is true, but PDU credentials are not set. Outlet on/off control will fail until Pdu.Credentials (or RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD) are provided.");
+
+            Log.Information("Outlet control is ENABLED (ActionsEnabled).");
             services.AddHostedService<OutletCommandService>();
+        }
     }
 }

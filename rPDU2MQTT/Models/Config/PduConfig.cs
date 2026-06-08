@@ -39,6 +39,12 @@ public class PduConfig
     [Display(Description = "Indicates whether actions are enabled.")]
     public bool ActionsEnabled { get; set; }
 
+    /// <summary>
+    /// Backwards-compatible alias for <see cref="ActionsEnabled"/>; applied during config load.
+    /// </summary>
+    [YamlMember(Alias = "Enable_Actions", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    public bool? EnableActionsAlias { get; set; }
+
     [DefaultValue(false)]
     [YamlMember(Alias = "RemapModel", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Enables remapping the model column for devices to display data related to which PDU, Outlet.")]
     /// <summary>
