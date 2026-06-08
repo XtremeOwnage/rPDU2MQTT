@@ -35,8 +35,16 @@ public class OutletCommandService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         mqtt.OnMessageReceived += OnMessageReceived;
-        await mqtt.SubscribeAsync(commandFilter, QualityOfService.AtLeastOnceDelivery);
-        Log.Information($"Outlet command handler subscribed to {commandFilter}");
+
+        var result = await mqtt.SubscribeAsync(commandFilter, QualityOfService.AtLeastOnceDelivery);
+        foreach (var sub in result.Subscriptions)
+        {
+            // SUBACK reason codes 0-2 are "granted QoS 0/1/2"; anything else is a failure/denial.
+            if ((int)sub.SubscribeReasonCode <= 2)
+                Log.Information($"Outlet command handler subscribed to {sub.TopicFilter.Topic} ({sub.SubscribeReasonCode}).");
+            else
+                Log.Error($"Outlet command subscription to {sub.TopicFilter.Topic} was NOT granted ({sub.SubscribeReasonCode}). Outlet control will not work - the MQTT account likely lacks subscribe permission on this topic.");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
