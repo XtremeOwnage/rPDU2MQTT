@@ -80,6 +80,29 @@ Pdu:
     Password: "actionsPass"  # Replace with your PDU password
 ```
 
+### Credentials via environment / secrets (Optional)
+To keep secrets out of `config.yaml`, MQTT and PDU credentials can be supplied via environment
+variables. These override whatever is in the config file:
+
+| Variable | Overrides |
+| --- | --- |
+| `RPDU2MQTT_MQTT_USERNAME` / `RPDU2MQTT_MQTT_PASSWORD` | MQTT broker credentials |
+| `RPDU2MQTT_PDU_USERNAME` / `RPDU2MQTT_PDU_PASSWORD` | PDU credentials |
+
+For each variable, a `<NAME>_FILE` form is also supported: set it to a file path (e.g. a Docker
+secret at `/run/secrets/mqtt_password`) and the value is read from that file. The `_FILE` form
+takes precedence over the plain variable.
+
+```yaml
+# docker-compose example
+services:
+  rpdu2mqtt:
+    environment:
+      RPDU2MQTT_MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
+    secrets:
+      - mqtt_password
+```
+
 ### Polling Interval (Optional)
 Set how often the PDU sensors should be polled and published to MQTT (in seconds).
 

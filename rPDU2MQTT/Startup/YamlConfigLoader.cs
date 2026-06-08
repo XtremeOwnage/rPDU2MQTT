@@ -106,7 +106,46 @@ internal class YamlConfigLoader
             if (dvc is not null)
                 dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
+        ApplyEnvironmentOverrides(config);
 
         return config;
+    }
+
+    /// <summary>
+    /// Override credentials from the environment so secrets don't have to live in config.yaml.
+    /// For each variable, a "<NAME>_FILE" pointing at a file (Docker secret) takes precedence.
+    /// </summary>
+    private static void ApplyEnvironmentOverrides(Config config)
+    {
+        var mqttUser = ResolveSecret("RPDU2MQTT_MQTT_USERNAME");
+        var mqttPass = ResolveSecret("RPDU2MQTT_MQTT_PASSWORD");
+        if (mqttUser is not null || mqttPass is not null)
+        {
+            config.MQTT.Credentials ??= new Models.Config.Schemas.Credentials();
+            if (mqttUser is not null) { config.MQTT.Credentials.Username = mqttUser; Log.Information("Using MQTT username from environment."); }
+            if (mqttPass is not null) { config.MQTT.Credentials.Password = mqttPass; Log.Information("Using MQTT password from environment."); }
+        }
+
+        var pduUser = ResolveSecret("RPDU2MQTT_PDU_USERNAME");
+        var pduPass = ResolveSecret("RPDU2MQTT_PDU_PASSWORD");
+        if (pduUser is not null || pduPass is not null)
+        {
+            config.PDU.Credentials ??= new Models.Config.Schemas.Credentials();
+            if (pduUser is not null) { config.PDU.Credentials.Username = pduUser; Log.Information("Using PDU username from environment."); }
+            if (pduPass is not null) { config.PDU.Credentials.Password = pduPass; Log.Information("Using PDU password from environment."); }
+        }
+    }
+
+    /// <summary>
+    /// Resolve a secret from "<name>_FILE" (a file path, e.g. a Docker secret) if present,
+    /// otherwise from the environment variable itself. Returns null when neither is set.
+    /// </summary>
+    private static string? ResolveSecret(string name)
+    {
+        var filePath = Environment.GetEnvironmentVariable($"{name}_FILE");
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+            return File.ReadAllText(filePath).Trim();
+
+        return Environment.GetEnvironmentVariable(name);
     }
 }
