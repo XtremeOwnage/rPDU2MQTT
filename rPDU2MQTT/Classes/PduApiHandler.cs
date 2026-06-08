@@ -2,8 +2,6 @@ using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDUResponse;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace rPDU2MQTT.Classes;
@@ -82,7 +80,9 @@ public class PduApiHandler
     /// Authenticate (if needed) and return a session token, caching it for reuse.
     /// </summary>
     /// <remarks>
-    /// Geist login is a POST to /api/auth/{username} with the SHA-256 hash of the password.
+    /// Matches the PDU web UI: POST /api/auth/{username} with the plaintext password, wrapped as
+    /// {"token":"","cmd":"login","data":{"password":...}}. retCode 1001 = NOT_AUTHORIZED (user
+    /// invalid/disabled/no permission); 1004 = invalid password.
     /// </remarks>
     private async Task<string> GetTokenAsync(CancellationToken cancellationToken)
     {
@@ -93,8 +93,7 @@ public class PduApiHandler
         if (string.IsNullOrEmpty(creds?.Username) || string.IsNullOrEmpty(creds?.Password))
             throw new Exception("PDU username and password are required for write-actions (PDU.ActionsEnabled).");
 
-        var hashedPassword = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(creds.Password))).ToLowerInvariant();
-        var body = new { cmd = "login", data = new { password = hashedPassword } };
+        var body = new { token = "", cmd = "login", data = new { password = creds.Password } };
 
         var response = await PostJsonWithRetryAsync($"/api/auth/{Uri.EscapeDataString(creds.Username)}", body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<AuthData>>(cancellationToken);
@@ -116,9 +115,19 @@ public class PduApiHandler
         const int maxAttempts = 2;
         for (int attempt = 1; ; attempt++)
         {
+            // The PDU's embedded HTTP server resets POSTs that use Expect: 100-continue or
+            // HTTP/2+. Force HTTP/1.1 and disable 100-continue so the body is sent immediately.
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = JsonContent.Create(body),
+                Version = System.Net.HttpVersion.Version11,
+                VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+            };
+            request.Headers.ExpectContinue = false;
+
             try
             {
-                return await http.PostAsJsonAsync(path, body, cancellationToken);
+                return await http.SendAsync(request, cancellationToken);
             }
             catch (HttpRequestException ex) when (attempt < maxAttempts)
             {
