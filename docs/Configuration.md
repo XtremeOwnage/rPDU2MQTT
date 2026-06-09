@@ -2,6 +2,8 @@
 
 This guide will walk you through the configuration options available for this service. The configuration file, typically named `config.yaml`, should be properly set up before deploying the service.
 
+> Clustering multiple PDUs? See [Aggregation.md](Aggregation.md) for OneView setup.
+
 ## MQTT Configuration
 
 ### Credentials (Optional)
