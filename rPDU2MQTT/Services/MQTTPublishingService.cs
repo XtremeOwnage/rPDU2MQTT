@@ -28,6 +28,10 @@ public class MQTTPublishingService : basePublishingService
             }
             foreach (var outlet in device.Outlets)
             {
+                // While a control command is still pending, report the commanded state instead of
+                // the stale polled one so HA doesn't flap back during the PDU's apply delay.
+                outlet.State = pdu.ResolveOutletState(device.Key, outlet.Key, outlet.State);
+
                 await PublishName(outlet, cancellationToken);
                 await PublishUniqueIdentifier(outlet, cancellationToken);
                 await PublishState(outlet, cancellationToken);

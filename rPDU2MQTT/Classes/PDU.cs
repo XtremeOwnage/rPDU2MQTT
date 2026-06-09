@@ -26,11 +26,46 @@ public partial class PDU
         this.api = api;
     }
 
+    // After a control command the PDU can sit in a "pending" state for up to ~a minute while it
+    // applies the change, during which it still reports the OLD state. Latch the commanded state
+    // so polling doesn't flap Home Assistant back until the PDU actually catches up (or we time out).
+    private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletStates = new();
+    private readonly object pendingLock = new();
+    private static readonly TimeSpan PendingStateTimeout = TimeSpan.FromSeconds(120);
+
     /// <summary>
     /// Turn an outlet on or off (only used when PDU.ActionsEnabled is true).
     /// </summary>
-    public Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
-        => api.SetOutletStateAsync(deviceId, outletIndex, on, cancellationToken);
+    public async Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+    {
+        await api.SetOutletStateAsync(deviceId, outletIndex, on, cancellationToken);
+
+        lock (pendingLock)
+            pendingOutletStates[$"{deviceId}/{outletIndex}"] = (on ? "on" : "off", DateTime.UtcNow.Add(PendingStateTimeout));
+    }
+
+    /// <summary>
+    /// Resolve the state to report for an outlet: while a recent command is still pending (the PDU
+    /// hasn't applied it yet) report the commanded state instead of the stale polled one.
+    /// </summary>
+    public string ResolveOutletState(string deviceId, int outletIndex, string actualState)
+    {
+        lock (pendingLock)
+        {
+            var key = $"{deviceId}/{outletIndex}";
+            if (!pendingOutletStates.TryGetValue(key, out var pending))
+                return actualState;
+
+            // Applied, or timed out -> stop latching and report reality.
+            if (string.Equals(actualState, pending.expected, StringComparison.OrdinalIgnoreCase) || DateTime.UtcNow >= pending.expiresUtc)
+            {
+                pendingOutletStates.Remove(key);
+                return actualState;
+            }
+
+            return pending.expected;
+        }
+    }
 
     /// <summary>
     /// Pull all public data.
