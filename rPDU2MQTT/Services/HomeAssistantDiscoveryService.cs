@@ -1,5 +1,6 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.PDU;
@@ -15,31 +16,71 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps) : base(deps) { }
+    private readonly SemaphoreSlim discoveryLock = new(1, 1);
+
+    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
+    {
+        // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
+        coordinator.RediscoverRequested += Execute;
+    }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        Log.Debug("Starting discovery job.");
-        var data = await pdu.GetRootData_Public(cancellationToken);
-
-        // Collect every entity, then publish one device-based discovery message per device.
-        var components = new List<baseEntity>();
-
-        // Discover PDUs, Outlets, etc...
-        foreach (rPDU nestedPDU in data.PDUs)
+        // The timer and the on-demand rediscover trigger can both call this; don't overlap.
+        if (!await discoveryLock.WaitAsync(0, cancellationToken))
         {
-            var pduDevice = nestedPDU.GetDiscoveryDevice();
-            collectDiscovery(nestedPDU.Devices, pduDevice, components);
+            Log.Debug("Discovery already in progress; skipping this request.");
+            return;
         }
 
-        // Discover OneView Groups.
-        var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
-        if (firstPDU is not null)
-            collectDiscovery(data.Groups, firstPDU, components);
+        try
+        {
+            Log.Debug("Starting discovery job.");
+            var data = await pdu.GetRootData_Public(cancellationToken);
 
-        await PublishDeviceDiscoveries(components, cancellationToken);
+            // Collect every entity, then publish one device-based discovery message per device.
+            var components = new List<baseEntity>();
 
-        Log.Information("Discovery information published.");
+            // Discover PDUs, Outlets, etc...
+            foreach (rPDU nestedPDU in data.PDUs)
+            {
+                var pduDevice = nestedPDU.GetDiscoveryDevice();
+                collectDiscovery(nestedPDU.Devices, pduDevice, components);
+            }
+
+            // Discover OneView Groups.
+            var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
+            if (firstPDU is not null)
+                collectDiscovery(data.Groups, firstPDU, components);
+
+            // Bridge device with diagnostic action buttons.
+            components.AddRange(BuildDiagnosticButtons());
+
+            await PublishDeviceDiscoveries(components, cancellationToken);
+
+            Log.Information("Discovery information published.");
+        }
+        finally
+        {
+            discoveryLock.Release();
+        }
+    }
+
+    /// <summary>Buttons for the bridge device: rediscover and restart (see DiagnosticService).</summary>
+    private IEnumerable<baseEntity> BuildDiagnosticButtons()
+    {
+        var bridge = new DiscoveryDevice
+        {
+            UniqueIdentifier = "rPDU2MQTT",
+            Name = "rPDU2MQTT",
+            Manufacturer = "rPDU2MQTT",
+            Model = "MQTT Bridge",
+        };
+
+        yield return BuildButton("rPDU2MQTT_rediscover", "Rediscover",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RediscoverSuffix), bridge);
+        yield return BuildButton("rPDU2MQTT_restart", "Restart",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
     }
 
 

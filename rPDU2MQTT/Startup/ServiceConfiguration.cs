@@ -104,8 +104,14 @@ public static class ServiceConfiguration
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();
 
+        // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
+        services.AddSingleton<DiscoveryCoordinator>();
+
         if (cfg.HASS.DiscoveryEnabled)
+        {
             services.AddHostedService<HomeAssistantDiscoveryService>();
+            services.AddHostedService<DiagnosticService>();
+        }
         else
             Log.Warning($"Home Assistant Discovery Disabled.");
 

@@ -8,6 +8,10 @@ public static class MQTTHelper
     /// <summary>Topic suffix (under the parent topic) for the bridge's LWT/birth availability status.</summary>
     public const string StatusSuffix = "Status";
 
+    /// <summary>Command-topic suffixes (under the parent topic) for the diagnostic action buttons.</summary>
+    public const string RediscoverSuffix = "rediscover";
+    public const string RestartSuffix = "restart";
+
     /// <summary>Full availability status topic for the configured parent topic.</summary>
     public static string StatusTopic(string parentTopic) => JoinPaths(parentTopic, StatusSuffix);
 

@@ -84,6 +84,27 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
+    /// Build a stateless button entity that publishes to <paramref name="commandTopic"/> when pressed.
+    /// </summary>
+    public ButtonDiscovery BuildButton(string id, string displayName, string commandTopic, DiscoveryDevice Parent, string? deviceClass = null)
+    {
+        return new ButtonDiscovery
+        {
+            ID = id,
+            Name = id,
+            DisplayName = displayName,
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Button,
+            EntityCategory = EntityCategory.Diagnostic,
+            DeviceClass = deviceClass,
+
+            CommandTopic = commandTopic,
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    /// <summary>
     /// Build a "problem" binary sensor reflecting an entity's alarm state.
     /// </summary>
     public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent)
