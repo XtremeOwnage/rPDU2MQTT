@@ -241,6 +241,20 @@ Logging:
     FileRetention: 30  # Number of rolled over logs to retain
 ```
 
+### Syslog Logging
+Send logs to a remote syslog server (RFC3164/RFC5424) over UDP or TCP.
+
+```yaml
+Logging:
+  Syslog:
+    Enabled: false       # Set to true to enable syslog
+    Host: "10.0.0.10"    # Syslog server hostname/IP (required when enabled)
+    Port: 514            # Syslog server port
+    Protocol: UDP        # UDP or TCP
+    AppName: "rPDU2MQTT" # Application name reported in syslog messages
+    Severity: Information # Minimum severity of messages to send
+```
+
 
 ## Example Configurations
 

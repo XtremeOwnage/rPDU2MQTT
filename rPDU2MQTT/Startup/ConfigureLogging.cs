@@ -36,6 +36,20 @@ public static class ConfigureLoggingExtension
             }
             else
                 Log.Debug("Will not log to file.");
+
+            // Configure logging to a remote syslog server.
+            if (cfg.Logging.Syslog.Enabled)
+            {
+                var sl = cfg.Logging.Syslog;
+                ThrowError.TestRequiredConfigurationSection(sl.Host, "Config.Logging.Syslog.Host");
+
+                if (sl.Protocol == Models.Config.Schemas.SyslogProtocol.TCP)
+                    o.WriteTo.TcpSyslog(sl.Host, sl.Port, appName: sl.AppName, restrictedToMinimumLevel: sl.Severity);
+                else
+                    o.WriteTo.UdpSyslog(sl.Host, sl.Port, appName: sl.AppName, restrictedToMinimumLevel: sl.Severity);
+
+                Log.Debug($"Will log to syslog at {sl.Host}:{sl.Port} ({sl.Protocol}).");
+            }
         });
 
         return services;
