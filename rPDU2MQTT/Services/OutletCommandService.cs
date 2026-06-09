@@ -72,6 +72,14 @@ public class OutletCommandService : IHostedService
             var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
 
             await pdu.SetOutletStateAsync(deviceId, outletIndex, on, CancellationToken.None);
+
+            // Optimistically publish the new state so HA reflects it immediately instead of waiting
+            // for the next poll. The regular poll will confirm/correct it shortly after.
+            var stateTopic = topic[..^MqttPath.Set.ToJsonString().Length] + MqttPath.State.ToJsonString();
+            await mqtt.PublishAsync(new MQTT5PublishMessage(stateTopic, QualityOfService.AtLeastOnceDelivery)
+            {
+                PayloadAsString = on ? "on" : "off",
+            });
         }
         catch (Exception ex)
         {
