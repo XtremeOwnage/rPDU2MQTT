@@ -14,7 +14,10 @@ public class PduApiHandler
 {
     private readonly HttpClient http;
     private readonly Config config;
-    private string? authToken;
+    // Session token per host web port (OneView cluster members are reached via the master's proxy port).
+    private readonly Dictionary<long, string> tokensByPort = new();
+    // deviceId -> owning host web port (0 = the directly-connected/base host).
+    private Dictionary<string, long>? deviceWebPorts;
 
     public PduApiHandler([DisallowNull, NotNull] HttpClient http, Config config)
     {
@@ -53,11 +56,13 @@ public class PduApiHandler
     /// </remarks>
     public async Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
     {
-        var token = await GetTokenAsync(cancellationToken);
+        var webPort = await ResolveWebPortAsync(deviceId, cancellationToken);
+        var token = await GetTokenAsync(webPort, cancellationToken);
         var action = on ? "on" : "off";
 
-        // The control resource is the same /api/dev/{device}/outlet/{index} path as the read API.
-        var path = $"/api/dev/{deviceId}/outlet/{outletIndex}";
+        // The control resource is the same /api/dev/{device}/outlet/{index} path as the read API,
+        // targeted at the host that owns the device (a proxy port for cluster members).
+        var url = BuildUrl(webPort, $"/api/dev/{deviceId}/outlet/{outletIndex}");
         var body = new
         {
             cmd = "control",
@@ -66,29 +71,29 @@ public class PduApiHandler
         };
 
         Log.Information($"[PduApiHandler] Setting outlet {deviceId}/{outletIndex} -> {action}");
-        var response = await PostJsonWithRetryAsync(path, body, cancellationToken);
+        var response = await PostJsonWithRetryAsync(url, body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
 
         if (!response.IsSuccessStatusCode || result is null || result.RetCode != 0)
         {
             // A stale token is the most likely failure; drop it so the next call re-authenticates.
-            authToken = null;
+            tokensByPort.Remove(webPort);
             throw new Exception($"[PduApiHandler] Outlet control failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
         }
     }
 
     /// <summary>
-    /// Authenticate (if needed) and return a session token, caching it for reuse.
+    /// Authenticate (if needed) against the given host port and return a session token, cached per port.
     /// </summary>
     /// <remarks>
     /// Matches the PDU web UI: POST /api/auth/{username} with the plaintext password, wrapped as
     /// {"token":"","cmd":"login","data":{"password":...}}. retCode 1001 = NOT_AUTHORIZED (user
     /// invalid/disabled/no permission); 1004 = invalid password.
     /// </remarks>
-    private async Task<string> GetTokenAsync(CancellationToken cancellationToken)
+    private async Task<string> GetTokenAsync(long webPort, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(authToken))
-            return authToken;
+        if (tokensByPort.TryGetValue(webPort, out var cached) && !string.IsNullOrEmpty(cached))
+            return cached;
 
         var creds = config.PDU.Credentials;
         if (string.IsNullOrEmpty(creds?.Username) || string.IsNullOrEmpty(creds?.Password))
@@ -96,14 +101,55 @@ public class PduApiHandler
 
         var body = new { token = "", cmd = "login", data = new { password = creds.Password } };
 
-        var response = await PostJsonWithRetryAsync($"/api/auth/{Uri.EscapeDataString(creds.Username)}", body, cancellationToken);
+        var response = await PostJsonWithRetryAsync(BuildUrl(webPort, $"/api/auth/{Uri.EscapeDataString(creds.Username)}"), body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<AuthData>>(cancellationToken);
 
         if (!response.IsSuccessStatusCode || result is null || result.RetCode != 0 || string.IsNullOrEmpty(result.Data?.Token))
             throw new Exception($"[PduApiHandler] PDU login failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
 
-        authToken = result.Data.Token;
-        return authToken;
+        tokensByPort[webPort] = result.Data.Token;
+        return result.Data.Token;
+    }
+
+    /// <summary>
+    /// Resolve the web port of the host that owns a device. In a OneView cluster, member PDUs are
+    /// reached through the master's per-member proxy port; the master itself uses the base port (0).
+    /// </summary>
+    private async Task<long> ResolveWebPortAsync(string deviceId, CancellationToken cancellationToken)
+    {
+        if (deviceWebPorts is null || !deviceWebPorts.ContainsKey(deviceId))
+            deviceWebPorts = await BuildWebPortMapAsync(cancellationToken);
+
+        return deviceWebPorts.TryGetValue(deviceId, out var port) ? port : 0;
+    }
+
+    private async Task<Dictionary<string, long>> BuildWebPortMapAsync(CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var https = string.Equals(http.BaseAddress?.Scheme, "https", StringComparison.OrdinalIgnoreCase);
+            var oneview = await GetAsync<Models.PDU.OneView.OneViewRootData>("/oneview", cancellationToken);
+            foreach (var host in oneview.Hosts)
+                foreach (var device in host.Cache?.Devices ?? new())
+                    if (!string.IsNullOrEmpty(device.Key))
+                        map[device.Key] = https ? host.HttpsPort : host.WebPort;
+        }
+        catch (Exception ex)
+        {
+            // Not a OneView/cluster deployment (or /oneview unavailable); fall back to the base host.
+            Log.Debug($"[PduApiHandler] Could not build device->host map ({ex.Message}); using base host.");
+        }
+        return map;
+    }
+
+    /// <summary>Build a request URL targeting the owning host (a proxy port for cluster members).</summary>
+    private string BuildUrl(long webPort, string relativePath)
+    {
+        if (webPort <= 0 || http.BaseAddress is null)
+            return relativePath; // base address (master / single PDU)
+
+        return $"{http.BaseAddress.Scheme}://{http.BaseAddress.Host}:{webPort}{relativePath}";
     }
 
     /// <summary>
