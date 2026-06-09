@@ -36,9 +36,12 @@
 
 ## 📌 Open
 
+- [x] **Outlet control — verified on live hardware** (both PDUs incl. OneView cluster via the
+  master's proxy port; auth, control, optimistic + latched state all confirmed working).
 - [ ] **Push / release** — this session's commits live on local `working-branch`. Push it (builds
   `:dev`) and tag `v0.4.0` to publish a release image.
-- [ ] **Outlet control — verify PDU endpoint** against live hardware before relying on it.
+- [ ] **Outlet control docs** — document setup: `ActionsEnabled`, a PDU user with **Control** on
+  every cluster node, proxy-port behavior, and the PDU apply-delay.
 - [ ] **Release workflow** — consider a dedicated GitHub Release workflow (changelog/artifacts)
   beyond the container build.
 - [ ] **README & documentation** — make the README more thorough and less AI-generated in tone.
