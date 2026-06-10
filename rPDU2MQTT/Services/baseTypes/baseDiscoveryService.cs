@@ -17,10 +17,10 @@ public abstract class baseDiscoveryService : baseMQTTService
     public baseDiscoveryService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
 
     /// <summary>
-    /// How long a state may go without an update before HA marks it unavailable. Derived from the
-    /// poll interval (with a floor) so it scales with the configured polling cadence.
+    /// How long a state may go without an update before HA marks it unavailable
+    /// (HomeAssistant.SensorExpireAfterSeconds).
     /// </summary>
-    private TimeSpan StateExpiry => TimeSpan.FromSeconds(Math.Max(cfg.PDU.PollInterval * 3, 60));
+    private TimeSpan StateExpiry => TimeSpan.FromSeconds(cfg.HASS.SensorExpireAfterSeconds);
 
     /// <summary>
     /// Build a sensor discovery for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>.

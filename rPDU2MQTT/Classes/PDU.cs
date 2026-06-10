@@ -70,9 +70,42 @@ public partial class PDU
     /// <summary>
     /// Pull all public data.
     /// </summary>
+    /// <remarks>
+    /// Results are cached briefly so that multiple consumers (MQTT publisher, discovery, and the
+    /// optional Prometheus/EmonCMS exporters) polling on the same interval share a single PDU fetch
+    /// instead of each hitting the PDU API. Consumers must treat the result as read-only.
+    /// </remarks>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     public async Task<PduData> GetRootData_Public(CancellationToken cancellationToken)
+    {
+        var ttl = TimeSpan.FromSeconds(Math.Max(1, config.PDU.PollInterval / 2.0));
+
+        if (cachedData is not null && DateTime.UtcNow - cachedDataAtUtc < ttl)
+            return cachedData;
+
+        await dataFetchLock.WaitAsync(cancellationToken);
+        try
+        {
+            // A concurrent caller may have refreshed the cache while we waited for the lock.
+            if (cachedData is not null && DateTime.UtcNow - cachedDataAtUtc < ttl)
+                return cachedData;
+
+            cachedData = await FetchRootData(cancellationToken);
+            cachedDataAtUtc = DateTime.UtcNow;
+            return cachedData;
+        }
+        finally
+        {
+            dataFetchLock.Release();
+        }
+    }
+
+    private readonly SemaphoreSlim dataFetchLock = new(1, 1);
+    private PduData? cachedData;
+    private DateTime cachedDataAtUtc;
+
+    private async Task<PduData> FetchRootData(CancellationToken cancellationToken)
     {
         if (useOneView is null)
         {

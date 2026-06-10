@@ -61,12 +61,16 @@ public abstract class basePublishingService : baseMQTTService
     /// <param name="Entity"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    protected async Task PublishState<T>(T Entity, CancellationToken cancellationToken)
+    protected Task PublishState<T>(T Entity, CancellationToken cancellationToken)
+        where T : IMQTTKey, IEntityWithState
+        => PublishState(Entity, Entity.State, cancellationToken);
+
+    /// <summary>Publish an explicit state value for an entity (e.g. a latched/optimistic state).</summary>
+    protected async Task PublishState<T>(T Entity, string state, CancellationToken cancellationToken)
         where T : IMQTTKey, IEntityWithState
     {
         var topic = MQTTHelper.JoinPaths(Entity.GetTopicPath(), Entity.State_Topic);
-        await PublishString(topic, Entity.State, cancellationToken);
-
+        await PublishString(topic, state, cancellationToken);
     }
 
     /// <summary>
