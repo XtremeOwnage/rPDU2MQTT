@@ -258,6 +258,32 @@ Logging:
 ```
 
 
+## Metric Exporters (Optional)
+
+In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled
+by default and poll on the same `Pdu.PollInterval` cadence.
+
+### Prometheus
+Exposes a `/metrics` endpoint. Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`)
+labelled by `device`, `source`, and `units`.
+
+```yaml
+Prometheus:
+  Enabled: false
+  Port: 9184   # /metrics endpoint port
+```
+
+### EmonCMS
+Pushes measurements to an EmonCMS server's `input/post` API (EmonCMS auto-creates the inputs).
+
+```yaml
+EmonCMS:
+  Enabled: false
+  Url: "http://emoncms.example.com"   # required when enabled
+  ApiKey: "your-write-apikey"         # or set RPDU2MQTT_EMONCMS_APIKEY
+  Node: "rpdu2mqtt"
+```
+
 ## Example Configurations
 
 Here- are a few example configuration files.

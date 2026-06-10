@@ -53,6 +53,46 @@ public class EnumExtensionsTests
         => Assert.Equal(expected, value.ToJsonString());
 }
 
+public class MetricsHelperTests
+{
+    [Fact]
+    public void EnumerateReadings_FlattensNumericMeasurements_AndSkipsNonNumeric()
+    {
+        var data = new PduData
+        {
+            Devices =
+            {
+                new Device
+                {
+                    Entity_Name = "PDU1",
+                    Entity = new List<Entity>(),
+                    Outlets = new List<Outlet>
+                    {
+                        new Outlet
+                        {
+                            Entity_Name = "Outlet1",
+                            Measurements = new List<Measurement>
+                            {
+                                new Measurement { Type = "realPower", Value = "123.4", Units = "W", Entity_Identifier = "id_power" },
+                                new Measurement { Type = "voltage",   Value = "n/a",   Units = "V", Entity_Identifier = "id_v" },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+
+        var readings = MetricsHelper.EnumerateReadings(data).ToList();
+
+        Assert.Single(readings); // the non-numeric "voltage" is skipped
+        Assert.Equal("PDU1", readings[0].Device);
+        Assert.Equal("Outlet1", readings[0].Source);
+        Assert.Equal("realPower", readings[0].Type);
+        Assert.Equal(123.4, readings[0].Value);
+        Assert.Equal("W", readings[0].Units);
+    }
+}
+
 public class MeasurementHelperTests
 {
     [Theory]

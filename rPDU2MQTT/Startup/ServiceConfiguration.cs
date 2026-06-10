@@ -104,6 +104,16 @@ public static class ServiceConfiguration
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();
 
+        // Optional metric exporters.
+        if (cfg.Prometheus.Enabled)
+            services.AddHostedService<PrometheusExportService>();
+
+        if (cfg.EmonCMS.Enabled)
+        {
+            ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
+            services.AddHostedService<EmonCmsExportService>();
+        }
+
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
 

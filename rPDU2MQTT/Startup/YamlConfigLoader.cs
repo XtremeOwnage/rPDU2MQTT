@@ -138,6 +138,9 @@ internal class YamlConfigLoader
             if (pduUser is not null) { config.PDU.Credentials.Username = pduUser; Log.Information("Using PDU username from environment."); }
             if (pduPass is not null) { config.PDU.Credentials.Password = pduPass; Log.Information("Using PDU password from environment."); }
         }
+
+        var emonKey = ResolveSecret("RPDU2MQTT_EMONCMS_APIKEY");
+        if (emonKey is not null) { config.EmonCMS.ApiKey = emonKey; Log.Information("Using EmonCMS API key from environment."); }
     }
 
     /// <summary>
