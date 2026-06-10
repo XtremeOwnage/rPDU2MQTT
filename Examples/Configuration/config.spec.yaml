@@ -1,5 +1,7 @@
 Mqtt:
     # Optional Credentials.
+    # Can also be provided via the RPDU2MQTT_MQTT_USERNAME / RPDU2MQTT_MQTT_PASSWORD environment
+    # variables (or a *_FILE variant pointing at a Docker secret), which override the values here.
     Credentials:
         # Add your MQTT Username and Password here.
         Username: "user"
@@ -46,7 +48,9 @@ Pdu:
         # (Optional) Enable or Disable Certificate Validation. Defaults to true.
         ValidateCertificate: true
 
-    # (Optional) Credentials to connect to PDU.
+    # (Optional) Credentials to connect to PDU. Required for write-actions (ActionsEnabled).
+    # Can also be provided via the RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD environment
+    # variables (or a *_FILE variant pointing at a Docker secret), which override the values here.
     Credentials:
         Username: "user"
         Password: "password"
@@ -290,3 +294,36 @@ Logging:
         # The number of rolled over logs which will be retained.
         # Example, if RolloverMode=Day, and this is set to 30, you will retain ~30 days of logs.
         FileRetention: 30
+
+    # Send logs to a remote syslog server (RFC3164/RFC5424).
+    Syslog:
+        # (Optional). Default: false
+        Enabled: false
+        # Syslog server host/ip. Required when enabled.
+        Host: "10.0.0.10"
+        # Syslog server port. Default: 514
+        Port: 514
+        # Transport: UDP or TCP. Default: UDP
+        Protocol: UDP
+        # Application name reported in the syslog messages. Default: rPDU2MQTT
+        AppName: "rPDU2MQTT"
+        # Only messages with this severity or higher are sent. Default: Information
+        Severity: Information
+
+# (Optional) Export measurements to Prometheus, in addition to MQTT.
+Prometheus:
+    # (Optional). Default: false
+    Enabled: false
+    # Port the /metrics endpoint listens on. Default: 9184
+    Port: 9184
+
+# (Optional) Push measurements to an EmonCMS server (inputs are auto-created).
+EmonCMS:
+    # (Optional). Default: false
+    Enabled: false
+    # Base URL of the EmonCMS server. Required when enabled.
+    Url: "http://emoncms.example.com"
+    # EmonCMS write API key. Can also be provided via the RPDU2MQTT_EMONCMS_APIKEY environment variable.
+    ApiKey: "your-write-apikey"
+    # EmonCMS input node name. Default: rpdu2mqtt
+    Node: "rpdu2mqtt"
