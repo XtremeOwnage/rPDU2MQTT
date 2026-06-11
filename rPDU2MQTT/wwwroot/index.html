@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rPDU2MQTT Configuration</title>
+<style>
+  :root { color-scheme: dark; --bg:#15171c; --panel:#1e2128; --panel2:#262a33; --line:#333845; --fg:#e6e8ec; --muted:#9aa3b2; --accent:#4f8cff; --good:#46c46a; --bad:#e5544b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:16px; margin:0; }
+  header .status { color:var(--muted); font-size:12px; margin-left:auto; display:flex; gap:14px; align-items:center; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--muted); margin-right:5px; vertical-align:middle; }
+  .dot.good { background:var(--good); } .dot.bad { background:var(--bad); }
+  .layout { display:flex; min-height:calc(100vh - 53px); }
+  nav { width:200px; border-right:1px solid var(--line); background:var(--panel); padding:10px 0; }
+  nav a { display:block; padding:8px 20px; color:var(--muted); cursor:pointer; border-left:3px solid transparent; }
+  nav a:hover { color:var(--fg); }
+  nav a.active { color:var(--fg); border-left-color:var(--accent); background:var(--panel2); }
+  main { flex:1; padding:24px 28px; max-width:900px; }
+  .section { display:none; } .section.active { display:block; }
+  h2 { margin:0 0 4px; font-size:18px; }
+  .field { margin:14px 0; }
+  .field > label { display:block; font-weight:600; margin-bottom:3px; }
+  .field .desc { color:var(--muted); font-size:12px; margin-bottom:5px; }
+  input[type=text], input[type=password], input[type=number], select {
+    width:100%; max-width:420px; padding:7px 9px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; color:var(--fg); }
+  input[type=checkbox] { width:16px; height:16px; vertical-align:middle; }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:16px 0; padding:8px 16px 16px; background:var(--panel); }
+  fieldset > legend { padding:0 6px; color:var(--accent); font-weight:600; }
+  .map-entry, .list-entry { border:1px solid var(--line); border-radius:8px; padding:8px 14px; margin:10px 0; background:var(--panel2); }
+  .map-entry > .head { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .map-entry .key { max-width:240px; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--fg); padding:7px 14px; border-radius:6px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.danger { color:var(--bad); }
+  button.small { padding:3px 9px; font-size:12px; }
+  .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
+  .toast { margin-left:auto; font-size:13px; } .toast.good { color:var(--good); } .toast.bad { color:var(--bad); }
+  .tools button { margin-right:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rPDU2MQTT</h1>
+  <div class="status">
+    <span id="st-version"></span>
+    <span><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
+  </div>
+</header>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main>
+    <div id="sections"></div>
+    <div class="actions">
+      <button class="primary" id="btn-save">Save</button>
+      <button id="btn-reload">Reload</button>
+      <div class="tools">
+        <button id="btn-test-mqtt">Test MQTT</button>
+        <button id="btn-test-pdu">Test PDU</button>
+      </div>
+      <span class="toast" id="toast"></span>
+    </div>
+  </main>
+</div>
+<script>
+const api = (p, opt) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+let schema = [], data = {};
+
+function ensure(obj, key, fallback) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
+
+function scalarInput(node, obj) {
+  let el;
+  if (node.type === 'bool') {
+    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
+    el.onchange = () => obj[node.key] = el.checked;
+  } else if (node.type === 'enum') {
+    el = document.createElement('select');
+    (node.enumValues || []).forEach(v => { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); });
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value;
+  } else if (node.type === 'int' || node.type === 'double') {
+    el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
+    if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
+  } else {
+    el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
+  }
+  return el;
+}
+
+// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+function renderNode(node, obj, container) {
+  if (node.type === 'object') {
+    const target = ensure(obj, node.key, {});
+    const fs = document.createElement('fieldset');
+    const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    (node.properties || []).forEach(child => renderNode(child, target, fs));
+    container.appendChild(fs);
+  } else if (node.type === 'dictionary') {
+    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
+  } else if (node.type === 'list') {
+    container.appendChild(renderList(node, ensure(obj, node.key, [])));
+  } else {
+    const f = document.createElement('div'); f.className = 'field';
+    const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
+    f.appendChild(scalarInput(node, obj));
+    container.appendChild(f);
+  }
+}
+
+// Render the value of a dictionary/list element (valueSchema has no key of its own).
+function renderValue(valueSchema, holder, keyName, container) {
+  const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
+  if (node.type === 'object') {
+    const target = ensure(holder, keyName, {});
+    (node.properties || []).forEach(child => renderNode(child, target, container));
+  } else {
+    renderNode(node, holder, container);
+  }
+}
+
+function renderMap(node, mapObj) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+  const entries = document.createElement('div'); fs.appendChild(entries);
+
+  const drawEntry = (key) => {
+    const wrap = document.createElement('div'); wrap.className = 'map-entry';
+    const head = document.createElement('div'); head.className = 'head';
+    const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
+    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
+    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
+    head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
+    if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
+    renderValue(node.valueSchema, mapObj, key, wrap);
+    entries.appendChild(wrap);
+  };
+
+  Object.keys(mapObj).forEach(drawEntry);
+  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
+  fs.appendChild(add);
+  return fs;
+}
+
+function renderList(node, arr) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  const entries = document.createElement('div'); fs.appendChild(entries);
+  const draw = (idx) => {
+    const wrap = document.createElement('div'); wrap.className = 'list-entry';
+    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
+    wrap.appendChild(del);
+    renderValue(node.valueSchema, arr, idx, wrap);
+    entries.appendChild(wrap);
+  };
+  const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
+  rebuild();
+  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
+  fs.appendChild(add);
+  return fs;
+}
+
+function build() {
+  const nav = document.getElementById('nav'); const sections = document.getElementById('sections');
+  nav.innerHTML = ''; sections.innerHTML = '';
+  schema.forEach((node, i) => {
+    const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
+    const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+    const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
+    if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
+    else renderNode(node, data, sec);
+    link.onclick = () => {
+      document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      link.classList.add('active'); sec.classList.add('active');
+    };
+    if (i === 0) link.click();
+  });
+}
+
+function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+
+async function load() {
+  schema = (await api('/api/schema')).body;
+  data = (await api('/api/config')).body;
+  build();
+  refreshStatus();
+}
+
+async function refreshStatus() {
+  const { body } = await api('/api/status');
+  document.getElementById('st-version').textContent = 'v' + (body.version || '?');
+  document.getElementById('st-mqtt-dot').className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+}
+
+document.getElementById('btn-reload').onclick = load;
+document.getElementById('btn-save').onclick = async () => {
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
+};
+document.getElementById('btn-test-mqtt').onclick = async () => { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); };
+document.getElementById('btn-test-pdu').onclick = async () => { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); };
+
+load();
+</script>
+</body>
+</html>

@@ -8,6 +8,9 @@ namespace rPDU2MQTT.Startup;
 /// </summary>
 internal class YamlConfigLoader
 {
+    /// <summary>Path of the config file resolved at startup; the GUI reads/writes this same file.</summary>
+    public static string? ResolvedPath { get; private set; }
+
     public static string Find()
     {
         Log.Information("Attempting to locate configuration file.");
@@ -33,6 +36,7 @@ internal class YamlConfigLoader
             if (File.Exists(file))
             {
                 Log.Information($"Found config file at {file}");
+                ResolvedPath = file;
                 return file;
             }
         }

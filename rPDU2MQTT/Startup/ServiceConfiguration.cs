@@ -123,6 +123,10 @@ public static class ServiceConfiguration
         else
             Log.Warning($"Home Assistant Discovery Disabled.");
 
+        // Optional embedded configuration GUI.
+        if (cfg.Gui.Enabled)
+            services.AddHostedService<Services.Gui.GuiService>();
+
         // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
         if (cfg.PDU.ActionsEnabled)
         {

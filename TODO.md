@@ -26,6 +26,9 @@
   **unverified against live hardware**.
 - [x] **Alarm integration** — device + outlet `problem` binary_sensors from the PDU alarm state.
 - [x] **`expire_after` / QoS tuning** — `expire_after` derived from `PollInterval`; state at QoS 1.
+- [x] **Configuration GUI (#69)** — optional embedded web GUI (`Gui.Enabled`): password-protected,
+  structured form generated from the config model, MQTT/PDU connection tests, and saves back to
+  `config.yaml` (with a `.bak`). Restart applies changes.
 
 ### Ops
 - [x] **GHCR publishing** — workflow fixed (built-in BuildKit, no Docker Hub dependency) with

@@ -284,6 +284,34 @@ EmonCMS:
   Node: "rpdu2mqtt"
 ```
 
+## Configuration GUI (Optional)
+
+An embedded web GUI can view, edit and test the configuration instead of hand-editing this file.
+It is disabled by default. When enabled, browse to `http://<host>:<port>` and sign in with the
+configured username/password (HTTP Basic auth).
+
+```yaml
+Gui:
+  Enabled: false
+  Port: 8080
+  Username: "admin"
+  Password: "change-me"   # the GUI refuses to start until this is set
+```
+
+The GUI:
+- Renders a **structured form for every option**, generated from the configuration model (so it stays
+  in sync automatically), with inline descriptions, types, and the dynamic Overrides maps.
+- **Tests** the running services — "Test MQTT" reports broker connectivity and "Test PDU" fetches live
+  data and reports the device/outlet counts.
+- **Saves** back to this config file (keeping a `config.yaml.bak` copy). Changes apply on the next
+  restart, so restart the service after saving.
+
+Notes:
+- Basic auth is sent in clear text, so only expose the GUI on a trusted network or behind a
+  TLS-terminating reverse proxy. Remember to publish/forward the GUI `Port` (e.g. `-p 8080:8080`).
+- "Test" reflects the **currently running** configuration, not unsaved edits — save and restart to
+  test new connection settings.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

@@ -327,3 +327,16 @@ EmonCMS:
     ApiKey: "your-write-apikey"
     # EmonCMS input node name. Default: rpdu2mqtt
     Node: "rpdu2mqtt"
+
+# (Optional) Embedded web GUI for viewing, editing and testing the configuration.
+# Browse to http://<host>:<port> and sign in with the username/password below.
+# Saving from the GUI writes this file (a .bak copy is kept); restart to apply changes.
+Gui:
+    # (Optional). Default: false
+    Enabled: false
+    # Port the GUI listens on. Default: 8080
+    Port: 8080
+    # Username for the GUI (HTTP Basic auth). Default: admin
+    Username: "admin"
+    # Password for the GUI. The GUI refuses to start until this is set.
+    Password: "change-me"
