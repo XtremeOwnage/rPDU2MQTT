@@ -102,6 +102,27 @@ IConfigSource
   `IConfigSource.Save`, which for k8s issues a `PATCH` to the CR `spec`. `configWritable` becomes true,
   re-enabling Save in-cluster.
 
+### Secrets (decided)
+
+When the Kubernetes config source is used, credentials live in a **Kubernetes Secret**, never inline in
+the CR `spec`. The CR references them (e.g. a `secretRef`/`secretName` field), and the existing
+`RPDU2MQTT_*` env overrides continue to populate them at runtime — so the secret-handling story is the
+same one the Helm chart already uses. GUI write-back **never** writes secret values into the CR.
+
+### GitOps & exporting manifests (decided)
+
+The CR can be the GitOps source of truth, so:
+
+- After a GUI **Save** that writes to a CR, the UI shows a **notice to update the GitOps source** so the
+  cluster's desired state doesn't silently drift from the repo.
+- The GUI's existing **Export** view ([`/api/config/yaml`](../rPDU2MQTT/Services/Gui/GuiService.cs))
+  gains a **"RpduConfig manifest"** export that renders the current (edited) config as a ready-to-commit
+  CR, **with secrets redacted to placeholders**. This lets users round-trip GUI edits back into source
+  control.
+- For the *full* set of supporting manifests (Service, ServiceMonitor, Deployment, RBAC), `helm template
+  ./charts/rpdu2mqtt` remains the canonical export — the GUI export focuses on the config/CR, which is
+  the only thing it actually edits.
+
 ### Reacting to changes & status (Phase 2)
 
 - **Watch** the CR; on change, the simplest correct behaviour is
@@ -201,13 +222,25 @@ There is no cluster in normal dev/CI, so:
   apply a sample CR, run the app, assert it loads and patches status). This would be a manual / opt-in
   CI job, not part of the default `dotnet test` run.
 
+## Decisions
+
+1. **Secrets** → stored in a **Kubernetes Secret** and referenced from the CR; never inline in `spec`,
+   and never written there by the GUI. (See *Secrets* above.)
+2. **Multiple CRs** → acceptable when there is a benefit (e.g. one CR per PDU). Phase 1 ships a single
+   named CR; the design does not preclude reconciling several later (Phase 3).
+3. **GitOps** → after a GUI save to a CR the UI warns the user to update their GitOps source, and the
+   GUI can **export the CR manifest** (secrets redacted) for re-importing into source control. (See
+   *GitOps & exporting manifests* above.)
+
 ## Open questions
 
-1. **Secrets:** keep passwords out of the CR (env/Secret only), or allow them in `spec` with a
-   `secretRef` option? Leaning: env/Secret only, mirroring today's `RPDU2MQTT_*` overrides.
-2. **Multiple CRs in a namespace:** single named CR (Phase 1) vs. the app reconciling all of them
-   (Phase 3).
-3. **GUI write-back default:** on or off? Writing to a CR via the GUI competes with GitOps as the
-   source of truth — probably default *off*, opt-in via config, with a clear notice in the GUI.
-4. **CRD ownership:** ship/version the CRD with the chart/manifests; decide an upgrade/conversion story
-   before leaving `v1alpha1`.
+1. **CRD installation/ownership:** ship the CRD via the Helm chart's `crds/` directory **and** a
+   standalone `crd.yaml` (the app does *not* self-register it, to avoid cluster-admin RBAC). Note: Helm
+   does not upgrade resources in `crds/`, so CRD schema upgrades need a documented manual/`kubectl`
+   step. Confirm this approach.
+2. **GUI write-back default:** default *off* (opt-in) so the CR/GitOps stays the source of truth, or
+   default *on* with the drift warning? (You're OK with the warning — question is just the default.)
+3. **`status` subresource:** include it in Phase 1 (adds `patch rpduconfigs/status` RBAC), or defer to
+   Phase 2? It's a nice `kubectl get rpduconfig` health view but not required to load config.
+4. **CRD versioning:** the upgrade/conversion story before graduating `v1alpha1` → `v1` (conversion
+   webhooks vs. a documented breaking bump).
