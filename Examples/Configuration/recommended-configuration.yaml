@@ -82,3 +82,10 @@ HomeAssistant:
 #    Url: "http://emoncms.example.com"
 #    ApiKey: "your-write-apikey"   # or set RPDU2MQTT_EMONCMS_APIKEY
 #    Node: "rpdu2mqtt"
+
+# Optional: web GUI to edit/test the config at http://<host>:8080 (set a password!).
+#Gui:
+#    Enabled: true
+#    Port: 8080
+#    Username: "admin"
+#    Password: "change-me"

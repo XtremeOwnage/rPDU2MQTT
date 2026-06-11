@@ -22,6 +22,22 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     {
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
         coordinator.RediscoverRequested += Execute;
+        // Allow the "Clear discovery" action (GUI) to remove the retained discovery messages.
+        coordinator.ClearRequested += ClearDiscoveries;
+    }
+
+    private async Task ClearDiscoveries(CancellationToken cancellationToken)
+    {
+        await discoveryLock.WaitAsync(cancellationToken);
+        try
+        {
+            var cleared = await ClearAllDiscoveries(cancellationToken);
+            Log.Information($"Cleared {cleared} Home Assistant discovery topic(s).");
+        }
+        finally
+        {
+            discoveryLock.Release();
+        }
     }
 
     protected override async Task Execute(CancellationToken cancellationToken)
@@ -83,6 +99,22 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
     }
 
+    /// <summary>Buttons for the bridge device: rediscover and restart (see DiagnosticService).</summary>
+    private IEnumerable<baseEntity> BuildDiagnosticButtons()
+    {
+        var bridge = new DiscoveryDevice
+        {
+            UniqueIdentifier = "rPDU2MQTT",
+            Name = "rPDU2MQTT",
+            Manufacturer = "rPDU2MQTT",
+            Model = "MQTT Bridge",
+        };
+
+        yield return BuildButton("rPDU2MQTT_rediscover", "Rediscover",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RediscoverSuffix), bridge);
+        yield return BuildButton("rPDU2MQTT_restart", "Restart",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
+    }
 
     private void collectDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
     {

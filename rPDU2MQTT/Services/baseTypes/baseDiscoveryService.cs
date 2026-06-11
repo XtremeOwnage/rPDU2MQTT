@@ -205,6 +205,23 @@ public abstract class baseDiscoveryService : baseMQTTService
         publishedDeviceTopics.UnionWith(currentTopics);
     }
 
+    /// <summary>
+    /// Clear every retained discovery message this service has published, so Home Assistant drops
+    /// the entities. Returns the number of topics cleared.
+    /// </summary>
+    protected async Task<int> ClearAllDiscoveries(CancellationToken cancellationToken)
+    {
+        var topics = publishedDeviceTopics.ToList();
+        foreach (var topic in topics)
+        {
+            Log.Information($"Clearing discovery topic {topic}");
+            await ClearRetained(topic, cancellationToken);
+        }
+
+        publishedDeviceTopics.Clear();
+        return topics.Count;
+    }
+
     private string DeviceTopic(string deviceIdentifier) => $"{cfg.HASS.DiscoveryTopic}/device/{deviceIdentifier}/config";
 
     private Task PublishDeviceDiscovery(DeviceDiscovery device, CancellationToken cancellationToken)

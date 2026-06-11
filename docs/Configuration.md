@@ -282,7 +282,75 @@ EmonCMS:
   Url: "http://emoncms.example.com"   # required when enabled
   ApiKey: "your-write-apikey"         # or set RPDU2MQTT_EMONCMS_APIKEY
   Node: "rpdu2mqtt"
+  Path: "input/post"                  # API path (relative to Url) to post to
 ```
+
+## Configuration GUI (Optional)
+
+An embedded web GUI can view, edit and test the configuration instead of hand-editing this file.
+It is disabled by default. When enabled, browse to `http://<host>:<port>` and sign in with the
+configured username/password (HTTP Basic auth).
+
+```yaml
+Gui:
+  Enabled: false
+  Port: 8080
+  Username: "admin"
+  Password: "change-me"   # the GUI refuses to start until this is set
+```
+
+The GUI:
+- Renders a **structured form for every option**, generated from the configuration model (so it stays
+  in sync automatically), with inline descriptions, types, and the dynamic Overrides maps.
+- **Tests** the running services — the MQTT section has a "Test MQTT connection" button (broker
+  connectivity) and the PDU section a "Test PDU connection" button (fetches live data and reports the
+  device/outlet counts).
+- **Home Assistant actions** — the Home Assistant section has "Republish discovery" and
+  "Clear discovery" buttons. Clear removes the retained discovery messages so the entities disappear
+  from Home Assistant (until discovery runs again).
+- **Live-driven Overrides** — the Overrides section is populated from the **live PDU data**: it lists
+  the actual devices, outlets (by index), measurement types, and OneView groups currently being
+  discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
+  instead of typing keys blind. Existing overrides for entities that are not currently discovered
+  (e.g. disabled ones) are still shown so they can be re-enabled.
+- **Live Data** — a read-only view of the current measurements being pulled from the PDU(s)
+  (device / outlet / measurement / value / units), with a filter and optional 5-second auto-refresh.
+- **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
+  the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
+  control, etc.
+- **Saves** back to this config file (keeping a `config.yaml.bak` copy). Changes apply on the next
+  restart, so restart the service after saving.
+
+Notes:
+- Basic auth is sent in clear text, so only expose the GUI on a trusted network or behind a
+  TLS-terminating reverse proxy. Remember to publish/forward the GUI `Port` (e.g. `-p 8080:8080`,
+  or a `ports:` entry in docker-compose).
+- For **Save** to work in a container, the config file must be writable. The example
+  docker-compose mounts it read-only (`:ro`) — drop the `:ro` if you want to edit the config from
+  the GUI:
+  ```yaml
+  services:
+    rpdu2mqtt:
+      ports:
+        - "8080:8080"        # publish the GUI
+      volumes:
+        - ./config.yaml:/config/config.yaml   # writable (no :ro) so the GUI can save
+  ```
+- "Test" reflects the **currently running** configuration, not unsaved edits — save and restart to
+  test new connection settings.
+
+### GUI with Kubernetes / read-only config
+
+A `config.yaml` mounted from a **ConfigMap** (or any `:ro` mount) is **read-only**, so the GUI
+cannot save to it. In that case the GUI is **view + test only**: it detects the read-only file,
+disables the **Save** button, and shows a notice (a save attempt returns HTTP 409). Viewing the
+config and the MQTT/PDU connection tests still work.
+
+If you want to edit and persist config from the GUI under Kubernetes, mount `config.yaml` from a
+**writable** volume (e.g. a `PersistentVolumeClaim`) instead of a ConfigMap. Note that GUI edits
+then become the source of truth for that file, which trades off against managing the config
+declaratively (ConfigMap / GitOps). A common pattern is to keep the ConfigMap as the source of
+truth and use the GUI only to view and test.
 
 ## Example Configurations
 

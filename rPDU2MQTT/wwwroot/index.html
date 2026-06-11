@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rPDU2MQTT Configuration</title>
+<style>
+  :root { color-scheme: dark; --bg:#15171c; --panel:#1e2128; --panel2:#262a33; --line:#333845; --fg:#e6e8ec; --muted:#9aa3b2; --accent:#4f8cff; --good:#46c46a; --bad:#e5544b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header h1 { font-size:16px; margin:0; }
+  header .status { color:var(--muted); font-size:12px; margin-left:auto; display:flex; gap:14px; align-items:center; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--muted); margin-right:5px; vertical-align:middle; }
+  .dot.good { background:var(--good); } .dot.bad { background:var(--bad); }
+  .layout { display:flex; min-height:calc(100vh - 53px); }
+  nav { width:200px; border-right:1px solid var(--line); background:var(--panel); padding:10px 0; }
+  nav a { display:block; padding:8px 20px; color:var(--muted); cursor:pointer; border-left:3px solid transparent; }
+  nav a:hover { color:var(--fg); }
+  nav a.active { color:var(--fg); border-left-color:var(--accent); background:var(--panel2); }
+  main { flex:1; padding:24px 28px; max-width:900px; }
+  .section { display:none; } .section.active { display:block; }
+  h2 { margin:0 0 4px; font-size:18px; }
+  .field { margin:14px 0; }
+  .field > label { display:block; font-weight:600; margin-bottom:3px; }
+  .field .desc { color:var(--muted); font-size:12px; margin-bottom:5px; }
+  input[type=text], input[type=password], input[type=number], select {
+    width:100%; max-width:420px; padding:7px 9px; background:var(--panel2); border:1px solid var(--line);
+    border-radius:6px; color:var(--fg); }
+  input[type=checkbox] { width:16px; height:16px; vertical-align:middle; }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:16px 0; padding:8px 16px 16px; background:var(--panel); }
+  fieldset > legend { padding:0 6px; color:var(--accent); font-weight:600; }
+  .map-entry, .list-entry { border:1px solid var(--line); border-radius:8px; padding:8px 14px; margin:10px 0; background:var(--panel2); }
+  .map-entry > .head { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .map-entry .key { max-width:240px; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel2); color:var(--fg); padding:7px 14px; border-radius:6px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  button.danger { color:var(--bad); }
+  button.small { padding:3px 9px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:not-allowed; border-color:var(--line); }
+  button.test { margin:6px 0 4px; }
+  .sec-actions { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 4px; }
+  textarea.yaml { width:100%; height:62vh; background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--fg); font:12px/1.45 ui-monospace,Consolas,monospace; padding:10px; white-space:pre; }
+  .ov-group { margin:20px 0 6px; }
+  .ov-group h3 { margin:0; font-size:15px; color:var(--accent); }
+  .ov-card { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:10px 14px; margin:10px 0; }
+  .ov-head { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .ov-title { font-weight:600; }
+  .ov-sub { color:var(--muted); font-size:12px; }
+  .ov-fields { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
+  .ov-field { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+  .ov-field input[type=text] { width:210px; }
+  .ov-field.ov-check { flex-direction:row; align-items:center; gap:6px; color:var(--fg); }
+  .ov-outlets { margin:10px 0 2px 6px; border-left:2px solid var(--line); padding-left:14px; }
+  .ov-outlet { padding:8px 0; }
+  .ov-outlet-label { margin-bottom:4px; }
+  .ld-toolbar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:6px 0 12px; }
+  .ld-toolbar input[type=text] { width:240px; }
+  .ld-toolbar label { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+  .ld-count { color:var(--muted); font-size:12px; }
+  table.ld { width:100%; border-collapse:collapse; font-size:13px; }
+  table.ld th, table.ld td { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line); }
+  table.ld th { color:var(--muted); font-weight:600; position:sticky; top:53px; background:var(--bg); }
+  table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.ld tr:hover td { background:var(--panel); }
+  .ro-note { color:var(--bad); font-size:12px; display:none; }
+  .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
+  .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
+  .toast { margin-left:auto; font-size:13px; } .toast.good { color:var(--good); } .toast.bad { color:var(--bad); }
+  .tools button { margin-right:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rPDU2MQTT</h1>
+  <div class="status">
+    <span id="st-version"></span>
+    <span><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
+  </div>
+</header>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main>
+    <div id="sections"></div>
+    <div class="actions">
+      <button class="primary" id="btn-save">Save</button>
+      <button id="btn-reload">Reload</button>
+      <span class="ro-note" id="ro-note">Config is read-only (ConfigMap / <code>:ro</code> mount) — editing disabled.</span>
+      <span class="toast" id="toast"></span>
+    </div>
+  </main>
+</div>
+<script>
+const api = (p, opt) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+let schema = [], data = {};
+
+function ensure(obj, key, fallback) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
+
+function scalarInput(node, obj) {
+  let el;
+  if (node.type === 'bool') {
+    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
+    el.onchange = () => obj[node.key] = el.checked;
+  } else if (node.type === 'enum') {
+    el = document.createElement('select');
+    (node.enumValues || []).forEach(v => { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); });
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value;
+  } else if (node.type === 'int' || node.type === 'double') {
+    el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
+    if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
+  } else {
+    el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
+  }
+  return el;
+}
+
+// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+function renderNode(node, obj, container) {
+  if (node.type === 'object') {
+    const target = ensure(obj, node.key, {});
+    const fs = document.createElement('fieldset');
+    const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    (node.properties || []).forEach(child => renderNode(child, target, fs));
+    container.appendChild(fs);
+  } else if (node.type === 'dictionary') {
+    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
+  } else if (node.type === 'list') {
+    container.appendChild(renderList(node, ensure(obj, node.key, [])));
+  } else {
+    const f = document.createElement('div'); f.className = 'field';
+    const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
+    f.appendChild(scalarInput(node, obj));
+    container.appendChild(f);
+  }
+}
+
+// Render the value of a dictionary/list element (valueSchema has no key of its own).
+function renderValue(valueSchema, holder, keyName, container) {
+  const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
+  if (node.type === 'object') {
+    const target = ensure(holder, keyName, {});
+    (node.properties || []).forEach(child => renderNode(child, target, container));
+  } else {
+    renderNode(node, holder, container);
+  }
+}
+
+function renderMap(node, mapObj) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+  const entries = document.createElement('div'); fs.appendChild(entries);
+
+  const drawEntry = (key) => {
+    const wrap = document.createElement('div'); wrap.className = 'map-entry';
+    const head = document.createElement('div'); head.className = 'head';
+    const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
+    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
+    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
+    head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
+    if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
+    renderValue(node.valueSchema, mapObj, key, wrap);
+    entries.appendChild(wrap);
+  };
+
+  Object.keys(mapObj).forEach(drawEntry);
+  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
+  fs.appendChild(add);
+  return fs;
+}
+
+function renderList(node, arr) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  const entries = document.createElement('div'); fs.appendChild(entries);
+  const draw = (idx) => {
+    const wrap = document.createElement('div'); wrap.className = 'list-entry';
+    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
+    wrap.appendChild(del);
+    renderValue(node.valueSchema, arr, idx, wrap);
+    entries.appendChild(wrap);
+  };
+  const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
+  rebuild();
+  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
+  fs.appendChild(add);
+  return fs;
+}
+
+function build() {
+  const nav = document.getElementById('nav'); const sections = document.getElementById('sections');
+  nav.innerHTML = ''; sections.innerHTML = '';
+  schema.forEach((node, i) => {
+    const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
+    const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+    const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
+    // Section-specific actions belong with the section they act on, not on every page.
+    const acts = sectionActions(node);
+    if (acts) sec.appendChild(acts);
+    if (node.key === 'Overrides') {
+      // Bespoke, live-data-driven editor instead of the blind dictionary form.
+      const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh live data';
+      const container = document.createElement('div');
+      refresh.onclick = () => renderOverrides(container);
+      sec.appendChild(refresh); sec.appendChild(container);
+      link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
+    } else {
+      if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
+      else renderNode(node, data, sec);
+      link.onclick = () => activate(link, sec);
+    }
+    if (i === 0) link.click();
+  });
+  addLiveDataSection(nav, sections);
+  addExportSection(nav, sections);
+}
+
+// A read-only view of the current readings being pulled from the PDU(s).
+function addLiveDataSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Live Data'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
+  const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
+  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
+  sec.appendChild(bar);
+  const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
+
+  let rows = [], timer = null;
+  const draw = () => {
+    const f = filter.value.trim().toLowerCase();
+    const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f)) : rows;
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['Device', 'Outlet / entity', 'Measurement', 'Value', 'Units'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    shown.forEach(r => {
+      const tr = document.createElement('tr');
+      const cells = [r.device, r.source, r.type, formatNum(r.value), r.units || ''];
+      cells.forEach((c, i) => { const td = document.createElement('td'); if (i === 3) td.className = 'num'; td.textContent = c; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+  };
+  const load = async () => {
+    const r = await api('/api/livedata');
+    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; count.textContent = ''; return; }
+    rows = r.body.readings || []; count.textContent = rows.length + ' readings'; draw();
+  };
+  refresh.onclick = load;
+  filter.oninput = draw;
+  auto.onchange = () => {
+    clearInterval(timer);
+    if (auto.checked) timer = setInterval(() => {
+      // Stop polling the PDU once the user navigates away from this tab.
+      if (!sec.classList.contains('active')) { clearInterval(timer); auto.checked = false; return; }
+      load();
+    }, 5000);
+  };
+  link.onclick = () => { activate(link, sec); load(); };
+}
+
+function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? (Math.round(v * 1000) / 1000).toString() : String(v); }
+
+function activate(link, sec) {
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  link.classList.add('active'); sec.classList.add('active');
+}
+
+// ---- Overrides editor (driven by live PDU data) ----
+function ovGet(path) { let o = data.Overrides; for (const p of path) { if (o == null) return undefined; o = o[p]; } return o; }
+function ovSet(path, val) {
+  let o = data.Overrides = data.Overrides || {};
+  for (let i = 0; i < path.length - 1; i++) { if (o[path[i]] == null) o[path[i]] = {}; o = o[path[i]]; }
+  const last = path[path.length - 1];
+  if (val === undefined || val === null || val === '') delete o[last]; else o[last] = val;
+}
+
+function ovText(label, path, placeholder) {
+  const f = document.createElement('label'); f.className = 'ov-field';
+  const s = document.createElement('span'); s.textContent = label; f.appendChild(s);
+  const inp = document.createElement('input'); inp.type = 'text';
+  const v = ovGet(path); if (v != null) inp.value = v;
+  if (placeholder) inp.placeholder = placeholder;
+  inp.onchange = () => ovSet(path, inp.value.trim());
+  f.appendChild(inp); return f;
+}
+function ovEnabled(path) {
+  const f = document.createElement('label'); f.className = 'ov-field ov-check';
+  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = ovGet(path) !== false;
+  // Checked == default (true) -> drop the key; unchecked -> persist Enabled:false.
+  inp.onchange = () => ovSet(path, inp.checked ? undefined : false);
+  const s = document.createElement('span'); s.textContent = 'Enabled';
+  f.appendChild(inp); f.appendChild(s); return f;
+}
+// ph: { name, id } placeholders showing the current (default) values.
+function overrideFields(objPath, ph) {
+  ph = ph || {};
+  const wrap = document.createElement('div'); wrap.className = 'ov-fields';
+  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
+  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
+  wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
+  return wrap;
+}
+// A muted line of "label value" context bits; empty values are skipped.
+function ovContext(parts) {
+  const span = document.createElement('span'); span.className = 'ov-sub';
+  span.textContent = parts.filter(p => p[1]).map(p => (p[0] ? p[0] + ' ' : '') + p[1]).join('   ·   ');
+  return span;
+}
+function overrideCard(title, contextParts, objPath, ph) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
+  if (contextParts && contextParts.some(p => p[1])) head.appendChild(ovContext(contextParts));
+  card.appendChild(head);
+  card.appendChild(overrideFields(objPath, ph));
+  return card;
+}
+function groupHeader(title, sub) {
+  const w = document.createElement('div'); w.className = 'ov-group';
+  const h = document.createElement('h3'); h.textContent = title; w.appendChild(h);
+  if (sub) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = sub; w.appendChild(d); }
+  return w;
+}
+function outletRow(deviceKey, o) {
+  const row = document.createElement('div'); row.className = 'ov-outlet';
+  const lab = document.createElement('div'); lab.className = 'ov-outlet-label';
+  const strong = document.createElement('strong'); strong.textContent = 'Outlet ' + o.index; lab.appendChild(strong);
+  const friendly = o.label || o.name;
+  if (friendly) { const s = document.createElement('span'); s.textContent = ' — ' + friendly; lab.appendChild(s); }
+  row.appendChild(lab);
+  if (o.name || o.displayName) row.appendChild(ovContext([['PDU name:', o.name], ['discovered as:', o.displayName]]));
+  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }));
+  return row;
+}
+function deviceCard(dev) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const friendly = dev.label || dev.name || dev.key;
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + friendly; head.appendChild(t);
+  head.appendChild(ovContext([['key', dev.key], ['PDU name:', dev.name], ['discovered as:', dev.displayName]]));
+  card.appendChild(head);
+  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }));
+
+  // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
+  const live = dev.outlets || [];
+  const ovOutlets = ovGet(['Devices', dev.key, 'Outlets']) || {};
+  const merged = [...live];
+  Object.keys(ovOutlets).forEach(idx => { if (!live.some(o => String(o.index) === String(idx))) merged.push({ index: Number(idx), displayName: '(not currently discovered)' }); });
+  if (merged.length) {
+    const ol = document.createElement('div'); ol.className = 'ov-outlets';
+    merged.sort((a, b) => a.index - b.index).forEach(o => ol.appendChild(outletRow(dev.key, o)));
+    card.appendChild(ol);
+  }
+  return card;
+}
+
+async function renderOverrides(container) {
+  container.dataset.loaded = '1';
+  container.innerHTML = '<div class="desc">Loading live PDU data…</div>';
+  const r = await api('/api/live');
+  ensure(data, 'Overrides', {}); ensure(data.Overrides, 'Devices', {}); ensure(data.Overrides, 'Measurements', {});
+  container.innerHTML = '';
+  if (!r.body.ok) {
+    const w = document.createElement('div'); w.className = 'desc'; w.style.color = 'var(--bad)';
+    w.textContent = (r.body.message || 'Could not load live data.') + ' Showing existing overrides only.';
+    container.appendChild(w);
+  }
+  const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
+  const ov = data.Overrides;
+
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['rPDU2MQTT'], {}));
+
+  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
+  const liveKeys = new Set();
+  lv.devices.forEach(d => { liveKeys.add(d.key); container.appendChild(deviceCard(d)); });
+  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, displayName: '(not currently discovered)', outlets: [] })));
+
+  container.appendChild(groupHeader('Measurements', 'Applied to every measurement of this type, across all outlets.'));
+  const units = {}; (lv.measurements || []).forEach(m => { units[m.type] = m.units; });
+  const types = [...new Set([...(lv.measurements || []).map(m => m.type), ...Object.keys(ov.Measurements || {})])];
+  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, [['units:', units[tp]]], ['Measurements', tp], {})));
+
+  if (lv.groups && lv.groups.length) {
+    container.appendChild(groupHeader('OneView Groups', null));
+    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['GroupOverrides', 'Overrides', g.key], { name: g.displayName })));
+  }
+}
+
+// Strip empty override objects so untouched entries don't pollute the saved config.
+function exportData() {
+  const clone = JSON.parse(JSON.stringify(data));
+  if (clone.Overrides) pruneEmpty(clone.Overrides);
+  return clone;
+}
+function pruneEmpty(o) {
+  if (o && typeof o === 'object' && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      const v = pruneEmpty(o[k]);
+      if (v === undefined) delete o[k];
+    }
+    if (Object.keys(o).length === 0) return undefined;
+  }
+  return o;
+}
+
+// Section-specific action buttons (connection tests; Home Assistant discovery actions).
+function sectionActions(node) {
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const add = (label, fn, cls) => { const b = document.createElement('button'); b.className = 'small ' + (cls || ''); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+
+  if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'HASS') {
+    if ((data.HASS || {}).DiscoveryEnabled === false) return null;
+    add('Republish discovery', rediscoverHa);
+    add('Clear discovery', clearHa, 'danger');
+  } else return null;
+
+  return bar;
+}
+
+// A synthetic section that shows the current form state rendered as YAML, for copy/paste.
+function addExportSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Export YAML'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Export YAML'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'The configuration as it would be written to config.yaml — copy into a ConfigMap, source control, etc. Reflects your current (possibly unsaved) edits.';
+  sec.appendChild(d);
+  const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.spellcheck = false; sec.appendChild(ta);
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const copy = document.createElement('button'); copy.className = 'small'; copy.textContent = 'Copy';
+  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied YAML to clipboard.', true); };
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  refresh.onclick = () => fillYaml(ta);
+  bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
+  link.onclick = () => { activate(link, sec); fillYaml(ta); };
+}
+
+async function fillYaml(ta) {
+  const r = await fetch('/api/config/yaml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+  ta.value = r.ok ? await r.text() : 'Unable to render YAML.';
+}
+
+function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+
+async function load() {
+  schema = (await api('/api/schema')).body;
+  data = (await api('/api/config')).body;
+  build();
+  refreshStatus();
+}
+
+async function refreshStatus() {
+  const { body } = await api('/api/status');
+  document.getElementById('st-version').textContent = 'v' + (body.version || '?');
+  document.getElementById('st-mqtt-dot').className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+  // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
+  const readOnly = body.configWritable === false;
+  const save = document.getElementById('btn-save');
+  save.disabled = readOnly;
+  save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
+  document.getElementById('ro-note').style.display = readOnly ? 'inline' : 'none';
+}
+
+async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
+async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function clearHa() {
+  if (!confirm('Clear all Home Assistant discovery messages? The entities will disappear from Home Assistant until discovery runs again.')) return;
+  const r = await api('/api/discovery/clear', { method: 'POST' });
+  toast(r.body.message, r.body.ok);
+}
+
+document.getElementById('btn-reload').onclick = load;
+document.getElementById('btn-save').onclick = async () => {
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
+};
+
+load();
+</script>
+</body>
+</html>

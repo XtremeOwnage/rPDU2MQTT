@@ -31,4 +31,7 @@ public class Config
 
     [YamlMember(Alias = "Logging")]
     public LoggingConfig Logging { get; set; } = new LoggingConfig();
+
+    [YamlMember(Alias = "Gui", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Embedded configuration web GUI")]
+    public GuiConfig Gui { get; set; } = new GuiConfig();
 }

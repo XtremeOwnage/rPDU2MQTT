@@ -1,5 +1,6 @@
 ﻿using rPDU2MQTT.Models.Config.Schemas;
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
@@ -41,7 +42,9 @@ public class PduConfig
 
     /// <summary>
     /// Backwards-compatible alias for <see cref="ActionsEnabled"/>; applied during config load.
+    /// Hidden from the GUI/JSON (the YAML loader still honours it for compatibility).
     /// </summary>
+    [JsonIgnore]
     [YamlMember(Alias = "Enable_Actions", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
     public bool? EnableActionsAlias { get; set; }
 

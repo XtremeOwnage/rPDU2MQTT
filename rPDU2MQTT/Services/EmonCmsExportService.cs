@@ -19,7 +19,7 @@ public class EmonCmsExportService : baseMQTTService
     public EmonCmsExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.PDU.PollInterval)
     {
         var c = deps.Cfg.EmonCMS;
-        postUrl = (c.Url ?? string.Empty).TrimEnd('/') + "/input/post";
+        postUrl = (c.Url ?? string.Empty).TrimEnd('/') + "/" + (c.Path ?? "input/post").TrimStart('/');
         node = c.Node;
         apiKey = c.ApiKey ?? string.Empty;
     }
