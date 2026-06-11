@@ -38,6 +38,10 @@
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
   button.danger { color:var(--bad); }
   button.small { padding:3px 9px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:not-allowed; border-color:var(--line); }
+  button.test { margin:6px 0 4px; }
+  .ro-note { color:var(--bad); font-size:12px; display:none; }
+  .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
   .toast { margin-left:auto; font-size:13px; } .toast.good { color:var(--good); } .toast.bad { color:var(--bad); }
   .tools button { margin-right:8px; }
@@ -58,10 +62,7 @@
     <div class="actions">
       <button class="primary" id="btn-save">Save</button>
       <button id="btn-reload">Reload</button>
-      <div class="tools">
-        <button id="btn-test-mqtt">Test MQTT</button>
-        <button id="btn-test-pdu">Test PDU</button>
-      </div>
+      <span class="ro-note" id="ro-note">Config is read-only (ConfigMap / <code>:ro</code> mount) — editing disabled.</span>
       <span class="toast" id="toast"></span>
     </div>
   </main>
@@ -182,6 +183,13 @@ function build() {
     const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
     const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
+    // The connection test belongs with the section it tests, not on every page.
+    if (node.key === 'MQTT' || node.key === 'PDU') {
+      const tb = document.createElement('button'); tb.className = 'small test';
+      tb.textContent = node.key === 'MQTT' ? 'Test MQTT connection' : 'Test PDU connection';
+      tb.onclick = node.key === 'MQTT' ? testMqtt : testPdu;
+      sec.appendChild(tb);
+    }
     if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
     else renderNode(node, data, sec);
     link.onclick = () => {
@@ -206,15 +214,22 @@ async function refreshStatus() {
   const { body } = await api('/api/status');
   document.getElementById('st-version').textContent = 'v' + (body.version || '?');
   document.getElementById('st-mqtt-dot').className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+  // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
+  const readOnly = body.configWritable === false;
+  const save = document.getElementById('btn-save');
+  save.disabled = readOnly;
+  save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
+  document.getElementById('ro-note').style.display = readOnly ? 'inline' : 'none';
 }
+
+async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
+async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 
 document.getElementById('btn-reload').onclick = load;
 document.getElementById('btn-save').onclick = async () => {
   const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
   toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
 };
-document.getElementById('btn-test-mqtt').onclick = async () => { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); };
-document.getElementById('btn-test-pdu').onclick = async () => { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); };
 
 load();
 </script>

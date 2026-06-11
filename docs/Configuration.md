@@ -324,6 +324,19 @@ Notes:
 - "Test" reflects the **currently running** configuration, not unsaved edits — save and restart to
   test new connection settings.
 
+### GUI with Kubernetes / read-only config
+
+A `config.yaml` mounted from a **ConfigMap** (or any `:ro` mount) is **read-only**, so the GUI
+cannot save to it. In that case the GUI is **view + test only**: it detects the read-only file,
+disables the **Save** button, and shows a notice (a save attempt returns HTTP 409). Viewing the
+config and the MQTT/PDU connection tests still work.
+
+If you want to edit and persist config from the GUI under Kubernetes, mount `config.yaml` from a
+**writable** volume (e.g. a `PersistentVolumeClaim`) instead of a ConfigMap. Note that GUI edits
+then become the source of truth for that file, which trades off against managing the config
+declaratively (ConfigMap / GitOps). A common pattern is to keep the ConfigMap as the source of
+truth and use the GUI only to view and test.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

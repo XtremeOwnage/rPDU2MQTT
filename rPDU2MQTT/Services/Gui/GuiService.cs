@@ -147,6 +147,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             if (string.IsNullOrEmpty(path))
                 return Results.Json(new { ok = false, message = "Config file path is unknown; cannot save." }, statusCode: 500);
 
+            if (!IsConfigWritable())
+                return Results.Json(new { ok = false, message = "Config file is read-only (e.g. a Kubernetes ConfigMap or a ':ro' mount); cannot save. Mount it from a writable volume to edit from the GUI." }, statusCode: 409);
+
             try
             {
                 // Keep a single rolling backup before overwriting.
@@ -167,6 +170,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             version = Version,
             configPath = YamlConfigLoader.ResolvedPath,
+            configWritable = IsConfigWritable(),
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
         }, ConfigSchema.Json));
@@ -207,6 +211,33 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+
+    /// <summary>
+    /// Whether the config file can be written. A ConfigMap-mounted (or ':ro') config is read-only,
+    /// so the GUI is view/test-only there; this lets the UI disable Save instead of failing on submit.
+    /// </summary>
+    private static bool IsConfigWritable()
+    {
+        var path = YamlConfigLoader.ResolvedPath;
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                return true;
+            }
+
+            var dir = Path.GetDirectoryName(path);
+            return !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>Load the config straight from disk (no environment-secret overrides) for editing.</summary>
     private static Config? LoadConfigFromFile()
