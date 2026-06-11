@@ -17,7 +17,7 @@ public class EnumToPropertyNameConverter: JsonConverter<object>
 
     public override void Write(Utf8JsonWriter writer, object value, JsonSerializerOptions options)
     {
-        var field = value.GetType().GetField(value.ToString());
+        var field = value.GetType().GetField(value.ToString() ?? string.Empty);
         var attribute = field?.GetCustomAttribute<JsonPropertyNameAttribute>();
 
         if (!string.IsNullOrEmpty(attribute?.Name))
@@ -26,10 +26,8 @@ public class EnumToPropertyNameConverter: JsonConverter<object>
         }
         else
         {
-            // Note- the expected attributes SHOULD be attached....
-            if (System.Diagnostics.Debugger.IsAttached)
-                System.Diagnostics.Debugger.Break();
-
+            // The expected [JsonPropertyName] attribute should always be attached to enum members.
+            Log.Warning($"Enum value '{value}' ({value.GetType().Name}) has no JsonPropertyName attribute; writing null.");
             writer.WriteNullValue();
         }
     }

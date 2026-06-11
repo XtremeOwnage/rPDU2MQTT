@@ -2,58 +2,211 @@
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
-using rPDU2MQTT.Models.PDUResponse;
+using rPDU2MQTT.Models.PDU.OneView;
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Http.Json;
 
 namespace rPDU2MQTT.Classes;
 
 public partial class PDU
 {
     private readonly Config config;
-    private readonly HttpClient http;
+    private readonly PduApiHandler api;
 
-    public PDU(Config config, [DisallowNull, NotNull] HttpClient http)
+    /// <summary>
+    /// A flag which determines if we should leverage the ONEView API, instead of the direct API.
+    /// </summary>
+    /// <remarks>
+    /// Detection of ONEView is performed on the first polling interval.
+    /// </remarks>
+    private bool? useOneView { get; set; } = null;
+
+    public PDU(Config config, PduApiHandler api)
     {
         this.config = config;
-        this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
+        this.api = api;
+    }
+
+    // After a control command the PDU can sit in a "pending" state for up to ~a minute while it
+    // applies the change, during which it still reports the OLD state. Latch the commanded state
+    // so polling doesn't flap Home Assistant back until the PDU actually catches up (or we time out).
+    private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletStates = new();
+    private readonly object pendingLock = new();
+    private static readonly TimeSpan PendingStateTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// Turn an outlet on or off (only used when PDU.ActionsEnabled is true).
+    /// </summary>
+    public async Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+    {
+        await api.SetOutletStateAsync(deviceId, outletIndex, on, cancellationToken);
+
+        lock (pendingLock)
+            pendingOutletStates[$"{deviceId}/{outletIndex}"] = (on ? "on" : "off", DateTime.UtcNow.Add(PendingStateTimeout));
+    }
+
+    /// <summary>
+    /// Resolve the state to report for an outlet: while a recent command is still pending (the PDU
+    /// hasn't applied it yet) report the commanded state instead of the stale polled one.
+    /// </summary>
+    public string ResolveOutletState(string deviceId, int outletIndex, string actualState)
+    {
+        lock (pendingLock)
+        {
+            var key = $"{deviceId}/{outletIndex}";
+            if (!pendingOutletStates.TryGetValue(key, out var pending))
+                return actualState;
+
+            // Applied, or timed out -> stop latching and report reality.
+            if (string.Equals(actualState, pending.expected, StringComparison.OrdinalIgnoreCase) || DateTime.UtcNow >= pending.expiresUtc)
+            {
+                pendingOutletStates.Remove(key);
+                return actualState;
+            }
+
+            return pending.expected;
+        }
     }
 
     /// <summary>
     /// Pull all public data.
     /// </summary>
+    /// <remarks>
+    /// Results are cached briefly so that multiple consumers (MQTT publisher, discovery, and the
+    /// optional Prometheus/EmonCMS exporters) polling on the same interval share a single PDU fetch
+    /// instead of each hitting the PDU API. Consumers must treat the result as read-only.
+    /// </remarks>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<RootData> GetRootData_Public(CancellationToken cancellationToken)
+    public async Task<PduData> GetRootData_Public(CancellationToken cancellationToken)
     {
-        Log.Debug("Querying /api");
-        var model = await http.GetFromJsonAsync<GetResponse<RootData>>("/api", options: Models.PDU.Converter.Settings, cancellationToken);
-        Log.Debug($"Query response {model.RetCode}");
+        var ttl = TimeSpan.FromSeconds(Math.Max(1, config.PDU.PollInterval / 2.0));
 
-        //Process device data.
-        processData(model.Data, cancellationToken);
+        // Always under the lock: cache hits are cheap, and concurrent callers coalesce onto a
+        // single in-flight fetch instead of each hitting the PDU API.
+        await dataFetchLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (cachedData is not null && DateTime.UtcNow - cachedDataAtUtc < ttl)
+                return cachedData;
 
-        return model.Data;
+            cachedData = await FetchRootData(cancellationToken);
+            cachedDataAtUtc = DateTime.UtcNow;
+            return cachedData;
+        }
+        finally
+        {
+            dataFetchLock.Release();
+        }
     }
 
-    public async void processData(RootData data, CancellationToken cancellationToken)
+    private readonly SemaphoreSlim dataFetchLock = new(1, 1);
+    private PduData? cachedData;
+    private DateTime cachedDataAtUtc;
+
+    private async Task<PduData> FetchRootData(CancellationToken cancellationToken)
+    {
+        if (useOneView is null)
+        {
+            this.useOneView = await api.GetAsync<bool>("/api/conf/oneview/enabled", cancellationToken);
+            if (useOneView == true)
+                Log.Debug("Detected OneView. Will use /oneview for collecting data.");
+            else
+                Log.Debug("OneView is not enabled. Using /api.");
+        }
+
+        if (useOneView is null)
+            throw new Exception("Failed to determine if Device Aggregation is enabled.");
+
+        if (useOneView == true)
+        {
+            // View ONE-View API
+            var data = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
+
+            // Process data.
+            await processOneViewData(data, cancellationToken);
+
+            // Return the single model.
+            return new PduData
+            {
+                PDUs = data.Hosts.Select(o => o.Cache).ToArray(),
+                Devices = data.Hosts.SelectMany(o => o.Cache.Devices).ToList(),
+                Groups = data.Groups
+            };
+        }
+        else
+        {
+            var model = await api.GetAsync<rPDU>("/api", cancellationToken);
+
+            // Process single-device data.
+            await processData(model, cancellationToken);
+
+            // Return the single model.
+            return new PduData
+            {
+                PDUs = [model],
+                Devices = model.Devices
+            };
+        }
+    }
+
+    private async Task processOneViewData(OneViewRootData data, CancellationToken cancellationToken)
     {
         //Set basic details.
         data.Record_Parent = null;
         data.Record_Key = config.MQTT.ParentTopic;
-        data.URL = http.BaseAddress!.ToString();
+        //data.URL = api.BaseAddress;
 
-        data.Entity_Identifier = Coalesce(config.Overrides?.PDU?.ID, "rPDU2MQTT")!;
-        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.PDU?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
+        data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = "OneView"; // Coalesce(config.Overrides?.rPDU2MQTT?.Name, "rPDU2MQTT")!;
+
+        // Process groups.
+        await processOneViewGroups(data, data.Groups, cancellationToken);
+
+
+        //Process individual hosts, as if they were stand-alone hosts.
+        foreach (var host in data.Hosts)
+            await processData(host.Cache, cancellationToken);
+
+    }
+
+    private async Task processOneViewGroups(OneViewRootData Parent, List<OneViewGroup> Groups, CancellationToken cancellationToken)
+    {
+        // Create a child-object named "Groups"
+        var Entity_Groups = BaseEntity.FromDevice(Parent, MqttPath.Groups);
 
         // Propagate down the parent, and identifier.
-        data.Devices.SetParentAndIdentifier(data, (k, v) => k);
+        Groups.SetParentAndIdentifier(Entity_Groups, o => o.Key);
 
         // Populate Name, DisplayName, and Enabled for devices.
-        data.Devices.SetEntityNameAndEnabled(config.Overrides!, (k, d) => d.Name, (k, d) => d.Label);
+        Groups.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
+
+        // Remove disabled items.
+        Groups.PruneDisabled();
+
+        // Process Groups.
+        await processListRecursive(Groups, Parent, cancellationToken);
+    }
+
+
+
+    private async Task processData(rPDU data, CancellationToken cancellationToken)
+    {
+        //Set basic details.
+        data.Record_Parent = null;
+        data.Record_Key = config.MQTT.ParentTopic;
+        data.URL = api.BaseAddress;
+
+        data.Entity_Identifier = Coalesce(config.Overrides?.rPDU2MQTT?.ID, "rPDU2MQTT")!;
+        data.Entity_Name = data.Entity_DisplayName = Coalesce(config.Overrides?.rPDU2MQTT?.Name, data.Sys.Label, data.Sys.Name, "rPDU2MQTT")!;
+
+        // Propagate down the parent, and identifier.
+        data.Devices.SetParentAndIdentifier(data, o => o.Key);
+
+        // Populate Name, DisplayName, and Enabled for devices.
+        data.Devices.SetEntityNameAndEnabled(config.Overrides!, o => o.Name, o => o.Label);
 
         //Process devices
-        await processRecursive(data.Devices, data, cancellationToken);
+        await processListRecursive(data.Devices, data, cancellationToken);
     }
 
     private async Task processRecursive<TEntity, TParent>([AllowNull] TEntity entity, TParent? parent, CancellationToken cancellationToken)
@@ -65,8 +218,8 @@ public partial class PDU
         else if (entity is Device device)
         {
             // Propagate down the parent, and identifier.
-            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), (k, v) => k);
-            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), (k, v) => k.ToString());
+            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), o => o.Key);
+            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), o => o.Key.ToString());
 
             // Set Overrides
             device.Outlets.SetEntityNameAndEnabled(config.Overrides, DefaultNames.UseEntityName, DefaultNames.UseEntityLabel);
@@ -77,16 +230,18 @@ public partial class PDU
             device.Entity.PruneDisabled();
 
             // Recurse to the next tier.
-            await processRecursive(device.Outlets, device, cancellationToken);
-            await processRecursive(device.Entity, device, cancellationToken);
+            await processListRecursive(device.Outlets, device, cancellationToken);
+            await processListRecursive(device.Entity, device, cancellationToken);
         }
         else if (entity is NamedEntityWithMeasurements nem)
         {
+            ArgumentNullException.ThrowIfNull(parent);
+
             // All measurements will be stored into a sub-key.
-            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: (k, v) => v.Type);
+            nem.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
 
             // Set Overrides
-            Func<string, Measurement, string> MeasurementNamingFunc = (k, m) => m.Type;
+            Func<Measurement, string> MeasurementNamingFunc = o => o.Type;
 
             nem.Measurements.SetEntityNameAndEnabled(config.Overrides, MeasurementNamingFunc, DefaultNames.UseMeasurementType);
             nem.Measurements.PruneDisabled();
@@ -94,25 +249,43 @@ public partial class PDU
             if (entity is Entity)
                 // For entities- these belong directly to a "Device"
                 // We want to set the prefix to the parent device's name.
-                nem.Measurements.SetEntityNamePrefix(parent!.Entity_Name);
+                nem.Measurements.SetEntityNamePrefix(parent.Entity_Name);
             else
                 // We want to prefix the measurements, with the outlet name.
                 // ie, mydevice_power
-                nem.Measurements.SetEntityNamePrefix(nem.Entity_Name);
+                nem.Measurements.SetEntityNamePrefix(string.Join('_', parent.Entity_Name, nem.Entity_Name).FormatName());
+        }
+        else if (entity is OneViewGroup grp)
+        {
+            ArgumentNullException.ThrowIfNull(parent);
+
+            if (grp.Entity is null)
+                return;
+
+            if (grp.Entity.PduTotal?.Measurements?.Any() ?? false)
+                grp.Entity.PduTotal.Measurements.SetEntityNamePrefix(parent.Entity_Name);
+
+            foreach (var outlet in grp.Entity.Outlets)
+            {
+                // All measurements will be stored into a sub-key.
+                outlet.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
+                outlet.Measurements.SetEntityNameAndEnabled(config.Overrides, o => o.Type, DefaultNames.UseMeasurementType);
+                outlet.Measurements.PruneDisabled();
+
+                outlet.Measurements.SetEntityNamePrefix(parent.Entity_Name);
+            }
         }
         else
         {
-            if (System.Diagnostics.Debugger.IsAttached)
-                System.Diagnostics.Debugger.Break();
+            Log.Warning($"Unhandled entity type in processRecursive: {entity.GetType().Name}");
         }
     }
 
-    private async Task processRecursive<TKey, TEntity, TParent>(Dictionary<TKey, TEntity> entities, TParent parent, CancellationToken cancellationToken)
-        where TKey : notnull
+    private async Task processListRecursive<TEntity, TParent>(List<TEntity> entities, TParent parent, CancellationToken cancellationToken)
         where TEntity : notnull, BaseEntity
         where TParent : NamedEntity
     {
-        foreach (var (_, entity) in entities)
+        foreach (var entity in entities)
             await processRecursive(entity, parent, cancellationToken);
     }
 }

@@ -1,8 +1,10 @@
 ﻿using rPDU2MQTT.Interfaces;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU.DummyDevices;
 
+[DebuggerDisplay("{Entity_Name}")]
 /// <summary>
 /// Represents an entity which has a name, which will be used when building discoveries, etc.
 /// </summary>

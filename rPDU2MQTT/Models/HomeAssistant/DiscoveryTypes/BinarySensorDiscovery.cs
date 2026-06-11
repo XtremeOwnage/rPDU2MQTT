@@ -11,6 +11,13 @@ namespace rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 public class BinarySensorDiscovery : baseSensorEntity
 {
     /// <summary>
+    /// The device class of the binary sensor (e.g. "problem"). See
+    /// https://www.home-assistant.io/integrations/binary_sensor/#device-class
+    /// </summary>
+    [JsonPropertyName("device_class")]
+    public string? DeviceClass { get; set; }
+
+    /// <summary>
     /// The string that represents the off state. It will be compared to the message in the state_topic.
     /// </summary>
     [JsonPropertyName("payload_off")]

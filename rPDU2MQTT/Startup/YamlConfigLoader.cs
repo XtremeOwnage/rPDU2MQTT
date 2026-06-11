@@ -1,5 +1,6 @@
 ﻿using rPDU2MQTT.Classes;
 using System.Runtime.InteropServices;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 namespace rPDU2MQTT.Startup;
 /// <summary>
@@ -71,9 +72,17 @@ internal class YamlConfigLoader
         using var stream = File.OpenRead(Find());
         using var sr = new StreamReader(stream);
 
-        var cfg = s.Deserialize<Config>(sr);
+        try
+        {
+            var cfg = s.Deserialize<Config>(sr);
 
-        return InitializeConfig(cfg);
+            return InitializeConfig(cfg);
+        }
+        catch(YamlException ex)
+        {
+            Log.Fatal($"Error while parsing YAML Config. Error on Line {ex.Start.Line}");
+            throw;
+        }
     }
 
     /// <summary>
@@ -90,12 +99,60 @@ internal class YamlConfigLoader
         config ??= new Config();
 
         config.Overrides ??= new Models.Config.Overrides();
-        config.Overrides.PDU ??= new Models.Config.Schemas.EntityOverride();
-        config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
-        config.Overrides.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
+        config.Overrides.rPDU2MQTT ??= new Models.Config.Schemas.EntityOverride();
+        config.Overrides.Devices ??= new Dictionary<string, Models.Config.Schemas.DeviceOverride?>();
         config.Overrides.Measurements ??= new Dictionary<string, Models.Config.Schemas.EntityOverride?>();
+        foreach (var (_, dvc) in config.Overrides.Devices)
+            if (dvc is not null)
+                dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
+        // Backwards-compatible alias: Enable_Actions -> ActionsEnabled.
+        if (config.PDU.EnableActionsAlias.HasValue)
+            config.PDU.ActionsEnabled = config.PDU.EnableActionsAlias.Value;
+
+        ApplyEnvironmentOverrides(config);
 
         return config;
+    }
+
+    /// <summary>
+    /// Override credentials from the environment so secrets don't have to live in config.yaml.
+    /// For each variable, a "<NAME>_FILE" pointing at a file (Docker secret) takes precedence.
+    /// </summary>
+    private static void ApplyEnvironmentOverrides(Config config)
+    {
+        var mqttUser = ResolveSecret("RPDU2MQTT_MQTT_USERNAME");
+        var mqttPass = ResolveSecret("RPDU2MQTT_MQTT_PASSWORD");
+        if (mqttUser is not null || mqttPass is not null)
+        {
+            config.MQTT.Credentials ??= new Models.Config.Schemas.Credentials();
+            if (mqttUser is not null) { config.MQTT.Credentials.Username = mqttUser; Log.Information("Using MQTT username from environment."); }
+            if (mqttPass is not null) { config.MQTT.Credentials.Password = mqttPass; Log.Information("Using MQTT password from environment."); }
+        }
+
+        var pduUser = ResolveSecret("RPDU2MQTT_PDU_USERNAME");
+        var pduPass = ResolveSecret("RPDU2MQTT_PDU_PASSWORD");
+        if (pduUser is not null || pduPass is not null)
+        {
+            config.PDU.Credentials ??= new Models.Config.Schemas.Credentials();
+            if (pduUser is not null) { config.PDU.Credentials.Username = pduUser; Log.Information("Using PDU username from environment."); }
+            if (pduPass is not null) { config.PDU.Credentials.Password = pduPass; Log.Information("Using PDU password from environment."); }
+        }
+
+        var emonKey = ResolveSecret("RPDU2MQTT_EMONCMS_APIKEY");
+        if (emonKey is not null) { config.EmonCMS.ApiKey = emonKey; Log.Information("Using EmonCMS API key from environment."); }
+    }
+
+    /// <summary>
+    /// Resolve a secret from "<name>_FILE" (a file path, e.g. a Docker secret) if present,
+    /// otherwise from the environment variable itself. Returns null when neither is set.
+    /// </summary>
+    private static string? ResolveSecret(string name)
+    {
+        var filePath = Environment.GetEnvironmentVariable($"{name}_FILE");
+        if (!string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath))
+            return File.ReadAllText(filePath).Trim();
+
+        return Environment.GetEnvironmentVariable(name);
     }
 }

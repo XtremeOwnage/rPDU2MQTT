@@ -23,6 +23,12 @@ public class Config
     [YamlMember(Alias = "Debug", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Settings for debugging and diagnostics.")]
     public DebugConfig Debug { get; set; } = new DebugConfig();
 
+    [YamlMember(Alias = "Prometheus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Prometheus metrics exporter")]
+    public PrometheusConfig Prometheus { get; set; } = new PrometheusConfig();
+
+    [YamlMember(Alias = "EmonCMS", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "EmonCMS exporter")]
+    public EmonCMSConfig EmonCMS { get; set; } = new EmonCMSConfig();
+
     [YamlMember(Alias = "Logging")]
     public LoggingConfig Logging { get; set; } = new LoggingConfig();
 }

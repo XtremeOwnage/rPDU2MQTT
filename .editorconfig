@@ -1,0 +1,11 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# Model/DTO types are populated by the JSON/YAML deserializers, so their non-nullable
+# members are always set at runtime even though the compiler cannot prove it. Suppress
+# CS8618 only for these types; it stays active everywhere else.
+[**/Models/**.cs]
+dotnet_diagnostic.CS8618.severity = none

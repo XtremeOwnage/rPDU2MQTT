@@ -13,6 +13,12 @@ public enum MqttPath
     [JsonPropertyName("state")]
     State,
 
+    [JsonPropertyName("set")]
+    Set,
+
+    [JsonPropertyName("alarm")]
+    Alarm,
+
     [JsonPropertyName("measurements")]
     Measurements,
 
@@ -21,4 +27,19 @@ public enum MqttPath
 
     [JsonPropertyName("identifier")]
     UniqueIdentifier,
+
+    [JsonPropertyName("Groups")]
+    Groups,
+
+    [JsonPropertyName("avg")]
+    Average,
+
+    [JsonPropertyName("sum")]
+    Sum,
+
+    [JsonPropertyName("min")]
+    Minimum,
+
+    [JsonPropertyName("max")]
+    Maximum,
 }

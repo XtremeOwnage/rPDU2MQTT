@@ -10,22 +10,23 @@ namespace rPDU2MQTT.Services.baseTypes;
 /// <summary>
 /// Represents a base hosted service, which interacts with MQTT.
 /// </summary>
-public abstract class baseMQTTTService : IHostedService, IDisposable
+public abstract class baseMQTTService : IHostedService, IDisposable
 {
     private IHiveMQClient mqtt { get; init; }
     private PeriodicTimer? timer;
     private Task timerTask = Task.CompletedTask;
+    private readonly CancellationTokenSource stoppingCts = new();
     protected Config cfg { get; }
     protected PDU pdu { get; }
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
-    protected baseMQTTTService(MQTTServiceDependancies dependancies) : this(dependancies, dependancies.Cfg.PDU.PollInterval) { }
-    protected baseMQTTTService(MQTTServiceDependancies dependancies, int Interval)
+    protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.PDU.PollInterval) { }
+    protected baseMQTTService(MQTTServiceDependencies dependencies, int Interval)
     {
-        mqtt = dependancies.Mqtt;
-        cfg = dependancies.Cfg;
-        pdu = dependancies.PDU;
+        mqtt = dependencies.Mqtt;
+        cfg = dependencies.Cfg;
+        pdu = dependencies.PDU;
 
         // If the interval is 0, don't create a timer.
         if (Interval <= 0)
@@ -59,7 +60,8 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
         Log.Information($"{GetType().Name} is starting.");
 
-        timerTask = Task.Run(() => timerTaskExecution(cancellationToken).Wait());
+        // Run the periodic loop in the background; it stops when stoppingCts is cancelled.
+        timerTask = timerTaskExecution(stoppingCts.Token);
 
         //Kick off the first one manually.
         await tick(cancellationToken);
@@ -70,8 +72,15 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
 
     private async Task timerTaskExecution(CancellationToken cancellationToken)
     {
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-            await tick(cancellationToken);
+        try
+        {
+            while (await timer!.WaitForNextTickAsync(cancellationToken))
+                await tick(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when the service is stopping.
+        }
     }
 
     private async Task tick(CancellationToken cancellationToken)
@@ -88,24 +97,25 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         }
     }
 
-    public Task StopAsync(CancellationToken stoppingToken)
+    public async Task StopAsync(CancellationToken stoppingToken)
     {
         Log.Information($"{GetType().Name} is stopping.");
 
-        //Do Something?
+        // Signal the periodic loop to stop, then wait for it to drain (bounded by the host's stop token).
+        await stoppingCts.CancelAsync();
+        await Task.WhenAny(timerTask, Task.Delay(Timeout.Infinite, stoppingToken));
 
         Log.Information($"{GetType().Name} has stopped.");
-
-        return Task.CompletedTask;
     }
 
-    ~baseMQTTTService()
+    ~baseMQTTService()
     {
         Log.Debug($"{GetType().Name} has been finalized");
     }
 
     public void Dispose()
     {
+        stoppingCts.Dispose();
         timer?.Dispose();
     }
 
@@ -117,11 +127,26 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     protected Task PublishString(string Topic, string Message, CancellationToken cancellationToken)
+        => PublishString(Topic, Message, retain: false, cancellationToken);
+
+    protected Task PublishString(string Topic, string Message, bool retain, CancellationToken cancellationToken)
     {
-        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtMostOnceDelivery);
-        msg.PayloadAsString = Message;
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery)
+        {
+            PayloadAsString = Message,
+            Retain = retain,
+        };
         return Publish(msg, cancellationToken);
     }
+
+    protected Task PublishObjectasJSON<TObject>(string Topic, TObject Obj, CancellationToken cancellationToken)
+    {
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery);
+        msg.PayloadAsString = System.Text.Json.JsonSerializer.Serialize<TObject>(Obj, this.jsonOptions);
+        return Publish(msg, cancellationToken);
+    }
+
+
 
     /// <summary>
     /// Publishes the specified message.
@@ -134,9 +159,8 @@ public abstract class baseMQTTTService : IHostedService, IDisposable
         if (cfg.Debug.PublishMessages == false)
             return Task.CompletedTask;
 
-        if (!mqtt.IsConnected())
-            Log.Error("MQTT Broker is not connected!!!!!");
-
+        // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
+        // publish failures surface in tick(). No need to check connectivity per message.
         return mqtt.PublishAsync(msg, cancellationToken);
     }
 

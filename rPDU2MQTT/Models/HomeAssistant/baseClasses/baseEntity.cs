@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
+using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Interfaces;
-using rPDU2MQTT.Models.Converters;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 using rPDU2MQTT.Models.HomeAssistant.Enums;
 using rPDU2MQTT.Models.HomeAssistant.Interfaces;
@@ -18,37 +18,38 @@ namespace rPDU2MQTT.Models.HomeAssistant.baseClasses;
 [JsonDerivedType(typeof(baseSensorEntity))]
 [JsonDerivedType(typeof(BinarySensorDiscovery))]
 [JsonDerivedType(typeof(SensorDiscovery))]
+[JsonDerivedType(typeof(SwitchDiscovery))]
+[JsonDerivedType(typeof(ButtonDiscovery))]
 [JsonPolymorphic(IgnoreUnrecognizedTypeDiscriminators = false, TypeDiscriminatorPropertyName = nameof(JsonPolyMorphicTypeName), UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor)]
 public abstract class baseEntity : IBaseDiscovery
 {
     [JsonIgnore]
     public string JsonPolyMorphicTypeName { get; set; }
+    #region Availability
     /// <summary>
-    /// Sub-class to hold topics relating to availability.
+    /// Topic carrying the bridge's online/offline status (its MQTT birth/LWT message).
     /// </summary>
-    /// <remarks>
-    /// If, this is not <see langword="null"/>, its properties will be flattened onto the parent object.
-    /// </remarks>
-    [JsonConverter(typeof(FlattenNullableObjectToParentObjectConverter))]
-    public EntityAvailability? Availability { get; set; } = null;
+    [JsonPropertyName("availability_topic")]
+    public string? AvailabilityTopic { get; set; }
 
-    /// <summary>
-    /// Sub-class which holds properties related to JSON Attributes.
-    /// </summary>
-    /// <remarks>
-    /// If, this is not <see langword="null"/>, its properties will be flattened onto the parent object.
-    /// </remarks>
-    [JsonConverter(typeof(FlattenNullableObjectToParentObjectConverter))]
-    public JsonAttributeSettings? JsonAttributes { get; set; } = null;
+    [JsonPropertyName("payload_available")]
+    public string? PayloadAvailable { get; set; } = "online";
+
+    [JsonPropertyName("payload_not_available")]
+    public string? PayloadNotAvailable { get; set; } = "offline";
+    #endregion
 
     [JsonIgnore(Condition = JsonIgnoreCondition.Always)]
     /// <summary>
     /// This is the type of entity this object represents.
     /// </summary>
-    /// <remarks>
-    /// Note- this is not serialized here.
-    /// </remarks>
     public virtual EntityType EntityType { get; set; }
+
+    /// <summary>
+    /// The component platform (domain) this entity maps to, used in device-based discovery.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public string Platform => EntityType.ToJsonString();
 
     /// <summary>
     /// The category of the entity. When set, the entity category must be diagnostic for sensors.
@@ -78,10 +79,11 @@ public abstract class baseEntity : IBaseDiscovery
     #endregion
 
     /// <summary>
-    /// This is the device for which this entity will belong to.
+    /// The device this entity belongs to. Used to group entities into a single device-based
+    /// discovery payload; the device block itself is published once at the payload root.
     /// </summary>
-    [JsonPropertyName("device")]
-    public required DiscoveryDevice Device { get; init; }
+    [JsonIgnore]
+    public DiscoveryDevice Device { get; init; } = null!;
 
     /// <summary>
     /// Icon for the entity.

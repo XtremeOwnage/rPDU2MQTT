@@ -9,11 +9,21 @@ Mqtt:
     ParentTopic: "Rack_PDU"
 
 PDU:
-    Connection:        
+    Connection:
         Host: 192.168.1.2   # Update to the IP of your PDU.
         Port: 80
-        
+
     PollInterval: 5
+
+    # Required only if you enable outlet on/off control below.
+    # Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD env vars.
+    #Credentials:
+    #    Username: "actions-user"
+    #    Password: "actions-pass"
+
+    # Enables outlet on/off control from Home Assistant (publishes switch entities).
+    # Requires Credentials above with "Control" permission on every PDU in a cluster. Default: false.
+    #ActionsEnabled: true
 Overrides:
     PDU: 
         Name: "Your PDU"
@@ -53,3 +63,22 @@ HomeAssistant:
 
     # Short discovery interval is used for testing.
     DiscoveryInterval: 30
+
+# Optional: send logs to a remote syslog server.
+#Logging:
+#    Syslog:
+#        Enabled: true
+#        Host: "10.0.0.10"
+#        Protocol: UDP   # UDP or TCP
+
+# Optional: expose metrics for Prometheus at http://<host>:9184/metrics
+#Prometheus:
+#    Enabled: true
+#    Port: 9184
+
+# Optional: push measurements to EmonCMS (inputs are auto-created).
+#EmonCMS:
+#    Enabled: true
+#    Url: "http://emoncms.example.com"
+#    ApiKey: "your-write-apikey"   # or set RPDU2MQTT_EMONCMS_APIKEY
+#    Node: "rpdu2mqtt"

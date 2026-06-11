@@ -7,7 +7,11 @@ public sealed class CaseInsensitiveDictionaryConverter<TValue> : JsonConverter<D
 {
     public override Dictionary<string, TValue> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        var newDictionary = (Dictionary<string, TValue>)JsonSerializer.Deserialize(ref reader, typeToConvert, options);
+        var newDictionary = (Dictionary<string, TValue>?)JsonSerializer.Deserialize(ref reader, typeToConvert, options);
+
+        if (newDictionary is null)
+            return new Dictionary<string, TValue>(StringComparer.OrdinalIgnoreCase);
+
         return new Dictionary<string, TValue>(newDictionary, StringComparer.OrdinalIgnoreCase);
     }
 

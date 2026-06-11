@@ -11,7 +11,7 @@ public static class ServiceConfiguration
 {
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
-        // While- we can request services when building dependancies-
+        // While- we can request services when building dependencies-
         // Need the configuration DURING service collection initilization- 
         // Because it determiens which hosted services we want to add.
         Config cfg = YamlConfigLoader.GetConfig() ?? throw new Exception("Unable to load configuration");
@@ -31,7 +31,7 @@ public static class ServiceConfiguration
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
             var lwt = new LastWillAndTestament(
-                MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "Status"), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
+                MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
 
             var mqttBuilder = new HiveMQClientOptionsBuilder()
                 .WithBroker(cfg.MQTT.Connection.Host)
@@ -48,20 +48,18 @@ public static class ServiceConfiguration
                 mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
 
             // Return new client, with options applied.
-            var x = new HiveMQClient(mqttBuilder.Build());
-
-            // While we are here- lets go ahead and create / bind the event handler.
-            services.AddSingleton<MqttEventHandler>(new MqttEventHandler(x));
-            return x;
-
-            
+            return new HiveMQClient(mqttBuilder.Build());
         });
+
+        // Wires the client's connect/disconnect events and the online-status heartbeat.
+        // Instantiated explicitly in Program.cs before the initial connect.
+        services.AddSingleton(sp => new MqttEventHandler((HiveMQClient)sp.GetRequiredService<IHiveMQClient>()));
 
         //Configure Services
         services.AddSingleton<PDU>();
 
         // Create HttpClient for PDU.
-        var pduHttpClient = services.AddHttpClient<PDU>(client =>
+        var pduHttpClient = services.AddHttpClient<PduApiHandler>(client =>
         {
             ThrowError.TestRequiredConfigurationSection(cfg.PDU, "PDU");
             ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection, "PDU.Connection");
@@ -99,14 +97,40 @@ public static class ServiceConfiguration
         }
 
 
-        services.AddSingleton<MQTTServiceDependancies>();
+        services.AddSingleton<MQTTServiceDependencies>();
 
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();
 
+        // Optional metric exporters.
+        if (cfg.Prometheus.Enabled)
+            services.AddHostedService<PrometheusExportService>();
+
+        if (cfg.EmonCMS.Enabled)
+        {
+            ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
+            services.AddHostedService<EmonCmsExportService>();
+        }
+
+        // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
+        services.AddSingleton<DiscoveryCoordinator>();
+
         if (cfg.HASS.DiscoveryEnabled)
+        {
             services.AddHostedService<HomeAssistantDiscoveryService>();
+            services.AddHostedService<DiagnosticService>();
+        }
         else
             Log.Warning($"Home Assistant Discovery Disabled.");
+
+        // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
+        if (cfg.PDU.ActionsEnabled)
+        {
+            if (string.IsNullOrEmpty(cfg.PDU.Credentials?.Username) || string.IsNullOrEmpty(cfg.PDU.Credentials?.Password))
+                Log.Warning("PDU.ActionsEnabled is true, but PDU credentials are not set. Outlet on/off control will fail until Pdu.Credentials (or RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD) are provided.");
+
+            Log.Information("Outlet control is ENABLED (ActionsEnabled).");
+            services.AddHostedService<OutletCommandService>();
+        }
     }
 }

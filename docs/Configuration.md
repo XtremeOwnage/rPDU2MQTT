@@ -2,6 +2,8 @@
 
 This guide will walk you through the configuration options available for this service. The configuration file, typically named `config.yaml`, should be properly set up before deploying the service.
 
+> Clustering multiple PDUs? See [Aggregation.md](Aggregation.md) for OneView setup.
+
 ## MQTT Configuration
 
 ### Credentials (Optional)
@@ -80,6 +82,29 @@ Pdu:
     Password: "actionsPass"  # Replace with your PDU password
 ```
 
+### Credentials via environment / secrets (Optional)
+To keep secrets out of `config.yaml`, MQTT and PDU credentials can be supplied via environment
+variables. These override whatever is in the config file:
+
+| Variable | Overrides |
+| --- | --- |
+| `RPDU2MQTT_MQTT_USERNAME` / `RPDU2MQTT_MQTT_PASSWORD` | MQTT broker credentials |
+| `RPDU2MQTT_PDU_USERNAME` / `RPDU2MQTT_PDU_PASSWORD` | PDU credentials |
+
+For each variable, a `<NAME>_FILE` form is also supported: set it to a file path (e.g. a Docker
+secret at `/run/secrets/mqtt_password`) and the value is read from that file. The `_FILE` form
+takes precedence over the plain variable.
+
+```yaml
+# docker-compose example
+services:
+  rpdu2mqtt:
+    environment:
+      RPDU2MQTT_MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
+    secrets:
+      - mqtt_password
+```
+
 ### Polling Interval (Optional)
 Set how often the PDU sensors should be polled and published to MQTT (in seconds).
 
@@ -88,8 +113,11 @@ Pdu:
   PollInterval: 5  # Adjust the polling interval as needed
 ```
 
-### Actions Enabled (Not yet implemented!)
-Enable or disable the ability to perform write-actions on the PDU (e.g., toggling switches).
+### Actions Enabled
+Enable or disable the ability to perform write-actions on the PDU (e.g., toggling outlets).
+When enabled, each outlet is also published as a Home Assistant `switch`, and the bridge
+subscribes to its command topic to relay on/off commands to the PDU. Requires PDU
+`Credentials`. Disabled by default.
 
 ```yaml
 Pdu:
@@ -215,6 +243,46 @@ Logging:
     FileRetention: 30  # Number of rolled over logs to retain
 ```
 
+### Syslog Logging
+Send logs to a remote syslog server (RFC3164/RFC5424) over UDP or TCP.
+
+```yaml
+Logging:
+  Syslog:
+    Enabled: false       # Set to true to enable syslog
+    Host: "10.0.0.10"    # Syslog server hostname/IP (required when enabled)
+    Port: 514            # Syslog server port
+    Protocol: UDP        # UDP or TCP
+    AppName: "rPDU2MQTT" # Application name reported in syslog messages
+    Severity: Information # Minimum severity of messages to send
+```
+
+
+## Metric Exporters (Optional)
+
+In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled
+by default and poll on the same `Pdu.PollInterval` cadence.
+
+### Prometheus
+Exposes a `/metrics` endpoint. Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`)
+labelled by `device`, `source`, and `units`.
+
+```yaml
+Prometheus:
+  Enabled: false
+  Port: 9184   # /metrics endpoint port
+```
+
+### EmonCMS
+Pushes measurements to an EmonCMS server's `input/post` API (EmonCMS auto-creates the inputs).
+
+```yaml
+EmonCMS:
+  Enabled: false
+  Url: "http://emoncms.example.com"   # required when enabled
+  ApiKey: "your-write-apikey"         # or set RPDU2MQTT_EMONCMS_APIKEY
+  Node: "rpdu2mqtt"
+```
 
 ## Example Configurations
 

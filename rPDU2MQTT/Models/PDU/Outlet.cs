@@ -4,9 +4,15 @@ using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.PDU;
 
-[System.Diagnostics.DebuggerDisplay("Outlet: { EntityName }")]
-public partial class Outlet : NamedEntityWithMeasurements, IEntityWithState
+[System.Diagnostics.DebuggerDisplay("Outlet: { Entity_Name }")]
+public partial class Outlet : NamedEntityWithMeasurements, IEntityWithState, IDictionaryKey<int>
 {
+    #region IDictionaryKey
+    /// <inheritdoc cref="IDictionaryKey{TKeyType}.Key"/>>
+    [JsonIgnore]
+    public int Key { get; set; }
+    #endregion
+
     [JsonPropertyName("poaAction")]
     public string PoaAction { get; set; }
 
@@ -26,7 +32,7 @@ public partial class Outlet : NamedEntityWithMeasurements, IEntityWithState
     public string Mode { get; set; }
 
     [JsonPropertyName("alarm")]
-    public A0Ae260C851900C3Alarm Alarm { get; set; }
+    public Alarm Alarm { get; set; }
 
     [JsonPropertyName("timeToAction")]
     public long TimeToAction { get; set; }

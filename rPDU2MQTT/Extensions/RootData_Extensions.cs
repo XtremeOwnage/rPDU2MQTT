@@ -10,7 +10,7 @@ public static class RootData_Extensiosn
     /// <param name="data"></param>
     /// <param name="DeviceURL"></param>
     /// <returns></returns>
-    public static DiscoveryDevice GetDiscoveryDevice(this RootData data)
+    public static DiscoveryDevice GetDiscoveryDevice(this rPDU data)
     {
         return new DiscoveryDevice
         {

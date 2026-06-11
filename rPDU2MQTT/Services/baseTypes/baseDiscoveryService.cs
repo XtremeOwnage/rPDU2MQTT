@@ -1,5 +1,4 @@
 ﻿using HiveMQtt.MQTT5.Types;
-using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
@@ -8,60 +7,31 @@ using rPDU2MQTT.Models.HomeAssistant;
 using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Models.PDU.basePDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
 
 namespace rPDU2MQTT.Services.baseTypes;
 
-public abstract class baseDiscoveryService : baseMQTTTService
+public abstract class baseDiscoveryService : baseMQTTService
 {
-    public baseDiscoveryService(MQTTServiceDependancies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
+    public baseDiscoveryService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.HASS.DiscoveryInterval) { }
 
     /// <summary>
-    /// Publish a discovery message for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>
+    /// How long a state may go without an update before HA marks it unavailable
+    /// (HomeAssistant.SensorExpireAfterSeconds).
     /// </summary>
-    /// <param name="measurement"></param>
-    /// <param name="Parent"></param>
-    /// <param name="cancellationToken"></param>
-    public Task DiscoverMeasurementAsync(Measurement measurement, DiscoveryDevice Parent, CancellationToken cancellationToken)
+    private TimeSpan StateExpiry => TimeSpan.FromSeconds(cfg.HASS.SensorExpireAfterSeconds);
+
+    /// <summary>
+    /// Build a sensor discovery for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>.
+    /// Returns <see langword="null"/> if the measurement cannot be parsed.
+    /// </summary>
+    public baseEntity? BuildMeasurement(Measurement measurement, DiscoveryDevice Parent)
+        => BuildMeasurement((baseMeasurement)measurement, Parent, "{{ value }}");
+
+    public BinarySensorDiscovery BuildState<T>(T item, DiscoveryDevice Parent) where T : NamedEntity, IEntityWithState
     {
-        //If we are unable to parse this measurement as valid, skip to the next.
-        var dto = measurement.TryParseValue();
-
-        if(dto is null)
-            return Task.CompletedTask;
-
-        var discovery = new SensorDiscovery
-        {
-            //Identifying Details
-            ID = measurement.Entity_Identifier,
-            Name = measurement.Entity_Name,
-            DisplayName = measurement.Entity_DisplayName,
-
-            //Device Details
-            Device = Parent,
-
-            //Sensor Specific Details
-            EntityType = Models.HomeAssistant.Enums.EntityType.Sensor,
-            EntityCategory = null,  // Leave null, as there is not a category for "sensors".
-            SensorClass = dto.SensorClass,
-            StateClass = dto.StateClass,
-
-            //Specific to this sensor.
-            StateTopic = measurement.GetTopicPath(),
-            UnitOfMeasurement = measurement.Units,
-            ValueTemplate = "{{ value }}",
-
-
-            // Availability
-            //Availability = new Models.HomeAssistant.baseClasses.EntityAvailability
-        };
-
-        return PushDiscoveryMessage(discovery, cancellationToken);
-    }
-
-    public Task DiscoverStateAsync<T>(T item, DiscoveryDevice Parent, CancellationToken cancellationToken) where T : NamedEntity, IEntityWithState
-    {
-        var discovery = new BinarySensorDiscovery
+        return new BinarySensorDiscovery
         {
             //Identifying Details
             ID = item.Entity_Identifier + "_state",
@@ -81,39 +51,172 @@ public abstract class baseDiscoveryService : baseMQTTTService
             PayloadOn = item.State_On,
             PayloadOff = item.State_Off,
 
-            //Availbility
-            //Availability = outlet.GetAvailability()
+            ExpireAfter = StateExpiry,
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
         };
-
-        return PushDiscoveryMessage(discovery, cancellationToken);
     }
 
     /// <summary>
-    /// Bulk publish all discoveries.
+    /// Build a switch discovery so a controllable outlet can be toggled from Home Assistant.
+    /// The switch shares the outlet's existing state topic and adds a command topic.
     /// </summary>
-    /// <remarks>
-    /// This will automatically split results by Device, and EntityType.
-    /// </remarks>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="Discoveries"></param>
-    /// <param name="cancellationToken"></param>
-    /// <returns></returns>
-    protected async Task PushDiscoveryMessages<T>(List<T> Discoveries, CancellationToken cancellationToken) where T : baseEntity
+    public SwitchDiscovery BuildSwitch<T>(T item, DiscoveryDevice Parent) where T : NamedEntity, IEntityWithState
     {
-        foreach (T sensor in Discoveries)
-            await PushDiscoveryMessage(sensor, cancellationToken);
+        return new SwitchDiscovery
+        {
+            ID = item.Entity_Identifier + "_switch",
+            Name = item.Entity_Name + "_switch",
+            DisplayName = "Switch",
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Switch,
+
+            StateTopic = item.GetStateTopic(),
+            ValueTemplate = item.State_ValueTemplate,
+            StateOn = item.State_On,
+            StateOff = item.State_Off,
+            PayloadOn = item.State_On,
+            PayloadOff = item.State_Off,
+            CommandTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.Set.ToJsonString()),
+
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
     }
 
-    protected Task PushDiscoveryMessage<T>(T sensor, CancellationToken cancellationToken) where T : baseEntity
+    /// <summary>
+    /// Build a stateless button entity that publishes to <paramref name="commandTopic"/> when pressed.
+    /// </summary>
+    public ButtonDiscovery BuildButton(string id, string displayName, string commandTopic, DiscoveryDevice Parent, string? deviceClass = null)
     {
-        var topic = $"{cfg.HASS.DiscoveryTopic}/{sensor.EntityType.ToJsonString()}/{sensor.ID}/config";
+        return new ButtonDiscovery
+        {
+            ID = id,
+            Name = id,
+            DisplayName = displayName,
 
-        Log.Debug($"Publishing Discovery of type {sensor.EntityType.ToJsonString()} for {sensor.ID} to {topic}");
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Button,
+            EntityCategory = EntityCategory.Diagnostic,
+            DeviceClass = deviceClass,
+
+            CommandTopic = commandTopic,
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    /// <summary>
+    /// Build a "problem" binary sensor reflecting an entity's alarm state.
+    /// </summary>
+    public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent)
+    {
+        return new BinarySensorDiscovery
+        {
+            ID = item.Entity_Identifier + "_alarm",
+            Name = item.Entity_Name + "_alarm",
+            DisplayName = "Alarm",
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.BinarySensor,
+            EntityCategory = EntityCategory.Diagnostic,
+            DeviceClass = "problem",
+
+            StateTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.Alarm.ToJsonString()),
+            // Map the raw alarm state: "none" -> no problem, anything else -> problem.
+            ValueTemplate = "{{ 'OFF' if value == 'none' else 'ON' }}",
+            PayloadOn = "ON",
+            PayloadOff = "OFF",
+
+            ExpireAfter = StateExpiry,
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    /// <summary>
+    /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
+    /// </summary>
+    protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)
+        => BuildMeasurement(measurement, Parent, "{{ value_json.sum }}");
+
+    private SensorDiscovery? BuildMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate)
+    {
+        //If we are unable to parse this measurement as valid, skip to the next.
+        var dto = measurement.TryParseValue();
+
+        if (dto is null)
+            return null;
+
+        return new SensorDiscovery
+        {
+            //Identifying Details
+            ID = measurement.Entity_Identifier,
+            Name = measurement.Entity_Name,
+            DisplayName = measurement.Entity_DisplayName,
+
+            //Device Details
+            Device = Parent,
+
+            //Sensor Specific Details
+            EntityType = Models.HomeAssistant.Enums.EntityType.Sensor,
+            EntityCategory = null,  // Leave null, as there is not a category for "sensors".
+            SensorClass = dto.SensorClass,
+            StateClass = dto.StateClass,
+
+            //Specific to this sensor.
+            StateTopic = measurement.GetTopicPath(),
+            UnitOfMeasurement = measurement.Units,
+            ValueTemplate = valueTemplate,
+
+            ExpireAfter = StateExpiry,
+            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+        };
+    }
+
+    // Device discovery topics published on the previous run, so we can clear ones that disappear.
+    private readonly HashSet<string> publishedDeviceTopics = new();
+
+    /// <summary>
+    /// Publish device-based discovery: one retained message per device containing all of its
+    /// entities as components. Devices that were published previously but are no longer present
+    /// have their retained discovery message cleared so they don't linger in Home Assistant.
+    /// </summary>
+    protected async Task PublishDeviceDiscoveries(IEnumerable<baseEntity> components, CancellationToken cancellationToken)
+    {
+        var currentTopics = new HashSet<string>();
+
+        foreach (var group in components.GroupBy(c => c.Device.UniqueIdentifier))
+        {
+            var device = new DeviceDiscovery
+            {
+                Device = group.First().Device,
+                Components = group.ToDictionary(c => c.ID, c => c),
+            };
+
+            currentTopics.Add(DeviceTopic(device.Device.UniqueIdentifier));
+            await PublishDeviceDiscovery(device, cancellationToken);
+        }
+
+        foreach (var staleTopic in publishedDeviceTopics.Except(currentTopics))
+        {
+            Log.Information($"Clearing stale discovery topic {staleTopic}");
+            await ClearRetained(staleTopic, cancellationToken);
+        }
+
+        publishedDeviceTopics.Clear();
+        publishedDeviceTopics.UnionWith(currentTopics);
+    }
+
+    private string DeviceTopic(string deviceIdentifier) => $"{cfg.HASS.DiscoveryTopic}/device/{deviceIdentifier}/config";
+
+    private Task PublishDeviceDiscovery(DeviceDiscovery device, CancellationToken cancellationToken)
+    {
+        var topic = DeviceTopic(device.Device.UniqueIdentifier);
+
+        Log.Debug($"Publishing device discovery for {device.Device.UniqueIdentifier} ({device.Components.Count} components) to {topic}");
 
         var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
         {
             ContentType = "json",
-            PayloadAsString = System.Text.Json.JsonSerializer.Serialize<T>(sensor, this.jsonOptions),
+            PayloadAsString = System.Text.Json.JsonSerializer.Serialize(device, this.jsonOptions),
             Retain = cfg.HASS.DiscoveryRetain,
         };
 
@@ -121,6 +224,38 @@ public abstract class baseDiscoveryService : baseMQTTTService
             Log.Debug(msg.PayloadAsString);
 
         return this.Publish(msg, cancellationToken);
+    }
+
+    /// <summary>Clear a retained topic by publishing a zero-length retained message.</summary>
+    private Task ClearRetained(string topic, CancellationToken cancellationToken)
+    {
+        var msg = new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
+        {
+            PayloadAsString = string.Empty,
+            Retain = true,
+        };
+
+        return this.Publish(msg, cancellationToken);
+    }
+
+    /// <summary>
+    /// If the configuration allows remapping make/model, this method will do it automatially.
+    /// </summary>
+    /// <param name="discoveryDevice"></param>
+    /// <param name="Make">This will be the value placed into the Manufacturer column, if enabled.</param>
+    /// <param name="Model">This will be the value APPENDED to the parent device's name, if enabled.</param>
+    protected void RemapColumns(DiscoveryDevice discoveryDevice, string Make, string Model)
+    {
+        var parent = discoveryDevice.ParentDevice;
+        if (parent is null)
+            return;
+
+        if (cfg.PDU.RemapModel)
+            discoveryDevice.Model = $"{parent.Name} {Model}";
+
+        if (cfg.PDU.RemapManufacturer)
+            discoveryDevice.Manufacturer = Make;
+
     }
 }
 

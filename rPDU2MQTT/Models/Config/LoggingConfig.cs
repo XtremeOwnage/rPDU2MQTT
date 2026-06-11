@@ -26,4 +26,11 @@ public class LoggingConfig
         FileRetention = 30,
         FileRollover = RollingInterval.Day,
     };
+
+    [YamlMember(Alias = "Syslog")]
+    public SyslogLoggingTargetConfiguration Syslog { get; set; } = new SyslogLoggingTargetConfiguration()
+    {
+        Enabled = false,
+        Severity = LogEventLevel.Information,
+    };
 }

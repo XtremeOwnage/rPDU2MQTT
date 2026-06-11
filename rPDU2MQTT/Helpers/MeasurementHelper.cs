@@ -1,6 +1,8 @@
-﻿using rPDU2MQTT.Models.HomeAssistant.Enums;
+﻿using rPDU2MQTT.Interfaces;
+using rPDU2MQTT.Models.HomeAssistant.Enums;
 using rPDU2MQTT.Models.HomeAssistant.ObjectDTOs;
 using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Models.PDU.basePDU;
 
 namespace rPDU2MQTT.Helpers;
 
@@ -11,7 +13,7 @@ public static class MeasurementHelper
     /// </summary>
     /// <param name="measurement"></param>
     /// <returns>Bool which indicates if this is a valid, supported measurement.</returns>
-    public static SensorDTO? TryParseValue(this Measurement measurement)
+    public static SensorDTO? TryParseValue(this baseMeasurement measurement)
     {
         return measurement.Type.ToLower() switch
         {

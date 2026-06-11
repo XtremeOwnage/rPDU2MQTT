@@ -1,5 +1,7 @@
 Mqtt:
     # Optional Credentials.
+    # Can also be provided via the RPDU2MQTT_MQTT_USERNAME / RPDU2MQTT_MQTT_PASSWORD environment
+    # variables (or a *_FILE variant pointing at a Docker secret), which override the values here.
     Credentials:
         # Add your MQTT Username and Password here.
         Username: "user"
@@ -46,7 +48,9 @@ Pdu:
         # (Optional) Enable or Disable Certificate Validation. Defaults to true.
         ValidateCertificate: true
 
-    # (Optional) Credentials to connect to PDU.
+    # (Optional) Credentials to connect to PDU. Required for write-actions (ActionsEnabled).
+    # Can also be provided via the RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD environment
+    # variables (or a *_FILE variant pointing at a Docker secret), which override the values here.
     Credentials:
         Username: "user"
         Password: "password"
@@ -61,6 +65,16 @@ Pdu:
     # This, defaults to false.
     ActionsEnabled: true
 
+    # When false, the model column for each outlet/device, will be set to the parent PDU's model.
+    # When true, the model for individual outlets/plugs, will be set to "{PDU Name} Outlet { Outlet Number }"
+    # This exists, to allow EASILY viewing which devices are plugged into which outlet, on which PDU.
+    RemapModel: true
+
+    # When false, the manufacturer column for each outlet/device, will be set to the parent PDU's manufactuer. (GEI in my testing)
+    # When true, the manufacturer for individual outlets/plugs, will be set to Outlet, Group, etc, to reflect the type of device.
+    # This exists, to make the manufacturer column a bit more useful.
+    RemapMake: true
+
 
 # This section allows overriding the generated entity_id, name, and enabled/disabled, for various objects.
 # Note- ID / entity_id, will only be set when the entity is created.
@@ -71,7 +85,7 @@ Pdu:
 # PDU > Devices > [Entities, Outlets] > Measurements
 Overrides:
     # Override details about the PDU itself.
-    PDU:
+    rPDU2MQTT:
         ID: null,
         Name: "Your-PDU"
         # Not- sure why you would want to set this to false... But, the option exists..
@@ -85,31 +99,39 @@ Overrides:
             Name:
             Enabled: true
 
+            # Customize individual outlets for this device (PDU)
+            # These are number-based, start at 1. 
+            # "Outlet 1" in the PDU corresponds to 1, for example. 
+            # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
+            Outlets:        
+                1:
+                    # Set both ID (entity name), and Display Name
+                    ID: kube02
+                    Name: "Proxmox: Kube02"
+                    Enabled: true
+                2:
+                    # Only set ID.
+                    ID: dell_md1220
+           
+                3:
+                    # Disable Outlet #3
+                    Enabled: false
+
         YOUR-SERIAL-NUMBER:
             ID:
             Name:
             Enabled: true
 
-    # Customize individual outlets.
-    # These are number-based, start at 1. 
-    # "Outlet 1" in the PDU corresponds to 1, for example. 
-    # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
-    Outlets:
-        1:
-            ID: kube02
-            Name: "Proxmox: Kube02"
-            Enabled: true
-        2:
-            ID: dell_md1220
-            Name: "Dell: MD1220"
-            Enabled: true
+            ## Outlet overrides for 'YOUR-SERIAL-NUMBER'
+            Outlets:
+                1:
+                    # Override outlet 1, for PDU with serial number 'YOUR-SERIAL-NUMBER'
+                    ID: your_entity_name
+                    Name: "Your Entity Name"
+                    Enabled: true
+                2:
+                    Enabled: true
 
-        # Empty record.
-        3:
-            ID:
-            Name:
-            Enabled:
-    
     # Customize how metrics are sent to services.
     # The entity ID used for metrics, is [DEVICE_ID]_[METRIC_TYPE]
     # The "ID" field here, will be used instead of "METRIC_TYPE"
@@ -142,12 +164,51 @@ Overrides:
             Enabled: false
         balance:
             Enabled: false
-            # These sensors are just an approximation of co2 produced from the amount of fossil-fuels which would need to be burned
-            # to produces equivalent amount of energy.
+        # These sensors are just an approximation of co2 produced from the amount of fossil-fuels which would need to be burned
+        # to produces equivalent amount of energy.
         accumulatedCo2:
             Enabled: false
         instantaneousCo2:
             Enabled: false
+
+    # This section specifically overrides details related to OneView groups. (Requires device aggregation on Vertiv rPDU)
+    OneviewGroups:
+        # Customize how metrics are sent to services.
+        # The entity ID used for metrics, is [DEVICE_ID]_[METRIC_TYPE]
+        # The "ID" field here, will be used instead of "METRIC_TYPE"
+        # The "Name" field here, maps back to a "Human Readable Version"
+        # These overrides affect OneView Group measurements.
+        Measurements:
+            realPower:
+                ID: power_sum
+                Name: Power (Sum)
+                Enabled: true
+            energy:
+                ID: energy_sum
+                Name: Energy (Sum)
+                Enabled: true
+
+        # This section gives the ability to override the ID, Name, or Enabled state for groups.
+        # Disabled groups will not be discovered.
+        Overrides:
+            # The key can either be the numeric ID, or the group's name as defined in /oneviewGroupConfig
+            GroupName:
+                ID: new_group_id
+                Name: New Group Name
+                Enabled: true
+            # Note- when referencing by ID, use quotes.
+            "2":
+                ID: group_2
+                Name: Group 2 Name
+                Enabled: true
+
+            # Disable unassigned group by default.
+            unassigned:
+                enabled: false
+
+            # Disable total group by default.
+            total:
+                enabled: false
 
 HomeAssistant:
     # Is home assistant mQTT-discovery enabled?
@@ -233,3 +294,36 @@ Logging:
         # The number of rolled over logs which will be retained.
         # Example, if RolloverMode=Day, and this is set to 30, you will retain ~30 days of logs.
         FileRetention: 30
+
+    # Send logs to a remote syslog server (RFC3164/RFC5424).
+    Syslog:
+        # (Optional). Default: false
+        Enabled: false
+        # Syslog server host/ip. Required when enabled.
+        Host: "10.0.0.10"
+        # Syslog server port. Default: 514
+        Port: 514
+        # Transport: UDP or TCP. Default: UDP
+        Protocol: UDP
+        # Application name reported in the syslog messages. Default: rPDU2MQTT
+        AppName: "rPDU2MQTT"
+        # Only messages with this severity or higher are sent. Default: Information
+        Severity: Information
+
+# (Optional) Export measurements to Prometheus, in addition to MQTT.
+Prometheus:
+    # (Optional). Default: false
+    Enabled: false
+    # Port the /metrics endpoint listens on. Default: 9184
+    Port: 9184
+
+# (Optional) Push measurements to an EmonCMS server (inputs are auto-created).
+EmonCMS:
+    # (Optional). Default: false
+    Enabled: false
+    # Base URL of the EmonCMS server. Required when enabled.
+    Url: "http://emoncms.example.com"
+    # EmonCMS write API key. Can also be provided via the RPDU2MQTT_EMONCMS_APIKEY environment variable.
+    ApiKey: "your-write-apikey"
+    # EmonCMS input node name. Default: rpdu2mqtt
+    Node: "rpdu2mqtt"

@@ -1,9 +1,11 @@
-﻿using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.HomeAssistant;
+using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.DummyDevices;
+using rPDU2MQTT.Models.PDU.OneView;
 using rPDU2MQTT.Services.baseTypes;
 using System.Diagnostics.CodeAnalysis;
 
@@ -14,23 +16,75 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
-    public HomeAssistantDiscoveryService(MQTTServiceDependancies deps) : base(deps) { }
+    private readonly SemaphoreSlim discoveryLock = new(1, 1);
+
+    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
+    {
+        // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
+        coordinator.RediscoverRequested += Execute;
+    }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var data = await pdu.GetRootData_Public(cancellationToken);
-        var pduDevice = data.GetDiscoveryDevice();
+        // The timer and the on-demand rediscover trigger can both call this; don't overlap.
+        if (!await discoveryLock.WaitAsync(0, cancellationToken))
+        {
+            Log.Debug("Discovery already in progress; skipping this request.");
+            return;
+        }
 
-        Log.Debug("Starting discovery job.");
+        try
+        {
+            Log.Debug("Starting discovery job.");
+            var data = await pdu.GetRootData_Public(cancellationToken);
 
-        // Recursively discover everything.
-        await recursiveDiscovery(data.Devices, pduDevice, cancellationToken);
+            // Collect every entity, then publish one device-based discovery message per device.
+            var components = new List<baseEntity>();
 
-        Log.Information("Discovery information published.");
+            // Discover PDUs, Outlets, etc...
+            foreach (rPDU nestedPDU in data.PDUs)
+            {
+                var pduDevice = nestedPDU.GetDiscoveryDevice();
+                collectDiscovery(nestedPDU.Devices, pduDevice, components);
+            }
+
+            // Discover OneView Groups.
+            var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
+            if (firstPDU is not null)
+                collectDiscovery(data.Groups, firstPDU, components);
+
+            // Bridge device with diagnostic action buttons.
+            components.AddRange(BuildDiagnosticButtons());
+
+            await PublishDeviceDiscoveries(components, cancellationToken);
+
+            Log.Information("Discovery information published.");
+        }
+        finally
+        {
+            discoveryLock.Release();
+        }
+    }
+
+    /// <summary>Buttons for the bridge device: rediscover and restart (see DiagnosticService).</summary>
+    private IEnumerable<baseEntity> BuildDiagnosticButtons()
+    {
+        var bridge = new DiscoveryDevice
+        {
+            UniqueIdentifier = "rPDU2MQTT",
+            Name = "rPDU2MQTT",
+            Manufacturer = "rPDU2MQTT",
+            Model = "MQTT Bridge",
+        };
+
+        yield return BuildButton("rPDU2MQTT_rediscover", "Rediscover",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RediscoverSuffix), bridge);
+        yield return BuildButton("rPDU2MQTT_restart", "Restart",
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
     }
 
 
-    protected async Task recursiveDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+    private void collectDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
     {
         if (entity is null)
             return;
@@ -39,8 +93,11 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Create a device, to represent this device.
             var newParent = parent.CreateChild(device);
 
+            // Device-level alarm.
+            components.Add(BuildAlarm(device, newParent));
+
             // Discover outlets.
-            await recursiveDiscovery(device.Outlets, newParent, cancellationToken);
+            collectDiscovery(device.Outlets, newParent, components);
 
             #region Hack - Discover Entities
             // Discover Entity
@@ -53,44 +110,79 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // So- Only want to discover the ROOT value.
             // To do this- we are just going to find the entity, at the top of the layout.
 
-            // In my testing, the root entity, contains a single name, "entity/phase0". So- this next line, extracts, "phase0"
-            var rootEntityName = device.Layout[0].First().Split("/", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Last();
+            // In my testing, the root entity, contains a single name, "entity/phase0". So- this extracts "phase0".
+            string? rootEntityName = null;
+            if (device.Layout is not null && device.Layout.TryGetValue(0, out var rootLayout) && rootLayout.Length > 0)
+                rootEntityName = rootLayout[0].Split("/", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
 
-            var rootEntity = device.Entity
-                .Where(o => o.Key == rootEntityName)
-                .Select(o => o.Value)
-                .FirstOrDefault();
-
-            await recursiveDiscovery(rootEntity!, newParent, cancellationToken);
+            if (!string.IsNullOrEmpty(rootEntityName))
+            {
+                var rootEntity = device.Entity.FirstOrDefault(o => o.Key == rootEntityName);
+                collectDiscovery(rootEntity!, newParent, components);
+            }
             #endregion
 
         }
         else if (entity is Outlet outlet)
         {
-            // Create a device to represent the outlet.
-            var newParent = parent.CreateChild(outlet);
+            // Create a device to represent the outlet. Prefix with the PDU name so outlets
+            // stay distinguishable across multiple PDUs (e.g. "Rack-PDU-1 Dell: r730XD").
+            var newParent = parent.CreateChild(outlet, prefixWithParentName: true);
+
+            // Remap Make/Model, IF specified in the configuration.
+            RemapColumns(newParent, "Outlet", outlet.Name);
 
             // Discover outlet's state.
-            await DiscoverStateAsync(outlet, newParent, cancellationToken);
+            components.Add(BuildState(outlet, newParent));
+
+            // Outlet-level alarm.
+            components.Add(BuildAlarm(outlet, newParent));
+
+            // When write-actions are enabled, also expose the outlet as a controllable switch.
+            if (cfg.PDU.ActionsEnabled)
+                components.Add(BuildSwitch(outlet, newParent));
 
             // Discover measurements
-            await recursiveDiscovery(outlet.Measurements, newParent, cancellationToken);
+            collectDiscovery(outlet.Measurements, newParent, components);
         }
         else if (entity is Entity pduEntity)
         {
             // Discover measurements
-            await recursiveDiscovery(pduEntity.Measurements, parent, cancellationToken);
+            collectDiscovery(pduEntity.Measurements, parent, components);
         }
         else if (entity is Measurement measurement)
         {
-            await DiscoverMeasurementAsync(measurement, parent, cancellationToken);
+            if (BuildMeasurement(measurement, parent) is { } sensor)
+                components.Add(sensor);
+        }
+        else if (entity is GroupMeasurement groupMeasurement)
+        {
+            if (BuildGroupMeasurement(groupMeasurement, parent) is { } sensor)
+                components.Add(sensor);
+        }
+        else if (entity is OneViewGroup group)
+        {
+            // Create a device to represent the group.
+            var newParent = parent.CreateChild(group);
+
+            // Remap Make/Model, IF specified in the configuration.
+            RemapColumns(newParent, "Oneview Group", group.Label);
+
+            // Discover measurements.
+            collectDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, components);
         }
     }
 
-    protected async Task recursiveDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, CancellationToken cancellationToken) where TEntity : BaseEntity
+    private void collectDiscovery<TEntity>(IEnumerable<TEntity> entities, DiscoveryDevice parent, List<baseEntity> components)
+        where TEntity : BaseEntity
     {
-        foreach (var (_, entity) in entities)
-            await recursiveDiscovery(entity, parent, cancellationToken);
+        foreach (var entity in entities)
+            collectDiscovery(entity, parent, components);
     }
 
+    private void collectDiscovery<TKey, TEntity>(Dictionary<TKey, TEntity> entities, DiscoveryDevice parent, List<baseEntity> components) where TKey : notnull where TEntity : BaseEntity
+    {
+        foreach (var (_, entity) in entities)
+            collectDiscovery(entity, parent, components);
+    }
 }

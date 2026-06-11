@@ -48,6 +48,19 @@ public class MqttEventHandler
 
     private void sendStatusOnline()
     {
-        TaskManager.AddTask(() => client.PublishAsync(client.Options!.LastWillAndTestament!.Topic, "online", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery));
+        // Fire-and-forget from the timer/connect callbacks, but observe failures.
+        _ = PublishStatusAsync();
+    }
+
+    private async Task PublishStatusAsync()
+    {
+        try
+        {
+            await client.PublishAsync(client.Options!.LastWillAndTestament!.Topic, "online", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to publish online status.");
+        }
     }
 }
