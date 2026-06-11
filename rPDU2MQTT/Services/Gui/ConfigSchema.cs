@@ -35,10 +35,20 @@ public sealed class SchemaNode
 /// </summary>
 public static class ConfigSchema
 {
+    // Used for the schema and status/test payloads (the frontend reads camelCase keys).
     public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    // Used for the config payload itself. Keys are the model's real (PascalCase) property names so
+    // they line up exactly with the schema's Key values the form binds against.
+    private static readonly JsonSerializerOptions ConfigJson = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },
     };
 
@@ -142,11 +152,11 @@ public static class ConfigSchema
         => value is null ? null : Convert.ToDouble(value);
 
     /// <summary>Serialize the live config to JSON for the form to bind against.</summary>
-    public static string ToJson(Config config) => JsonSerializer.Serialize(config, Json);
+    public static string ToJson(Config config) => JsonSerializer.Serialize(config, ConfigJson);
 
     /// <summary>Deserialize the form's JSON back into a config object.</summary>
     public static Config FromJson(string json)
-        => JsonSerializer.Deserialize<Config>(json, Json) ?? throw new Exception("Configuration payload was empty.");
+        => JsonSerializer.Deserialize<Config>(json, ConfigJson) ?? throw new Exception("Configuration payload was empty.");
 
     /// <summary>Serialize a config object to YAML (honoring the model's YAML aliases).</summary>
     public static string ToYaml(Config config)
