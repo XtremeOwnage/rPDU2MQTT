@@ -63,6 +63,10 @@ public static class ConfigSchema
             if (!prop.CanRead || !prop.CanWrite)
                 continue;
 
+            // Skip properties hidden from JSON (e.g. back-compat aliases) so they don't show in the GUI.
+            if (prop.GetCustomAttribute<JsonIgnoreAttribute>() is not null)
+                continue;
+
             nodes.Add(BuildNode(prop));
         }
         return nodes;

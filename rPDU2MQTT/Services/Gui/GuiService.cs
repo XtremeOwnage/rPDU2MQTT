@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Startup;
 using YamlDotNet.Serialization;
 
@@ -257,6 +258,26 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 }).ToList();
 
                 return Results.Json(new { ok = true, devices, measurements, groups }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Live readings pulled from the PDU(s), for the read-only "Live Data" view.
+        app.MapGet("/api/livedata", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await pdu.GetRootData_Public(cts.Token);
+                var readings = MetricsHelper.EnumerateReadings(data)
+                    .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
+                    .Select(r => new { device = r.Device, source = r.Source, type = r.Type, value = r.Value, units = r.Units })
+                    .ToList();
+                return Results.Json(new { ok = true, count = readings.Count, readings }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {

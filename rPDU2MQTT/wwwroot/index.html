@@ -55,6 +55,15 @@
   .ov-outlets { margin:10px 0 2px 6px; border-left:2px solid var(--line); padding-left:14px; }
   .ov-outlet { padding:8px 0; }
   .ov-outlet-label { margin-bottom:4px; }
+  .ld-toolbar { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:6px 0 12px; }
+  .ld-toolbar input[type=text] { width:240px; }
+  .ld-toolbar label { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; }
+  .ld-count { color:var(--muted); font-size:12px; }
+  table.ld { width:100%; border-collapse:collapse; font-size:13px; }
+  table.ld th, table.ld td { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line); }
+  table.ld th { color:var(--muted); font-weight:600; position:sticky; top:53px; background:var(--bg); }
+  table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.ld tr:hover td { background:var(--panel); }
   .ro-note { color:var(--bad); font-size:12px; display:none; }
   .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
@@ -215,8 +224,64 @@ function build() {
     }
     if (i === 0) link.click();
   });
+  addLiveDataSection(nav, sections);
   addExportSection(nav, sections);
 }
+
+// A read-only view of the current readings being pulled from the PDU(s).
+function addLiveDataSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Live Data'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
+  const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
+  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
+  sec.appendChild(bar);
+  const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
+
+  let rows = [], timer = null;
+  const draw = () => {
+    const f = filter.value.trim().toLowerCase();
+    const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f)) : rows;
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['Device', 'Outlet / entity', 'Measurement', 'Value', 'Units'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    shown.forEach(r => {
+      const tr = document.createElement('tr');
+      const cells = [r.device, r.source, r.type, formatNum(r.value), r.units || ''];
+      cells.forEach((c, i) => { const td = document.createElement('td'); if (i === 3) td.className = 'num'; td.textContent = c; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+  };
+  const load = async () => {
+    const r = await api('/api/livedata');
+    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; count.textContent = ''; return; }
+    rows = r.body.readings || []; count.textContent = rows.length + ' readings'; draw();
+  };
+  refresh.onclick = load;
+  filter.oninput = draw;
+  auto.onchange = () => {
+    clearInterval(timer);
+    if (auto.checked) timer = setInterval(() => {
+      // Stop polling the PDU once the user navigates away from this tab.
+      if (!sec.classList.contains('active')) { clearInterval(timer); auto.checked = false; return; }
+      load();
+    }, 5000);
+  };
+  link.onclick = () => { activate(link, sec); load(); };
+}
+
+function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? (Math.round(v * 1000) / 1000).toString() : String(v); }
 
 function activate(link, sec) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));

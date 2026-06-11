@@ -282,6 +282,7 @@ EmonCMS:
   Url: "http://emoncms.example.com"   # required when enabled
   ApiKey: "your-write-apikey"         # or set RPDU2MQTT_EMONCMS_APIKEY
   Node: "rpdu2mqtt"
+  Path: "input/post"                  # API path (relative to Url) to post to
 ```
 
 ## Configuration GUI (Optional)
@@ -312,6 +313,8 @@ The GUI:
   discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
   instead of typing keys blind. Existing overrides for entities that are not currently discovered
   (e.g. disabled ones) are still shown so they can be re-enabled.
+- **Live Data** — a read-only view of the current measurements being pulled from the PDU(s)
+  (device / outlet / measurement / value / units), with a filter and optional 5-second auto-refresh.
 - **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
   the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
   control, etc.

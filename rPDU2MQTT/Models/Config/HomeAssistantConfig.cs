@@ -1,4 +1,6 @@
-﻿namespace rPDU2MQTT.Models.Config;
+﻿using System.ComponentModel;
+
+namespace rPDU2MQTT.Models.Config;
 
 /// <summary>
 /// Configuration settings for Home Assistant integration.
@@ -23,15 +25,18 @@ public class HomeAssistantConfig
     /// <remarks>
     /// A value of 0, will run a single discovery, and not run a re-discovery until the application is restarted.
     /// </remarks>
+    [Description("How often (seconds) to republish discovery. 0 = run once at startup until restarted.")]
     public int DiscoveryInterval { get; set; } = 0;
 
     /// <summary>
     /// Should discovery messages be retained?
     /// </summary>
+    [Description("Whether discovery messages are retained on the broker.")]
     public bool DiscoveryRetain { get; set; } = true;
 
     /// <summary>
     ///  Default expireAfter interval applied to all sensors. After this time- the sensor will be marked as unavailable.
     /// </summary>
+    [Description("expire_after (seconds) applied to sensors; after this long without an update Home Assistant marks them unavailable.")]
     public int SensorExpireAfterSeconds { get; set; } = (int)TimeSpan.FromMinutes(5).TotalSeconds;
 }

@@ -327,6 +327,8 @@ EmonCMS:
     ApiKey: "your-write-apikey"
     # EmonCMS input node name. Default: rpdu2mqtt
     Node: "rpdu2mqtt"
+    # API path (relative to Url) that measurements are posted to. Default: input/post
+    Path: "input/post"
 
 # (Optional) Embedded web GUI for viewing, editing and testing the configuration.
 # Browse to http://<host>:<port> and sign in with the username/password below.
