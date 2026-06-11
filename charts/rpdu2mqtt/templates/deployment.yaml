@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Single instance owning the PDU session; avoid two running at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "rpdu2mqtt.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Roll the pod when the rendered config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "rpdu2mqtt.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "rpdu2mqtt.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if include "rpdu2mqtt.hasSecret" . }}
+          envFrom:
+            - secretRef:
+                name: {{ include "rpdu2mqtt.secretName" . }}
+          {{- end }}
+          ports:
+            {{- if dig "Gui" "Enabled" false .Values.config }}
+            - name: gui
+              containerPort: {{ dig "Gui" "Port" 8080 .Values.config }}
+            {{- end }}
+            {{- if dig "Prometheus" "Enabled" false .Values.config }}
+            - name: metrics
+              containerPort: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "rpdu2mqtt.fullname" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

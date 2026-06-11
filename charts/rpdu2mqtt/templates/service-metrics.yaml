@@ -1,0 +1,21 @@
+{{- if and (dig "Prometheus" "Enabled" false .Values.config) .Values.service.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-metrics
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- with .Values.service.metrics.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.metrics.type }}
+  selector:
+    {{- include "rpdu2mqtt.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+      targetPort: metrics
+{{- end }}

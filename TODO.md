@@ -48,6 +48,8 @@
 - [ ] **Release workflow** — consider a dedicated GitHub Release workflow (changelog/artifacts)
   beyond the container build.
 - [ ] **README & documentation** — make the README more thorough and less AI-generated in tone.
+- [x] **Helm chart** — [`charts/rpdu2mqtt`](charts/rpdu2mqtt): config ConfigMap, credentials Secret,
+  Deployment, optional GUI Service/Ingress, and a Prometheus Operator `ServiceMonitor`.
 - [ ] **Kubernetes CRD config source** — optional `RpduConfig` CRD as a writable config source
-  (makes GUI Save work in k8s), with status subresource and a Prometheus Operator `ServiceMonitor`.
-  Design proposal: [KubernetesCRD.md](docs/KubernetesCRD.md).
+  (makes GUI Save work in k8s), with status subresource. Design proposal:
+  [KubernetesCRD.md](docs/KubernetesCRD.md).

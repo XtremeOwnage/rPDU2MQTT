@@ -1,0 +1,108 @@
+# Default values for rpdu2mqtt.
+
+image:
+  repository: ghcr.io/xtremeownage/rpdu2mqtt
+  # Defaults to the chart's appVersion when empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Single instance: the bridge holds per-PDU state and has no leader election.
+replicaCount: 1
+
+# ---------------------------------------------------------------------------
+# Application configuration.
+# This whole block is rendered verbatim into config.yaml (mounted at /config).
+# It is the single source of truth for app behaviour, including Gui.Enabled and
+# Prometheus.Enabled (the Kubernetes Service/Ingress/ServiceMonitor toggles below
+# only control whether those *resources* are created).
+# See docs/Configuration.md for every option.
+# ---------------------------------------------------------------------------
+config:
+  MQTT:
+    Connection:
+      Host: mqtt.example.com
+      Port: 1883
+    ParentTopic: rPDU2MQTT
+  PDU:
+    Connection:
+      Host: pdu.example.com
+      Port: 80
+    PollInterval: 5
+  HomeAssistant:
+    DiscoveryEnabled: true
+    DiscoveryTopic: homeassistant
+  Prometheus:
+    Enabled: false
+    Port: 9184
+  Gui:
+    Enabled: false
+    Port: 8080
+    Username: admin
+    # Set Gui.Password via .Values.config or, better, leave the GUI disabled in
+    # Kubernetes (the ConfigMap mount is read-only, so Save is disabled anyway).
+
+# ---------------------------------------------------------------------------
+# Credentials, injected as RPDU2MQTT_* environment variables via a Secret so
+# they don't have to live in the ConfigMap. Set values here to have the chart
+# create a Secret, or point existingSecret at a Secret you manage (whose keys
+# are the RPDU2MQTT_* variable names).
+# ---------------------------------------------------------------------------
+existingSecret: ""
+credentials:
+  mqtt:
+    username: ""
+    password: ""
+  pdu:
+    username: ""
+    password: ""
+  emoncmsApiKey: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Kubernetes Services for the GUI and /metrics endpoints. Created only when the
+# corresponding feature is enabled in `config` AND the toggle here is true.
+service:
+  gui:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+  metrics:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+
+# Prometheus Operator ServiceMonitor for the /metrics Service. Requires the
+# Prometheus Operator CRDs to be installed.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: ""
+  # Extra labels so your Prometheus's serviceMonitorSelector picks it up.
+  labels: {}
+
+# Ingress for the GUI Service.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: rpdu2mqtt.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources: {}
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
