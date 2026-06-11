@@ -11,5 +11,5 @@ public class NamedEntityWithMeasurements : EntityWithNameAndLabel
 {
     [JsonPropertyName("measurement")]
     [JsonConverter(typeof(DictionaryToListConverter<Measurement, string>))]
-    public List<Measurement> Measurements { get; set; }
+    public List<Measurement> Measurements { get; set; } = new();
 }

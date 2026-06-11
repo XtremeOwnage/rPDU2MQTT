@@ -110,14 +110,16 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // So- Only want to discover the ROOT value.
             // To do this- we are just going to find the entity, at the top of the layout.
 
-            // In my testing, the root entity, contains a single name, "entity/phase0". So- this next line, extracts, "phase0"
-            var rootEntityName = device.Layout[0].First().Split("/", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Last();
+            // In my testing, the root entity, contains a single name, "entity/phase0". So- this extracts "phase0".
+            string? rootEntityName = null;
+            if (device.Layout is not null && device.Layout.TryGetValue(0, out var rootLayout) && rootLayout.Length > 0)
+                rootEntityName = rootLayout[0].Split("/", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
 
-            var rootEntity = device.Entity
-                .Where(o => o.Key == rootEntityName)
-                .FirstOrDefault();
-
-            collectDiscovery(rootEntity!, newParent, components);
+            if (!string.IsNullOrEmpty(rootEntityName))
+            {
+                var rootEntity = device.Entity.FirstOrDefault(o => o.Key == rootEntityName);
+                collectDiscovery(rootEntity!, newParent, components);
+            }
             #endregion
 
         }

@@ -42,7 +42,7 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState, IDiction
 
     [JsonPropertyName("outlet")]
     [JsonConverter(typeof(DictionaryToListConverter<Outlet, int>))]
-    public List<Outlet> Outlets { get; set; }
+    public List<Outlet> Outlets { get; set; } = new();
 
     [JsonPropertyName("alarm")]
     public Alarm Alarm { get; set; }
@@ -53,5 +53,5 @@ public partial class Device : EntityWithNameAndLabel, IEntityWithState, IDiction
 
     [JsonPropertyName("entity")]
     [JsonConverter(typeof(DictionaryToListConverter<Entity, string>))]
-    public List<Entity> Entity { get; set; }
+    public List<Entity> Entity { get; set; } = new();
 }
