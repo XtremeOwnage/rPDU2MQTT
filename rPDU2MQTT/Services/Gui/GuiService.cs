@@ -220,25 +220,43 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 var data = await pdu.GetRootData_Public(cts.Token);
 
+                // Expose the raw PDU label/name plus the currently-discovered display name and
+                // object_id, so the Overrides editor can show what each entity actually is.
                 var devices = data.Devices.Select(d => new
                 {
                     key = d.Key,
-                    name = d.Entity_Name,
-                    outlets = d.Outlets.Select(o => new { index = o.Key, name = o.Entity_Name }).ToList(),
+                    label = d.Label,
+                    name = d.Name,
+                    displayName = d.Entity_DisplayName,
+                    objectId = d.Entity_Name,
+                    outlets = d.Outlets.OrderBy(o => o.Key).Select(o => new
+                    {
+                        index = o.Key,
+                        label = o.Label,
+                        name = o.Name,
+                        displayName = o.Entity_DisplayName,
+                        objectId = o.Entity_Name,
+                    }).ToList(),
                 }).ToList();
 
-                var measurementTypes = data.Devices
+                var measurements = data.Devices
                     .SelectMany(d => d.Outlets.SelectMany(o => o.Measurements)
                         .Concat(d.Entity.SelectMany(e => e.Measurements)))
-                    .Select(m => m.Type)
-                    .Where(t => !string.IsNullOrEmpty(t))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(t => t)
+                    .Where(m => !string.IsNullOrEmpty(m.Type))
+                    .GroupBy(m => m.Type, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(g => g.Key)
+                    .Select(g => new { type = g.Key, units = g.Select(m => m.Units).FirstOrDefault(u => !string.IsNullOrEmpty(u)) })
                     .ToList();
 
-                var groups = data.Groups.Select(g => new { key = g.Key, name = g.Entity_Name }).ToList();
+                var groups = data.Groups.Select(g => new
+                {
+                    key = g.Key,
+                    label = g.Label,
+                    name = g.Name,
+                    displayName = g.Entity_DisplayName,
+                }).ToList();
 
-                return Results.Json(new { ok = true, devices, measurementTypes, groups }, ConfigSchema.Json);
+                return Results.Json(new { ok = true, devices, measurements, groups }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {

@@ -250,21 +250,28 @@ function ovEnabled(path) {
   const s = document.createElement('span'); s.textContent = 'Enabled';
   f.appendChild(inp); f.appendChild(s); return f;
 }
-function overrideFields(objPath, placeholderName) {
+// ph: { name, id } placeholders showing the current (default) values.
+function overrideFields(objPath, ph) {
+  ph = ph || {};
   const wrap = document.createElement('div'); wrap.className = 'ov-fields';
-  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], placeholderName));
-  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], null));
-  // Enabled stays false for groups/measurements set false; ovEnabled handles the default.
+  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
+  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
   wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
   return wrap;
 }
-function overrideCard(title, subtitle, objPath) {
+// A muted line of "label value" context bits; empty values are skipped.
+function ovContext(parts) {
+  const span = document.createElement('span'); span.className = 'ov-sub';
+  span.textContent = parts.filter(p => p[1]).map(p => (p[0] ? p[0] + ' ' : '') + p[1]).join('   ·   ');
+  return span;
+}
+function overrideCard(title, contextParts, objPath, ph) {
   const card = document.createElement('div'); card.className = 'ov-card';
   const head = document.createElement('div'); head.className = 'ov-head';
   const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
-  if (subtitle) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = subtitle; head.appendChild(s); }
+  if (contextParts && contextParts.some(p => p[1])) head.appendChild(ovContext(contextParts));
   card.appendChild(head);
-  card.appendChild(overrideFields(objPath, subtitle));
+  card.appendChild(overrideFields(objPath, ph));
   return card;
 }
 function groupHeader(title, sub) {
@@ -277,24 +284,27 @@ function outletRow(deviceKey, o) {
   const row = document.createElement('div'); row.className = 'ov-outlet';
   const lab = document.createElement('div'); lab.className = 'ov-outlet-label';
   const strong = document.createElement('strong'); strong.textContent = 'Outlet ' + o.index; lab.appendChild(strong);
-  if (o.name) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = ' — ' + o.name; lab.appendChild(s); }
+  const friendly = o.label || o.name;
+  if (friendly) { const s = document.createElement('span'); s.textContent = ' — ' + friendly; lab.appendChild(s); }
   row.appendChild(lab);
-  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], o.name));
+  if (o.name || o.displayName) row.appendChild(ovContext([['PDU name:', o.name], ['discovered as:', o.displayName]]));
+  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }));
   return row;
 }
 function deviceCard(dev) {
   const card = document.createElement('div'); card.className = 'ov-card';
   const head = document.createElement('div'); head.className = 'ov-head';
-  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + dev.key; head.appendChild(t);
-  if (dev.name) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = dev.name; head.appendChild(s); }
+  const friendly = dev.label || dev.name || dev.key;
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + friendly; head.appendChild(t);
+  head.appendChild(ovContext([['key', dev.key], ['PDU name:', dev.name], ['discovered as:', dev.displayName]]));
   card.appendChild(head);
-  card.appendChild(overrideFields(['Devices', dev.key], dev.name));
+  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }));
 
   // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
   const live = dev.outlets || [];
   const ovOutlets = ovGet(['Devices', dev.key, 'Outlets']) || {};
   const merged = [...live];
-  Object.keys(ovOutlets).forEach(idx => { if (!live.some(o => String(o.index) === String(idx))) merged.push({ index: Number(idx), name: '(not currently discovered)' }); });
+  Object.keys(ovOutlets).forEach(idx => { if (!live.some(o => String(o.index) === String(idx))) merged.push({ index: Number(idx), displayName: '(not currently discovered)' }); });
   if (merged.length) {
     const ol = document.createElement('div'); ol.className = 'ov-outlets';
     merged.sort((a, b) => a.index - b.index).forEach(o => ol.appendChild(outletRow(dev.key, o)));
@@ -314,23 +324,24 @@ async function renderOverrides(container) {
     w.textContent = (r.body.message || 'Could not load live data.') + ' Showing existing overrides only.';
     container.appendChild(w);
   }
-  const lv = r.body.ok ? r.body : { devices: [], measurementTypes: [], groups: [] };
+  const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
   const ov = data.Overrides;
 
-  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', 'the top-level device', ['rPDU2MQTT']));
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['rPDU2MQTT'], {}));
 
-  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to use the default.'));
+  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
   const liveKeys = new Set();
   lv.devices.forEach(d => { liveKeys.add(d.key); container.appendChild(deviceCard(d)); });
-  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, name: '(not currently discovered)', outlets: [] })));
+  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, displayName: '(not currently discovered)', outlets: [] })));
 
   container.appendChild(groupHeader('Measurements', 'Applied to every measurement of this type, across all outlets.'));
-  const types = [...new Set([...lv.measurementTypes, ...Object.keys(ov.Measurements || {})])];
-  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, null, ['Measurements', tp])));
+  const units = {}; (lv.measurements || []).forEach(m => { units[m.type] = m.units; });
+  const types = [...new Set([...(lv.measurements || []).map(m => m.type), ...Object.keys(ov.Measurements || {})])];
+  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, [['units:', units[tp]]], ['Measurements', tp], {})));
 
   if (lv.groups && lv.groups.length) {
     container.appendChild(groupHeader('OneView Groups', null));
-    lv.groups.forEach(g => container.appendChild(overrideCard('group: ' + g.key, g.name, ['GroupOverrides', 'Overrides', g.key])));
+    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['GroupOverrides', 'Overrides', g.key], { name: g.displayName })));
   }
 }
 
