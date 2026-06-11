@@ -301,8 +301,15 @@ Gui:
 The GUI:
 - Renders a **structured form for every option**, generated from the configuration model (so it stays
   in sync automatically), with inline descriptions, types, and the dynamic Overrides maps.
-- **Tests** the running services — "Test MQTT" reports broker connectivity and "Test PDU" fetches live
-  data and reports the device/outlet counts.
+- **Tests** the running services — the MQTT section has a "Test MQTT connection" button (broker
+  connectivity) and the PDU section a "Test PDU connection" button (fetches live data and reports the
+  device/outlet counts).
+- **Home Assistant actions** — the Home Assistant section has "Republish discovery" and
+  "Clear discovery" buttons. Clear removes the retained discovery messages so the entities disappear
+  from Home Assistant (until discovery runs again).
+- **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
+  the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
+  control, etc.
 - **Saves** back to this config file (keeping a `config.yaml.bak` copy). Changes apply on the next
   restart, so restart the service after saving.
 

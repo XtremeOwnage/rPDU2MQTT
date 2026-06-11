@@ -22,6 +22,22 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     {
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
         coordinator.RediscoverRequested += Execute;
+        // Allow the "Clear discovery" action (GUI) to remove the retained discovery messages.
+        coordinator.ClearRequested += ClearDiscoveries;
+    }
+
+    private async Task ClearDiscoveries(CancellationToken cancellationToken)
+    {
+        await discoveryLock.WaitAsync(cancellationToken);
+        try
+        {
+            var cleared = await ClearAllDiscoveries(cancellationToken);
+            Log.Information($"Cleared {cleared} Home Assistant discovery topic(s).");
+        }
+        finally
+        {
+            discoveryLock.Release();
+        }
     }
 
     protected override async Task Execute(CancellationToken cancellationToken)

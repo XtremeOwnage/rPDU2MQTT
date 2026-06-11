@@ -40,6 +40,8 @@
   button.small { padding:3px 9px; font-size:12px; }
   button:disabled { opacity:.5; cursor:not-allowed; border-color:var(--line); }
   button.test { margin:6px 0 4px; }
+  .sec-actions { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 4px; }
+  textarea.yaml { width:100%; height:62vh; background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--fg); font:12px/1.45 ui-monospace,Consolas,monospace; padding:10px; white-space:pre; }
   .ro-note { color:var(--bad); font-size:12px; display:none; }
   .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
@@ -183,13 +185,9 @@ function build() {
     const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
     const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
-    // The connection test belongs with the section it tests, not on every page.
-    if (node.key === 'MQTT' || node.key === 'PDU') {
-      const tb = document.createElement('button'); tb.className = 'small test';
-      tb.textContent = node.key === 'MQTT' ? 'Test MQTT connection' : 'Test PDU connection';
-      tb.onclick = node.key === 'MQTT' ? testMqtt : testPdu;
-      sec.appendChild(tb);
-    }
+    // Section-specific actions belong with the section they act on, not on every page.
+    const acts = sectionActions(node);
+    if (acts) sec.appendChild(acts);
     if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
     else renderNode(node, data, sec);
     link.onclick = () => {
@@ -199,6 +197,51 @@ function build() {
     };
     if (i === 0) link.click();
   });
+  addExportSection(nav, sections);
+}
+
+// Section-specific action buttons (connection tests; Home Assistant discovery actions).
+function sectionActions(node) {
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const add = (label, fn, cls) => { const b = document.createElement('button'); b.className = 'small ' + (cls || ''); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+
+  if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'HASS') {
+    if ((data.HASS || {}).DiscoveryEnabled === false) return null;
+    add('Republish discovery', rediscoverHa);
+    add('Clear discovery', clearHa, 'danger');
+  } else return null;
+
+  return bar;
+}
+
+// A synthetic section that shows the current form state rendered as YAML, for copy/paste.
+function addExportSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Export YAML'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Export YAML'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'The configuration as it would be written to config.yaml — copy into a ConfigMap, source control, etc. Reflects your current (possibly unsaved) edits.';
+  sec.appendChild(d);
+  const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.spellcheck = false; sec.appendChild(ta);
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const copy = document.createElement('button'); copy.className = 'small'; copy.textContent = 'Copy';
+  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied YAML to clipboard.', true); };
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  refresh.onclick = () => fillYaml(ta);
+  bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
+  link.onclick = () => {
+    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    link.classList.add('active'); sec.classList.add('active');
+    fillYaml(ta);
+  };
+}
+
+async function fillYaml(ta) {
+  const r = await fetch('/api/config/yaml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  ta.value = r.ok ? await r.text() : 'Unable to render YAML.';
 }
 
 function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
@@ -224,6 +267,12 @@ async function refreshStatus() {
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function clearHa() {
+  if (!confirm('Clear all Home Assistant discovery messages? The entities will disappear from Home Assistant until discovery runs again.')) return;
+  const r = await api('/api/discovery/clear', { method: 'POST' });
+  toast(r.body.message, r.body.ok);
+}
 
 document.getElementById('btn-reload').onclick = load;
 document.getElementById('btn-save').onclick = async () => {

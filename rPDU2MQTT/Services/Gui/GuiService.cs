@@ -22,13 +22,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Config config;
     private readonly IHiveMQClient mqtt;
     private readonly PDU pdu;
+    private readonly DiscoveryCoordinator discovery;
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery)
     {
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
+        this.discovery = discovery;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -206,6 +208,39 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 return Results.Json(new { ok = false, message = $"PDU request failed: {ex.Message}" }, ConfigSchema.Json);
             }
+        });
+
+        // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
+        app.MapPost("/api/config/yaml", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var json = await reader.ReadToEndAsync();
+            try
+            {
+                return Results.Text(ConfigSchema.ToYaml(ConfigSchema.FromJson(json)), "text/plain");
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, message = $"Invalid configuration: {ex.Message}" });
+            }
+        });
+
+        app.MapPost("/api/discovery/rediscover", async () =>
+        {
+            if (!discovery.HasSubscribers)
+                return Results.Json(new { ok = false, message = "Home Assistant discovery is disabled." }, ConfigSchema.Json);
+
+            await discovery.RequestRediscoverAsync(CancellationToken.None);
+            return Results.Json(new { ok = true, message = "Discovery republish requested." }, ConfigSchema.Json);
+        });
+
+        app.MapPost("/api/discovery/clear", async () =>
+        {
+            if (!discovery.HasSubscribers)
+                return Results.Json(new { ok = false, message = "Home Assistant discovery is disabled." }, ConfigSchema.Json);
+
+            await discovery.RequestClearAsync(CancellationToken.None);
+            return Results.Json(new { ok = true, message = "Cleared the retained Home Assistant discovery messages." }, ConfigSchema.Json);
         });
     }
 
