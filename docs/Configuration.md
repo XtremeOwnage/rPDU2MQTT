@@ -308,7 +308,19 @@ The GUI:
 
 Notes:
 - Basic auth is sent in clear text, so only expose the GUI on a trusted network or behind a
-  TLS-terminating reverse proxy. Remember to publish/forward the GUI `Port` (e.g. `-p 8080:8080`).
+  TLS-terminating reverse proxy. Remember to publish/forward the GUI `Port` (e.g. `-p 8080:8080`,
+  or a `ports:` entry in docker-compose).
+- For **Save** to work in a container, the config file must be writable. The example
+  docker-compose mounts it read-only (`:ro`) — drop the `:ro` if you want to edit the config from
+  the GUI:
+  ```yaml
+  services:
+    rpdu2mqtt:
+      ports:
+        - "8080:8080"        # publish the GUI
+      volumes:
+        - ./config.yaml:/config/config.yaml   # writable (no :ro) so the GUI can save
+  ```
 - "Test" reflects the **currently running** configuration, not unsaved edits — save and restart to
   test new connection settings.
 
