@@ -194,16 +194,25 @@ Notes:
 - [`KubernetesClient`](https://www.nuget.org/packages/KubernetesClient) (official .NET client). Only
   loaded/active when the k8s source is selected; it does not affect file/compose users.
 
-## Phasing
+## Scope (all implemented together)
 
-- **Phase 1 (MVP):** read config from the CR + ship CRD/RBAC manifests + GUI `PATCH` write-back. CRD
-  uses `preserve-unknown-fields` initially. This delivers the headline win (declarative, GUI-writable
-  config in k8s).
-- **Phase 2:** generate the CRD OpenAPI schema from the `Config` model; watch + restart-on-change;
-  `status` subresource.
-- **Phase 3 (maybe):** a real controller managing multiple `RpduConfig` instances (one per PDU), with
-  leader election. Likely overkill unless there's demand — a Deployment-per-PDU with its own CR is
-  simpler and covers most needs.
+No phasing — the full feature ships at once:
+
+- Read config from the CR (`KubernetesConfigSource`), in-cluster auth.
+- **GUI write-back enabled by default** (`PATCH` the CR `spec`), with a GitOps-drift warning and a
+  redacted CR-manifest export for re-importing into source control.
+- **`status` subresource** updated with `connected` / `deviceCount` / `lastPoll`.
+- **Watch** the CR and restart on `spec` change.
+- CRD OpenAPI `spec` schema **generated from the `Config` model** (reusing the GUI's `ConfigSchema`
+  reflection).
+- CRD shipped both in the Helm chart's `crds/` directory **and** as a standalone manifest; the app does
+  not self-register it. (Helm does not auto-upgrade `crds/`, so schema bumps need a documented
+  `kubectl apply`.)
+- RBAC: `get,list,watch` + `patch` on `rpduconfigs` and `patch` on `rpduconfigs/status`.
+
+**Possible future (not now):** a controller reconciling *multiple* `RpduConfig` instances (one per PDU)
+with leader election. Multiple CRs are acceptable where there's a benefit; a Deployment-per-CR covers
+most needs without a full operator.
 
 ## Alternative considered: patch the ConfigMap instead
 
@@ -232,15 +241,21 @@ There is no cluster in normal dev/CI, so:
    GUI can **export the CR manifest** (secrets redacted) for re-importing into source control. (See
    *GitOps & exporting manifests* above.)
 
+## Decisions (round 2)
+
+4. **CRD installation** → shipped in the chart's `crds/` directory **and** as a standalone manifest;
+   the app does not self-register it.
+5. **GUI write-back** → **enabled by default**, with the GitOps-drift warning.
+6. **`status` subresource** → included now (no phasing).
+
 ## Open questions
 
-1. **CRD installation/ownership:** ship the CRD via the Helm chart's `crds/` directory **and** a
-   standalone `crd.yaml` (the app does *not* self-register it, to avoid cluster-admin RBAC). Note: Helm
-   does not upgrade resources in `crds/`, so CRD schema upgrades need a documented manual/`kubectl`
-   step. Confirm this approach.
-2. **GUI write-back default:** default *off* (opt-in) so the CR/GitOps stays the source of truth, or
-   default *on* with the drift warning? (You're OK with the warning — question is just the default.)
-3. **`status` subresource:** include it in Phase 1 (adds `patch rpduconfigs/status` RBAC), or defer to
-   Phase 2? It's a nice `kubectl get rpduconfig` health view but not required to load config.
-4. **CRD versioning:** the upgrade/conversion story before graduating `v1alpha1` → `v1` (conversion
-   webhooks vs. a documented breaking bump).
+1. **CRD versioning:** the upgrade/conversion story before graduating `v1alpha1` → `v1` (conversion
+   webhooks vs. a documented breaking bump). Deferred until we leave `v1alpha1`.
+
+## Verification constraint
+
+Building this requires no cluster, but **runtime-verifying** it (in-cluster auth, CR read, `spec`/
+`status` PATCH, watch) does. With no Docker/cluster available in the dev environment, the cluster-
+independent parts (spec⇄Config mapping, OpenAPI generation, manifest/chart rendering, build) are
+verified here; the live in-cluster operations must be confirmed against a real cluster.
