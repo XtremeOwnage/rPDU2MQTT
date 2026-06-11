@@ -210,6 +210,42 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Live discovered structure (keys + current names) so the Overrides editor can be driven by
+        // the actual devices/outlets/measurements instead of blindly-typed dictionary keys.
+        app.MapGet("/api/live", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await pdu.GetRootData_Public(cts.Token);
+
+                var devices = data.Devices.Select(d => new
+                {
+                    key = d.Key,
+                    name = d.Entity_Name,
+                    outlets = d.Outlets.Select(o => new { index = o.Key, name = o.Entity_Name }).ToList(),
+                }).ToList();
+
+                var measurementTypes = data.Devices
+                    .SelectMany(d => d.Outlets.SelectMany(o => o.Measurements)
+                        .Concat(d.Entity.SelectMany(e => e.Measurements)))
+                    .Select(m => m.Type)
+                    .Where(t => !string.IsNullOrEmpty(t))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(t => t)
+                    .ToList();
+
+                var groups = data.Groups.Select(g => new { key = g.Key, name = g.Entity_Name }).ToList();
+
+                return Results.Json(new { ok = true, devices, measurementTypes, groups }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
         app.MapPost("/api/config/yaml", async (HttpContext ctx) =>
         {

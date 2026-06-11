@@ -42,6 +42,19 @@
   button.test { margin:6px 0 4px; }
   .sec-actions { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 4px; }
   textarea.yaml { width:100%; height:62vh; background:var(--panel2); border:1px solid var(--line); border-radius:8px; color:var(--fg); font:12px/1.45 ui-monospace,Consolas,monospace; padding:10px; white-space:pre; }
+  .ov-group { margin:20px 0 6px; }
+  .ov-group h3 { margin:0; font-size:15px; color:var(--accent); }
+  .ov-card { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:10px 14px; margin:10px 0; }
+  .ov-head { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .ov-title { font-weight:600; }
+  .ov-sub { color:var(--muted); font-size:12px; }
+  .ov-fields { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
+  .ov-field { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+  .ov-field input[type=text] { width:210px; }
+  .ov-field.ov-check { flex-direction:row; align-items:center; gap:6px; color:var(--fg); }
+  .ov-outlets { margin:10px 0 2px 6px; border-left:2px solid var(--line); padding-left:14px; }
+  .ov-outlet { padding:8px 0; }
+  .ov-outlet-label { margin-bottom:4px; }
   .ro-note { color:var(--bad); font-size:12px; display:none; }
   .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
@@ -188,16 +201,154 @@ function build() {
     // Section-specific actions belong with the section they act on, not on every page.
     const acts = sectionActions(node);
     if (acts) sec.appendChild(acts);
-    if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
-    else renderNode(node, data, sec);
-    link.onclick = () => {
-      document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      link.classList.add('active'); sec.classList.add('active');
-    };
+    if (node.key === 'Overrides') {
+      // Bespoke, live-data-driven editor instead of the blind dictionary form.
+      const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh live data';
+      const container = document.createElement('div');
+      refresh.onclick = () => renderOverrides(container);
+      sec.appendChild(refresh); sec.appendChild(container);
+      link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
+    } else {
+      if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
+      else renderNode(node, data, sec);
+      link.onclick = () => activate(link, sec);
+    }
     if (i === 0) link.click();
   });
   addExportSection(nav, sections);
+}
+
+function activate(link, sec) {
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  link.classList.add('active'); sec.classList.add('active');
+}
+
+// ---- Overrides editor (driven by live PDU data) ----
+function ovGet(path) { let o = data.Overrides; for (const p of path) { if (o == null) return undefined; o = o[p]; } return o; }
+function ovSet(path, val) {
+  let o = data.Overrides = data.Overrides || {};
+  for (let i = 0; i < path.length - 1; i++) { if (o[path[i]] == null) o[path[i]] = {}; o = o[path[i]]; }
+  const last = path[path.length - 1];
+  if (val === undefined || val === null || val === '') delete o[last]; else o[last] = val;
+}
+
+function ovText(label, path, placeholder) {
+  const f = document.createElement('label'); f.className = 'ov-field';
+  const s = document.createElement('span'); s.textContent = label; f.appendChild(s);
+  const inp = document.createElement('input'); inp.type = 'text';
+  const v = ovGet(path); if (v != null) inp.value = v;
+  if (placeholder) inp.placeholder = placeholder;
+  inp.onchange = () => ovSet(path, inp.value.trim());
+  f.appendChild(inp); return f;
+}
+function ovEnabled(path) {
+  const f = document.createElement('label'); f.className = 'ov-field ov-check';
+  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = ovGet(path) !== false;
+  // Checked == default (true) -> drop the key; unchecked -> persist Enabled:false.
+  inp.onchange = () => ovSet(path, inp.checked ? undefined : false);
+  const s = document.createElement('span'); s.textContent = 'Enabled';
+  f.appendChild(inp); f.appendChild(s); return f;
+}
+function overrideFields(objPath, placeholderName) {
+  const wrap = document.createElement('div'); wrap.className = 'ov-fields';
+  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], placeholderName));
+  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], null));
+  // Enabled stays false for groups/measurements set false; ovEnabled handles the default.
+  wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
+  return wrap;
+}
+function overrideCard(title, subtitle, objPath) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
+  if (subtitle) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = subtitle; head.appendChild(s); }
+  card.appendChild(head);
+  card.appendChild(overrideFields(objPath, subtitle));
+  return card;
+}
+function groupHeader(title, sub) {
+  const w = document.createElement('div'); w.className = 'ov-group';
+  const h = document.createElement('h3'); h.textContent = title; w.appendChild(h);
+  if (sub) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = sub; w.appendChild(d); }
+  return w;
+}
+function outletRow(deviceKey, o) {
+  const row = document.createElement('div'); row.className = 'ov-outlet';
+  const lab = document.createElement('div'); lab.className = 'ov-outlet-label';
+  const strong = document.createElement('strong'); strong.textContent = 'Outlet ' + o.index; lab.appendChild(strong);
+  if (o.name) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = ' — ' + o.name; lab.appendChild(s); }
+  row.appendChild(lab);
+  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], o.name));
+  return row;
+}
+function deviceCard(dev) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + dev.key; head.appendChild(t);
+  if (dev.name) { const s = document.createElement('span'); s.className = 'ov-sub'; s.textContent = dev.name; head.appendChild(s); }
+  card.appendChild(head);
+  card.appendChild(overrideFields(['Devices', dev.key], dev.name));
+
+  // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
+  const live = dev.outlets || [];
+  const ovOutlets = ovGet(['Devices', dev.key, 'Outlets']) || {};
+  const merged = [...live];
+  Object.keys(ovOutlets).forEach(idx => { if (!live.some(o => String(o.index) === String(idx))) merged.push({ index: Number(idx), name: '(not currently discovered)' }); });
+  if (merged.length) {
+    const ol = document.createElement('div'); ol.className = 'ov-outlets';
+    merged.sort((a, b) => a.index - b.index).forEach(o => ol.appendChild(outletRow(dev.key, o)));
+    card.appendChild(ol);
+  }
+  return card;
+}
+
+async function renderOverrides(container) {
+  container.dataset.loaded = '1';
+  container.innerHTML = '<div class="desc">Loading live PDU data…</div>';
+  const r = await api('/api/live');
+  ensure(data, 'Overrides', {}); ensure(data.Overrides, 'Devices', {}); ensure(data.Overrides, 'Measurements', {});
+  container.innerHTML = '';
+  if (!r.body.ok) {
+    const w = document.createElement('div'); w.className = 'desc'; w.style.color = 'var(--bad)';
+    w.textContent = (r.body.message || 'Could not load live data.') + ' Showing existing overrides only.';
+    container.appendChild(w);
+  }
+  const lv = r.body.ok ? r.body : { devices: [], measurementTypes: [], groups: [] };
+  const ov = data.Overrides;
+
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', 'the top-level device', ['rPDU2MQTT']));
+
+  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to use the default.'));
+  const liveKeys = new Set();
+  lv.devices.forEach(d => { liveKeys.add(d.key); container.appendChild(deviceCard(d)); });
+  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, name: '(not currently discovered)', outlets: [] })));
+
+  container.appendChild(groupHeader('Measurements', 'Applied to every measurement of this type, across all outlets.'));
+  const types = [...new Set([...lv.measurementTypes, ...Object.keys(ov.Measurements || {})])];
+  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, null, ['Measurements', tp])));
+
+  if (lv.groups && lv.groups.length) {
+    container.appendChild(groupHeader('OneView Groups', null));
+    lv.groups.forEach(g => container.appendChild(overrideCard('group: ' + g.key, g.name, ['GroupOverrides', 'Overrides', g.key])));
+  }
+}
+
+// Strip empty override objects so untouched entries don't pollute the saved config.
+function exportData() {
+  const clone = JSON.parse(JSON.stringify(data));
+  if (clone.Overrides) pruneEmpty(clone.Overrides);
+  return clone;
+}
+function pruneEmpty(o) {
+  if (o && typeof o === 'object' && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      const v = pruneEmpty(o[k]);
+      if (v === undefined) delete o[k];
+    }
+    if (Object.keys(o).length === 0) return undefined;
+  }
+  return o;
 }
 
 // Section-specific action buttons (connection tests; Home Assistant discovery actions).
@@ -231,16 +382,11 @@ function addExportSection(nav, sections) {
   const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
   refresh.onclick = () => fillYaml(ta);
   bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
-  link.onclick = () => {
-    document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    link.classList.add('active'); sec.classList.add('active');
-    fillYaml(ta);
-  };
+  link.onclick = () => { activate(link, sec); fillYaml(ta); };
 }
 
 async function fillYaml(ta) {
-  const r = await fetch('/api/config/yaml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const r = await fetch('/api/config/yaml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
   ta.value = r.ok ? await r.text() : 'Unable to render YAML.';
 }
 
@@ -276,7 +422,7 @@ async function clearHa() {
 
 document.getElementById('btn-reload').onclick = load;
 document.getElementById('btn-save').onclick = async () => {
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
   toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
 };
 

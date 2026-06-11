@@ -307,6 +307,11 @@ The GUI:
 - **Home Assistant actions** — the Home Assistant section has "Republish discovery" and
   "Clear discovery" buttons. Clear removes the retained discovery messages so the entities disappear
   from Home Assistant (until discovery runs again).
+- **Live-driven Overrides** — the Overrides section is populated from the **live PDU data**: it lists
+  the actual devices, outlets (by index), measurement types, and OneView groups currently being
+  discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
+  instead of typing keys blind. Existing overrides for entities that are not currently discovered
+  (e.g. disabled ones) are still shown so they can be re-enabled.
 - **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
   the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
   control, etc.
