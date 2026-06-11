@@ -127,9 +127,15 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     protected Task PublishString(string Topic, string Message, CancellationToken cancellationToken)
+        => PublishString(Topic, Message, retain: false, cancellationToken);
+
+    protected Task PublishString(string Topic, string Message, bool retain, CancellationToken cancellationToken)
     {
-        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery);
-        msg.PayloadAsString = Message;
+        var msg = new MQTT5PublishMessage(Topic, QualityOfService.AtLeastOnceDelivery)
+        {
+            PayloadAsString = Message,
+            Retain = retain,
+        };
         return Publish(msg, cancellationToken);
     }
 

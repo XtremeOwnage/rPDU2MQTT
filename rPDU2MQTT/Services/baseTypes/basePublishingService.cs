@@ -90,13 +90,9 @@ public abstract class basePublishingService : baseMQTTService
     /// <param name="Entity"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    protected async Task PublishUniqueIdentifier<T>(T Entity, CancellationToken cancellationToken)
+    protected Task PublishUniqueIdentifier<T>(T Entity, CancellationToken cancellationToken)
         where T : IMQTTKey
-    {
-        var topic = MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.UniqueIdentifier);
-        await PublishString(topic, Entity.Entity_Identifier, cancellationToken);
-
-    }
+        => PublishMetadataIfChanged(MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.UniqueIdentifier), Entity.Entity_Identifier, cancellationToken);
 
     /// <summary>
     /// Publish entities Name as DisplayName.
@@ -105,11 +101,20 @@ public abstract class basePublishingService : baseMQTTService
     /// <param name="Entity"></param>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    protected async Task PublishName<T>(T Entity, CancellationToken cancellationToken)
+    protected Task PublishName<T>(T Entity, CancellationToken cancellationToken)
         where T : IMQTTKey, IEntityName
-    {
-        var topic = MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.Name);
-        await PublishString(topic, Entity.Entity_DisplayName, cancellationToken);
+        => PublishMetadataIfChanged(MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.Name), Entity.Entity_DisplayName, cancellationToken);
 
+    // Name/identifier are static metadata; publish them retained and only when they actually change
+    // instead of republishing on every poll.
+    private readonly Dictionary<string, string> lastMetadata = new();
+
+    private Task PublishMetadataIfChanged(string topic, string value, CancellationToken cancellationToken)
+    {
+        if (lastMetadata.TryGetValue(topic, out var previous) && previous == value)
+            return Task.CompletedTask;
+
+        lastMetadata[topic] = value;
+        return PublishString(topic, value, retain: true, cancellationToken);
     }
 }

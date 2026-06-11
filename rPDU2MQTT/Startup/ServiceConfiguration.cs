@@ -48,14 +48,12 @@ public static class ServiceConfiguration
                 mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
 
             // Return new client, with options applied.
-            var x = new HiveMQClient(mqttBuilder.Build());
-
-            // While we are here- lets go ahead and create / bind the event handler.
-            services.AddSingleton<MqttEventHandler>(new MqttEventHandler(x));
-            return x;
-
-            
+            return new HiveMQClient(mqttBuilder.Build());
         });
+
+        // Wires the client's connect/disconnect events and the online-status heartbeat.
+        // Instantiated explicitly in Program.cs before the initial connect.
+        services.AddSingleton(sp => new MqttEventHandler((HiveMQClient)sp.GetRequiredService<IHiveMQClient>()));
 
         //Configure Services
         services.AddSingleton<PDU>();

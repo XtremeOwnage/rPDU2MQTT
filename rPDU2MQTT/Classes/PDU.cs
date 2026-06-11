@@ -81,13 +81,11 @@ public partial class PDU
     {
         var ttl = TimeSpan.FromSeconds(Math.Max(1, config.PDU.PollInterval / 2.0));
 
-        if (cachedData is not null && DateTime.UtcNow - cachedDataAtUtc < ttl)
-            return cachedData;
-
+        // Always under the lock: cache hits are cheap, and concurrent callers coalesce onto a
+        // single in-flight fetch instead of each hitting the PDU API.
         await dataFetchLock.WaitAsync(cancellationToken);
         try
         {
-            // A concurrent caller may have refreshed the cache while we waited for the lock.
             if (cachedData is not null && DateTime.UtcNow - cachedDataAtUtc < ttl)
                 return cachedData;
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Startup;
 
 Log.Logger = new LoggerConfiguration()
@@ -23,6 +24,9 @@ var host = Host.CreateDefaultBuilder(args)
 
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
+
+// Instantiate the event handler now so its connect/disconnect handlers are wired before we connect.
+host.Services.GetRequiredService<MqttEventHandler>();
 
 Log.Information($"Connecting to MQTT Broker at {client.Options.Host}:{client.Options.Port}");
 
