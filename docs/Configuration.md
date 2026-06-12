@@ -352,6 +352,18 @@ then become the source of truth for that file, which trades off against managing
 declaratively (ConfigMap / GitOps). A common pattern is to keep the ConfigMap as the source of
 truth and use the GUI only to view and test.
 
+### Kubernetes config source (CRD)
+
+Alternatively, store the configuration in an **`RpduConfig` custom resource** instead of a ConfigMap.
+The CR is a writable API object, so the GUI's **Save works** (it PATCHes the CR), config is validated
+by the CRD schema, and a `status` subresource reports health (`kubectl get rpduconfig`). Enable it via
+the Helm chart (`kubernetesConfigSource.enabled=true`) or the manifests in
+[`Examples/Kubernetes/crd/`](../Examples/Kubernetes/crd/); full details in
+[KubernetesCRD.md](KubernetesCRD.md). Saving from the GUI shows a reminder to update your GitOps
+source, and the GUI's **Export** view can render the current config as an `RpduConfig` manifest
+(secrets redacted) to commit back. Credentials are not stored in the CR — provide them via a Secret
+and the `RPDU2MQTT_*` env vars.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

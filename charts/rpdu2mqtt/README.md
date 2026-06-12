@@ -51,16 +51,17 @@ credentials:
 | `service.gui.enabled` | `true` | Create a Service for the GUI (when `config.Gui.Enabled`). |
 | `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Enabled`). |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
+| `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
 | `ingress.enabled` | `false` | Expose the GUI via an Ingress. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity` | `{}` / `[]` | Standard pod scheduling/limits. |
 
 ## Notes
 
-- **GUI in Kubernetes:** the config is mounted read-only from a ConfigMap, so the GUI's *Save* is
-  disabled — it's view/test only. Change config by editing values and running `helm upgrade`. (A
-  writable, GUI-editable config source is proposed in
-  [docs/KubernetesCRD.md](../../docs/KubernetesCRD.md).)
+- **GUI in Kubernetes:** by default the config is mounted read-only from a ConfigMap, so the GUI's
+  *Save* is disabled — change config by editing values and running `helm upgrade`. To make the GUI
+  *Save* work, set `kubernetesConfigSource.enabled=true` to store config in a writable `RpduConfig`
+  custom resource (see [docs/KubernetesCRD.md](../../docs/KubernetesCRD.md)).
 - **Metrics scraping:** enable `config.Prometheus.Enabled` and `serviceMonitor.enabled` (requires the
   Prometheus Operator) to have Prometheus auto-discover the `/metrics` endpoint.
 - **Single replica:** the bridge owns a PDU session and has no leader election; keep `replicaCount: 1`

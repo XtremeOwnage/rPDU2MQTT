@@ -1,4 +1,5 @@
 ﻿using rPDU2MQTT.Models.Config;
+using System.Text.Json.Serialization;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Classes;
@@ -15,6 +16,7 @@ public class Config
     public PduConfig PDU { get; set; } = new PduConfig();
 
     [YamlMember(Alias = "HomeAssistant", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Home Assistant Configuration")]
+    [JsonPropertyName("HomeAssistant")]
     public HomeAssistantConfig HASS { get; set; } = new HomeAssistantConfig();
 
     [YamlMember(Alias = "Overrides", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Overrides")]

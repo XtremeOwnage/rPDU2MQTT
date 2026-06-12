@@ -45,6 +45,17 @@ spec:
             - secretRef:
                 name: {{ include "rpdu2mqtt.secretName" . }}
           {{- end }}
+          {{- if .Values.kubernetesConfigSource.enabled }}
+          env:
+            - name: RPDU2MQTT_CONFIG_SOURCE
+              value: k8s
+            - name: RPDU2MQTT_CR_NAME
+              value: {{ include "rpdu2mqtt.crName" . | quote }}
+            - name: RPDU2MQTT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          {{- end }}
           ports:
             {{- if dig "Gui" "Enabled" false .Values.config }}
             - name: gui
@@ -54,18 +65,22 @@ spec:
             - name: metrics
               containerPort: {{ dig "Prometheus" "Port" 9184 .Values.config }}
             {{- end }}
+          {{- if not .Values.kubernetesConfigSource.enabled }}
           volumeMounts:
             - name: config
               mountPath: /config
               readOnly: true
+          {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if not .Values.kubernetesConfigSource.enabled }}
       volumes:
         - name: config
           configMap:
             name: {{ include "rpdu2mqtt.fullname" . }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

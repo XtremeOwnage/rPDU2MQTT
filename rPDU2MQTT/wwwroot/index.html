@@ -392,7 +392,7 @@ async function renderOverrides(container) {
   const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
   const ov = data.Overrides;
 
-  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['rPDU2MQTT'], {}));
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['PDU'], {}));
 
   container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
   const liveKeys = new Set();
@@ -406,7 +406,7 @@ async function renderOverrides(container) {
 
   if (lv.groups && lv.groups.length) {
     container.appendChild(groupHeader('OneView Groups', null));
-    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['GroupOverrides', 'Overrides', g.key], { name: g.displayName })));
+    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName })));
   }
 }
 
@@ -434,8 +434,8 @@ function sectionActions(node) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
-  else if (node.key === 'HASS') {
-    if ((data.HASS || {}).DiscoveryEnabled === false) return null;
+  else if (node.key === 'HomeAssistant') {
+    if ((data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
     add('Republish discovery', rediscoverHa);
     add('Clear discovery', clearHa, 'danger');
   } else return null;
@@ -443,27 +443,33 @@ function sectionActions(node) {
   return bar;
 }
 
-// A synthetic section that shows the current form state rendered as YAML, for copy/paste.
+// A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest.
 function addExportSection(nav, sections) {
-  const link = document.createElement('a'); link.textContent = 'Export YAML'; nav.appendChild(link);
+  const link = document.createElement('a'); link.textContent = 'Export'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Export YAML'; sec.appendChild(h);
+  const h = document.createElement('h2'); h.textContent = 'Export'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'The configuration as it would be written to config.yaml — copy into a ConfigMap, source control, etc. Reflects your current (possibly unsaved) edits.';
+  d.textContent = 'Render the current (possibly unsaved) config for copy/paste into a ConfigMap, an RpduConfig custom resource, or source control.';
   sec.appendChild(d);
-  const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.spellcheck = false; sec.appendChild(ta);
-  const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const copy = document.createElement('button'); copy.className = 'small'; copy.textContent = 'Copy';
-  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied YAML to clipboard.', true); };
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
-  refresh.onclick = () => fillYaml(ta);
-  bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
-  link.onclick = () => { activate(link, sec); fillYaml(ta); };
-}
 
-async function fillYaml(ta) {
-  const r = await fetch('/api/config/yaml', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-  ta.value = r.ok ? await r.text() : 'Unable to render YAML.';
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const fmt = document.createElement('select');
+  [['yaml', 'config.yaml'], ['manifest', 'RpduConfig (Kubernetes)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; fmt.appendChild(o); });
+  const copy = document.createElement('button'); copy.className = 'small'; copy.textContent = 'Copy';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  bar.appendChild(fmt); bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
+
+  const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.spellcheck = false; sec.appendChild(ta);
+
+  const fill = async () => {
+    const endpoint = fmt.value === 'manifest' ? '/api/config/manifest' : '/api/config/yaml';
+    const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+    ta.value = r.ok ? await r.text() : 'Unable to render.';
+  };
+  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied to clipboard.', true); };
+  refresh.onclick = fill;
+  fmt.onchange = fill;
+  link.onclick = () => { activate(link, sec); fill(); };
 }
 
 function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }

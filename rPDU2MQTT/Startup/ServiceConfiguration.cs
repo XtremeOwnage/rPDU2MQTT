@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Services;
+using rPDU2MQTT.Services.Kubernetes;
+using rPDU2MQTT.Startup.ConfigSources;
 
 namespace rPDU2MQTT.Startup;
 
@@ -12,12 +14,24 @@ public static class ServiceConfiguration
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
         // While- we can request services when building dependencies-
-        // Need the configuration DURING service collection initilization- 
+        // Need the configuration DURING service collection initilization-
         // Because it determiens which hosted services we want to add.
-        Config cfg = YamlConfigLoader.GetConfig() ?? throw new Exception("Unable to load configuration");
+        IConfigSource configSource = ConfigSourceFactory.IsKubernetes
+            ? new KubernetesConfigSource()
+            : new FileConfigSource();
+        Log.Information($"Loading configuration from {configSource.Describe}.");
 
-        // Bind Configuration
+        Config cfg = configSource.Load() ?? throw new Exception("Unable to load configuration");
+
+        // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
+        services.AddSingleton(configSource);
+        if (configSource is KubernetesConfigSource k8sSource)
+        {
+            services.AddSingleton(k8sSource);
+            services.AddHostedService<KubernetesStatusService>();
+            services.AddHostedService<KubernetesConfigWatcher>();
+        }
 
         // Configure Logging.
         services.ConfigureLogging(cfg);

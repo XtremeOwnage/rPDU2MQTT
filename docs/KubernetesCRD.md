@@ -1,11 +1,18 @@
-# Design proposal: Kubernetes CRD as a configuration source
+# Kubernetes CRD as a configuration source
 
-**Status:** proposal (not implemented) · **Audience:** Kubernetes users · **Tracking:** follow-up to the
+**Status:** implemented · **Audience:** Kubernetes users · **Tracking:** follow-up to the
 configuration GUI (#69)
 
-This document proposes letting rPDU2MQTT read (and write) its configuration from a Kubernetes
-**Custom Resource** instead of a file, as an *optional* source for people running in Kubernetes. It
-is a design for review — no code has been written yet.
+rPDU2MQTT can read (and write) its configuration from a Kubernetes **Custom Resource** instead of a
+file, as an *optional* source for people running in Kubernetes. This document is both the design and
+the reference for the implementation.
+
+**How to use it:** set `kubernetesConfigSource.enabled=true` in the [Helm chart](../charts/rpdu2mqtt),
+or apply the raw manifests in [`Examples/Kubernetes/crd/`](../Examples/Kubernetes/crd/). The app reads
+config from the `RpduConfig` CR when `RPDU2MQTT_CONFIG_SOURCE=k8s` (+ `RPDU2MQTT_CR_NAME`).
+
+> Built and unit-tested here; the in-cluster runtime paths (auth, CR read, spec/status PATCH, watch)
+> should be confirmed in a real cluster — see *Verification constraint* below.
 
 ## Motivation
 
