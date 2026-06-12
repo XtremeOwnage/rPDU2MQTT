@@ -264,14 +264,24 @@ In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. 
 by default and poll on the same `Pdu.PollInterval` cadence.
 
 ### Prometheus
-Exposes a `/metrics` endpoint. Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`)
-labelled by `device`, `source`, and `units`.
+Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`) labelled by `device`, `source`, and
+`units`. Two independent delivery methods — enable **either or both**:
+
+- **`Exporter`** — expose a `/metrics` endpoint for Prometheus to **scrape** (pull).
+- **`Pushgateway`** — **push** to a Prometheus **Pushgateway** (for setups where scraping isn't practical).
 
 ```yaml
 Prometheus:
-  Enabled: false
-  Port: 9184   # /metrics endpoint port
+  Exporter: false       # expose /metrics for scraping
+  Port: 9184            # /metrics endpoint port (Exporter)
+  Pushgateway:
+    Enabled: false      # push to a Pushgateway
+    Url: "http://pushgateway:9091/metrics"
+    Job: "rpdu2mqtt"
+    IntervalSeconds: 0  # 0 = use Pdu.PollInterval
 ```
+
+> The older `Prometheus.Enabled: true` still works — it's treated as `Exporter: true`.
 
 ### EmonCMS
 Pushes measurements to an EmonCMS server's `input/post` API (EmonCMS auto-creates the inputs).

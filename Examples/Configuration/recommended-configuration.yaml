@@ -71,10 +71,15 @@ HomeAssistant:
 #        Host: "10.0.0.10"
 #        Protocol: UDP   # UDP or TCP
 
-# Optional: expose metrics for Prometheus at http://<host>:9184/metrics
+# Optional: expose metrics for Prometheus at http://<host>:9184/metrics (Exporter),
+# and/or push to a Pushgateway. Both are independent.
 #Prometheus:
-#    Enabled: true
+#    Exporter: true
 #    Port: 9184
+#    #Pushgateway:
+#    #    Enabled: true
+#    #    Url: "http://pushgateway:9091/metrics"
+#    #    Job: "rpdu2mqtt"
 
 # Optional: push measurements to EmonCMS (inputs are auto-created).
 #EmonCMS:

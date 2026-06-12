@@ -311,11 +311,22 @@ Logging:
         Severity: Information
 
 # (Optional) Export measurements to Prometheus, in addition to MQTT.
+# The exporter (scrape) and the Pushgateway (push) are independent — enable either or both.
 Prometheus:
-    # (Optional). Default: false
-    Enabled: false
+    # Expose a /metrics endpoint for Prometheus to scrape. Default: false
+    Exporter: false
     # Port the /metrics endpoint listens on. Default: 9184
     Port: 9184
+    # Push to a Prometheus Pushgateway.
+    Pushgateway:
+        # (Optional). Default: false
+        Enabled: false
+        # Pushgateway endpoint. Required when Pushgateway is enabled.
+        Url: "http://pushgateway:9091/metrics"
+        # The "job" label applied to pushed metrics. Default: rpdu2mqtt
+        Job: "rpdu2mqtt"
+        # How often to push, in seconds. 0 = use Pdu.PollInterval. Default: 0
+        IntervalSeconds: 0
 
 # (Optional) Push measurements to an EmonCMS server (inputs are auto-created).
 EmonCMS:

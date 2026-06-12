@@ -117,7 +117,7 @@ public static class ServiceConfiguration
         services.AddHostedService<MQTTPublishingService>();
 
         // Optional metric exporters.
-        if (cfg.Prometheus.Enabled)
+        if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
             services.AddHostedService<PrometheusExportService>();
 
         if (cfg.EmonCMS.Enabled)
