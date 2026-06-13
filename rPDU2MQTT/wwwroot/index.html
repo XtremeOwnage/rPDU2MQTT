@@ -51,6 +51,8 @@
   .ov-fields { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
   .ov-field { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
   .ov-field input[type=text] { width:210px; }
+  .ov-pair { display:flex; gap:14px; }
+  .ov-note { flex-basis:100%; color:var(--muted); font-size:12px; margin-top:2px; }
   .ov-field.ov-check { flex-direction:row; align-items:center; gap:6px; color:var(--fg); }
   .ov-outlets { margin:10px 0 2px 6px; border-left:2px solid var(--line); padding-left:14px; }
   .ov-outlet { padding:8px 0; }
@@ -316,12 +318,25 @@ function ovEnabled(path) {
   f.appendChild(inp); f.appendChild(s); return f;
 }
 // ph: { name, id } placeholders showing the current (default) values.
-function overrideFields(objPath, ph) {
+// makeModel: also render Manufacturer/Model overrides (devices/outlets/groups, not measurements).
+function overrideFields(objPath, ph, makeModel) {
   ph = ph || {};
   const wrap = document.createElement('div'); wrap.className = 'ov-fields';
   wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
   wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
+  if (makeModel) {
+    // Keep Make + Model together on one line.
+    const pair = document.createElement('div'); pair.className = 'ov-pair';
+    pair.appendChild(ovText('Make (manufacturer)', [...objPath, 'Make'], 'e.g. Dell'));
+    pair.appendChild(ovText('Model', [...objPath, 'Model'], 'e.g. PowerEdge R730xd'));
+    wrap.appendChild(pair);
+  }
   wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
+  if (makeModel) {
+    const note = document.createElement('div'); note.className = 'ov-note';
+    note.textContent = 'Make/Model: leave blank to use the PDU’s value (or the Remap Model/Manufacturer result, if those toggles are enabled).';
+    wrap.appendChild(note);
+  }
   return wrap;
 }
 // A muted line of "label value" context bits; empty values are skipped.
@@ -330,13 +345,13 @@ function ovContext(parts) {
   span.textContent = parts.filter(p => p[1]).map(p => (p[0] ? p[0] + ' ' : '') + p[1]).join('   ·   ');
   return span;
 }
-function overrideCard(title, contextParts, objPath, ph) {
+function overrideCard(title, contextParts, objPath, ph, makeModel) {
   const card = document.createElement('div'); card.className = 'ov-card';
   const head = document.createElement('div'); head.className = 'ov-head';
   const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
   if (contextParts && contextParts.some(p => p[1])) head.appendChild(ovContext(contextParts));
   card.appendChild(head);
-  card.appendChild(overrideFields(objPath, ph));
+  card.appendChild(overrideFields(objPath, ph, makeModel));
   return card;
 }
 function groupHeader(title, sub) {
@@ -353,7 +368,7 @@ function outletRow(deviceKey, o) {
   if (friendly) { const s = document.createElement('span'); s.textContent = ' — ' + friendly; lab.appendChild(s); }
   row.appendChild(lab);
   if (o.name || o.displayName) row.appendChild(ovContext([['PDU name:', o.name], ['discovered as:', o.displayName]]));
-  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }));
+  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }, true));
   return row;
 }
 function deviceCard(dev) {
@@ -363,7 +378,7 @@ function deviceCard(dev) {
   const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + friendly; head.appendChild(t);
   head.appendChild(ovContext([['key', dev.key], ['PDU name:', dev.name], ['discovered as:', dev.displayName]]));
   card.appendChild(head);
-  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }));
+  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }, true));
 
   // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
   const live = dev.outlets || [];
@@ -392,7 +407,7 @@ async function renderOverrides(container) {
   const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
   const ov = data.Overrides;
 
-  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['PDU'], {}));
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['PDU'], {}, true));
 
   container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
   const liveKeys = new Set();
@@ -406,7 +421,7 @@ async function renderOverrides(container) {
 
   if (lv.groups && lv.groups.length) {
     container.appendChild(groupHeader('OneView Groups', null));
-    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName })));
+    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName }, true)));
   }
 }
 

@@ -20,4 +20,11 @@ public class NamedEntity : BaseEntity, IEntityName
     [JsonIgnore]
     /// <inheritdoc cref="IEntityName.DisplayName"/>
     public string Entity_DisplayName { get; set; }
+
+    /// <summary>Optional Manufacturer/Model overrides (from config), surfaced in HA discovery.</summary>
+    [JsonIgnore]
+    public string? Entity_Make { get; set; }
+
+    [JsonIgnore]
+    public string? Entity_Model { get; set; }
 }

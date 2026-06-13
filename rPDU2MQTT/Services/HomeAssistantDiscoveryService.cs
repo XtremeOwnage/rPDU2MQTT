@@ -107,6 +107,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         {
             // Create a device, to represent this device.
             var newParent = parent.CreateChild(device);
+            ApplyMakeModelOverride(newParent, device);
 
             // Device-level alarm.
             components.Add(BuildAlarm(device, newParent));
@@ -146,6 +147,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Remap Make/Model, IF specified in the configuration.
             RemapColumns(newParent, "Outlet", outlet.Name);
+            // Per-outlet Make/Model override wins over the remap/inherited values.
+            ApplyMakeModelOverride(newParent, outlet);
 
             // Discover outlet's state.
             components.Add(BuildState(outlet, newParent));
@@ -182,6 +185,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Remap Make/Model, IF specified in the configuration.
             RemapColumns(newParent, "Oneview Group", group.Label);
+            ApplyMakeModelOverride(newParent, group);
 
             // Discover measurements.
             collectDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, components);
