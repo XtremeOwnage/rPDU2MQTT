@@ -51,6 +51,8 @@
   .ov-fields { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; }
   .ov-field { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
   .ov-field input[type=text] { width:210px; }
+  .ov-pair { display:flex; gap:14px; }
+  .ov-note { flex-basis:100%; color:var(--muted); font-size:12px; margin-top:2px; }
   .ov-field.ov-check { flex-direction:row; align-items:center; gap:6px; color:var(--fg); }
   .ov-outlets { margin:10px 0 2px 6px; border-left:2px solid var(--line); padding-left:14px; }
   .ov-outlet { padding:8px 0; }
@@ -323,10 +325,18 @@ function overrideFields(objPath, ph, makeModel) {
   wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
   wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
   if (makeModel) {
-    wrap.appendChild(ovText('Make (manufacturer)', [...objPath, 'Make'], 'e.g. Dell'));
-    wrap.appendChild(ovText('Model', [...objPath, 'Model'], 'e.g. PowerEdge R730xd'));
+    // Keep Make + Model together on one line.
+    const pair = document.createElement('div'); pair.className = 'ov-pair';
+    pair.appendChild(ovText('Make (manufacturer)', [...objPath, 'Make'], 'e.g. Dell'));
+    pair.appendChild(ovText('Model', [...objPath, 'Model'], 'e.g. PowerEdge R730xd'));
+    wrap.appendChild(pair);
   }
   wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
+  if (makeModel) {
+    const note = document.createElement('div'); note.className = 'ov-note';
+    note.textContent = 'Make/Model: leave blank to use the PDU’s value (or the Remap Model/Manufacturer result, if those toggles are enabled).';
+    wrap.appendChild(note);
+  }
   return wrap;
 }
 // A muted line of "label value" context bits; empty values are skipped.
