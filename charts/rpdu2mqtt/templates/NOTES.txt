@@ -1,0 +1,33 @@
+rPDU2MQTT has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+1. Check it started and connected to your broker:
+   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "rpdu2mqtt.fullname" . }} -f
+
+{{- if and (dig "Gui" "Enabled" false .Values.config) .Values.service.gui.enabled }}
+
+2. Configuration GUI is enabled. Reach it with a port-forward:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "rpdu2mqtt.fullname" . }}-gui {{ dig "Gui" "Port" 8080 .Values.config }}:{{ dig "Gui" "Port" 8080 .Values.config }}
+   then open http://localhost:{{ dig "Gui" "Port" 8080 .Values.config }}
+   NOTE: the config is mounted read-only from a ConfigMap, so the GUI is view/test only.
+   Edit values and `helm upgrade` to change configuration.
+{{- end }}
+
+{{- if and (dig "Prometheus" "Enabled" false .Values.config) .Values.service.metrics.enabled }}
+
+3. Metrics are exposed at :{{ dig "Prometheus" "Port" 9184 .Values.config }}/metrics on service
+   {{ include "rpdu2mqtt.fullname" . }}-metrics.
+   {{- if .Values.serviceMonitor.enabled }}
+   A ServiceMonitor was created for the Prometheus Operator.
+   {{- else }}
+   Set `serviceMonitor.enabled=true` to have the Prometheus Operator scrape it.
+   {{- end }}
+{{- end }}
+
+{{- if not (include "rpdu2mqtt.hasSecret" .) }}
+
+WARNING: no credentials were provided. If your MQTT broker or PDU require auth,
+set `credentials.*` (or `existingSecret`) so the RPDU2MQTT_* env vars are injected.
+{{- end }}

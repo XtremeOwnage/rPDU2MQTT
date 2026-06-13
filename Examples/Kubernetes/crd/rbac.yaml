@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+rules:
+  - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
+    resources: ["rpduconfigs"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
+    resources: ["rpduconfigs/status"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rpdu2mqtt
+subjects:
+  - kind: ServiceAccount
+    name: rpdu2mqtt
+    namespace: rpdu2mqtt

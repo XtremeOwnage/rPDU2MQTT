@@ -1,0 +1,30 @@
+{{- if .Values.kubernetesConfigSource.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
+    resources: ["rpduconfigs"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
+    resources: ["rpduconfigs/status"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "rpdu2mqtt.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "rpdu2mqtt.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

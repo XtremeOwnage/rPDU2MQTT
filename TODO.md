@@ -48,3 +48,75 @@
 - [ ] **Release workflow** — consider a dedicated GitHub Release workflow (changelog/artifacts)
   beyond the container build.
 - [ ] **README & documentation** — make the README more thorough and less AI-generated in tone.
+- [x] **Helm chart** — [`charts/rpdu2mqtt`](charts/rpdu2mqtt): config ConfigMap, credentials Secret,
+  Deployment, optional GUI Service/Ingress, and a Prometheus Operator `ServiceMonitor`.
+- [ ] **Kubernetes CRD config source** — optional `RpduConfig` CRD as a writable config source
+  (makes GUI Save work in k8s), with status subresource. Design proposal:
+  [KubernetesCRD.md](docs/KubernetesCRD.md).
+
+
+
+
+
+Configuration GUI needs explanation of various settings. Help text, etc... 
+- Ex- what is "ActionsEnabled"? What is "RemapMake and Remap Model???" GUI should display meaning....
+- Kubernetes CRDs should contain descriptiosn too.
+
+GUI
+  - Would be nice to be able to see the ACTUAL generated paths and metric types for home assistant, prometheus, home assistant... etc.... and how overrides affects it.
+
+Home Assistant  - Groups
+  - For Oneview groups- I should be able to see the switches for contained group members, to allow me to toggle individual outlets in a group.
+  - Should be a master "switch" allowing the entire group to be toggled off as well.
+  - I would like to see some rollup sensors potentially populated for groups, if possible.
+
+Alarms-
+  There is nothing in the GUI, or MQTT to allow configuring any of the alarms or actions.
+  Seems like that could be useful functionality.
+
+Documentation
+  - Configuration guide will need to be updated to include details to configure either via GUI, or via CRDs.
+  - Will need to capture a bunch of screenshots and images too.
+  - The main readme, needs to have screenshots showing this in use, in home assistant, emoncms, and prometheus.
+
+Actions Enabled-
+  - If actions are not enabled, switches should not be discovered in home assistant. Or any other write actions.
+  - Should also prob rename this, to Enable Write Actions, or something.
+
+Unit Testing-
+  - Pretty lax. Need to expand unit testing.
+  - Unit testing k8s CRDs too?
+  - Helm chart unit tests?
+
+Make / Model
+  - As home assistant can display the Manufacturer and Model for individual switches, it would be pretty slick to be able to override the values for individual outlets, so instead of showing GEI / MNU3E1R1-12S203-3TL5A0E10-S-115, I could for example, show Dell / PowerEdge r730XD.
+
+Home Assistant / Device Info
+  - ![alt text](image-1.png)
+  - Should show the IP and MAC Address of the connected PDU.
+
+Home Assistant / Outlet Info
+  - ![alt text](image-2.png)
+  - Should ideally display the actual outlet number in the device info.
+
+MQTT / Home Assistant
+  - Add option/configuration to toggle last-will messages
+  - When disabled, then option to configure the amount of time before device/outlets/etc shows unavailable.
+
+Reset Statistics (Write Action)
+
+
+More Outlet Options / Metrics / Values
+  - Expose more PDU configuration options to home assistant
+  - ![alt text](image-3.png)
+  - Configurable On / Off / Reboot Delays.
+  - Reboot Button
+  - Dropdown for Power-On Action
+  - ![alt text](image-4.png)
+  - Add option to enable a diagnostics button in home assistant to reset the statistics for a outlet/device.
+    - This is exposed as a operation. Reboot is too.
+    - ![alt text](image-5.png)
+
+GUI / Live View Enhancements:
+  - Can improve the live view, to display data simlier to this:
+  - ![alt text](image-6.png)
