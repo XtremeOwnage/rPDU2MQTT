@@ -6,25 +6,57 @@ using rPDU2MQTT.Services.baseTypes;
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// Exposes PDU measurements as Prometheus metrics on a /metrics endpoint. Each measurement type
-/// becomes a gauge (e.g. rpdu2mqtt_realpower) labelled by device and source. Enabled via config.
+/// Publishes PDU measurements as Prometheus metrics. Each measurement type becomes a gauge
+/// (e.g. rpdu2mqtt_realpower) labelled by device and source. Can expose a /metrics endpoint for
+/// scraping (Exporter) and/or push to a Pushgateway (Pushgateway) — both independent.
 /// </summary>
 public class PrometheusExportService : baseMQTTService
 {
     private readonly Dictionary<string, Gauge> gauges = new();
-    private readonly IMetricServer? server;
+    private readonly IMetricServer? exporter;
+    private readonly IMetricServer? pusher;
 
     public PrometheusExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.PDU.PollInterval)
     {
-        var port = deps.Cfg.Prometheus.Port;
-        try
+        var cfg = deps.Cfg.Prometheus;
+
+        if (cfg.Exporter)
         {
-            server = new MetricServer(port: port).Start();
-            Log.Information($"Prometheus exporter listening on :{port}/metrics");
+            try
+            {
+                exporter = new MetricServer(port: cfg.Port).Start();
+                Log.Information($"Prometheus exporter listening on :{cfg.Port}/metrics");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, $"Failed to start the Prometheus exporter on port {cfg.Port}.");
+            }
         }
-        catch (Exception ex)
+
+        if (cfg.Pushgateway.Enabled)
         {
-            Log.Error(ex, $"Failed to start the Prometheus metric server on port {port}.");
+            if (string.IsNullOrWhiteSpace(cfg.Pushgateway.Url))
+            {
+                Log.Error("Prometheus Pushgateway is enabled but Prometheus.Pushgateway.Url is not set; no metrics will be pushed.");
+            }
+            else
+            {
+                try
+                {
+                    var seconds = cfg.Pushgateway.IntervalSeconds > 0 ? cfg.Pushgateway.IntervalSeconds : deps.Cfg.PDU.PollInterval;
+                    pusher = new MetricPusher(new MetricPusherOptions
+                    {
+                        Endpoint = cfg.Pushgateway.Url,
+                        Job = cfg.Pushgateway.Job,
+                        IntervalMilliseconds = Math.Max(1, seconds) * 1000,
+                    }).Start();
+                    Log.Information($"Prometheus pushing to {cfg.Pushgateway.Url} (job '{cfg.Pushgateway.Job}') every {seconds}s.");
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Failed to start the Prometheus Pushgateway pusher.");
+                }
+            }
         }
     }
 

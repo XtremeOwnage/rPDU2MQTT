@@ -282,10 +282,29 @@ spec:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
                 properties:
-                  Enabled:
+                  Exporter:
                     type: boolean
+                    description: Expose a /metrics endpoint for Prometheus to scrape.
                   Port:
                     type: integer
+                    description: Port the /metrics endpoint listens on (Exporter).
+                  Pushgateway:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Enabled:
+                        type: boolean
+                        description: Push metrics to a Pushgateway.
+                      Url:
+                        type: string
+                        description: Pushgateway endpoint, e.g. http://pushgateway:9091/metrics.
+                      Job:
+                        type: string
+                        description: The 'job' label applied to pushed metrics.
+                      IntervalSeconds:
+                        type: integer
+                        description: How often to push, in seconds. Falls back to the PDU poll interval when 0.
+                    description: Push metrics to a Prometheus Pushgateway.
                 description: Prometheus metrics exporter
               EmonCMS:
                 type: object

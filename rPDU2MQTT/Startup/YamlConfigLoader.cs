@@ -121,6 +121,10 @@ internal class YamlConfigLoader
         if (config.PDU.EnableActionsAlias.HasValue)
             config.PDU.ActionsEnabled = config.PDU.EnableActionsAlias.Value;
 
+        // Backwards-compatible alias: the old Prometheus.Enabled meant "run the exporter".
+        if (config.Prometheus.EnabledAlias == true)
+            config.Prometheus.Exporter = true;
+
         ApplyEnvironmentOverrides(config);
 
         return config;
