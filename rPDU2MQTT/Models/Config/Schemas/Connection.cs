@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Text.Json.Serialization;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config.Schemas;
@@ -21,6 +22,7 @@ public class Connection
     public int? Port { get; set; }
 
     [YamlMember(Alias = "Timeout", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [JsonPropertyName("Timeout")]
     [Range(1, 3600, ErrorMessage = "Timeout must be between 0 and 3600.")]
     [Display(Name = "Connection Timeout", Description = "Default connection timeout.")]
     [Description("Default connection timeout.")]

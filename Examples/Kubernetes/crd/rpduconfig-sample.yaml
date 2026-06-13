@@ -1,0 +1,24 @@
+apiVersion: rpdu2mqtt.xtremeownage.com/v1alpha1
+kind: RpduConfig
+metadata:
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+# The spec uses the same field names as config.yaml / the GUI. Credentials are NOT set here —
+# provide them via a Secret and the RPDU2MQTT_* env vars (see deployment.yaml).
+spec:
+  MQTT:
+    Connection:
+      Host: mqtt.lan
+      Port: 1883
+    ParentTopic: Rack_PDU
+  PDU:
+    Connection:
+      Host: pdu.lan
+      Port: 80
+    PollInterval: 5
+  HomeAssistant:
+    DiscoveryEnabled: true
+    DiscoveryTopic: homeassistant
+  Prometheus:
+    Enabled: false
+    Port: 9184

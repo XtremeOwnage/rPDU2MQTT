@@ -78,7 +78,9 @@ public static class ConfigSchema
 
         var node = new SchemaNode
         {
-            Key = prop.Name,
+            // Key drives the JSON payload + the CR spec; align it with [JsonPropertyName] so the GUI
+            // JSON, the Kubernetes CR spec, and the YAML config all share one field vocabulary.
+            Key = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? prop.Name,
             Label = prop.GetCustomAttribute<YamlMemberAttribute>()?.Alias ?? prop.Name,
             Description = ResolveDescription(prop),
             Required = prop.GetCustomAttribute<RequiredAttribute>() is not null,
@@ -161,6 +163,20 @@ public static class ConfigSchema
     /// <summary>Deserialize the form's JSON back into a config object.</summary>
     public static Config FromJson(string json)
         => JsonSerializer.Deserialize<Config>(json, ConfigJson) ?? throw new Exception("Configuration payload was empty.");
+
+    /// <summary>
+    /// Return a deep copy with secrets stripped, for writing to a Kubernetes CR or exporting a manifest
+    /// (credentials belong in a Secret, not the CR spec / committed manifest).
+    /// </summary>
+    public static Config RedactSecrets(Config config)
+    {
+        var clone = FromJson(ToJson(config));
+        clone.MQTT.Credentials = null;
+        clone.PDU.Credentials = null;
+        clone.EmonCMS.ApiKey = null;
+        clone.Gui.Password = null;
+        return clone;
+    }
 
     /// <summary>Serialize a config object to YAML (honoring the model's YAML aliases).</summary>
     public static string ToYaml(Config config)

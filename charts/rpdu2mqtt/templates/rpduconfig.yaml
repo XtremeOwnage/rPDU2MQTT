@@ -1,0 +1,10 @@
+{{- if .Values.kubernetesConfigSource.enabled }}
+apiVersion: {{ printf "rpdu2mqtt.xtremeownage.com/v1alpha1" }}
+kind: RpduConfig
+metadata:
+  name: {{ include "rpdu2mqtt.crName" . }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+spec:
+  {{- toYaml .Values.config | nindent 2 }}
+{{- end }}

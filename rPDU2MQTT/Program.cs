@@ -5,6 +5,14 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Startup;
+using rPDU2MQTT.Startup.ConfigSources;
+
+// Emit the generated RpduConfig CRD manifest and exit (used to regenerate the committed manifests).
+if (args.Contains("--emit-crd"))
+{
+    Console.Write(CrdGenerator.ToYaml());
+    return 0;
+}
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()

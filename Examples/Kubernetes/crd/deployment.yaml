@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rpdu2mqtt-credentials
+  namespace: rpdu2mqtt
+type: Opaque
+stringData:
+  # Credentials are injected as env vars (kept out of the RpduConfig CR).
+  RPDU2MQTT_MQTT_USERNAME: "rpdu2mqtt"
+  RPDU2MQTT_MQTT_PASSWORD: "changeme"
+  RPDU2MQTT_PDU_USERNAME: "hass"
+  RPDU2MQTT_PDU_PASSWORD: "changeme"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rpdu2mqtt
+  namespace: rpdu2mqtt
+  labels: { app: rpdu2mqtt }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: rpdu2mqtt }
+  template:
+    metadata:
+      labels: { app: rpdu2mqtt }
+    spec:
+      serviceAccountName: rpdu2mqtt
+      containers:
+        - name: rpdu2mqtt
+          image: ghcr.io/xtremeownage/rpdu2mqtt:stable
+          envFrom:
+            - secretRef:
+                name: rpdu2mqtt-credentials
+          env:
+            - name: RPDU2MQTT_CONFIG_SOURCE
+              value: k8s
+            - name: RPDU2MQTT_CR_NAME
+              value: rpdu2mqtt
+            - name: RPDU2MQTT_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace

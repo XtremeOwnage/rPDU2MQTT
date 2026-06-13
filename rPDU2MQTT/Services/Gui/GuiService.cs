@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Startup;
-using YamlDotNet.Serialization;
+using rPDU2MQTT.Startup.ConfigSources;
 
 namespace rPDU2MQTT.Services.Gui;
 
@@ -24,14 +24,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IHiveMQClient mqtt;
     private readonly PDU pdu;
     private readonly DiscoveryCoordinator discovery;
+    private readonly IConfigSource configSource;
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource)
     {
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
         this.discovery = discovery;
+        this.configSource = configSource;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -124,10 +126,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         app.MapGet("/api/schema", () => Results.Json(ConfigSchema.Build(), ConfigSchema.Json));
 
-        // Reflect the on-disk config (which may have been edited) rather than the running singleton.
+        // Reflect the current source (file on disk or the CR), which may have been edited.
         app.MapGet("/api/config", () =>
         {
-            var current = LoadConfigFromFile() ?? config;
+            Config current;
+            try { current = configSource.Load(); }
+            catch { current = config; }
             return Results.Content(ConfigSchema.ToJson(current), "application/json");
         });
 
@@ -146,34 +150,45 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = $"Invalid configuration: {ex.Message}" });
             }
 
-            var path = YamlConfigLoader.ResolvedPath;
-            if (string.IsNullOrEmpty(path))
-                return Results.Json(new { ok = false, message = "Config file path is unknown; cannot save." }, statusCode: 500);
-
-            if (!IsConfigWritable())
-                return Results.Json(new { ok = false, message = "Config file is read-only (e.g. a Kubernetes ConfigMap or a ':ro' mount); cannot save. Mount it from a writable volume to edit from the GUI." }, statusCode: 409);
+            if (!configSource.CanWrite)
+                return Results.Json(new { ok = false, message = "Configuration is read-only (e.g. a ConfigMap or ':ro' mount); cannot save. Use a writable source to edit from the GUI." }, statusCode: 409);
 
             try
             {
-                // Keep a single rolling backup before overwriting.
-                if (File.Exists(path))
-                    File.Copy(path, path + ".bak", overwrite: true);
-
-                await File.WriteAllTextAsync(path, ConfigSchema.ToYaml(parsed));
-                Log.Information($"Configuration saved via GUI to {path}. Restart to apply.");
-                return Results.Json(new { ok = true, message = "Saved. Restart the service to apply changes.", path });
+                await configSource.SaveAsync(parsed, ctx.RequestAborted);
+                Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
+                var message = configSource.IsGitOpsManaged
+                    ? "Saved to the Kubernetes resource. Remember to update your GitOps source so it doesn't drift. Restart to apply."
+                    : "Saved. Restart the service to apply changes.";
+                return Results.Json(new { ok = true, message, gitops = configSource.IsGitOpsManaged });
             }
             catch (Exception ex)
             {
-                return Results.Json(new { ok = false, message = $"Failed to write config: {ex.Message}" }, statusCode: 500);
+                return Results.Json(new { ok = false, message = $"Failed to save config: {ex.Message}" }, statusCode: 500);
+            }
+        });
+
+        // Export the current (edited) config as an RpduConfig CR manifest, secrets redacted.
+        app.MapPost("/api/config/manifest", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var json = await reader.ReadToEndAsync();
+            try
+            {
+                return Results.Text(BuildManifest(ConfigSchema.FromJson(json)), "text/plain");
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { ok = false, message = $"Invalid configuration: {ex.Message}" });
             }
         });
 
         app.MapGet("/api/status", () => Results.Json(new
         {
             version = Version,
-            configPath = YamlConfigLoader.ResolvedPath,
-            configWritable = IsConfigWritable(),
+            configSource = configSource.Describe,
+            configWritable = configSource.CanWrite,
+            gitops = configSource.IsGitOpsManaged,
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
         }, ConfigSchema.Json));
@@ -322,55 +337,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private static string Version =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
 
-    /// <summary>
-    /// Whether the config file can be written. A ConfigMap-mounted (or ':ro') config is read-only,
-    /// so the GUI is view/test-only there; this lets the UI disable Save instead of failing on submit.
-    /// </summary>
-    private static bool IsConfigWritable()
+    /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
+    private static string BuildManifest(Config config)
     {
-        var path = YamlConfigLoader.ResolvedPath;
-        if (string.IsNullOrEmpty(path))
-            return false;
-
-        try
-        {
-            if (File.Exists(path))
-            {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
-                return true;
-            }
-
-            var dir = Path.GetDirectoryName(path);
-            return !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>Load the config straight from disk (no environment-secret overrides) for editing.</summary>
-    private static Config? LoadConfigFromFile()
-    {
-        var path = YamlConfigLoader.ResolvedPath;
-        if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            return null;
-
-        try
-        {
-            var deserializer = new DeserializerBuilder()
-                .WithCaseInsensitivePropertyMatching()
-                .IgnoreFields()
-                .IgnoreUnmatchedProperties()
-                .Build();
-            using var sr = new StreamReader(path);
-            return deserializer.Deserialize<Config>(sr);
-        }
-        catch (Exception ex)
-        {
-            Log.Warning($"GUI could not read config file for editing: {ex.Message}");
-            return null;
-        }
+        var spec = ConfigSchema.ToYaml(ConfigSchema.RedactSecrets(config));
+        var indentedSpec = string.Join("\n", spec.TrimEnd().Split('\n').Select(l => "    " + l));
+        return
+            "# Secrets are redacted; provide them via a Secret and the RPDU2MQTT_* env vars.\n" +
+            $"apiVersion: {RpduCrd.ApiVersion}\n" +
+            $"kind: {RpduCrd.Kind}\n" +
+            "metadata:\n" +
+            "  name: rpdu2mqtt\n" +
+            "spec:\n" +
+            indentedSpec + "\n";
     }
 
     private static string LoadIndexHtml()

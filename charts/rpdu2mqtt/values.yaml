@@ -66,6 +66,15 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# Store configuration in a Kubernetes RpduConfig custom resource instead of a ConfigMap.
+# When enabled: the chart creates the CR (from `config` above) and grants RBAC to read/write it,
+# the app reads config from the CR (RPDU2MQTT_CONFIG_SOURCE=k8s), and the GUI's Save writes back to
+# the CR. Requires the RpduConfig CRD to be installed (shipped in this chart's crds/ directory).
+kubernetesConfigSource:
+  enabled: false
+  # Name of the RpduConfig resource (defaults to the release fullname).
+  crName: ""
+
 # Kubernetes Services for the GUI and /metrics endpoints. Created only when the
 # corresponding feature is enabled in `config` AND the toggle here is true.
 service:

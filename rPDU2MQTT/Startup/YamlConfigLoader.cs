@@ -55,9 +55,8 @@ internal class YamlConfigLoader
         throw new Exception("Unable to locate config.yaml");
     }
 
-    public static Config GetConfig()
-    {
-        var ds = new DeserializerBuilder()
+    private static IDeserializer BuildDeserializer() =>
+        new DeserializerBuilder()
             // Ignore case when deserializing
             .WithCaseInsensitivePropertyMatching()
             // Ignore fields.
@@ -69,20 +68,28 @@ internal class YamlConfigLoader
             // Check for duplicate keys
             .WithDuplicateKeyChecking()
             // Enforce required attributes
-            .WithEnforceRequiredMembers();
+            .WithEnforceRequiredMembers()
+            .Build();
 
-        IDeserializer s = ds.Build();
-
+    public static Config GetConfig()
+    {
         using var stream = File.OpenRead(Find());
         using var sr = new StreamReader(stream);
+        return Deserialize(sr);
+    }
 
+    /// <summary>Deserialize a YAML string into a fully-initialized <see cref="Config"/> (shared by the
+    /// file and Kubernetes config sources).</summary>
+    public static Config DeserializeString(string yaml) => Deserialize(new StringReader(yaml));
+
+    private static Config Deserialize(TextReader reader)
+    {
         try
         {
-            var cfg = s.Deserialize<Config>(sr);
-
-            return InitializeConfig(cfg);
+            var cfg = BuildDeserializer().Deserialize<Config>(reader);
+            return Initialize(cfg);
         }
-        catch(YamlException ex)
+        catch (YamlException ex)
         {
             Log.Fatal($"Error while parsing YAML Config. Error on Line {ex.Start.Line}");
             throw;
@@ -90,10 +97,10 @@ internal class YamlConfigLoader
     }
 
     /// <summary>
-    /// Just initializes values to default values.
+    /// Initialize defaults, apply the back-compat alias, and layer environment/secret overrides.
+    /// Shared by the file and Kubernetes config sources.
     /// </summary>
-    /// <param name="config"></param>
-    private static Config InitializeConfig(Config config)
+    public static Config Initialize(Config config)
     {
         // This- method exists, because apparently when you have an empty dictionary defined
         // yamldotnet, produces a null dictionary in return.
@@ -145,6 +152,9 @@ internal class YamlConfigLoader
 
         var emonKey = ResolveSecret("RPDU2MQTT_EMONCMS_APIKEY");
         if (emonKey is not null) { config.EmonCMS.ApiKey = emonKey; Log.Information("Using EmonCMS API key from environment."); }
+
+        var guiPass = ResolveSecret("RPDU2MQTT_GUI_PASSWORD");
+        if (guiPass is not null) { config.Gui.Password = guiPass; Log.Information("Using GUI password from environment."); }
     }
 
     /// <summary>
