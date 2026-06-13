@@ -19,6 +19,18 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void Build_UsesFriendlyDisplayNamesAndHelpText()
+    {
+        var pdu = ConfigSchema.Build().Single(n => n.Key == "PDU");
+        var actions = pdu.Properties!.Single(n => n.Key == "ActionsEnabled");
+
+        // Key stays the config field; Label is the friendly GUI title from [Display(Name)].
+        Assert.Equal("Enable Write Actions", actions.Label);
+        Assert.False(string.IsNullOrWhiteSpace(actions.Description));
+        Assert.All(pdu.Properties!, p => Assert.False(string.IsNullOrWhiteSpace(p.Description)));
+    }
+
+    [Fact]
     public void Build_ClassifiesScalarTypes()
     {
         var mqtt = ConfigSchema.Build().Single(n => n.Key == "MQTT");

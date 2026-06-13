@@ -125,20 +125,21 @@ spec:
                       Password:
                         type: string
                         description: Password to login with
+                    description: PDU login used for write actions (outlet control). Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD.
                   PollInterval:
                     type: integer
-                    description: The polling interval for the PDU in seconds.
+                    description: How often (seconds) to poll the PDU and publish readings.
                     minimum: 1
                     maximum: 2147483647
                   ActionsEnabled:
                     type: boolean
-                    description: Configuration to enable write actions via PDU
+                    description: Allow the bridge to make changes on the PDU (e.g. toggle outlets). When off, no switches or other write controls are exposed to Home Assistant. Requires PDU credentials.
                   RemapModel:
                     type: boolean
-                    description: Enables remapping the model column for devices to display data related to which PDU, Outlet.
+                    description: Replace each outlet/group's Model (shown in the Home Assistant device info) with contextual text (e.g. parent PDU + name) instead of the PDU's hardware model.
                   RemapManufacturer:
                     type: boolean
-                    description: Enables remapping the manufacturer column for devices to display the type of entity. Aka, Outlet, Group, etc..
+                    description: Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.
                 description: PDU Configuration
               HomeAssistant:
                 type: object
@@ -275,8 +276,10 @@ spec:
                 properties:
                   PublishMessages:
                     type: boolean
+                    description: Actually publish messages to the broker. Turn off to dry-run the whole pipeline without sending anything.
                   PrintDiscovery:
                     type: boolean
+                    description: Log the Home Assistant discovery JSON to the console (verbose; for troubleshooting discovery).
                 description: Settings for debugging and diagnostics.
               Prometheus:
                 type: object
