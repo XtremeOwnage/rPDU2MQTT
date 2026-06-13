@@ -81,7 +81,10 @@ public static class ConfigSchema
             // Key drives the JSON payload + the CR spec; align it with [JsonPropertyName] so the GUI
             // JSON, the Kubernetes CR spec, and the YAML config all share one field vocabulary.
             Key = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? prop.Name,
-            Label = prop.GetCustomAttribute<YamlMemberAttribute>()?.Alias ?? prop.Name,
+            // Friendly display title for the GUI: [Display(Name)] wins, else the YAML alias / property name.
+            Label = prop.GetCustomAttribute<DisplayAttribute>()?.Name
+                ?? prop.GetCustomAttribute<YamlMemberAttribute>()?.Alias
+                ?? prop.Name,
             Description = ResolveDescription(prop),
             Required = prop.GetCustomAttribute<RequiredAttribute>() is not null,
         };

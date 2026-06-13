@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
@@ -15,6 +16,7 @@ public class DebugConfig
     /// Intended usage, is to allow the entire process to be tested, and debugged, without actually publishing the mwssages.
     /// </remarks>
     [YamlMember(Alias = "PublishMessages")]
+    [Display(Name = "Publish to MQTT", Description = "Actually publish messages to the broker. Turn off to dry-run the whole pipeline without sending anything.")]
     [DefaultValue(true)]
     public bool PublishMessages { get; set; } = true;
 
@@ -23,6 +25,7 @@ public class DebugConfig
     /// When enabled, this will print the MQTT discovery messages to the console.
     /// </summary>
     [YamlMember(Alias = "PrintDiscovery")]
+    [Display(Name = "Print Discovery Payloads", Description = "Log the Home Assistant discovery JSON to the console (verbose; for troubleshooting discovery).")]
     [DefaultValue(false)]
     public bool PrintDiscovery { get; set; } = false;
 }

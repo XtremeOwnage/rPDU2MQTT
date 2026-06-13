@@ -21,6 +21,7 @@ public class PduConfig
     /// Credentials used when connection to PDU.
     /// </summary>
     [YamlMember(Alias = "Credentials", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Description = "PDU login used for write actions (outlet control). Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD.")]
     [DefaultValue(null)]
     public Schemas.Credentials? Credentials { get; set; } = null;
 
@@ -28,16 +29,13 @@ public class PduConfig
     /// Gets or sets the polling interval for the PDU in seconds.
     /// </summary>
     [Range(1, int.MaxValue, ErrorMessage = "PollInterval must be greater than 0.")]
-    [Display(Description = "The polling interval for the PDU in seconds.")]
+    [Display(Name = "Poll Interval (seconds)", Description = "How often (seconds) to poll the PDU and publish readings.")]
     [DefaultValue(5)]
     public int PollInterval { get; set; } = 5;
 
     [DefaultValue(false)]
-    [YamlMember(Alias = "ActionsEnabled", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Configuration to enable write actions via PDU")]
-    /// <summary>
-    /// Gets or sets a value indicating whether actions are enabled.
-    /// </summary>
-    [Display(Description = "Indicates whether actions are enabled.")]
+    [YamlMember(Alias = "ActionsEnabled", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Allow the bridge to make changes on the PDU (e.g. toggle outlets). When off, no switches or other write controls are exposed to Home Assistant. Requires PDU credentials.")]
+    [Display(Name = "Enable Write Actions", Description = "Allow the bridge to make changes on the PDU (e.g. toggle outlets). When off, no switches or other write controls are exposed to Home Assistant. Requires PDU credentials.")]
     public bool ActionsEnabled { get; set; }
 
     /// <summary>
@@ -49,18 +47,12 @@ public class PduConfig
     public bool? EnableActionsAlias { get; set; }
 
     [DefaultValue(false)]
-    [YamlMember(Alias = "RemapModel", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Enables remapping the model column for devices to display data related to which PDU, Outlet.")]
-    /// <summary>
-    /// Gets or sets a value indicating whether actions are enabled.
-    /// </summary>
-    [Display(Description = "This setting can be enabled, which will remap the model value for individual outlets to provide more contextual information.")]
+    [YamlMember(Alias = "RemapModel", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Replace each outlet/group's Model (shown in the Home Assistant device info) with contextual text (e.g. parent PDU + name) instead of the PDU's hardware model.")]
+    [Display(Name = "Remap Model column", Description = "Replace each outlet/group's Model (in Home Assistant device info) with contextual text instead of the PDU's hardware model.")]
     public bool RemapModel { get; set; }
 
     [DefaultValue(false)]
-    [YamlMember(Alias = "RemapMake", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Enables remapping the manufacturer column for devices to display the type of entity. Aka, Outlet, Group, etc..")]
-    /// <summary>
-    /// Gets or sets a value indicating whether actions are enabled.
-    /// </summary>
-    [Display(Description = "This setting can be enabled, which will remap the manufacturer value for individual outlets to provide more contextual information.")]
-    public bool RemapManufacturer { get; set;}
+    [YamlMember(Alias = "RemapMake", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.")]
+    [Display(Name = "Remap Manufacturer column", Description = "Replace each entity's Manufacturer (in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.")]
+    public bool RemapManufacturer { get; set; }
 }
