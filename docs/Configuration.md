@@ -159,16 +159,25 @@ Overrides:
 ```
 
 ### Outlets Override
-Customize individual outlets by their number. 
+Customize individual outlets by their number (1-based, matching the PDU UI). Outlets are nested under
+their device's serial number.
 
 ```yaml
 Overrides:
-  Outlets:
-    1:
-      ID: kube02                # Customize the outlet ID
-      Name: "Proxmox: Kube02"   # Customize the outlet name
-      Enabled: true             # Set to false to disable this outlet
+  Devices:
+    A0AE260C851900C3:           # Device serial number
+      Outlets:
+        1:
+          ID: kube02                # Customize the outlet ID
+          Name: "Proxmox: Kube02"   # Customize the outlet name
+          Enabled: true             # Set to false to disable this outlet
+          Make: "Dell"              # Manufacturer shown in Home Assistant
+          Model: "PowerEdge R730xd" # Model shown in Home Assistant
 ```
+
+`Make` and `Model` override what Home Assistant shows in the device info (instead of the PDU's
+hardware make/model, e.g. `GEI` / `MNU3E1R1-...`). They apply to devices, outlets, and OneView groups,
+and take precedence over the `RemapMake` / `RemapModel` toggles.
 
 ### Measurements Override
 Customize how metrics are sent to services. The entity ID used for metrics is `[DEVICE_ID]_[METRIC_TYPE]`.

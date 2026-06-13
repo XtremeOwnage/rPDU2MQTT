@@ -274,6 +274,19 @@ public abstract class baseDiscoveryService : baseMQTTService
             discoveryDevice.Manufacturer = Make;
 
     }
+
+    /// <summary>
+    /// Apply per-entity Manufacturer/Model overrides (Overrides.*.Make/Model) to a discovery device.
+    /// Takes precedence over the inherited values and the RemapColumns behavior.
+    /// </summary>
+    protected static void ApplyMakeModelOverride(DiscoveryDevice discoveryDevice, NamedEntity entity)
+    {
+        if (!string.IsNullOrWhiteSpace(entity.Entity_Make))
+            discoveryDevice.Manufacturer = entity.Entity_Make;
+
+        if (!string.IsNullOrWhiteSpace(entity.Entity_Model))
+            discoveryDevice.Model = entity.Entity_Model;
+    }
 }
 
 

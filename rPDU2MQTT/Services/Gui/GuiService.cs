@@ -247,7 +247,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     objectId = d.Entity_Name,
                     outlets = d.Outlets.OrderBy(o => o.Key).Select(o => new
                     {
-                        index = o.Key,
+                        // 1-based: matches the PDU UI and the outlet override keys (Outlets.<n>).
+                        index = o.Key + 1,
                         label = o.Label,
                         name = o.Name,
                         displayName = o.Entity_DisplayName,

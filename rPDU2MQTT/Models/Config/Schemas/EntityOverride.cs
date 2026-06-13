@@ -34,4 +34,16 @@ public class EntityOverride
     /// </remarks>
     [YamlMember(Alias = "Enabled", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Is this entity enabled?")]
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Override the Manufacturer shown in Home Assistant for this device/outlet/group.
+    /// </summary>
+    [YamlMember(Alias = "Make", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.")]
+    public string? Make { get; set; }
+
+    /// <summary>
+    /// Override the Model shown in Home Assistant for this device/outlet/group.
+    /// </summary>
+    [YamlMember(Alias = "Model", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.")]
+    public string? Model { get; set; }
 }

@@ -59,6 +59,8 @@ public static class EntityWithName_Overrides
                 // Fall back to Entity_Name so a missing display name doesn't throw.
                 entity.Entity_DisplayName = Coalesce(entityOverride.Name, DefaultDisplayNameFunc?.Invoke(entity), entity.Entity_DisplayName, entity.Entity_Name) ?? throw new Exception("Unable to determine entity name.");
                 entity.Entity_Enabled = entityOverride.Enabled; //Always default to enabled.
+                entity.Entity_Make = entityOverride.Make;
+                entity.Entity_Model = entityOverride.Model;
             }
             else // No overrides defined. Set defaults.
             {

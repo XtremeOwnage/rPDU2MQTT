@@ -178,6 +178,12 @@ spec:
                       Enabled:
                         type: boolean
                         description: Is this entity enabled?
+                      Make:
+                        type: string
+                        description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                      Model:
+                        type: string
+                        description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                     description: Allows overriding values for the rPDU2MQTT.
                   Devices:
                     type: object
@@ -202,6 +208,12 @@ spec:
                               Enabled:
                                 type: boolean
                                 description: Is this entity enabled?
+                              Make:
+                                type: string
+                                description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                              Model:
+                                type: string
+                                description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                           description: Allows overriding values for individual outlets.
                         ID:
                           type: string
@@ -212,6 +224,12 @@ spec:
                         Enabled:
                           type: boolean
                           description: Is this entity enabled?
+                        Make:
+                          type: string
+                          description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                        Model:
+                          type: string
+                          description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                     description: Allows overriding configuration for individual devices.
                   Measurements:
                     type: object
@@ -229,6 +247,12 @@ spec:
                         Enabled:
                           type: boolean
                           description: Is this entity enabled?
+                        Make:
+                          type: string
+                          description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                        Model:
+                          type: string
+                          description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                     description: Allows overriding individual measurements
                   OneviewGroups:
                     type: object
@@ -250,6 +274,12 @@ spec:
                             Enabled:
                               type: boolean
                               description: Is this entity enabled?
+                            Make:
+                              type: string
+                              description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                            Model:
+                              type: string
+                              description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                         description: Allows overriding individual measurements for groups
                       Overrides:
                         type: object
@@ -267,6 +297,12 @@ spec:
                             Enabled:
                               type: boolean
                               description: Is this entity enabled?
+                            Make:
+                              type: string
+                              description: Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.
+                            Model:
+                              type: string
+                              description: Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.
                         description: Allows overriding group ID, Name, and enabled state.
                     description: Overrides specific to Oneview groups
                 description: Overrides

@@ -103,12 +103,15 @@ Overrides:
             # These are number-based, start at 1. 
             # "Outlet 1" in the PDU corresponds to 1, for example. 
             # Note- You can set the Label field in the PDU itself, instead of setting the Name here, as the default "Name" is the Label value from the PDU.
-            Outlets:        
+            Outlets:
                 1:
                     # Set both ID (entity name), and Display Name
                     ID: kube02
                     Name: "Proxmox: Kube02"
                     Enabled: true
+                    # Override the Manufacturer/Model shown in Home Assistant (optional).
+                    Make: "Dell"
+                    Model: "PowerEdge R730xd"
                 2:
                     # Only set ID.
                     ID: dell_md1220

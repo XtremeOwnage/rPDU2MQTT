@@ -1,4 +1,5 @@
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Models.Config.Schemas;
 using rPDU2MQTT.Services.Gui;
 using Xunit;
 
@@ -16,6 +17,32 @@ public class ConfigSchemaTests
         Assert.Contains("PDU", keys);
         Assert.Contains("Gui", keys);
         Assert.All(schema, n => Assert.False(string.IsNullOrEmpty(n.Label)));
+    }
+
+    [Fact]
+    public void Build_OverrideDevicesAndOutletsExposeMakeAndModel()
+    {
+        var overrides = ConfigSchema.Build().Single(n => n.Key == "Overrides");
+        var deviceVal = overrides.Properties!.Single(n => n.Key == "Devices").ValueSchema!;
+        Assert.Contains("Make", deviceVal.Properties!.Select(n => n.Key));
+        Assert.Contains("Model", deviceVal.Properties!.Select(n => n.Key));
+
+        var outletVal = deviceVal.Properties!.Single(n => n.Key == "Outlets").ValueSchema!;
+        Assert.Contains("Make", outletVal.Properties!.Select(n => n.Key));
+        Assert.Contains("Model", outletVal.Properties!.Select(n => n.Key));
+    }
+
+    [Fact]
+    public void OverrideMakeModel_JsonRoundTrips()
+    {
+        var cfg = new Config();
+        cfg.Overrides.Devices["DEV"] = new DeviceOverride { Outlets = { [1] = new EntityOverride { Make = "Dell", Model = "PowerEdge R730xd" } } };
+
+        var back = ConfigSchema.FromJson(ConfigSchema.ToJson(cfg));
+        var outlet = back.Overrides.Devices["DEV"]!.Outlets[1]!;
+
+        Assert.Equal("Dell", outlet.Make);
+        Assert.Equal("PowerEdge R730xd", outlet.Model);
     }
 
     [Fact]
