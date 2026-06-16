@@ -262,17 +262,16 @@ public partial class PDU
             if (grp.Entity is null)
                 return;
 
-            if (grp.Entity.PduTotal?.Measurements?.Any() ?? false)
-                grp.Entity.PduTotal.Measurements.SetEntityNamePrefix(parent.Entity_Name);
-
-            foreach (var outlet in grp.Entity.Outlets)
+            // A group exposes its rollup either as per-group aggregate "outlets" or, for the
+            // cluster-wide "Total" group, as pduTotal. Both are grouped measurements under the group.
+            foreach (var rollup in grp.Entity.Outlets.Concat(grp.Entity.PduTotal))
             {
                 // All measurements will be stored into a sub-key.
-                outlet.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
-                outlet.Measurements.SetEntityNameAndEnabled(config.Overrides, o => o.Type, DefaultNames.UseMeasurementType);
-                outlet.Measurements.PruneDisabled();
+                rollup.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), IdentifierFunc: o => o.Type);
+                rollup.Measurements.SetEntityNameAndEnabled(config.Overrides, o => o.Type, DefaultNames.UseMeasurementType);
+                rollup.Measurements.PruneDisabled();
 
-                outlet.Measurements.SetEntityNamePrefix(parent.Entity_Name);
+                rollup.Measurements.SetEntityNamePrefix(parent.Entity_Name);
             }
         }
         else

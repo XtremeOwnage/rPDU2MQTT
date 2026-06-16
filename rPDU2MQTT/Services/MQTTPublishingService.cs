@@ -46,7 +46,8 @@ public class MQTTPublishingService : basePublishingService
             await PublishName(group, cancellationToken);
             await PublishUniqueIdentifier(group, cancellationToken);
 
-            foreach (var outlet in group.Entity.Outlets)
+            // Per-group aggregates, plus the cluster-wide total (the "Total" group's pduTotal).
+            foreach (var outlet in group.Entity.Outlets.Concat(group.Entity.PduTotal))
             {
                 await PublishOneViewGroupMeasurements(outlet.Measurements, cancellationToken);
             }
