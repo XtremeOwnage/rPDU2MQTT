@@ -1,9 +1,18 @@
-version: '3.8'
-
 services:
   rpdu2mqtt:
-    image: ghcr.io/xtremeownage/rpdu2mqtt:main
+    image: ghcr.io/xtremeownage/rpdu2mqtt:stable
     container_name: rpdu2mqtt
-    volumes:
-      - ./config.yaml:/config/config.yaml:ro
     restart: unless-stopped
+    volumes:
+      # Mount your config. Keep it writable (drop :ro) if you want to edit it from the GUI.
+      - ./config.yaml:/config/config.yaml:ro
+    # Prefer secrets over putting credentials in config.yaml (optional; uncomment as needed):
+    # environment:
+    #   RPDU2MQTT_MQTT_USERNAME: rpdu2mqtt
+    #   RPDU2MQTT_MQTT_PASSWORD: "change-me"
+    #   RPDU2MQTT_PDU_USERNAME: hass
+    #   RPDU2MQTT_PDU_PASSWORD: "change-me"
+    # Only needed if you enable the optional features:
+    # ports:
+    #   - "8080:8080"   # Gui.Enabled          -> configuration web GUI
+    #   - "9184:9184"   # Prometheus.Exporter  -> /metrics endpoint

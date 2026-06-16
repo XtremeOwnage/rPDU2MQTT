@@ -30,7 +30,7 @@ Scroll down & Click: `Add Container`
 
 Name it: Something e.g. `rpdu2mqtt`
 
-Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:main`
+Set the Repository: `ghcr.io/xtremeownage/rpdu2mqtt:stable`
  - Note: You can [select different sources by utilizing](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pulling-container-images) a 'colon' or '@' (:main - main branch, :latest - most recent tagged release, :v0.2.1 - specific tagged branch, @sha256: - specific commit)
 
 Network Type: `Bridge` (Allows outbound, inbound not needed)
