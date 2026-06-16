@@ -93,7 +93,7 @@ spec:
     spec:
       dnsPolicy: ClusterFirst
       containers:
-      - image: ghcr.io/xtremeownage/rpdu2mqtt:main
+      - image: ghcr.io/xtremeownage/rpdu2mqtt:stable
         name: app
         securityContext:
           runAsNonRoot: true
