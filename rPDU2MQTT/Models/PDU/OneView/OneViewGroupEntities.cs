@@ -9,6 +9,8 @@ public class OneViewGroupEntities
     [JsonConverter(typeof(DictionaryToListConverter<OneViewGroupedOutlet, int>))]
     public List<OneViewGroupedOutlet> Outlets { get; set; } = new List<OneViewGroupedOutlet>();
 
+    // pduTotal is keyed the same way as outlet (e.g. {"0": {...}}), so deserialize it as a list too.
     [JsonPropertyName("pduTotal")]
-    public OneViewGroupedOutlet? PduTotal { get; set; }
+    [JsonConverter(typeof(DictionaryToListConverter<OneViewGroupedOutlet, int>))]
+    public List<OneViewGroupedOutlet> PduTotal { get; set; } = new List<OneViewGroupedOutlet>();
 }

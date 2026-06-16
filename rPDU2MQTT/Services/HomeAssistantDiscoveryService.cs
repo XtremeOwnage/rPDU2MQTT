@@ -187,8 +187,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             RemapColumns(newParent, "Oneview Group", group.Label);
             ApplyMakeModelOverride(newParent, group);
 
-            // Discover measurements.
-            collectDiscovery(group.Entity.Outlets.SelectMany(o => o.Measurements), newParent, components);
+            // Discover measurements (per-group aggregate, and the cluster-wide PduTotal rollup).
+            collectDiscovery(group.Entity.Outlets.Concat(group.Entity.PduTotal).SelectMany(o => o.Measurements), newParent, components);
         }
     }
 

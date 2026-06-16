@@ -31,9 +31,18 @@ master via `via_device`.
 
 ## OneView groups
 
-OneView lets you define **groups** (e.g. all the outlets feeding one server). Groups are published
-with aggregated measurements (sum across the group). Customize them under
-`Overrides.OneviewGroups`:
+OneView lets you define **groups** (e.g. all the outlets feeding one server). Each group is published
+as a Home Assistant device carrying **rollup sensors** — the group's aggregated measurements (sum
+across its outlets). The cluster-wide **"Total"** group is included too (its rollup comes from the
+PDU's `pduTotal`), giving you whole-cluster Power/Energy/etc. sensors.
+
+> **Group switches aren't possible.** The PDU's OneView API exposes a group only as *aggregate
+> measurements* — it does not list the group's member outlets, and the outlets themselves carry no
+> group membership. With no way to map a group to its outlets, the bridge cannot offer per-member or
+> "whole group" switches. Toggle the individual outlets on their own devices instead (they work
+> cluster-wide; see *Outlet control* below).
+
+Customize groups under `Overrides.OneviewGroups`:
 
 ```yaml
 Overrides:
