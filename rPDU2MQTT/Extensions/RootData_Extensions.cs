@@ -22,6 +22,24 @@ public static class RootData_Extensiosn
             SerialNumber = data.Sys.SerialNumber,
             SoftwareVersion = data.Sys.AppVersion,
             Name = data.Entity_DisplayName,
+            Connections = BuildConnections(data),
         };
+    }
+
+    /// <summary>Home Assistant device connections (MAC + IPv4) from the PDU's ethernet config.</summary>
+    private static List<string[]>? BuildConnections(rPDU data)
+    {
+        var ethernet = data.Conf?.Network?.Ethernet;
+        var connections = new List<string[]>();
+
+        var mac = ethernet?.MacAddr;
+        if (!string.IsNullOrWhiteSpace(mac))
+            connections.Add(["mac", mac]);
+
+        var ip = ethernet?.Address?.The1?.Address;
+        if (!string.IsNullOrWhiteSpace(ip))
+            connections.Add(["ip", ip]);
+
+        return connections.Count > 0 ? connections : null;
     }
 }

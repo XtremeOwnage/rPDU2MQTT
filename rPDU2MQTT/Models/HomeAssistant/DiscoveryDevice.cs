@@ -34,6 +34,11 @@ public record DiscoveryDevice
     [JsonPropertyName("configuration_url")]
     public string ConfigurationUrl { get; set; }
 
+    // Home Assistant device "connections": list of [type, value] pairs (e.g. ["mac","00:.."], ["ip","10..."]).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("connections")]
+    public List<string[]>? Connections { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull | JsonIgnoreCondition.WhenWritingDefault)]
     [JsonPropertyName("via_device")]
     [JsonConverter(typeof(DeviceToUniqueIdentifierConverter))]
@@ -47,12 +52,18 @@ public record DiscoveryDevice
     /// When true, prefix the child's name with this device's name (e.g. "Rack-PDU-1 Outlet 1"),
     /// so names stay unambiguous across multiple parents.
     /// </param>
-    public DiscoveryDevice CreateChild(NamedEntity entity, bool prefixWithParentName = false)
+    public DiscoveryDevice CreateChild(NamedEntity entity, bool prefixWithParentName = false, bool inheritConnections = false)
     {
         var name = prefixWithParentName
             ? $"{Name} {entity.Entity_DisplayName}"
             : entity.Entity_DisplayName;
 
-        return this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = name };
+        var child = this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = name };
+
+        // Only the physical PDU device carries the MAC/IP connections; outlets/groups must not.
+        if (!inheritConnections)
+            child.Connections = null;
+
+        return child;
     }
 }
