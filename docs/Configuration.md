@@ -45,6 +45,29 @@ Mqtt:
   KeepAlive: 60  # Adjust as necessary
 ```
 
+### Last Will / Availability (Optional)
+By default the bridge registers an MQTT **Last-Will** message and sets an `availability_topic` on every
+entity, so Home Assistant marks them **unavailable the instant the bridge disconnects**.
+
+```yaml
+Mqtt:
+  LastWill: true   # default
+```
+
+Set `LastWill: false` to disable both the Last-Will and the availability topic. Entities then rely on
+**`HomeAssistant.SensorExpireAfterSeconds`** (the `expire_after` timeout) to go unavailable once their
+data goes stale — tune that value to control how long until they show unavailable:
+
+```yaml
+Mqtt:
+  LastWill: false
+HomeAssistant:
+  SensorExpireAfterSeconds: 300   # how long stale sensors stay "available"
+```
+
+> Note: `expire_after` only applies to sensors/binary-sensors. Outlet **switches** have no
+> `expire_after` in Home Assistant, so with `LastWill: false` switches will not auto-mark unavailable.
+
 ### Connection Details (Required)
 Configure the connection to your MQTT broker:
 

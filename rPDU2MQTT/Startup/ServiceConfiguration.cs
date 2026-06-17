@@ -44,16 +44,17 @@ public static class ServiceConfiguration
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Host");
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
-            var lwt = new LastWillAndTestament(
-                MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true);
-
             var mqttBuilder = new HiveMQClientOptionsBuilder()
                 .WithBroker(cfg.MQTT.Connection.Host)
                 .WithPort(cfg.MQTT.Connection.Port!.Value)
                 .WithClientId((cfg.MQTT.ClientID ?? "rpdu2mqtt") + Guid.NewGuid().ToString())
                 .WithAutomaticReconnect(true)
-                .WithKeepAlive(cfg.MQTT.KeepAlive)
-                .WithLastWillAndTestament(lwt);
+                .WithKeepAlive(cfg.MQTT.KeepAlive);
+
+            // Optional Last-Will so HA marks entities unavailable immediately on disconnect.
+            if (cfg.MQTT.LastWill)
+                mqttBuilder.WithLastWillAndTestament(new LastWillAndTestament(
+                    MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true));
 
             if (cfg.MQTT.Credentials?.Username is not null)
                 mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);

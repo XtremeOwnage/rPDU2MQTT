@@ -86,6 +86,9 @@ spec:
                     description: The keepalive interval for the MQTT connection in seconds.
                     minimum: 1
                     maximum: 2147483647
+                  LastWill:
+                    type: boolean
+                    description: Publish a Last-Will message and set an availability topic on entities, so Home Assistant marks them unavailable immediately when the bridge disconnects. When off, entities instead rely on HomeAssistant.SensorExpireAfterSeconds (expire_after) to go unavailable.
                 description: MQTT Configuration
               PDU:
                 type: object

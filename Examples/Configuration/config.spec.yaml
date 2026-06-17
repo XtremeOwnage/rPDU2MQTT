@@ -15,6 +15,11 @@ Mqtt:
 
     KeepAlive: 60
 
+    # Register a Last-Will + availability topic so Home Assistant marks entities unavailable
+    # immediately when the bridge disconnects. When false, entities rely on
+    # HomeAssistant.SensorExpireAfterSeconds (expire_after) instead. Default: true
+    LastWill: true
+
     # Connection details for MQTT server
     Connection:
         # Set this to the host / ip of your MQTT server.

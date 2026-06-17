@@ -40,4 +40,13 @@ public class MQTTConfig
     [Range(1, int.MaxValue, ErrorMessage = "KeepAlive must be greater than 0.")]
     [Display(Description = "The keepalive interval for the MQTT connection in seconds.")]
     public int KeepAlive { get; set; } = 60;
+
+    /// <summary>
+    /// Use an MQTT Last-Will message + availability topic so Home Assistant marks entities
+    /// unavailable the moment the bridge disconnects.
+    /// </summary>
+    [DefaultValue(true)]
+    [YamlMember(Alias = "LastWill", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Name = "Last Will / Availability", Description = "Publish a Last-Will message and set an availability topic on entities, so Home Assistant marks them unavailable immediately when the bridge disconnects. When off, entities instead rely on HomeAssistant.SensorExpireAfterSeconds (expire_after) to go unavailable.")]
+    public bool LastWill { get; set; } = true;
 }
