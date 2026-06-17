@@ -105,8 +105,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             return;
         else if (entity is Device device)
         {
-            // Create a device, to represent this device.
-            var newParent = parent.CreateChild(device);
+            // Create a device, to represent this device. It's the physical PDU shown in HA, so it
+            // inherits the MAC/IP connections from the PDU-level device.
+            var newParent = parent.CreateChild(device, inheritConnections: true);
             ApplyMakeModelOverride(newParent, device);
 
             // Device-level alarm.
@@ -144,6 +145,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Create a device to represent the outlet. Prefix with the PDU name so outlets
             // stay distinguishable across multiple PDUs (e.g. "Rack-PDU-1 Dell: r730XD").
             var newParent = parent.CreateChild(outlet, prefixWithParentName: true);
+
+            // Surface the physical outlet number (1-based, matching the PDU UI) in the device info.
+            newParent.SerialNumber = $"Outlet {outlet.Key + 1}";
 
             // Remap Make/Model, IF specified in the configuration.
             RemapColumns(newParent, "Outlet", outlet.Name);
