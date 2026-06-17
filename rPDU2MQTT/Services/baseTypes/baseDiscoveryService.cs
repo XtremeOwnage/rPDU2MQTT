@@ -23,6 +23,12 @@ public abstract class baseDiscoveryService : baseMQTTService
     private TimeSpan StateExpiry => TimeSpan.FromSeconds(cfg.HASS.SensorExpireAfterSeconds);
 
     /// <summary>
+    /// The availability (LWT) topic for entities, or null when Last-Will is disabled
+    /// (entities then rely on expire_after to go unavailable).
+    /// </summary>
+    private string? Availability => cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
+
+    /// <summary>
     /// Build a sensor discovery for the specified <paramref name="measurement"/>, for device <paramref name="Parent"/>.
     /// Returns <see langword="null"/> if the measurement cannot be parsed.
     /// </summary>
@@ -52,7 +58,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOff = item.State_Off,
 
             ExpireAfter = StateExpiry,
-            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+            AvailabilityTopic = Availability,
         };
     }
 
@@ -79,7 +85,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOff = item.State_Off,
             CommandTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.Set.ToJsonString()),
 
-            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+            AvailabilityTopic = Availability,
         };
     }
 
@@ -100,7 +106,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             DeviceClass = deviceClass,
 
             CommandTopic = commandTopic,
-            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+            AvailabilityTopic = Availability,
         };
     }
 
@@ -127,7 +133,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             PayloadOff = "OFF",
 
             ExpireAfter = StateExpiry,
-            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+            AvailabilityTopic = Availability,
         };
     }
 
@@ -167,7 +173,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             ValueTemplate = valueTemplate,
 
             ExpireAfter = StateExpiry,
-            AvailabilityTopic = MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic),
+            AvailabilityTopic = Availability,
         };
     }
 

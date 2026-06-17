@@ -46,6 +46,20 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void MqttLastWill_DefaultsTrue_AndRoundTrips()
+    {
+        Assert.True(new Config().MQTT.LastWill);
+
+        var cfg = new Config();
+        cfg.MQTT.LastWill = false;
+        var back = ConfigSchema.FromJson(ConfigSchema.ToJson(cfg));
+        Assert.False(back.MQTT.LastWill);
+
+        var mqtt = ConfigSchema.Build().Single(n => n.Key == "MQTT");
+        Assert.Contains("LastWill", mqtt.Properties!.Select(n => n.Key));
+    }
+
+    [Fact]
     public void Build_UsesFriendlyDisplayNamesAndHelpText()
     {
         var pdu = ConfigSchema.Build().Single(n => n.Key == "PDU");
