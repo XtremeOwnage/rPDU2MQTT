@@ -38,6 +38,9 @@
   (pduTotal). NOTE: group **member/master switches are NOT possible** — the OneView API exposes only
   aggregate measurements with no member-outlet list (see [Aggregation.md](docs/Aggregation.md)).
 - [x] **Prometheus exporter + Pushgateway push (#73)** — independent `Exporter` / `Pushgateway` toggles.
+- [x] **Outlet operations (Batch A, #91)** — reboot button, on/off/reboot delays (`number`), power-on
+  action (`select`), reset-statistics button; GUI **Control** tab to exercise them. ✅ on/off/reboot
+  hardware-verified; ⚠️ delays / power-on action / reset use Geist conventions, pending verification.
 
 ### Ops / deployment
 - [x] **GHCR publishing** — `main`→`:stable`, branches→`:dev`, tags→`:<version>`.
@@ -49,15 +52,6 @@
 - [x] **Simpler config format** — evaluated; see [ConfigFormatEvaluation.md](docs/ConfigFormatEvaluation.md).
 
 ## 🚧 Planned (batched — roughly in order; each is one PR)
-
-### Batch A — Outlet operations & config (write actions)
-All PDU outlet control/config surfaced as HA entities, gated by **Enable Write Actions**. Shared
-control + discovery + command-subscriber path, so they synergize.
-- [ ] **Reboot button** (outlet / device).
-- [ ] **Reset Statistics button** (outlet / device) — exposed by the PDU as an operation, like reboot.
-- [ ] **Configurable On / Off / Reboot delays** — HA `number` entities.
-- [ ] **Power-On Action** — HA `select` (dropdown).
-- Refs: image-3, image-4, image-5. ⚠️ Write actions — needs verification on real hardware.
 
 ### Batch B — Alarm configuration
 - [ ] View/configure PDU **alarm thresholds + actions** via the GUI and MQTT.

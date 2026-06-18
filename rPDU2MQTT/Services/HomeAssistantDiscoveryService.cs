@@ -99,6 +99,34 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
     }
 
+    // Power-on action options (Geist values; "last" restores the pre-outage state).
+    private static readonly string[] PowerOnActions = { "on", "off", "last" };
+
+    /// <summary>
+    /// Write-action entities for a controllable outlet: switch, reboot button, on/off/reboot delays
+    /// (number), power-on action (select), and a reset-statistics button.
+    /// </summary>
+    private void collectOutletOperations(Outlet outlet, DiscoveryDevice parent, List<baseEntity> components)
+    {
+        var id = outlet.Entity_Identifier;
+        var basePath = outlet.GetTopicPath();
+        string state(string field) => MQTTHelper.JoinPaths(basePath, field);
+        string command(string field) => MQTTHelper.JoinPaths(basePath, field, MqttPath.Set.ToJsonString());
+
+        components.Add(BuildSwitch(outlet, parent));
+        components.Add(BuildButton(id + "_reboot", "Reboot",
+            MQTTHelper.JoinPaths(basePath, MqttPath.Reboot.ToJsonString()), parent, deviceClass: "restart"));
+
+        components.Add(BuildNumber(id + "_onDelay", "On Delay", state("onDelay"), command("onDelay"), parent, min: 0, max: 3600, step: 1, unit: "s"));
+        components.Add(BuildNumber(id + "_offDelay", "Off Delay", state("offDelay"), command("offDelay"), parent, min: 0, max: 3600, step: 1, unit: "s"));
+        components.Add(BuildNumber(id + "_rebootDelay", "Reboot Delay", state("rebootDelay"), command("rebootDelay"), parent, min: 0, max: 3600, step: 1, unit: "s"));
+
+        components.Add(BuildSelect(id + "_poaAction", "Power-On Action", state("poaAction"), command("poaAction"), PowerOnActions, parent));
+
+        components.Add(BuildButton(id + "_resetStats", "Reset Statistics",
+            MQTTHelper.JoinPaths(basePath, "resetStats"), parent));
+    }
+
     private void collectDiscovery<TEntity>([AllowNull] TEntity entity, DiscoveryDevice parent, List<baseEntity> components) where TEntity : BaseEntity
     {
         if (entity is null)
@@ -160,9 +188,10 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Outlet-level alarm.
             components.Add(BuildAlarm(outlet, newParent));
 
-            // When write-actions are enabled, also expose the outlet as a controllable switch.
+            // When write-actions are enabled, expose the controllable switch plus the outlet
+            // operations: reboot, configurable delays, power-on action, and a reset-stats button.
             if (cfg.PDU.ActionsEnabled)
-                components.Add(BuildSwitch(outlet, newParent));
+                collectOutletOperations(outlet, newParent, components);
 
             // Discover measurements
             collectDiscovery(outlet.Measurements, newParent, components);

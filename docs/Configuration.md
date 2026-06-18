@@ -138,14 +138,29 @@ Pdu:
 
 ### Actions Enabled
 Enable or disable the ability to perform write-actions on the PDU (e.g., toggling outlets).
-When enabled, each outlet is also published as a Home Assistant `switch`, and the bridge
-subscribes to its command topic to relay on/off commands to the PDU. Requires PDU
-`Credentials`. Disabled by default.
+Requires PDU `Credentials`. Disabled by default.
 
 ```yaml
 Pdu:
   ActionsEnabled: true  # Set to false to disable any changes on the PDU
 ```
+
+When enabled, each outlet gains the following **outlet operations** in Home Assistant
+(and a matching **Control** tab in the configuration GUI):
+
+| Entity | Type | Action |
+| --- | --- | --- |
+| Switch | `switch` | Turn the outlet on / off |
+| Reboot | `button` | Power-cycle the outlet |
+| On Delay / Off Delay / Reboot Delay | `number` | Configure the outlet's on/off/reboot timing (seconds) |
+| Power-On Action | `select` | What the outlet does when power is restored |
+| Reset Statistics | `button` | Reset the outlet's accumulated energy statistics |
+
+The GUI **Control** tab is the easiest place to exercise these against a single outlet. It also
+shows each outlet's current delays and power-on action so changes made from Home Assistant are
+visible there.
+
+> Power-On Action options are `on` / `off` / `last` (restore the pre-outage state).
 
 ## Overrides Configuration (Optional)
 

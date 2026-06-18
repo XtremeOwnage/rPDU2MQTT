@@ -47,30 +47,49 @@ public class PduApiHandler
         }
     }
 
+    /// <summary>Turn an outlet on or off.</summary>
+    public Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+        => ControlOutletAsync(deviceId, outletIndex, on ? "on" : "off", cancellationToken);
+
     /// <summary>
-    /// Turn an outlet on or off.
+    /// Issue a control action ("on", "off", "reboot") against an outlet.
     /// </summary>
     /// <remarks>
     /// Endpoint/auth match the Geist firmware (apiVersion 1.0.1): control is a POST to the
     /// outlet resource with the session token in the body. Only invoked when ActionsEnabled.
     /// </remarks>
-    public async Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+    public Task ControlOutletAsync(string deviceId, int outletIndex, string action, CancellationToken cancellationToken)
+        => SendOutletCommandAsync(deviceId, outletIndex, "control", new { action, delay = false }, $"control '{action}'", cancellationToken);
+
+    /// <summary>
+    /// Write outlet configuration fields (e.g. onDelay/offDelay/rebootDelay/poaAction) via cmd "set".
+    /// </summary>
+    public Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+        => SendOutletCommandAsync(deviceId, outletIndex, "set", fields, $"set {string.Join(",", fields.Keys)}", cancellationToken);
+
+    /// <summary>
+    /// Reset an outlet's accumulated energy statistics (cmd "reset", target "energy").
+    /// </summary>
+    public Task ResetOutletStatsAsync(string deviceId, int outletIndex, CancellationToken cancellationToken)
+        => SendOutletCommandAsync(deviceId, outletIndex, "reset", new { target = "energy" }, "reset statistics", cancellationToken);
+
+    /// <summary>
+    /// POST a command (control/set) to an outlet resource on the owning host, validating the result.
+    /// </summary>
+    /// <remarks>
+    /// Endpoint/auth match the Geist firmware (apiVersion 1.0.1): the session token travels in the
+    /// body, against the same /api/dev/{device}/outlet/{index} path as the read API (a proxy port
+    /// for cluster members). Only invoked when ActionsEnabled.
+    /// </remarks>
+    private async Task SendOutletCommandAsync(string deviceId, int outletIndex, string cmd, object data, string description, CancellationToken cancellationToken)
     {
         var webPort = await ResolveWebPortAsync(deviceId, cancellationToken);
         var token = await GetTokenAsync(webPort, cancellationToken);
-        var action = on ? "on" : "off";
 
-        // The control resource is the same /api/dev/{device}/outlet/{index} path as the read API,
-        // targeted at the host that owns the device (a proxy port for cluster members).
         var url = BuildUrl(webPort, $"/api/dev/{deviceId}/outlet/{outletIndex}");
-        var body = new
-        {
-            cmd = "control",
-            token,
-            data = new { action, delay = false },
-        };
+        var body = new { cmd, token, data };
 
-        Log.Information($"[PduApiHandler] Setting outlet {deviceId}/{outletIndex} -> {action}");
+        Log.Information($"[PduApiHandler] Outlet {deviceId}/{outletIndex}: {description}");
         var response = await PostJsonWithRetryAsync(url, body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
 
@@ -78,7 +97,7 @@ public class PduApiHandler
         {
             // A stale token is the most likely failure; drop it so the next call re-authenticates.
             tokensByPort.Remove(webPort);
-            throw new Exception($"[PduApiHandler] Outlet control failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
+            throw new Exception($"[PduApiHandler] Outlet {description} failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
         }
     }
 

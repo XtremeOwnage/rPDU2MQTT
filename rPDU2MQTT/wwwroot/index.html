@@ -235,8 +235,75 @@ function build() {
     }
     if (i === 0) link.click();
   });
+  addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
   addExportSection(nav, sections);
+}
+
+// Direct outlet control (on/off/reboot). A convenient place to exercise write actions.
+function addControlSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Control'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'Turn outlets on/off or reboot them directly. Requires write actions enabled (PDU.ActionsEnabled) and PDU credentials.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet)…';
+  bar.appendChild(refresh); bar.appendChild(filter); sec.appendChild(bar);
+  const warn = document.createElement('div'); warn.className = 'desc'; warn.style.color = 'var(--bad)'; warn.style.display = 'none';
+  warn.textContent = 'Write actions are disabled (PDU.ActionsEnabled is false). Enable it in the PDU section and restart to control outlets.';
+  sec.appendChild(warn);
+  const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
+
+  let rows = [], enabled = false;
+  const act = async (o, action) => {
+    if (action === 'off' && !confirm('Turn OFF outlet ' + o.number + ' (' + o.name + ')?')) return;
+    if (action === 'reboot' && !confirm('Reboot outlet ' + o.number + ' (' + o.name + ')? Connected equipment will lose power briefly.')) return;
+    if (action === 'resetstats' && !confirm('Reset statistics for outlet ' + o.number + ' (' + o.name + ')?')) return;
+    toast('Outlet ' + o.number + ': ' + action + '…', true);
+    const r = await api('/api/control/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, action }) });
+    toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
+    setTimeout(load, 800); // let the PDU apply, then re-read state
+  };
+  const draw = () => {
+    const f = filter.value.trim().toLowerCase();
+    const shown = f ? rows.filter(r => (r.device + ' ' + r.name + ' ' + r.number).toLowerCase().includes(f)) : rows;
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['Device', 'Outlet', 'State', 'Actions'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    shown.forEach(o => {
+      const tr = document.createElement('tr');
+      const tdDev = document.createElement('td'); tdDev.textContent = o.device; tr.appendChild(tdDev);
+      const tdName = document.createElement('td');
+      tdName.appendChild(document.createTextNode('#' + o.number + ' — ' + (o.name || '')));
+      // Current write-action config, so changes made via HA are visible here.
+      const cfg = document.createElement('div'); cfg.className = 'ld-count';
+      cfg.textContent = 'delays: on ' + o.onDelay + 's / off ' + o.offDelay + 's / reboot ' + o.rebootDelay + 's · power-on: ' + (o.poaAction || '?');
+      tdName.appendChild(cfg); tr.appendChild(tdName);
+      const tdState = document.createElement('td');
+      const dot = document.createElement('span'); dot.className = 'dot ' + (o.state === 'on' ? 'good' : 'bad'); tdState.appendChild(dot);
+      tdState.appendChild(document.createTextNode(o.state || '?')); tr.appendChild(tdState);
+      const tdAct = document.createElement('td');
+      [['On', 'on'], ['Off', 'off'], ['Reboot', 'reboot'], ['Reset Stats', 'resetstats']].forEach(([lab, a]) => {
+        const b = document.createElement('button'); b.className = 'small' + (a === 'off' ? ' danger' : '');
+        b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => act(o, a); tdAct.appendChild(b);
+      });
+      tr.appendChild(tdAct); tb.appendChild(tr);
+    });
+    t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+  };
+  const load = async () => {
+    const r = await api('/api/control/outlets');
+    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load outlets.') + '</div>'; return; }
+    rows = r.body.outlets || []; enabled = !!r.body.actionsEnabled; warn.style.display = enabled ? 'none' : 'block'; draw();
+  };
+  refresh.onclick = load; filter.oninput = draw;
+  link.onclick = () => { activate(link, sec); load(); };
 }
 
 // A read-only view of the current readings being pulled from the PDU(s).
