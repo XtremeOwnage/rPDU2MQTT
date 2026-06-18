@@ -64,6 +64,12 @@ public enum EntityType
     [JsonPropertyName("button")]
     Button,
 
+    [JsonPropertyName("number")]
+    Number,
+
+    [JsonPropertyName("select")]
+    Select,
+
     [JsonPropertyName("fan")]
     Fan,
 

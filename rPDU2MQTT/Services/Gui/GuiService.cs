@@ -318,6 +318,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     number = o.Key + 1,   // 1-based, matching the PDU UI
                     name = o.Entity_DisplayName,
                     state = pdu.ResolveOutletState(d.Key, o.Key, o.State),
+                    onDelay = o.OnDelay,
+                    offDelay = o.OffDelay,
+                    rebootDelay = o.RebootDelay,
+                    poaAction = o.PoaAction,
                 })).ToList();
                 return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets }, ConfigSchema.Json);
             }
@@ -340,14 +344,17 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "deviceId, index and action are required." });
 
             var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
-            if (action is not ("on" or "off" or "reboot"))
-                return Results.BadRequest(new { ok = false, message = "action must be on, off or reboot." });
+            if (action is not ("on" or "off" or "reboot" or "resetstats"))
+                return Results.BadRequest(new { ok = false, message = "action must be on, off, reboot or resetstats." });
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
+                if (action == "resetstats")
+                    await pdu.ResetOutletStatsAsync(req.DeviceId, req.Index, cts.Token);
+                else
+                    await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
                 return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} → {action}." }, ConfigSchema.Json);
             }
             catch (Exception ex)

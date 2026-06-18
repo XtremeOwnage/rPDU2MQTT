@@ -262,6 +262,7 @@ function addControlSection(nav, sections) {
   const act = async (o, action) => {
     if (action === 'off' && !confirm('Turn OFF outlet ' + o.number + ' (' + o.name + ')?')) return;
     if (action === 'reboot' && !confirm('Reboot outlet ' + o.number + ' (' + o.name + ')? Connected equipment will lose power briefly.')) return;
+    if (action === 'resetstats' && !confirm('Reset statistics for outlet ' + o.number + ' (' + o.name + ')?')) return;
     toast('Outlet ' + o.number + ': ' + action + '…', true);
     const r = await api('/api/control/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, action }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
@@ -278,12 +279,17 @@ function addControlSection(nav, sections) {
     shown.forEach(o => {
       const tr = document.createElement('tr');
       const tdDev = document.createElement('td'); tdDev.textContent = o.device; tr.appendChild(tdDev);
-      const tdName = document.createElement('td'); tdName.textContent = '#' + o.number + ' — ' + (o.name || ''); tr.appendChild(tdName);
+      const tdName = document.createElement('td');
+      tdName.appendChild(document.createTextNode('#' + o.number + ' — ' + (o.name || '')));
+      // Current write-action config, so changes made via HA are visible here.
+      const cfg = document.createElement('div'); cfg.className = 'ld-count';
+      cfg.textContent = 'delays: on ' + o.onDelay + 's / off ' + o.offDelay + 's / reboot ' + o.rebootDelay + 's · power-on: ' + (o.poaAction || '?');
+      tdName.appendChild(cfg); tr.appendChild(tdName);
       const tdState = document.createElement('td');
       const dot = document.createElement('span'); dot.className = 'dot ' + (o.state === 'on' ? 'good' : 'bad'); tdState.appendChild(dot);
       tdState.appendChild(document.createTextNode(o.state || '?')); tr.appendChild(tdState);
       const tdAct = document.createElement('td');
-      [['On', 'on'], ['Off', 'off'], ['Reboot', 'reboot']].forEach(([lab, a]) => {
+      [['On', 'on'], ['Off', 'off'], ['Reboot', 'reboot'], ['Reset Stats', 'resetstats']].forEach(([lab, a]) => {
         const b = document.createElement('button'); b.className = 'small' + (a === 'off' ? ' danger' : '');
         b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => act(o, a); tdAct.appendChild(b);
       });

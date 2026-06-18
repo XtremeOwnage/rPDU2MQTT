@@ -111,6 +111,59 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
+    /// Build a writable numeric setting (Home Assistant number) bound to <paramref name="stateTopic"/>,
+    /// publishing the new value to <paramref name="commandTopic"/>.
+    /// </summary>
+    public NumberDiscovery BuildNumber(string id, string displayName, string stateTopic, string commandTopic,
+        DiscoveryDevice Parent, double? min = null, double? max = null, double? step = null, string? unit = null)
+    {
+        return new NumberDiscovery
+        {
+            ID = id,
+            Name = id,
+            DisplayName = displayName,
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Number,
+            EntityCategory = EntityCategory.Config,
+
+            StateTopic = stateTopic,
+            CommandTopic = commandTopic,
+            Min = min,
+            Max = max,
+            Step = step,
+            UnitOfMeasurement = unit,
+
+            AvailabilityTopic = Availability,
+        };
+    }
+
+    /// <summary>
+    /// Build a writable enumerated setting (Home Assistant select) bound to <paramref name="stateTopic"/>,
+    /// publishing the chosen option to <paramref name="commandTopic"/>.
+    /// </summary>
+    public SelectDiscovery BuildSelect(string id, string displayName, string stateTopic, string commandTopic,
+        IEnumerable<string> options, DiscoveryDevice Parent)
+    {
+        return new SelectDiscovery
+        {
+            ID = id,
+            Name = id,
+            DisplayName = displayName,
+
+            Device = Parent,
+            EntityType = Models.HomeAssistant.Enums.EntityType.Select,
+            EntityCategory = EntityCategory.Config,
+
+            StateTopic = stateTopic,
+            CommandTopic = commandTopic,
+            Options = options.ToList(),
+
+            AvailabilityTopic = Availability,
+        };
+    }
+
+    /// <summary>
     /// Build a "problem" binary sensor reflecting an entity's alarm state.
     /// </summary>
     public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent)

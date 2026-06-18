@@ -55,6 +55,19 @@ public abstract class basePublishingService : baseMQTTService
     }
 
     /// <summary>
+    /// Publish an outlet's writable config values (delays, power-on action) to the state topics
+    /// backing the Home Assistant number/select entities.
+    /// </summary>
+    protected async Task PublishOutletConfig(Outlet outlet, CancellationToken cancellationToken)
+    {
+        var basePath = outlet.GetTopicPath();
+        await PublishString(MQTTHelper.JoinPaths(basePath, "onDelay"), outlet.OnDelay.ToString(), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "offDelay"), outlet.OffDelay.ToString(), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "rebootDelay"), outlet.RebootDelay.ToString(), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "poaAction"), outlet.PoaAction ?? string.Empty, cancellationToken);
+    }
+
+    /// <summary>
     /// Publish entities state.
     /// </summary>
     /// <typeparam name="T"></typeparam>

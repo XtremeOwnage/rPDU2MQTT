@@ -28,13 +28,22 @@ public class OutletCommandService : IHostedService
         cfg = deps.Cfg;
         pdu = deps.PDU;
 
-        // <ParentTopic>/+/outlets/+/{set,reboot}
+        // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
+        // (<ParentTopic>/+/outlets/+/<field>/set).
+        var outlets = MqttPath.Outlets.ToJsonString();
         commandFilters = new[]
         {
-            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", MqttPath.Outlets.ToJsonString(), "+", MqttPath.Set.ToJsonString()),
-            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", MqttPath.Outlets.ToJsonString(), "+", MqttPath.Reboot.ToJsonString()),
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", MqttPath.Set.ToJsonString()),
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", MqttPath.Reboot.ToJsonString()),
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", ResetStatsCommand),
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", "+", MqttPath.Set.ToJsonString()),
         };
     }
+
+    // Command segment for the reset-statistics button, and the config fields settable via <field>/set.
+    private const string ResetStatsCommand = "resetStats";
+    private static readonly HashSet<string> DelayFields = new(StringComparer.OrdinalIgnoreCase) { "onDelay", "offDelay", "rebootDelay" };
+    private static readonly HashSet<string> ConfigFields = new(StringComparer.OrdinalIgnoreCase) { "onDelay", "offDelay", "rebootDelay", "poaAction" };
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -75,8 +84,22 @@ public class OutletCommandService : IHostedService
             if (!int.TryParse(parts[outletsIdx + 1], out var outletIndex))
                 return;
 
-            // Trailing segment selects the action: "set" carries on/off, "reboot" power-cycles.
-            var command = parts[^1];
+            // Segments after the index select the action:
+            //   [set]            -> on/off (payload)        [reboot] -> power-cycle
+            //   [resetStats]     -> reset statistics        [<field>, set] -> write config field
+            var rest = parts[(outletsIdx + 2)..];
+            var payload = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim();
+
+            if (rest.Length == 2 && rest[1].Equals(MqttPath.Set.ToJsonString(), StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleConfigSet(deviceId, outletIndex, rest[0], payload, topic);
+                return;
+            }
+
+            if (rest.Length != 1)
+                return;
+
+            var command = rest[0];
 
             if (command.Equals(MqttPath.Reboot.ToJsonString(), StringComparison.OrdinalIgnoreCase))
             {
@@ -84,9 +107,14 @@ public class OutletCommandService : IHostedService
                 return;
             }
 
-            var payload = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim();
-            var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
+            if (command.Equals(ResetStatsCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None);
+                return;
+            }
 
+            // Otherwise it's the on/off switch command ([set]).
+            var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
             await pdu.SetOutletStateAsync(deviceId, outletIndex, on, CancellationToken.None);
 
             // Optimistically publish the new state so HA reflects it immediately instead of waiting
@@ -101,5 +129,34 @@ public class OutletCommandService : IHostedService
         {
             Log.Error(ex, $"Failed to handle outlet command on topic {topic}.");
         }
+    }
+
+    /// <summary>Write a single outlet config field (delay as a number, power-on action as a string).</summary>
+    private async Task HandleConfigSet(string deviceId, int outletIndex, string field, string payload, string topic)
+    {
+        if (!ConfigFields.Contains(field))
+            return;
+
+        object value;
+        if (DelayFields.Contains(field))
+        {
+            // HA number sends the value as text (e.g. "5" or "5.0"); the API expects an integer.
+            if (!double.TryParse(payload, System.Globalization.CultureInfo.InvariantCulture, out var num))
+                return;
+            value = (long)Math.Round(num);
+        }
+        else
+        {
+            value = payload; // poaAction: the selected option
+        }
+
+        await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+
+        // Echo the new value back to the field's state topic so HA reflects it immediately.
+        var stateTopic = topic[..topic.LastIndexOf('/')];
+        await mqtt.PublishAsync(new MQTT5PublishMessage(stateTopic, QualityOfService.AtLeastOnceDelivery)
+        {
+            PayloadAsString = value.ToString(),
+        });
     }
 }

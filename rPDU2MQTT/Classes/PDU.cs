@@ -57,6 +57,14 @@ public partial class PDU
                 pendingOutletStates[$"{deviceId}/{outletIndex}"] = (action, DateTime.UtcNow.Add(PendingStateTimeout));
     }
 
+    /// <summary>Write outlet configuration fields (delays, power-on action) — PDU.ActionsEnabled only.</summary>
+    public Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+        => api.SetOutletConfigAsync(deviceId, outletIndex, fields, cancellationToken);
+
+    /// <summary>Reset an outlet's accumulated statistics — PDU.ActionsEnabled only.</summary>
+    public Task ResetOutletStatsAsync(string deviceId, int outletIndex, CancellationToken cancellationToken)
+        => api.ResetOutletStatsAsync(deviceId, outletIndex, cancellationToken);
+
     /// <summary>
     /// Resolve the state to report for an outlet: while a recent command is still pending (the PDU
     /// hasn't applied it yet) report the commanded state instead of the stale polled one.
