@@ -45,6 +45,19 @@ public partial class PDU
     }
 
     /// <summary>
+    /// Issue a control action ("on", "off", "reboot") against an outlet (PDU.ActionsEnabled only).
+    /// on/off latch the expected state; reboot is left to the next poll to report.
+    /// </summary>
+    public async Task ControlOutletAsync(string deviceId, int outletIndex, string action, CancellationToken cancellationToken)
+    {
+        await api.ControlOutletAsync(deviceId, outletIndex, action, cancellationToken);
+
+        if (action is "on" or "off")
+            lock (pendingLock)
+                pendingOutletStates[$"{deviceId}/{outletIndex}"] = (action, DateTime.UtcNow.Add(PendingStateTimeout));
+    }
+
+    /// <summary>
     /// Resolve the state to report for an outlet: while a recent command is still pending (the PDU
     /// hasn't applied it yet) report the commanded state instead of the stale polled one.
     /// </summary>

@@ -47,18 +47,21 @@ public class PduApiHandler
         }
     }
 
+    /// <summary>Turn an outlet on or off.</summary>
+    public Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+        => ControlOutletAsync(deviceId, outletIndex, on ? "on" : "off", cancellationToken);
+
     /// <summary>
-    /// Turn an outlet on or off.
+    /// Issue a control action ("on", "off", "reboot") against an outlet.
     /// </summary>
     /// <remarks>
     /// Endpoint/auth match the Geist firmware (apiVersion 1.0.1): control is a POST to the
     /// outlet resource with the session token in the body. Only invoked when ActionsEnabled.
     /// </remarks>
-    public async Task SetOutletStateAsync(string deviceId, int outletIndex, bool on, CancellationToken cancellationToken)
+    public async Task ControlOutletAsync(string deviceId, int outletIndex, string action, CancellationToken cancellationToken)
     {
         var webPort = await ResolveWebPortAsync(deviceId, cancellationToken);
         var token = await GetTokenAsync(webPort, cancellationToken);
-        var action = on ? "on" : "off";
 
         // The control resource is the same /api/dev/{device}/outlet/{index} path as the read API,
         // targeted at the host that owns the device (a proxy port for cluster members).
@@ -70,7 +73,7 @@ public class PduApiHandler
             data = new { action, delay = false },
         };
 
-        Log.Information($"[PduApiHandler] Setting outlet {deviceId}/{outletIndex} -> {action}");
+        Log.Information($"[PduApiHandler] Outlet {deviceId}/{outletIndex} control -> {action}");
         var response = await PostJsonWithRetryAsync(url, body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
 
@@ -78,7 +81,7 @@ public class PduApiHandler
         {
             // A stale token is the most likely failure; drop it so the next call re-authenticates.
             tokensByPort.Remove(webPort);
-            throw new Exception($"[PduApiHandler] Outlet control failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
+            throw new Exception($"[PduApiHandler] Outlet control '{action}' failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
         }
     }
 

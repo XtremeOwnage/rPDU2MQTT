@@ -191,6 +191,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             gitops = configSource.IsGitOpsManaged,
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
+            actionsEnabled = config.PDU.ActionsEnabled,
         }, ConfigSchema.Json));
 
         app.MapPost("/api/test/mqtt", () =>
@@ -301,6 +302,60 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Outlets available for control, with their current state (drives the Control tab).
+        app.MapGet("/api/control/outlets", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await pdu.GetRootData_Public(cts.Token);
+                var outlets = data.Devices.SelectMany(d => d.Outlets.OrderBy(o => o.Key).Select(o => new
+                {
+                    deviceId = d.Key,
+                    device = d.Entity_DisplayName,
+                    index = o.Key,        // raw key the control API expects
+                    number = o.Key + 1,   // 1-based, matching the PDU UI
+                    name = o.Entity_DisplayName,
+                    state = pdu.ResolveOutletState(d.Key, o.Key, o.State),
+                })).ToList();
+                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Issue an outlet control action (on/off/reboot). Gated by PDU.ActionsEnabled.
+        app.MapPost("/api/control/outlet", async (HttpContext ctx) =>
+        {
+            if (!config.PDU.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
+
+            ControlRequest? req;
+            try { req = await ctx.Request.ReadFromJsonAsync<ControlRequest>(ctx.RequestAborted); }
+            catch { req = null; }
+            if (req is null || string.IsNullOrWhiteSpace(req.DeviceId))
+                return Results.BadRequest(new { ok = false, message = "deviceId, index and action are required." });
+
+            var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
+            if (action is not ("on" or "off" or "reboot"))
+                return Results.BadRequest(new { ok = false, message = "action must be on, off or reboot." });
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
+                return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} → {action}." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Control failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
         app.MapPost("/api/config/yaml", async (HttpContext ctx) =>
         {
@@ -334,6 +389,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, message = "Cleared the retained Home Assistant discovery messages." }, ConfigSchema.Json);
         });
     }
+
+    /// <summary>Body of a POST /api/control/outlet request.</summary>
+    private sealed record ControlRequest(string DeviceId, int Index, string Action);
 
     private static string Version =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
