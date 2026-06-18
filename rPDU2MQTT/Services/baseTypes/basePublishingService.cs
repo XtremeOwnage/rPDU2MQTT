@@ -58,13 +58,16 @@ public abstract class basePublishingService : baseMQTTService
     /// Publish an outlet's writable config values (delays, power-on action) to the state topics
     /// backing the Home Assistant number/select entities.
     /// </summary>
-    protected async Task PublishOutletConfig(Outlet outlet, CancellationToken cancellationToken)
+    protected async Task PublishOutletConfig(string deviceId, Outlet outlet, CancellationToken cancellationToken)
     {
         var basePath = outlet.GetTopicPath();
-        await PublishString(MQTTHelper.JoinPaths(basePath, "onDelay"), outlet.OnDelay.ToString(), cancellationToken);
-        await PublishString(MQTTHelper.JoinPaths(basePath, "offDelay"), outlet.OffDelay.ToString(), cancellationToken);
-        await PublishString(MQTTHelper.JoinPaths(basePath, "rebootDelay"), outlet.RebootDelay.ToString(), cancellationToken);
-        await PublishString(MQTTHelper.JoinPaths(basePath, "poaAction"), outlet.PoaAction ?? string.Empty, cancellationToken);
+        var idx = outlet.Key;
+        string resolve(string field, string actual) => pdu.ResolveOutletConfig(deviceId, idx, field, actual);
+
+        await PublishString(MQTTHelper.JoinPaths(basePath, "onDelay"), resolve("onDelay", outlet.OnDelay.ToString()), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "offDelay"), resolve("offDelay", outlet.OffDelay.ToString()), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "rebootDelay"), resolve("rebootDelay", outlet.RebootDelay.ToString()), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(basePath, "poaAction"), resolve("poaAction", outlet.PoaAction ?? string.Empty), cancellationToken);
     }
 
     /// <summary>

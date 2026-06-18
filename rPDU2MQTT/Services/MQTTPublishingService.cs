@@ -41,7 +41,7 @@ public class MQTTPublishingService : basePublishingService
 
                 // Current values backing the writable delay/power-on entities (when control is enabled).
                 if (cfg.PDU.ActionsEnabled)
-                    await PublishOutletConfig(outlet, cancellationToken);
+                    await PublishOutletConfig(device.Key, outlet, cancellationToken);
             }
         }
 

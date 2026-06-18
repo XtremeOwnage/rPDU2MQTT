@@ -99,8 +99,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix), bridge, deviceClass: "restart");
     }
 
-    // Power-on action options (UNVERIFIED Geist values; adjust once confirmed against hardware).
-    private static readonly string[] PowerOnActions = { "on", "off", "previous" };
+    // Power-on action options (Geist values; "last" restores the pre-outage state).
+    private static readonly string[] PowerOnActions = { "on", "off", "last" };
 
     /// <summary>
     /// Write-action entities for a controllable outlet: switch, reboot button, on/off/reboot delays

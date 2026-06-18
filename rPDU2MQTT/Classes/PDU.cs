@@ -30,6 +30,8 @@ public partial class PDU
     // applies the change, during which it still reports the OLD state. Latch the commanded state
     // so polling doesn't flap Home Assistant back until the PDU actually catches up (or we time out).
     private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletStates = new();
+    // Same latch idea for writable config fields (delays / power-on action), keyed deviceId/index/field.
+    private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletConfig = new();
     private readonly object pendingLock = new();
     private static readonly TimeSpan PendingStateTimeout = TimeSpan.FromSeconds(120);
 
@@ -58,8 +60,34 @@ public partial class PDU
     }
 
     /// <summary>Write outlet configuration fields (delays, power-on action) — PDU.ActionsEnabled only.</summary>
-    public Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
-        => api.SetOutletConfigAsync(deviceId, outletIndex, fields, cancellationToken);
+    public async Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+    {
+        await api.SetOutletConfigAsync(deviceId, outletIndex, fields, cancellationToken);
+
+        // Latch the new values so polling doesn't flap HA back to the stale config while the PDU applies.
+        lock (pendingLock)
+            foreach (var (field, value) in fields)
+                pendingOutletConfig[$"{deviceId}/{outletIndex}/{field}"] = (value?.ToString() ?? string.Empty, DateTime.UtcNow.Add(PendingStateTimeout));
+    }
+
+    /// <summary>Report the latched value for a writable config field until the PDU catches up (or we time out).</summary>
+    public string ResolveOutletConfig(string deviceId, int outletIndex, string field, string actual)
+    {
+        lock (pendingLock)
+        {
+            var key = $"{deviceId}/{outletIndex}/{field}";
+            if (!pendingOutletConfig.TryGetValue(key, out var pending))
+                return actual;
+
+            if (string.Equals(actual, pending.expected, StringComparison.OrdinalIgnoreCase) || DateTime.UtcNow >= pending.expiresUtc)
+            {
+                pendingOutletConfig.Remove(key);
+                return actual;
+            }
+
+            return pending.expected;
+        }
+    }
 
     /// <summary>Reset an outlet's accumulated statistics — PDU.ActionsEnabled only.</summary>
     public Task ResetOutletStatsAsync(string deviceId, int outletIndex, CancellationToken cancellationToken)
