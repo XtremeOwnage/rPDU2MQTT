@@ -18,7 +18,7 @@ public class OutletCommandService : IHostedService
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     private readonly PDU pdu;
-    private readonly string commandFilter;
+    private readonly string[] commandFilters;
 
     public OutletCommandService(MQTTServiceDependencies deps)
     {
@@ -28,22 +28,29 @@ public class OutletCommandService : IHostedService
         cfg = deps.Cfg;
         pdu = deps.PDU;
 
-        // <ParentTopic>/+/outlets/+/set
-        commandFilter = MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", MqttPath.Outlets.ToJsonString(), "+", MqttPath.Set.ToJsonString());
+        // <ParentTopic>/+/outlets/+/{set,reboot}
+        commandFilters = new[]
+        {
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", MqttPath.Outlets.ToJsonString(), "+", MqttPath.Set.ToJsonString()),
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", MqttPath.Outlets.ToJsonString(), "+", MqttPath.Reboot.ToJsonString()),
+        };
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         mqtt.OnMessageReceived += OnMessageReceived;
 
-        var result = await mqtt.SubscribeAsync(commandFilter, QualityOfService.AtLeastOnceDelivery);
-        foreach (var sub in result.Subscriptions)
+        foreach (var filter in commandFilters)
         {
-            // SUBACK reason codes 0-2 are "granted QoS 0/1/2"; anything else is a failure/denial.
-            if ((int)sub.SubscribeReasonCode <= 2)
-                Log.Information($"Outlet command handler subscribed to {sub.TopicFilter.Topic} ({sub.SubscribeReasonCode}).");
-            else
-                Log.Error($"Outlet command subscription to {sub.TopicFilter.Topic} was NOT granted ({sub.SubscribeReasonCode}). Outlet control will not work - the MQTT account likely lacks subscribe permission on this topic.");
+            var result = await mqtt.SubscribeAsync(filter, QualityOfService.AtLeastOnceDelivery);
+            foreach (var sub in result.Subscriptions)
+            {
+                // SUBACK reason codes 0-2 are "granted QoS 0/1/2"; anything else is a failure/denial.
+                if ((int)sub.SubscribeReasonCode <= 2)
+                    Log.Information($"Outlet command handler subscribed to {sub.TopicFilter.Topic} ({sub.SubscribeReasonCode}).");
+                else
+                    Log.Error($"Outlet command subscription to {sub.TopicFilter.Topic} was NOT granted ({sub.SubscribeReasonCode}). Outlet control will not work - the MQTT account likely lacks subscribe permission on this topic.");
+            }
         }
     }
 
@@ -67,6 +74,15 @@ public class OutletCommandService : IHostedService
             var deviceId = parts[outletsIdx - 1];
             if (!int.TryParse(parts[outletsIdx + 1], out var outletIndex))
                 return;
+
+            // Trailing segment selects the action: "set" carries on/off, "reboot" power-cycles.
+            var command = parts[^1];
+
+            if (command.Equals(MqttPath.Reboot.ToJsonString(), StringComparison.OrdinalIgnoreCase))
+            {
+                await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None);
+                return;
+            }
 
             var payload = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim();
             var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);

@@ -160,9 +160,14 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Outlet-level alarm.
             components.Add(BuildAlarm(outlet, newParent));
 
-            // When write-actions are enabled, also expose the outlet as a controllable switch.
+            // When write-actions are enabled, also expose the outlet as a controllable switch
+            // plus a reboot (power-cycle) button.
             if (cfg.PDU.ActionsEnabled)
+            {
                 components.Add(BuildSwitch(outlet, newParent));
+                components.Add(BuildButton(outlet.Entity_Identifier + "_reboot", "Reboot",
+                    MQTTHelper.JoinPaths(outlet.GetTopicPath(), MqttPath.Reboot.ToJsonString()), newParent, deviceClass: "restart"));
+            }
 
             // Discover measurements
             collectDiscovery(outlet.Measurements, newParent, components);
