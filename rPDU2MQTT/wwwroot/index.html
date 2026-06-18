@@ -18,9 +18,13 @@
   nav a { display:block; padding:8px 20px; color:var(--muted); cursor:pointer; border-left:3px solid transparent; }
   nav a:hover { color:var(--fg); }
   nav a.active { color:var(--fg); border-left-color:var(--accent); background:var(--panel2); }
-  main { flex:1; padding:24px 28px; max-width:900px; }
+  main { flex:1; padding:24px 28px; max-width:1180px; }
   .section { display:none; } .section.active { display:block; }
   h2 { margin:0 0 4px; font-size:18px; }
+  /* Two-column layout for a section's top-level fields; collapses to one column when narrow. */
+  .grid { column-width:340px; column-count:2; column-gap:40px; }
+  .grid > .field, .grid > fieldset { break-inside:avoid; }
+  .grid .field input[type=text], .grid .field input[type=password], .grid .field input[type=number], .grid .field select { max-width:none; }
   .field { margin:14px 0; }
   .field > label { display:block; font-weight:600; margin-bottom:3px; }
   .field .desc { color:var(--muted); font-size:12px; margin-bottom:5px; }
@@ -220,7 +224,12 @@ function build() {
       sec.appendChild(refresh); sec.appendChild(container);
       link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
     } else {
-      if (node.type === 'object') { ensure(data, node.key, {}); (node.properties || []).forEach(c => renderNode(c, data[node.key], sec)); }
+      if (node.type === 'object') {
+        ensure(data, node.key, {});
+        const grid = document.createElement('div'); grid.className = 'grid';
+        (node.properties || []).forEach(c => renderNode(c, data[node.key], grid));
+        sec.appendChild(grid);
+      }
       else renderNode(node, data, sec);
       link.onclick = () => activate(link, sec);
     }
