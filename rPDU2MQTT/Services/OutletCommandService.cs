@@ -156,7 +156,7 @@ public class OutletCommandService : IHostedService
         var stateTopic = topic[..topic.LastIndexOf('/')];
         await mqtt.PublishAsync(new MQTT5PublishMessage(stateTopic, QualityOfService.AtLeastOnceDelivery)
         {
-            PayloadAsString = value.ToString(),
+            PayloadAsString = value.ToString() ?? string.Empty,
         });
     }
 }

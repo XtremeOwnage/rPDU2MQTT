@@ -68,14 +68,10 @@ public class PduApiHandler
         => SendOutletCommandAsync(deviceId, outletIndex, "set", fields, $"set {string.Join(",", fields.Keys)}", cancellationToken);
 
     /// <summary>
-    /// Reset an outlet's accumulated statistics (energy).
+    /// Reset an outlet's accumulated energy statistics (cmd "reset", target "energy").
     /// </summary>
-    /// <remarks>
-    /// UNVERIFIED: the exact Geist control action for an energy/statistics reset isn't documented
-    /// here; "resetEnergy" is the best guess. Adjust if the PDU returns a non-zero retCode.
-    /// </remarks>
     public Task ResetOutletStatsAsync(string deviceId, int outletIndex, CancellationToken cancellationToken)
-        => SendOutletCommandAsync(deviceId, outletIndex, "control", new { action = "resetEnergy" }, "reset statistics", cancellationToken);
+        => SendOutletCommandAsync(deviceId, outletIndex, "reset", new { target = "energy" }, "reset statistics", cancellationToken);
 
     /// <summary>
     /// POST a command (control/set) to an outlet resource on the owning host, validating the result.

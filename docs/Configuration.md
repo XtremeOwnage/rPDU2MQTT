@@ -160,8 +160,7 @@ The GUI **Control** tab is the easiest place to exercise these against a single 
 shows each outlet's current delays and power-on action so changes made from Home Assistant are
 visible there.
 
-> Note: the Power-On Action options and the Reset Statistics call use the Geist/Vertiv firmware
-> conventions; if your PDU rejects one, check the logs for the returned `retCode`/`retMsg`.
+> Power-On Action options are `on` / `off` / `last` (restore the pre-outage state).
 
 ## Overrides Configuration (Optional)
 
