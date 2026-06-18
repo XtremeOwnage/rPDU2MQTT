@@ -8,7 +8,12 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class MQTTPublishingService : basePublishingService
 {
-    public MQTTPublishingService(MQTTServiceDependencies deps) : base(deps) { }
+    private readonly HealthState health;
+
+    public MQTTPublishingService(MQTTServiceDependencies deps, HealthState health) : base(deps)
+    {
+        this.health = health;
+    }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
@@ -56,5 +61,8 @@ public class MQTTPublishingService : basePublishingService
                 await PublishOneViewGroupMeasurements(outlet.Measurements, cancellationToken);
             }
         }
+
+        // Reached here without throwing -> a healthy poll+publish cycle (drives readiness).
+        health.RecordPollSuccess();
     }
 }

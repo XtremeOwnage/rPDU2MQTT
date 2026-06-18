@@ -238,6 +238,79 @@ function build() {
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
   addExportSection(nav, sections);
+  addDiagnosticsSection(nav, sections);
+}
+
+// Status / diagnostics: versions, uptime, restart, and (in Kubernetes) logs + events.
+function addDiagnosticsSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Diagnostics'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Diagnostics'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Runtime status and maintenance actions.'; sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const restart = document.createElement('button'); restart.className = 'small danger'; restart.textContent = 'Restart bridge';
+  bar.appendChild(refresh); bar.appendChild(restart); sec.appendChild(bar);
+
+  const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
+  const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
+
+  const fmtUptime = s => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  const row = (k, v) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
+
+  const load = async () => {
+    const r = await api('/api/diagnostics'); const b = r.body;
+    info.innerHTML = '';
+    info.appendChild(row('App version', b.version));
+    if (b.image) info.appendChild(row('Container image', b.image));
+    info.appendChild(row('Uptime', b.uptimeSeconds != null ? fmtUptime(b.uptimeSeconds) : null));
+    info.appendChild(row('Started (UTC)', b.startedUtc));
+    info.appendChild(row('MQTT', (b.mqttConnected ? 'connected' : 'disconnected') + ' — ' + b.mqttHost));
+    info.appendChild(row('Last PDU poll (UTC)', b.lastPollUtc));
+    info.appendChild(row('Config source', b.configSource));
+    info.appendChild(row('.NET', b.dotnet));
+    info.appendChild(row('OS', b.os));
+    info.appendChild(row('Kubernetes', b.kubernetes ? (b.ns + ' / ' + (b.pod || '?')) : 'no'));
+    k8sWrap.innerHTML = '';
+    if (b.kubernetes) buildK8sTools(k8sWrap);
+  };
+  refresh.onclick = load;
+  restart.onclick = async () => {
+    if (!confirm('Restart the bridge? It will disconnect briefly while the container restarts.')) return;
+    const r = await api('/api/restart', { method: 'POST' });
+    toast(r.body.message || 'Restarting…', r.ok && r.body.ok);
+  };
+  link.onclick = () => { activate(link, sec); load(); };
+}
+
+// Kubernetes-only: on-demand pod logs + recent events.
+function buildK8sTools(container) {
+  const tools = document.createElement('div'); tools.className = 'sec-actions';
+  const logsBtn = document.createElement('button'); logsBtn.className = 'small'; logsBtn.textContent = 'Load logs';
+  const evBtn = document.createElement('button'); evBtn.className = 'small'; evBtn.textContent = 'Load events';
+  tools.appendChild(logsBtn); tools.appendChild(evBtn); container.appendChild(tools);
+  const out = document.createElement('div'); container.appendChild(out);
+
+  logsBtn.onclick = async () => {
+    out.innerHTML = '<div class="desc">Loading logs…</div>';
+    const r = await api('/api/diagnostics/logs');
+    if (!r.body.ok) { out.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Failed.') + '</div>'; return; }
+    const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.value = r.body.logs || '(empty)';
+    out.innerHTML = ''; out.appendChild(ta);
+  };
+  evBtn.onclick = async () => {
+    out.innerHTML = '<div class="desc">Loading events…</div>';
+    const r = await api('/api/diagnostics/events');
+    if (!r.body.ok) { out.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Failed.') + '</div>'; return; }
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr'); ['Time', 'Type', 'Reason', 'Message', 'Count'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    (r.body.events || []).forEach(e => { const tr = document.createElement('tr'); [e.time, e.type, e.reason, e.message, e.count].forEach(c => { const td = document.createElement('td'); td.textContent = c == null ? '' : c; tr.appendChild(td); }); tb.appendChild(tr); });
+    t.appendChild(tb); out.innerHTML = ''; out.appendChild(t);
+    if (!(r.body.events || []).length) out.innerHTML = '<div class="desc">No recent events.</div>';
+  };
 }
 
 // Direct outlet control (on/off/reboot). A convenient place to exercise write actions.

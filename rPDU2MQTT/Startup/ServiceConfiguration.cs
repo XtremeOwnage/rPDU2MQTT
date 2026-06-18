@@ -114,6 +114,9 @@ public static class ServiceConfiguration
 
         services.AddSingleton<MQTTServiceDependencies>();
 
+        // Shared liveness/readiness signals (uptime + last successful poll).
+        services.AddSingleton<HealthState>();
+
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();
 
@@ -137,6 +140,10 @@ public static class ServiceConfiguration
         }
         else
             Log.Warning($"Home Assistant Discovery Disabled.");
+
+        // Optional HTTP health endpoints for container probes.
+        if (cfg.Health.Enabled)
+            services.AddHostedService<HealthService>();
 
         // Optional embedded configuration GUI.
         if (cfg.Gui.Enabled)

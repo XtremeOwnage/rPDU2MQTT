@@ -421,6 +421,33 @@ source, and the GUI's **Export** view can render the current config as an `RpduC
 (secrets redacted) to commit back. Credentials are not stored in the CR — provide them via a Secret
 and the `RPDU2MQTT_*` env vars.
 
+### GUI Diagnostics page
+
+The GUI's **Diagnostics** tab shows runtime status — app version, container image, uptime, MQTT
+connection, last successful PDU poll, config source, and (in Kubernetes) the namespace/pod. It also
+has a **Restart bridge** button (stops the process so the container/host restarts it) and, when using
+the Kubernetes config source, on-demand **pod logs** and **recent events** (requires the RBAC the Helm
+chart grants — `pods`, `pods/log`, `events`).
+
+## Health Checks (Optional)
+
+The bridge exposes lightweight HTTP health endpoints for container/orchestrator probes, enabled by
+default on their own port:
+
+```yaml
+Health:
+  Enabled: true   # default
+  Port: 8081      # default
+```
+
+| Endpoint | Meaning |
+| --- | --- |
+| `GET /healthz` | **Liveness** — the process is up (always `200 OK` while running). |
+| `GET /readyz` | **Readiness** — `200` when MQTT is connected and the PDU has been polled recently; otherwise `503`. |
+
+The Helm chart wires these as `livenessProbe` / `readinessProbe` automatically (toggle with
+`healthProbes.enabled`, default on). For Docker Compose you can point a `healthcheck` at `/healthz`.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

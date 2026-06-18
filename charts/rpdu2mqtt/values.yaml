@@ -44,6 +44,9 @@ config:
     Username: admin
     # Set Gui.Password via .Values.config or, better, leave the GUI disabled in
     # Kubernetes (the ConfigMap mount is read-only, so Save is disabled anyway).
+  Health:
+    Enabled: true
+    Port: 8081
 
 # ---------------------------------------------------------------------------
 # Credentials, injected as RPDU2MQTT_* environment variables via a Secret so
@@ -107,6 +110,21 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+# Liveness/readiness probes against the app's health endpoints (config.Health).
+# Liveness  -> /healthz (process is up); Readiness -> /readyz (MQTT connected + PDU polled recently).
+healthProbes:
+  enabled: true
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
 
 resources: {}
 podAnnotations: {}
