@@ -45,8 +45,14 @@ spec:
             - secretRef:
                 name: {{ include "rpdu2mqtt.secretName" . }}
           {{- end }}
-          {{- if .Values.kubernetesConfigSource.enabled }}
           env:
+            - name: RPDU2MQTT_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: RPDU2MQTT_IMAGE
+              value: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+            {{- if .Values.kubernetesConfigSource.enabled }}
             - name: RPDU2MQTT_CONFIG_SOURCE
               value: k8s
             - name: RPDU2MQTT_CR_NAME
@@ -55,7 +61,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-          {{- end }}
+            {{- end }}
           ports:
             {{- if dig "Gui" "Enabled" false .Values.config }}
             - name: gui
@@ -65,6 +71,26 @@ spec:
             - name: metrics
               containerPort: {{ dig "Prometheus" "Port" 9184 .Values.config }}
             {{- end }}
+            {{- if dig "Health" "Enabled" true .Values.config }}
+            - name: health
+              containerPort: {{ dig "Health" "Port" 8081 .Values.config }}
+            {{- end }}
+          {{- if and .Values.healthProbes.enabled (dig "Health" "Enabled" true .Values.config) }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ dig "Health" "Port" 8081 .Values.config }}
+            {{- with .Values.healthProbes.liveness }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ dig "Health" "Port" 8081 .Values.config }}
+            {{- with .Values.healthProbes.readiness }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
           {{- if not .Values.kubernetesConfigSource.enabled }}
           volumeMounts:
             - name: config

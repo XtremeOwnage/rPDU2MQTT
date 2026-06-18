@@ -1,7 +1,9 @@
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using HiveMQtt.Client;
+using k8s;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -25,15 +27,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly PDU pdu;
     private readonly DiscoveryCoordinator discovery;
     private readonly IConfigSource configSource;
+    private readonly IHostApplicationLifetime lifetime;
+    private readonly HealthState health;
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health)
     {
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
         this.discovery = discovery;
         this.configSource = configSource;
+        this.lifetime = lifetime;
+        this.health = health;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -193,6 +199,88 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
             actionsEnabled = config.PDU.ActionsEnabled,
         }, ConfigSchema.Json));
+
+        // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
+        app.MapGet("/api/diagnostics", () =>
+        {
+            var k8s = configSource as KubernetesConfigSource;
+            return Results.Json(new
+            {
+                ok = true,
+                version = Version,
+                image = Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"),
+                dotnet = Environment.Version.ToString(),
+                os = RuntimeInformation.OSDescription,
+                startedUtc = health.StartedUtc,
+                uptimeSeconds = (long)health.Uptime.TotalSeconds,
+                mqttConnected = mqtt.IsConnected(),
+                mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
+                configSource = configSource.Describe,
+                lastPollUtc = health.LastPollUtc,
+                kubernetes = k8s is not null,
+                pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
+                ns = k8s?.Namespace,
+            }, ConfigSchema.Json);
+        });
+
+        // Stop the app so the container/host restarts it (same mechanism as the HA Restart button).
+        app.MapPost("/api/restart", () =>
+        {
+            Log.Information("Restart requested via GUI; stopping application.");
+            // Let the HTTP response flush before the host shuts down.
+            _ = Task.Run(async () => { await Task.Delay(300); lifetime.StopApplication(); });
+            return Results.Json(new { ok = true, message = "Restarting…" }, ConfigSchema.Json);
+        });
+
+        // Tail of this pod's container logs (Kubernetes config source only).
+        app.MapGet("/api/diagnostics/logs", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource k8s)
+                return Results.Json(new { ok = false, message = "Logs are only available with the Kubernetes config source." }, ConfigSchema.Json);
+            var pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
+            if (string.IsNullOrEmpty(pod))
+                return Results.Json(new { ok = false, message = "Pod name unavailable (RPDU2MQTT_POD_NAME not set)." }, ConfigSchema.Json);
+            try
+            {
+                using var stream = await k8s.Client.CoreV1.ReadNamespacedPodLogAsync(pod, k8s.Namespace, tailLines: 200, cancellationToken: ctx.RequestAborted);
+                using var reader = new StreamReader(stream);
+                return Results.Json(new { ok = true, logs = await reader.ReadToEndAsync(ctx.RequestAborted) }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read pod logs: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Recent Kubernetes events for this pod (Kubernetes config source only).
+        app.MapGet("/api/diagnostics/events", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource k8s)
+                return Results.Json(new { ok = false, message = "Events are only available with the Kubernetes config source." }, ConfigSchema.Json);
+            try
+            {
+                var pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
+                var list = await k8s.Client.CoreV1.ListNamespacedEventAsync(k8s.Namespace,
+                    fieldSelector: string.IsNullOrEmpty(pod) ? null : $"involvedObject.name={pod}", cancellationToken: ctx.RequestAborted);
+                var events = list.Items
+                    .Select(e => new
+                    {
+                        time = e.LastTimestamp ?? e.EventTime ?? e.Metadata?.CreationTimestamp,
+                        type = e.Type,
+                        reason = e.Reason,
+                        message = e.Message,
+                        count = e.Count,
+                    })
+                    .OrderByDescending(e => e.time)
+                    .Take(50)
+                    .ToList();
+                return Results.Json(new { ok = true, events }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read events: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
 
         app.MapPost("/api/test/mqtt", () =>
         {

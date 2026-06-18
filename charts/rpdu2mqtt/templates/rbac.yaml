@@ -12,6 +12,10 @@ rules:
   - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
     resources: ["rpduconfigs/status"]
     verbs: ["get", "patch", "update"]
+  # Lets the GUI Diagnostics page show this pod's logs + recent events.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

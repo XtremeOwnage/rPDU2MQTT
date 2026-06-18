@@ -36,4 +36,7 @@ public class Config
 
     [YamlMember(Alias = "Gui", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Embedded configuration web GUI")]
     public GuiConfig Gui { get; set; } = new GuiConfig();
+
+    [YamlMember(Alias = "Health", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "HTTP health-check endpoints")]
+    public HealthConfig Health { get; set; } = new HealthConfig();
 }
