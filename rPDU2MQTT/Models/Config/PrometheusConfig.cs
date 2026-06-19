@@ -26,6 +26,7 @@ public class PrometheusConfig
     /// </summary>
     [DefaultValue("rpdu2mqtt_{type}")]
     [Description("Template for Prometheus metric names. Use {type} for the measurement type (e.g. 'rpdu2mqtt_{type}' -> rpdu2mqtt_realpower).")]
+    [TemplateVariables("type")]
     public string MetricNameTemplate { get; set; } = "rpdu2mqtt_{type}";
 
     [Description("Push metrics to a Prometheus Pushgateway.")]

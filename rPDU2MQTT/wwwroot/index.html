@@ -143,9 +143,35 @@ function renderNode(node, obj, container) {
     const f = document.createElement('div'); f.className = 'field';
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
-    f.appendChild(scalarInput(node, obj));
+    const input = scalarInput(node, obj);
+    f.appendChild(input);
+    if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
     container.appendChild(f);
   }
+}
+
+// Click-to-insert / draggable chips for a templated field's available {variables}.
+function templateVarChips(vars, input, obj, node) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+  const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
+  wrap.appendChild(label);
+  vars.forEach(v => {
+    const token = '{' + v + '}';
+    const chip = document.createElement('span'); chip.textContent = token; chip.draggable = true;
+    chip.style.cssText = 'cursor:grab;user-select:none;font:12px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;';
+    chip.title = 'Click to insert at the cursor, or drag into the field';
+    chip.onclick = () => {
+      const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
+      input.value = input.value.slice(0, s) + token + input.value.slice(e);
+      const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
+      obj[node.key] = input.value === '' ? null : input.value;
+    };
+    // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
+    chip.ondragstart = (ev) => ev.dataTransfer.setData('text/plain', token);
+    wrap.appendChild(chip);
+  });
+  return wrap;
 }
 
 // Render the value of a dictionary/list element (valueSchema has no key of its own).
