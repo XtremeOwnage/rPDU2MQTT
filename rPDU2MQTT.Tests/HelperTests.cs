@@ -1,5 +1,7 @@
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
+using rPDU2MQTT.Models.Config.Schemas;
 using rPDU2MQTT.Models.HomeAssistant.Enums;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.basePDU;
@@ -90,6 +92,26 @@ public class MetricsHelperTests
         Assert.Equal("realPower", readings[0].Type);
         Assert.Equal(123.4, readings[0].Value);
         Assert.Equal("W", readings[0].Units);
+    }
+
+    [Fact]
+    public void PrometheusMetricName_DefaultTemplate_SanitizesType()
+        => Assert.Equal("rpdu2mqtt_realpower", MetricsHelper.PrometheusMetricName("realPower", new Config()));
+
+    [Fact]
+    public void PrometheusMetricName_HonorsMeasurementIdOverride()
+    {
+        var cfg = new Config();
+        cfg.Overrides.Measurements["realPower"] = new EntityOverride { ID = "power" };
+        Assert.Equal("rpdu2mqtt_power", MetricsHelper.PrometheusMetricName("realPower", cfg));
+    }
+
+    [Fact]
+    public void PrometheusMetricName_AppliesCustomTemplate()
+    {
+        var cfg = new Config();
+        cfg.Prometheus.MetricNameTemplate = "homelab_{type}_watts";
+        Assert.Equal("homelab_realpower_watts", MetricsHelper.PrometheusMetricName("realPower", cfg));
     }
 }
 
