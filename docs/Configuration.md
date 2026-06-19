@@ -372,6 +372,9 @@ The GUI:
   (e.g. disabled ones) are still shown so they can be re-enabled.
 - **Live Data** — a read-only view of the current measurements being pulled from the PDU(s)
   (device / outlet / measurement / value / units), with a filter and optional 5-second auto-refresh.
+- **Paths** — shows the generated **MQTT topic**, **Prometheus metric**, and **EmonCMS key** for each
+  measurement (reflecting your overrides), with click-to-copy. Prometheus/EmonCMS columns appear only
+  when those exporters are enabled.
 - **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
   the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
   control, etc.

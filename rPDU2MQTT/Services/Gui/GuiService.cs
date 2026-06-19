@@ -390,6 +390,37 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key),
+        // reflecting the current overrides — for the GUI "Paths" view.
+        app.MapGet("/api/paths", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await pdu.GetRootData_Public(cts.Token);
+                var promEnabled = config.Prometheus.Exporter || config.Prometheus.Pushgateway.Enabled;
+                var emonEnabled = config.EmonCMS.Enabled;
+                var rows = MetricsHelper.EnumerateReadings(data)
+                    .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
+                    .Select(r => new
+                    {
+                        device = r.Device,
+                        source = r.Source,
+                        type = r.Type,
+                        mqtt = r.Topic,
+                        prometheus = promEnabled ? $"{MetricsHelper.PrometheusMetricName(r.Type)}{{device=\"{r.Device}\",source=\"{r.Source}\"}}" : null,
+                        emoncms = emonEnabled ? $"node={config.EmonCMS.Node} key={r.Identifier}" : null,
+                    })
+                    .ToList();
+                return Results.Json(new { ok = true, prometheusEnabled = promEnabled, emonEnabled, count = rows.Count, rows }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Outlets available for control, with their current state (drives the Control tab).
         app.MapGet("/api/control/outlets", async (HttpContext ctx) =>
         {

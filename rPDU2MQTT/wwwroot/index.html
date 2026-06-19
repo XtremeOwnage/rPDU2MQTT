@@ -237,8 +237,65 @@ function build() {
   });
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
+  addPathsSection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
+}
+
+// Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key).
+function addPathsSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Paths'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click a value to copy it.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement / path)…';
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(count); sec.appendChild(bar);
+  const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
+
+  let rows = [], promOn = false, emonOn = false;
+  const copyCell = (text) => {
+    const td = document.createElement('td');
+    if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+    const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
+    code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px';
+    code.title = 'Click to copy';
+    code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
+    td.appendChild(code); return td;
+  };
+  const draw = () => {
+    const f = filter.value.trim().toLowerCase();
+    const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type + ' ' + r.mqtt + ' ' + (r.prometheus || '') + ' ' + (r.emoncms || '')).toLowerCase().includes(f)) : rows;
+    const t = document.createElement('table'); t.className = 'ld';
+    const cols = ['Device', 'Outlet / entity', 'Measurement', 'MQTT topic'];
+    if (promOn) cols.push('Prometheus'); if (emonOn) cols.push('EmonCMS');
+    const head = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    shown.forEach(r => {
+      const tr = document.createElement('tr');
+      [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tr.appendChild(copyCell(r.mqtt));
+      if (promOn) tr.appendChild(copyCell(r.prometheus));
+      if (emonOn) tr.appendChild(copyCell(r.emoncms));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+  };
+  const load = async () => {
+    const r = await api('/api/paths');
+    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load paths.') + '</div>'; count.textContent = ''; return; }
+    rows = r.body.rows || []; promOn = !!r.body.prometheusEnabled; emonOn = !!r.body.emonEnabled;
+    count.textContent = rows.length + ' measurements';
+    draw();
+  };
+  refresh.onclick = load; filter.oninput = draw;
+  link.onclick = () => { activate(link, sec); load(); };
 }
 
 // Status / diagnostics: versions, uptime, restart, and (in Kubernetes) logs + events.

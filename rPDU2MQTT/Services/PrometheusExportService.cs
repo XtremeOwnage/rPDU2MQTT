@@ -72,12 +72,9 @@ public class PrometheusExportService : baseMQTTService
     {
         if (!gauges.TryGetValue(type, out var gauge))
         {
-            gauge = Metrics.CreateGauge($"rpdu2mqtt_{Sanitize(type)}", $"rPDU2MQTT {type} measurement", "device", "source", "units");
+            gauge = Metrics.CreateGauge(MetricsHelper.PrometheusMetricName(type), $"rPDU2MQTT {type} measurement", "device", "source", "units");
             gauges[type] = gauge;
         }
         return gauge;
     }
-
-    private static string Sanitize(string value)
-        => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
 }

@@ -1,10 +1,11 @@
+using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.PDU;
 using System.Globalization;
 
 namespace rPDU2MQTT.Helpers;
 
 /// <summary>A single numeric measurement, flattened for export to Prometheus / EmonCMS / etc.</summary>
-public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier);
+public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic);
 
 public static class MetricsHelper
 {
@@ -30,6 +31,12 @@ public static class MetricsHelper
     {
         foreach (var m in measurements)
             if (double.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier);
+                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath());
     }
+
+    /// <summary>The Prometheus gauge name for a measurement type (e.g. realPower -> rpdu2mqtt_realpower).</summary>
+    public static string PrometheusMetricName(string type) => $"rpdu2mqtt_{Sanitize(type)}";
+
+    private static string Sanitize(string value)
+        => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
 }
