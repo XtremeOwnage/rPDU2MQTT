@@ -1,3 +1,4 @@
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.PDU;
 using System.Globalization;
@@ -34,8 +35,23 @@ public static class MetricsHelper
                 yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath());
     }
 
-    /// <summary>The Prometheus gauge name for a measurement type (e.g. realPower -> rpdu2mqtt_realpower).</summary>
-    public static string PrometheusMetricName(string type) => $"rpdu2mqtt_{Sanitize(type)}";
+    /// <summary>
+    /// The Prometheus gauge name for a measurement type, applying the configured name template and
+    /// any per-type ID override (e.g. realPower -> rpdu2mqtt_realpower, or rpdu2mqtt_power if
+    /// Overrides.Measurements.realPower.ID = "power").
+    /// </summary>
+    public static string PrometheusMetricName(string type, Config config)
+    {
+        var effectiveType = config.Overrides.Measurements.TryGetValue(type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
+            ? ov!.ID!
+            : type;
+
+        var template = string.IsNullOrWhiteSpace(config.Prometheus.MetricNameTemplate)
+            ? "rpdu2mqtt_{type}"
+            : config.Prometheus.MetricNameTemplate;
+
+        return Sanitize(template.Replace("{type}", effectiveType));
+    }
 
     private static string Sanitize(string value)
         => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());

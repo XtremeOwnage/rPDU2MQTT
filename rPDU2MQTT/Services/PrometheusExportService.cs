@@ -72,7 +72,7 @@ public class PrometheusExportService : baseMQTTService
     {
         if (!gauges.TryGetValue(type, out var gauge))
         {
-            gauge = Metrics.CreateGauge(MetricsHelper.PrometheusMetricName(type), $"rPDU2MQTT {type} measurement", "device", "source", "units");
+            gauge = Metrics.CreateGauge(MetricsHelper.PrometheusMetricName(type, cfg), $"rPDU2MQTT {type} measurement", "device", "source", "units");
             gauges[type] = gauge;
         }
         return gauge;

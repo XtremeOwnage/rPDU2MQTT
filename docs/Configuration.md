@@ -321,6 +321,7 @@ Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`) labelled by `
 Prometheus:
   Exporter: false       # expose /metrics for scraping
   Port: 9184            # /metrics endpoint port (Exporter)
+  MetricNameTemplate: "rpdu2mqtt_{type}"  # naming template; {type} = measurement type
   Pushgateway:
     Enabled: false      # push to a Pushgateway
     Url: "http://pushgateway:9091/metrics"
@@ -329,6 +330,23 @@ Prometheus:
 ```
 
 > The older `Prometheus.Enabled: true` still works — it's treated as `Exporter: true`.
+
+**Customizing metric names.** `MetricNameTemplate` controls the generated metric name; `{type}` is the
+measurement type. For example `"homelab_pdu_{type}"` yields `homelab_pdu_realpower`. The result is
+lower-cased with non-alphanumeric characters replaced by `_`.
+
+You can also rename an individual measurement type via its **Measurements override ID**, which replaces
+`{type}`. For example, with the default template:
+
+```yaml
+Overrides:
+  Measurements:
+    realPower:
+      ID: power      # -> rpdu2mqtt_power instead of rpdu2mqtt_realpower
+```
+
+The GUI **Paths** tab (and the Overrides "Preview generated paths" button) show the resulting metric
+names so you can confirm them before deploying.
 
 ### EmonCMS
 Pushes measurements to an EmonCMS server's `input/post` API (EmonCMS auto-creates the inputs).
