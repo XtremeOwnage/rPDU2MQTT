@@ -29,9 +29,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IConfigSource configSource;
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
+    private readonly PduApiHandler pduApi;
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduApiHandler pduApi)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -40,6 +41,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.configSource = configSource;
         this.lifetime = lifetime;
         this.health = health;
+        this.pduApi = pduApi;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -390,6 +392,48 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key),
+        // reflecting the current overrides — for the GUI "Paths" view.
+        app.MapGet("/api/paths", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await pdu.GetRootData_Public(cts.Token);
+                return Results.Json(BuildPaths(data, config), ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Preview the generated paths with the posted (unsaved) config applied, so the Overrides
+        // editor can show how edits change the HA/Prometheus/EmonCMS paths. Runs the real processing
+        // pipeline against a transient PDU so the result matches what would actually be published.
+        app.MapPost("/api/paths/preview", async (HttpContext ctx) =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            var json = await reader.ReadToEndAsync();
+
+            Config parsed;
+            try { parsed = ConfigSchema.FromJson(json); }
+            catch (Exception ex) { return Results.BadRequest(new { ok = false, message = $"Invalid configuration: {ex.Message}" }); }
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var data = await new PDU(parsed, pduApi).GetRootData_Public(cts.Token);
+                return Results.Json(BuildPaths(data, parsed), ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not compute paths: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Outlets available for control, with their current state (drives the Control tab).
         app.MapGet("/api/control/outlets", async (HttpContext ctx) =>
         {
@@ -487,6 +531,26 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of a POST /api/control/outlet request.</summary>
     private sealed record ControlRequest(string DeviceId, int Index, string Action);
+
+    /// <summary>Project a poll's measurements into the generated MQTT/Prometheus/EmonCMS paths.</summary>
+    private static object BuildPaths(Models.PDU.PduData data, Config config)
+    {
+        var promEnabled = config.Prometheus.Exporter || config.Prometheus.Pushgateway.Enabled;
+        var emonEnabled = config.EmonCMS.Enabled;
+        var rows = MetricsHelper.EnumerateReadings(data)
+            .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
+            .Select(r => new
+            {
+                device = r.Device,
+                source = r.Source,
+                type = r.Type,
+                mqtt = r.Topic,
+                prometheus = promEnabled ? $"{MetricsHelper.PrometheusMetricName(r.Type)}{{device=\"{r.Device}\",source=\"{r.Source}\"}}" : null,
+                emoncms = emonEnabled ? $"node={config.EmonCMS.Node} key={r.Identifier}" : null,
+            })
+            .ToList();
+        return new { ok = true, prometheusEnabled = promEnabled, emonEnabled, count = rows.Count, rows };
+    }
 
     private static string Version =>
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
