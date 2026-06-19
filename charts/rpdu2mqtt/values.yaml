@@ -111,6 +111,45 @@ ingress:
           pathType: Prefix
   tls: []
 
+# Gateway API HTTPRoute for the GUI Service (alternative to Ingress). Requires the
+# Gateway API CRDs and a Gateway. By default routes all traffic to the GUI Service.
+httpRoute:
+  enabled: false
+  # The Gateway(s) to attach to.
+  parentRefs:
+    - name: main-gateway
+      # namespace: gateway-namespace
+  hostnames:
+    - rpdu2mqtt.example.com
+  annotations: {}
+  # Override the default rule (route everything to the GUI Service) with custom matches if needed.
+  rules: []
+
+# NetworkPolicy to restrict pod access. When enabled, ingress to the GUI/metrics ports is allowed
+# only from the peers listed below (so users reach the GUI via Ingress/HTTPRoute, not the pod
+# directly); health probes are always allowed. Requires a CNI that enforces NetworkPolicy.
+networkPolicy:
+  enabled: false
+  # Peers (NetworkPolicyPeer: namespaceSelector / podSelector / ipBlock) allowed to reach the GUI
+  # port — e.g. your ingress controller or Gateway. Empty = no direct GUI ingress is permitted.
+  guiIngressFrom: []
+    # - namespaceSelector:
+    #     matchLabels:
+    #       kubernetes.io/metadata.name: ingress-nginx
+  # Peers allowed to scrape the metrics port (e.g. your Prometheus). Empty = none.
+  metricsIngressFrom: []
+  # Restrict egress to DNS + the rules below. When false, egress is unrestricted.
+  restrictEgress: false
+  # Extra egress rules (NetworkPolicyEgressRule) for your MQTT broker, PDU, and — with the
+  # Kubernetes config source — the API server. Required when restrictEgress is true.
+  egress: []
+    # - to:
+    #     - ipBlock:
+    #         cidr: 10.0.0.10/32   # MQTT broker
+    #   ports:
+    #     - port: 1883
+    #       protocol: TCP
+
 # Liveness/readiness probes against the app's health endpoints (config.Health).
 # Liveness  -> /healthz (process is up); Readiness -> /readyz (MQTT connected + PDU polled recently).
 healthProbes:
