@@ -545,7 +545,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 source = r.Source,
                 type = r.Type,
                 mqtt = r.Topic,
-                prometheus = promEnabled ? $"{MetricsHelper.PrometheusMetricName(r.Type)}{{device=\"{r.Device}\",source=\"{r.Source}\"}}" : null,
+                prometheus = promEnabled ? $"{MetricsHelper.PrometheusMetricName(r, config)}{{device=\"{r.Device}\",source=\"{r.Source}\"}}" : null,
                 emoncms = emonEnabled ? $"node={config.EmonCMS.Node} key={r.Identifier}" : null,
             })
             .ToList();

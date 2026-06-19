@@ -19,6 +19,17 @@ public class PrometheusConfig
     [Description("Port the /metrics endpoint listens on (Exporter).")]
     public int Port { get; set; } = 9184;
 
+    /// <summary>
+    /// Template for generated metric names. Placeholders: {type} (measurement type, honoring its
+    /// Overrides.Measurements ID), {device}, {source}/{outlet}, {units}. The result is lower-cased
+    /// and non-alphanumeric characters become underscores. device/source/units are also always
+    /// emitted as labels.
+    /// </summary>
+    [DefaultValue("rpdu2mqtt_{type}")]
+    [Description("Template for Prometheus metric names. Placeholders: {type}, {device}, {source} (a.k.a. {outlet}), {units}. e.g. 'rpdu2mqtt_{type}' -> rpdu2mqtt_realpower; 'pdu_{device}_{type}' -> pdu_rack_pdu_1_realpower. (device/source/units are also emitted as labels.)")]
+    [TemplateVariables("type", "device", "source", "units")]
+    public string MetricNameTemplate { get; set; } = "rpdu2mqtt_{type}";
+
     [Description("Push metrics to a Prometheus Pushgateway.")]
     public PrometheusPushgatewayConfig Pushgateway { get; set; } = new();
 

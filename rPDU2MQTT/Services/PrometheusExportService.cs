@@ -65,15 +65,16 @@ public class PrometheusExportService : baseMQTTService
         var data = await pdu.GetRootData_Public(cancellationToken);
 
         foreach (var r in MetricsHelper.EnumerateReadings(data))
-            GetGauge(r.Type).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
+            GetGauge(MetricsHelper.PrometheusMetricName(r, cfg)).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
     }
 
-    private Gauge GetGauge(string type)
+    // Cached by the resolved metric name (the template may vary the name by device/source/units).
+    private Gauge GetGauge(string name)
     {
-        if (!gauges.TryGetValue(type, out var gauge))
+        if (!gauges.TryGetValue(name, out var gauge))
         {
-            gauge = Metrics.CreateGauge(MetricsHelper.PrometheusMetricName(type), $"rPDU2MQTT {type} measurement", "device", "source", "units");
-            gauges[type] = gauge;
+            gauge = Metrics.CreateGauge(name, "rPDU2MQTT measurement", "device", "source", "units");
+            gauges[name] = gauge;
         }
         return gauge;
     }

@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Models.Config;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Services.Gui;
@@ -25,6 +26,7 @@ public sealed class SchemaNode
     public double? Min { get; set; }
     public double? Max { get; set; }
     public string[]? EnumValues { get; set; }
+    public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
     public string? KeyType { get; set; }
@@ -97,6 +99,9 @@ public static class ConfigSchema
 
         if (prop.GetCustomAttribute<DefaultValueAttribute>()?.Value is { } dv)
             node.Default = dv;
+
+        if (prop.GetCustomAttribute<TemplateVariablesAttribute>() is { } tv)
+            node.TemplateVars = tv.Names;
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
         return node;
