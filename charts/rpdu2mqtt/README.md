@@ -53,6 +53,9 @@ credentials:
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
 | `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
 | `ingress.enabled` | `false` | Expose the GUI via an Ingress. |
+| `httpRoute.enabled` | `false` | Expose the GUI via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
+| `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
+| `networkPolicy.enabled` | `false` | Restrict pod access: GUI/metrics ingress only from `networkPolicy.guiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity` | `{}` / `[]` | Standard pod scheduling/limits. |
 

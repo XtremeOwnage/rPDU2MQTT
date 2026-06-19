@@ -1,0 +1,54 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "rpdu2mqtt.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    {{- if dig "Health" "Enabled" true .Values.config }}
+    # Allow health probes (kubelet) to the health port from any source.
+    - ports:
+        - port: {{ dig "Health" "Port" 8081 .Values.config }}
+          protocol: TCP
+    {{- end }}
+    {{- if and (dig "Gui" "Enabled" false .Values.config) .Values.networkPolicy.guiIngressFrom }}
+    # Allow the GUI port only from the configured peers (e.g. your gateway/ingress controller).
+    - from:
+        {{- toYaml .Values.networkPolicy.guiIngressFrom | nindent 8 }}
+      ports:
+        - port: {{ dig "Gui" "Port" 8080 .Values.config }}
+          protocol: TCP
+    {{- end }}
+    {{- if and (dig "Prometheus" "Enabled" false .Values.config) .Values.networkPolicy.metricsIngressFrom }}
+    # Allow the metrics port only from the configured peers (e.g. Prometheus).
+    - from:
+        {{- toYaml .Values.networkPolicy.metricsIngressFrom | nindent 8 }}
+      ports:
+        - port: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+          protocol: TCP
+    {{- end }}
+  {{- if .Values.networkPolicy.restrictEgress }}
+  egress:
+    # DNS resolution (always needed).
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- with .Values.networkPolicy.egress }}
+    # Caller-provided egress (MQTT broker, PDU, and the Kubernetes API server when using the
+    # Kubernetes config source). Without these, restricted egress will block the bridge.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
