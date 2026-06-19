@@ -218,10 +218,15 @@ function build() {
     if (acts) sec.appendChild(acts);
     if (node.key === 'Overrides') {
       // Bespoke, live-data-driven editor instead of the blind dictionary form.
+      const tools = document.createElement('div'); tools.className = 'sec-actions';
       const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh live data';
+      const preview = document.createElement('button'); preview.className = 'small'; preview.textContent = 'Preview generated paths (with unsaved edits)';
+      tools.appendChild(refresh); tools.appendChild(preview);
+      const pathsBox = document.createElement('div');
       const container = document.createElement('div');
       refresh.onclick = () => renderOverrides(container);
-      sec.appendChild(refresh); sec.appendChild(container);
+      preview.onclick = () => previewOverridePaths(pathsBox);
+      sec.appendChild(tools); sec.appendChild(pathsBox); sec.appendChild(container);
       link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
     } else {
       if (node.type === 'object') {
@@ -242,6 +247,35 @@ function build() {
   addDiagnosticsSection(nav, sections);
 }
 
+// A click-to-copy monospace table cell (used by the path tables).
+function pathCopyCell(text) {
+  const td = document.createElement('td');
+  if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+  const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
+  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px'; code.title = 'Click to copy';
+  code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
+  td.appendChild(code); return td;
+}
+
+// Build a paths table (Device / Outlet / Measurement / MQTT [/ Prometheus] [/ EmonCMS]).
+function pathsTable(rows, promOn, emonOn) {
+  const t = document.createElement('table'); t.className = 'ld';
+  const cols = ['Device', 'Outlet / entity', 'Measurement', 'MQTT topic'];
+  if (promOn) cols.push('Prometheus'); if (emonOn) cols.push('EmonCMS');
+  const head = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+  const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+  const tb = document.createElement('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    tr.appendChild(pathCopyCell(r.mqtt));
+    if (promOn) tr.appendChild(pathCopyCell(r.prometheus));
+    if (emonOn) tr.appendChild(pathCopyCell(r.emoncms));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); return t;
+}
+
 // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key).
 function addPathsSection(nav, sections) {
   const link = document.createElement('a'); link.textContent = 'Paths'; nav.appendChild(link);
@@ -259,33 +293,10 @@ function addPathsSection(nav, sections) {
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
   let rows = [], promOn = false, emonOn = false;
-  const copyCell = (text) => {
-    const td = document.createElement('td');
-    if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
-    const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
-    code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px';
-    code.title = 'Click to copy';
-    code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
-    td.appendChild(code); return td;
-  };
   const draw = () => {
     const f = filter.value.trim().toLowerCase();
     const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type + ' ' + r.mqtt + ' ' + (r.prometheus || '') + ' ' + (r.emoncms || '')).toLowerCase().includes(f)) : rows;
-    const t = document.createElement('table'); t.className = 'ld';
-    const cols = ['Device', 'Outlet / entity', 'Measurement', 'MQTT topic'];
-    if (promOn) cols.push('Prometheus'); if (emonOn) cols.push('EmonCMS');
-    const head = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
-    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
-    const tb = document.createElement('tbody');
-    shown.forEach(r => {
-      const tr = document.createElement('tr');
-      [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
-      tr.appendChild(copyCell(r.mqtt));
-      if (promOn) tr.appendChild(copyCell(r.prometheus));
-      if (emonOn) tr.appendChild(copyCell(r.emoncms));
-      tb.appendChild(tr);
-    });
-    t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+    tableWrap.innerHTML = ''; tableWrap.appendChild(pathsTable(shown, promOn, emonOn));
   };
   const load = async () => {
     const r = await api('/api/paths');
@@ -629,6 +640,20 @@ async function renderOverrides(container) {
     container.appendChild(groupHeader('OneView Groups', null));
     lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName }, true)));
   }
+}
+
+// Show the generated paths produced by the current (unsaved) overrides, computed server-side
+// against the real processing pipeline so it matches what would actually be published.
+async function previewOverridePaths(box) {
+  box.innerHTML = '<div class="desc">Computing paths with your unsaved edits…</div>';
+  const r = await fetch('/api/paths/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) })
+    .then(async res => ({ ok: res.ok, body: await res.json().catch(() => ({})) }));
+  box.innerHTML = '';
+  if (!r.body.ok) { box.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not compute paths.') + '</div>'; return; }
+  const note = document.createElement('div'); note.className = 'desc';
+  note.innerHTML = 'Paths with unsaved overrides applied. Note: overrides change the <b>HA name/object_id</b> and <b>Prometheus device/source labels</b>; the <b>MQTT topic</b> and <b>EmonCMS key</b> derive from the PDU’s raw keys and are not affected.';
+  box.appendChild(note);
+  box.appendChild(pathsTable(r.body.rows || [], !!r.body.prometheusEnabled, !!r.body.emonEnabled));
 }
 
 // Strip empty override objects so untouched entries don't pollute the saved config.
