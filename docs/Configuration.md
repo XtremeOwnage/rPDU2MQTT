@@ -331,9 +331,20 @@ Prometheus:
 
 > The older `Prometheus.Enabled: true` still works — it's treated as `Exporter: true`.
 
-**Customizing metric names.** `MetricNameTemplate` controls the generated metric name; `{type}` is the
-measurement type. For example `"homelab_pdu_{type}"` yields `homelab_pdu_realpower`. The result is
-lower-cased with non-alphanumeric characters replaced by `_`.
+**Customizing metric names.** `MetricNameTemplate` controls the generated metric name. Placeholders:
+
+| Placeholder | Value |
+| --- | --- |
+| `{type}` | measurement type (honoring its Overrides.Measurements ID) |
+| `{device}` | device name |
+| `{source}` / `{outlet}` | outlet or entity name |
+| `{units}` | measurement units |
+
+For example `"pdu_{device}_{type}"` yields `pdu_rack_pdu_1_realpower`. The result is lower-cased with
+non-alphanumeric characters replaced by `_` (so pick a template that starts with a letter). Note that
+`device`, `source`, and `units` are **also always emitted as Prometheus labels**, so you can keep the
+default `rpdu2mqtt_{type}` and aggregate/filter by label (the idiomatic approach), or encode them into
+the name if you prefer.
 
 You can also rename an individual measurement type via its **Measurements override ID**, which replaces
 `{type}`. For example, with the default template:

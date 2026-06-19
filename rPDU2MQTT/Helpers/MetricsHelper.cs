@@ -36,11 +36,12 @@ public static class MetricsHelper
     }
 
     /// <summary>
-    /// The Prometheus gauge name for a measurement type, applying the configured name template and
-    /// any per-type ID override (e.g. realPower -> rpdu2mqtt_realpower, or rpdu2mqtt_power if
-    /// Overrides.Measurements.realPower.ID = "power").
+    /// The Prometheus gauge name for a reading, applying the configured name template. Supported
+    /// placeholders: <c>{type}</c> (measurement type, honoring its Overrides.Measurements ID),
+    /// <c>{device}</c>, <c>{source}</c> / <c>{outlet}</c>, and <c>{units}</c>. The result is
+    /// lower-cased with non-alphanumeric characters replaced by underscores.
     /// </summary>
-    public static string PrometheusMetricName(string type, Config config)
+    public static string PrometheusMetricName(string type, string device, string source, string units, Config config)
     {
         var effectiveType = config.Overrides.Measurements.TryGetValue(type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
             ? ov!.ID!
@@ -50,8 +51,19 @@ public static class MetricsHelper
             ? "rpdu2mqtt_{type}"
             : config.Prometheus.MetricNameTemplate;
 
-        return Sanitize(template.Replace("{type}", effectiveType));
+        var name = template
+            .Replace("{type}", effectiveType)
+            .Replace("{device}", device)
+            .Replace("{source}", source)
+            .Replace("{outlet}", source)
+            .Replace("{units}", units);
+
+        return Sanitize(name);
     }
+
+    /// <summary>Overload for a flattened reading.</summary>
+    public static string PrometheusMetricName(MeasurementReading r, Config config)
+        => PrometheusMetricName(r.Type, r.Device, r.Source, r.Units, config);
 
     private static string Sanitize(string value)
         => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
