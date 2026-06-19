@@ -19,6 +19,10 @@ public class MQTTPublishingService : basePublishingService
     {
         var data = await pdu.GetRootData_Public(cancellationToken);
 
+        // A successful fetch is the readiness signal: we can reach the PDU. Record it before
+        // publishing so a later publish hiccup can't keep the pod permanently NotReady.
+        health.RecordPollSuccess();
+
         // Run through each device.
         foreach (var device in data.Devices)
         {
@@ -61,8 +65,5 @@ public class MQTTPublishingService : basePublishingService
                 await PublishOneViewGroupMeasurements(outlet.Measurements, cancellationToken);
             }
         }
-
-        // Reached here without throwing -> a healthy poll+publish cycle (drives readiness).
-        health.RecordPollSuccess();
     }
 }

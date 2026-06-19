@@ -39,9 +39,13 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
 
         app = builder.Build();
         app.MapGet("/healthz", () => Results.Text("OK"));
-        app.MapGet("/readyz", () => IsReady()
-            ? Results.Text("READY")
-            : Results.Text("NOT READY", "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable));
+        app.MapGet("/readyz", () =>
+        {
+            var reason = NotReadyReason();
+            return reason is null
+                ? Results.Text("READY")
+                : Results.Text($"NOT READY: {reason}", "text/plain", statusCode: StatusCodes.Status503ServiceUnavailable);
+        });
 
         await app.StartAsync(cancellationToken);
         Log.Information($"Health endpoints listening on http://*:{cfg.Health.Port} (/healthz, /readyz).");
@@ -59,17 +63,24 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
             await app.DisposeAsync();
     }
 
-    /// <summary>Ready when MQTT is connected and a poll has succeeded within the staleness window.</summary>
-    private bool IsReady()
+    /// <summary>
+    /// Ready when MQTT is connected and the PDU has been polled recently. Returns the reason it is
+    /// NOT ready, or <see langword="null"/> when ready.
+    /// </summary>
+    private string? NotReadyReason()
     {
         if (!mqtt.IsConnected())
-            return false;
+            return "MQTT not connected";
 
         var last = health.LastPollUtc;
         if (last is null)
-            return false;
+            return "no successful PDU poll yet";
 
         var staleAfter = TimeSpan.FromSeconds(Math.Max(30, cfg.PDU.PollInterval * 3));
-        return DateTime.UtcNow - last.Value < staleAfter;
+        var age = DateTime.UtcNow - last.Value;
+        if (age >= staleAfter)
+            return $"last PDU poll {age.TotalSeconds:0}s ago (> {staleAfter.TotalSeconds:0}s)";
+
+        return null;
     }
 }
