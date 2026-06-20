@@ -356,6 +356,7 @@ function addControlSection(nav, sections) {
     setTimeout(load, 800); // let the PDU apply, then re-read state
   };
   const setLabel = async (o, value) => {
+    value = (value || '').trim();
     toast('Outlet ' + o.number + ': set label…', true);
     const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, label: value }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);

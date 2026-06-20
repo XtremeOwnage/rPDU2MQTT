@@ -588,12 +588,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     index = o.Key,        // raw key the control API expects
                     number = o.Key + 1,   // 1-based, matching the PDU UI
                     name = o.Entity_DisplayName,
-                    label = o.Label,      // the editable label on the PDU itself
+                    // Resolve through the pending-write latch so a value just set here shows
+                    // immediately instead of reverting until the PDU/poll catches up.
+                    label = pdu.ResolveOutletConfig(d.Key, o.Key, "label", o.Label ?? ""),
                     state = pdu.ResolveOutletState(d.Key, o.Key, o.State),
-                    onDelay = o.OnDelay,
-                    offDelay = o.OffDelay,
-                    rebootDelay = o.RebootDelay,
-                    poaAction = o.PoaAction,
+                    onDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "onDelay", o.OnDelay.ToString()),
+                    offDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "offDelay", o.OffDelay.ToString()),
+                    rebootDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "rebootDelay", o.RebootDelay.ToString()),
+                    poaAction = pdu.ResolveOutletConfig(d.Key, o.Key, "poaAction", o.PoaAction ?? ""),
                 })).ToList();
                 return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets }, ConfigSchema.Json);
             }
@@ -651,7 +653,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, new Dictionary<string, object> { ["label"] = req.Label ?? string.Empty }, cts.Token);
+                await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, new Dictionary<string, object> { ["label"] = (req.Label ?? string.Empty).Trim() }, cts.Token);
                 return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} label set." }, ConfigSchema.Json);
             }
             catch (Exception ex)
