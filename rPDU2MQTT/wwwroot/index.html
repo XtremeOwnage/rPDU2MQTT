@@ -83,6 +83,8 @@
   <div class="status">
     <span id="st-version"></span>
     <span><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
+    <span id="st-user"></span>
+    <a id="st-logout" href="/logout" style="display:none;color:var(--accent)">Logout</a>
   </div>
 </header>
 <div class="layout">
@@ -763,6 +765,11 @@ async function refreshStatus() {
   save.disabled = readOnly;
   save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
   document.getElementById('ro-note').style.display = readOnly ? 'inline' : 'none';
+  // Show a logout link + signed-in user when OIDC is in use.
+  if (body.auth === 'oidc') {
+    document.getElementById('st-logout').style.display = 'inline';
+    if (body.user) document.getElementById('st-user').textContent = body.user;
+  }
 }
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }

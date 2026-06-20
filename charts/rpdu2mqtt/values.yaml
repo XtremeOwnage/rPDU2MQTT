@@ -63,6 +63,8 @@ credentials:
     username: ""
     password: ""
   emoncmsApiKey: ""
+  # GUI OIDC client secret (RPDU2MQTT_OIDC_CLIENT_SECRET) when using Gui.Oidc.
+  oidcClientSecret: ""
 
 serviceAccount:
   create: true

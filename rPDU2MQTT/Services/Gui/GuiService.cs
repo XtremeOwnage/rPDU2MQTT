@@ -4,13 +4,20 @@ using System.Runtime.InteropServices;
 using System.Text;
 using HiveMQtt.Client;
 using k8s;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Startup;
 using rPDU2MQTT.Startup.ConfigSources;
 
@@ -44,28 +51,86 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.pduApi = pduApi;
     }
 
+    /// <summary>OIDC is active when enabled and the minimum settings (authority + client id) are present.</summary>
+    private bool UseOidc => config.Gui.Oidc.Enabled
+        && !string.IsNullOrWhiteSpace(config.Gui.Oidc.Authority)
+        && !string.IsNullOrWhiteSpace(config.Gui.Oidc.ClientId);
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var gui = config.Gui;
         if (!gui.Enabled)
             return;
 
-        if (string.IsNullOrWhiteSpace(gui.Password))
+        if (!UseOidc && string.IsNullOrWhiteSpace(gui.Password))
         {
-            Log.Error("Configuration GUI is enabled but Gui.Password is not set. The GUI will not start.");
+            Log.Error("Configuration GUI is enabled but no authentication is configured (set Gui.Password, or enable Gui.Oidc). The GUI will not start.");
             return;
         }
+
+        if (gui.Oidc.Enabled && !UseOidc)
+            Log.Warning("Gui.Oidc.Enabled is set but Authority/ClientId are missing; falling back to Basic auth.");
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{gui.Port}");
 
+        if (UseOidc)
+            ConfigureOidc(builder, gui.Oidc);
+
         app = builder.Build();
-        app.Use(AuthMiddleware);
+
+        if (UseOidc)
+        {
+            // The GUI typically runs behind an ingress/gateway terminating TLS; honor the forwarded
+            // scheme/host so OIDC builds the correct (https) redirect_uri.
+            var fwd = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost };
+            fwd.KnownNetworks.Clear();
+            fwd.KnownProxies.Clear();
+            app.UseForwardedHeaders(fwd);
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+        else
+        {
+            app.Use(AuthMiddleware);
+        }
+
         MapEndpoints(app);
 
         await app.StartAsync(cancellationToken);
-        Log.Information($"Configuration GUI listening on http://*:{gui.Port} (user '{gui.Username}').");
+        Log.Information(UseOidc
+            ? $"Configuration GUI listening on http://*:{gui.Port} (OIDC via {gui.Oidc.Authority})."
+            : $"Configuration GUI listening on http://*:{gui.Port} (user '{gui.Username}').");
+    }
+
+    /// <summary>Wire cookie + OpenID Connect authentication and require an authenticated user.</summary>
+    private static void ConfigureOidc(WebApplicationBuilder builder, OidcConfig oidc)
+    {
+        builder.Services.AddAuthentication(o =>
+        {
+            o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            o.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+        })
+        .AddCookie()
+        .AddOpenIdConnect(o =>
+        {
+            o.Authority = oidc.Authority;
+            o.ClientId = oidc.ClientId;
+            o.ClientSecret = oidc.ClientSecret;
+            o.ResponseType = "code";
+            o.CallbackPath = oidc.CallbackPath;
+            o.SaveTokens = true;
+            o.GetClaimsFromUserInfoEndpoint = true;
+            o.Scope.Clear();
+            foreach (var scope in (oidc.Scopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                o.Scope.Add(scope);
+        });
+
+        // Everything requires an authenticated user unless explicitly AllowAnonymous.
+        builder.Services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -132,6 +197,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     {
         app.MapGet("/", () => Results.Content(LoadIndexHtml(), "text/html"));
 
+        // OIDC sign-out (clears the local cookie and ends the IdP session).
+        if (UseOidc)
+            app.MapGet("/logout", async (HttpContext ctx) =>
+            {
+                await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+            });
+
         app.MapGet("/api/schema", () => Results.Json(ConfigSchema.Build(), ConfigSchema.Json));
 
         // Reflect the current source (file on disk or the CR), which may have been edited.
@@ -191,7 +264,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapGet("/api/status", () => Results.Json(new
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new
         {
             version = Version,
             configSource = configSource.Describe,
@@ -200,6 +273,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
             actionsEnabled = config.PDU.ActionsEnabled,
+            auth = UseOidc ? "oidc" : "basic",
+            user = UseOidc ? ctx.User?.Identity?.Name : null,
         }, ConfigSchema.Json));
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.

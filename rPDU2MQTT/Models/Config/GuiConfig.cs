@@ -20,6 +20,9 @@ public class GuiConfig
     public string Username { get; set; } = "admin";
 
     [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
-    [Description("Password required to access the GUI. The GUI refuses to start until this is set.")]
+    [Description("Password required to access the GUI (HTTP Basic auth). Required unless Oidc is enabled.")]
     public string? Password { get; set; }
+
+    [Description("OpenID Connect (SSO) login for the GUI. When enabled, replaces HTTP Basic auth.")]
+    public OidcConfig Oidc { get; set; } = new();
 }
