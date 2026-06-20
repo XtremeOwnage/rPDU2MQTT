@@ -4,13 +4,20 @@ using System.Runtime.InteropServices;
 using System.Text;
 using HiveMQtt.Client;
 using k8s;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Startup;
 using rPDU2MQTT.Startup.ConfigSources;
 
@@ -44,15 +51,32 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.pduApi = pduApi;
     }
 
+    /// <summary>Authentication is turned off entirely (Gui.AuthType = None).</summary>
+    private bool AuthDisabled => config.Gui.AuthType == GuiAuthType.None;
+
+    /// <summary>OIDC is selected and the minimum settings (authority + client id) are present.</summary>
+    private bool UseOidc => config.Gui.AuthType == GuiAuthType.Oidc
+        && !string.IsNullOrWhiteSpace(config.Gui.Oidc.Authority)
+        && !string.IsNullOrWhiteSpace(config.Gui.Oidc.ClientId);
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var gui = config.Gui;
         if (!gui.Enabled)
             return;
 
-        if (string.IsNullOrWhiteSpace(gui.Password))
+        if (AuthDisabled)
         {
-            Log.Error("Configuration GUI is enabled but Gui.Password is not set. The GUI will not start.");
+            Log.Warning("GUI authentication is DISABLED (Gui.AuthType = None). Anyone who can reach the GUI port has full access — only do this on a trusted, isolated network.");
+        }
+        else if (gui.AuthType == GuiAuthType.Oidc && !UseOidc)
+        {
+            Log.Error("Gui.AuthType is Oidc but Gui.Oidc.Authority/ClientId are not set. The GUI will not start.");
+            return;
+        }
+        else if (gui.AuthType == GuiAuthType.Basic && string.IsNullOrWhiteSpace(gui.Password))
+        {
+            Log.Error("Gui.AuthType is Basic but Gui.Password is not set. The GUI will not start.");
             return;
         }
 
@@ -60,12 +84,96 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{gui.Port}");
 
+        if (UseOidc)
+            ConfigureOidc(builder, gui.Oidc);
+
         app = builder.Build();
-        app.Use(AuthMiddleware);
+
+        if (UseOidc)
+        {
+            // The GUI typically runs behind an ingress/gateway terminating TLS; honor the forwarded
+            // scheme/host so OIDC builds the correct (https) redirect_uri.
+            var fwd = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost };
+            fwd.KnownNetworks.Clear();
+            fwd.KnownProxies.Clear();
+            app.UseForwardedHeaders(fwd);
+
+            app.UseAuthentication();
+            app.UseAuthorization();
+        }
+        else if (!AuthDisabled)
+        {
+            app.Use(AuthMiddleware);
+        }
+
         MapEndpoints(app);
 
         await app.StartAsync(cancellationToken);
-        Log.Information($"Configuration GUI listening on http://*:{gui.Port} (user '{gui.Username}').");
+        var how = AuthDisabled ? "no authentication" : UseOidc ? $"OIDC via {gui.Oidc.Authority}" : $"user '{gui.Username}'";
+        Log.Information($"Configuration GUI listening on http://*:{gui.Port} ({how}).");
+    }
+
+    /// <summary>Wire cookie + OpenID Connect authentication and require an authenticated user.</summary>
+    private static void ConfigureOidc(WebApplicationBuilder builder, OidcConfig oidc)
+    {
+        builder.Services.AddAuthentication(o =>
+        {
+            o.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            o.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+        })
+        .AddCookie()
+        .AddOpenIdConnect(o =>
+        {
+            o.Authority = oidc.Authority;
+            o.ClientId = oidc.ClientId;
+            o.ClientSecret = oidc.ClientSecret;
+            o.ResponseType = "code";
+            // Code flow defaults to form_post (a cross-site POST callback), on which SameSite=Lax
+            // cookies aren't sent -> "Correlation failed". Use query so the callback is a top-level
+            // GET; PKCE (on by default) keeps the code exchange safe.
+            o.ResponseMode = "query";
+            o.UsePkce = true;
+            o.CallbackPath = oidc.CallbackPath;
+            o.SaveTokens = true;
+            o.GetClaimsFromUserInfoEndpoint = true;
+            o.Scope.Clear();
+            foreach (var scope in (oidc.Scopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                o.Scope.Add(scope);
+
+            // Some providers (e.g. Authentik with no signing certificate) sign the id_token with
+            // HS256, whose key isn't published in JWKS. Offer the client secret as a symmetric key so
+            // those tokens validate; RS256 tokens still use the JWKS keys from discovery.
+            if (!string.IsNullOrEmpty(oidc.ClientSecret))
+                o.TokenValidationParameters.IssuerSigningKey =
+                    new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(Encoding.UTF8.GetBytes(oidc.ClientSecret));
+
+            // The default correlation/nonce cookies are SameSite=None, which browsers drop without
+            // Secure (e.g. plain-http localhost). Lax + SameAsRequest works over http locally and
+            // https behind a TLS-terminating ingress (the code flow's callback is a top-level GET).
+            o.CorrelationCookie.SameSite = SameSiteMode.Lax;
+            o.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            o.NonceCookie.SameSite = SameSiteMode.Lax;
+            o.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+
+            // Surface the real reason instead of a bare 500 on a failed callback.
+            o.Events.OnRemoteFailure = ctx =>
+            {
+                Log.Error(ctx.Failure, $"OIDC sign-in failed: {ctx.Failure?.Message}");
+                ctx.HandleResponse();
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                ctx.Response.ContentType = "text/plain";
+                return ctx.Response.WriteAsync($"OIDC sign-in failed: {ctx.Failure?.Message}. See the bridge logs for details.");
+            };
+            o.Events.OnAuthenticationFailed = ctx =>
+            {
+                Log.Error(ctx.Exception, "OIDC authentication failed.");
+                return Task.CompletedTask;
+            };
+        });
+
+        // Everything requires an authenticated user unless explicitly AllowAnonymous.
+        builder.Services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -132,6 +240,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     {
         app.MapGet("/", () => Results.Content(LoadIndexHtml(), "text/html"));
 
+        // OIDC sign-out (clears the local cookie and ends the IdP session).
+        if (UseOidc)
+            app.MapGet("/logout", async (HttpContext ctx) =>
+            {
+                await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+            });
+
         app.MapGet("/api/schema", () => Results.Json(ConfigSchema.Build(), ConfigSchema.Json));
 
         // Reflect the current source (file on disk or the CR), which may have been edited.
@@ -191,7 +307,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapGet("/api/status", () => Results.Json(new
+        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new
         {
             version = Version,
             configSource = configSource.Describe,
@@ -200,6 +316,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
             actionsEnabled = config.PDU.ActionsEnabled,
+            auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
+            user = UseOidc ? ctx.User?.Identity?.Name : null,
         }, ConfigSchema.Json));
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.

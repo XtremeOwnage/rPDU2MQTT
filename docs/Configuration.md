@@ -113,6 +113,9 @@ variables. These override whatever is in the config file:
 | --- | --- |
 | `RPDU2MQTT_MQTT_USERNAME` / `RPDU2MQTT_MQTT_PASSWORD` | MQTT broker credentials |
 | `RPDU2MQTT_PDU_USERNAME` / `RPDU2MQTT_PDU_PASSWORD` | PDU credentials |
+| `RPDU2MQTT_EMONCMS_APIKEY` | EmonCMS write API key |
+| `RPDU2MQTT_GUI_PASSWORD` | GUI Basic-auth password |
+| `RPDU2MQTT_OIDC_CLIENT_SECRET` | GUI OIDC client secret |
 
 For each variable, a `<NAME>_FILE` form is also supported: set it to a file path (e.g. a Docker
 secret at `/run/secrets/mqtt_password`) and the value is read from that file. The `_FILE` form
@@ -382,8 +385,50 @@ Gui:
   Enabled: false
   Port: 8080
   Username: "admin"
-  Password: "change-me"   # the GUI refuses to start until this is set
+  AuthType: Basic         # Basic | Oidc | None
+  Password: "change-me"   # required when AuthType is Basic
 ```
+
+### Single Sign-On (OIDC)
+
+The GUI authentication method is chosen with **`Gui.AuthType`** (`Basic`, `Oidc`, or `None`). Set it to
+`Oidc` to authenticate against an OpenID Connect provider (Keycloak, Authentik, Authelia, Google,
+Entra ID, etc.): unauthenticated visitors are redirected to the provider, and a **Logout** link
+appears in the header.
+
+```yaml
+Gui:
+  Enabled: true
+  Port: 8080
+  AuthType: Oidc
+  Oidc:
+    Authority: "https://keycloak.example.com/realms/home"
+    ClientId: "rpdu2mqtt"
+    ClientSecret: "..."          # prefer the env var / secret below
+    Scopes: "openid profile email"
+    CallbackPath: "/signin-oidc" # register <gui-url>/signin-oidc as the redirect URI
+```
+
+- Register the redirect URI `https://<your-gui-host>/signin-oidc` with your provider.
+- Provide the client secret out-of-band via **`RPDU2MQTT_OIDC_CLIENT_SECRET`** (or its `_FILE` form)
+  rather than in the config.
+- The GUI honors `X-Forwarded-Proto`/`-Host`, so behind an Ingress/Gateway terminating TLS the
+  redirect URI is built with the external `https` URL.
+- In the GUI form, the **Authentication** dropdown greys out the fields that don't apply to the
+  selected method.
+
+### Disabling authentication
+
+For a trusted, isolated network you can turn GUI authentication off entirely:
+
+```yaml
+Gui:
+  Enabled: true
+  AuthType: None   # ⚠️ no login — anyone who can reach the port has full access
+```
+
+**Only** use it where the GUI port is otherwise protected (e.g. a private network or a NetworkPolicy);
+a warning is logged at startup.
 
 The GUI:
 - Renders a **structured form for every option**, generated from the configuration model (so it stays

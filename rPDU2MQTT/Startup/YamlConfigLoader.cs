@@ -159,6 +159,9 @@ internal class YamlConfigLoader
 
         var guiPass = ResolveSecret("RPDU2MQTT_GUI_PASSWORD");
         if (guiPass is not null) { config.Gui.Password = guiPass; Log.Information("Using GUI password from environment."); }
+
+        var oidcSecret = ResolveSecret("RPDU2MQTT_OIDC_CLIENT_SECRET");
+        if (oidcSecret is not null) { config.Gui.Oidc.ClientSecret = oidcSecret; Log.Information("Using OIDC client secret from environment."); }
     }
 
     /// <summary>

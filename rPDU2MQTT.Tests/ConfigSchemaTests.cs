@@ -94,6 +94,23 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void Build_MarksOidcClientSecretAsPassword()
+    {
+        var gui = ConfigSchema.Build().Single(n => n.Key == "Gui");
+        var oidc = gui.Properties!.Single(n => n.Key == "Oidc");
+        var secret = oidc.Properties!.Single(n => n.Key == "ClientSecret");
+        Assert.Equal("password", secret.Type);
+    }
+
+    [Fact]
+    public void RedactSecrets_ClearsOidcClientSecret()
+    {
+        var cfg = new Config();
+        cfg.Gui.Oidc.ClientSecret = "shh";
+        Assert.Null(ConfigSchema.RedactSecrets(cfg).Gui.Oidc.ClientSecret);
+    }
+
+    [Fact]
     public void Build_TreatsOverridesDevicesAsDictionary()
     {
         var overrides = ConfigSchema.Build().Single(n => n.Key == "Overrides");

@@ -51,7 +51,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* True when a credentials Secret should be referenced (either managed here or external). */}}
 {{- define "rpdu2mqtt.hasSecret" -}}
-{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey -}}
+{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret -}}
 true
 {{- end -}}
 {{- end -}}

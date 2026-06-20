@@ -110,7 +110,8 @@ public static class ConfigSchema
     private static string ClassifyAndPopulate(Type type, string name, SchemaNode node)
     {
         if (type == typeof(string))
-            return name.Contains("password", StringComparison.OrdinalIgnoreCase) ? "password" : "string";
+            return name.Contains("password", StringComparison.OrdinalIgnoreCase) || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                ? "password" : "string";
 
         if (type == typeof(bool)) return "bool";
         if (type == typeof(int) || type == typeof(long) || type == typeof(short)) return "int";
@@ -183,6 +184,8 @@ public static class ConfigSchema
         clone.PDU.Credentials = null;
         clone.EmonCMS.ApiKey = null;
         clone.Gui.Password = null;
+        if (clone.Gui.Oidc is not null)
+            clone.Gui.Oidc.ClientSecret = null;
         return clone;
     }
 

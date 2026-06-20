@@ -83,6 +83,8 @@
   <div class="status">
     <span id="st-version"></span>
     <span><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
+    <span id="st-user"></span>
+    <a id="st-logout" href="/logout" style="display:none;color:var(--accent)">Logout</a>
   </div>
 </header>
 <div class="layout">
@@ -262,6 +264,7 @@ function build() {
         sec.appendChild(grid);
       }
       else renderNode(node, data, sec);
+      if (node.key === 'Gui') wireGuiAuth(sec);
       link.onclick = () => activate(link, sec);
     }
     if (i === 0) link.click();
@@ -271,6 +274,25 @@ function build() {
   addPathsSection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
+}
+
+// In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
+function wireGuiAuth(sec) {
+  const oidcFs = [...sec.querySelectorAll('fieldset')].find(fs => fs.querySelector('legend')?.textContent === 'Oidc');
+  // The AuthType dropdown is the only select in the Gui section (outside the Oidc fieldset).
+  const authSelect = [...sec.querySelectorAll('.field select')].find(s => !oidcFs || !oidcFs.contains(s));
+  if (!authSelect) return;
+  // Basic-auth fields = text/password inputs of the Gui section, outside the Oidc fieldset.
+  const basicInputs = [...sec.querySelectorAll('.field input')].filter(i => (!oidcFs || !oidcFs.contains(i)) && (i.type === 'text' || i.type === 'password'));
+  const oidcInputs = oidcFs ? [...oidcFs.querySelectorAll('input, select, textarea')] : [];
+  const setOff = (els, off) => els.forEach(e => { e.disabled = off; e.style.opacity = off ? '0.5' : '1'; });
+  const apply = () => {
+    const t = authSelect.value;
+    setOff(basicInputs, t !== 'Basic');
+    setOff(oidcInputs, t !== 'Oidc');
+  };
+  authSelect.addEventListener('change', apply);
+  apply();
 }
 
 // A click-to-copy monospace table cell (used by the path tables).
@@ -763,6 +785,11 @@ async function refreshStatus() {
   save.disabled = readOnly;
   save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
   document.getElementById('ro-note').style.display = readOnly ? 'inline' : 'none';
+  // Show a logout link + signed-in user when OIDC is in use.
+  if (body.auth === 'oidc') {
+    document.getElementById('st-logout').style.display = 'inline';
+    if (body.user) document.getElementById('st-user').textContent = body.user;
+  }
 }
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
