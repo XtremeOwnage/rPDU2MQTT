@@ -588,6 +588,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     index = o.Key,        // raw key the control API expects
                     number = o.Key + 1,   // 1-based, matching the PDU UI
                     name = o.Entity_DisplayName,
+                    label = o.Label,      // the editable label on the PDU itself
                     state = pdu.ResolveOutletState(d.Key, o.Key, o.State),
                     onDelay = o.OnDelay,
                     offDelay = o.OffDelay,
@@ -634,6 +635,31 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Write an outlet's label on the PDU itself (cmd "set"). Gated by PDU.ActionsEnabled.
+        app.MapPost("/api/control/label", async (HttpContext ctx) =>
+        {
+            if (!config.PDU.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
+
+            LabelRequest? req;
+            try { req = await ctx.Request.ReadFromJsonAsync<LabelRequest>(ctx.RequestAborted); }
+            catch { req = null; }
+            if (req is null || string.IsNullOrWhiteSpace(req.DeviceId))
+                return Results.BadRequest(new { ok = false, message = "deviceId, index and label are required." });
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, new Dictionary<string, object> { ["label"] = req.Label ?? string.Empty }, cts.Token);
+                return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} label set." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Set label failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
         app.MapPost("/api/config/yaml", async (HttpContext ctx) =>
         {
@@ -670,6 +696,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of a POST /api/control/outlet request.</summary>
     private sealed record ControlRequest(string DeviceId, int Index, string Action);
+
+    /// <summary>Body of a POST /api/control/label request.</summary>
+    private sealed record LabelRequest(string DeviceId, int Index, string Label);
 
     /// <summary>One pivoted live-view row: an outlet/entity with its numeric measurements + state.</summary>
     private static object BuildLiveEntity(string device, string source, string kind, int? number, string? state, IEnumerable<Models.PDU.Measurement> measurements)

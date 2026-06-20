@@ -161,7 +161,8 @@ When enabled, each outlet gains the following **outlet operations** in Home Assi
 
 The GUI **Control** tab is the easiest place to exercise these against a single outlet. It also
 shows each outlet's current delays and power-on action so changes made from Home Assistant are
-visible there.
+visible there, and lets you **rename the outlet's label on the PDU** (handy since the PDU's own web
+UI is slow) — also gated by write actions.
 
 > Power-On Action options are `on` / `off` / `last` (restore the pre-outage state).
 

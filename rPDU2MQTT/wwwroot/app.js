@@ -333,7 +333,7 @@ function addControlSection(nav, sections) {
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'Turn outlets on/off or reboot them directly. Requires write actions enabled (PDU.ActionsEnabled) and PDU credentials.';
+  d.textContent = 'Turn outlets on/off, reboot, reset stats, or rename them on the PDU. Requires write actions enabled (PDU.ActionsEnabled) and PDU credentials.';
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
@@ -355,12 +355,18 @@ function addControlSection(nav, sections) {
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800); // let the PDU apply, then re-read state
   };
+  const setLabel = async (o, value) => {
+    toast('Outlet ' + o.number + ': set label…', true);
+    const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, label: value }) });
+    toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
+    setTimeout(load, 800);
+  };
   const draw = () => {
     const f = filter.value.trim().toLowerCase();
     const shown = f ? rows.filter(r => (r.device + ' ' + r.name + ' ' + r.number).toLowerCase().includes(f)) : rows;
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
-    ['Device', 'Outlet', 'State', 'Actions'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    ['Device', 'Outlet', 'Label (on PDU)', 'State', 'Actions'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
     shown.forEach(o => {
@@ -372,6 +378,12 @@ function addControlSection(nav, sections) {
       const cfg = document.createElement('div'); cfg.className = 'ld-count';
       cfg.textContent = 'delays: on ' + o.onDelay + 's / off ' + o.offDelay + 's / reboot ' + o.rebootDelay + 's · power-on: ' + (o.poaAction || '?');
       tdName.appendChild(cfg); tr.appendChild(tdName);
+      // Editable PDU label.
+      const tdLabel = document.createElement('td');
+      const lin = document.createElement('input'); lin.type = 'text'; lin.value = o.label || ''; lin.style.width = '150px'; lin.disabled = !enabled;
+      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      setBtn.onclick = () => setLabel(o, lin.value);
+      tdLabel.appendChild(lin); tdLabel.appendChild(setBtn); tr.appendChild(tdLabel);
       const tdState = document.createElement('td');
       const dot = document.createElement('span'); dot.className = 'dot ' + (o.state === 'on' ? 'good' : 'bad'); tdState.appendChild(dot);
       tdState.appendChild(document.createTextNode(o.state || '?')); tr.appendChild(tdState);
