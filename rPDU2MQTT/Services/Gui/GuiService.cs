@@ -498,11 +498,30 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var data = await pdu.GetRootData_Public(cts.Token);
-                var readings = MetricsHelper.EnumerateReadings(data)
+                var readingList = MetricsHelper.EnumerateReadings(data)
                     .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
+                    .ToList();
+
+                var readings = readingList
                     .Select(r => new { device = r.Device, source = r.Source, type = r.Type, value = r.Value, units = r.Units })
                     .ToList();
-                return Results.Json(new { ok = true, count = readings.Count, readings }, ConfigSchema.Json);
+
+                // Pivoted view: one row per outlet/entity with its measurements as columns + state.
+                var types = readingList.Select(r => r.Type).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+                var units = readingList.GroupBy(r => r.Type, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Select(r => r.Units).FirstOrDefault(u => !string.IsNullOrEmpty(u)) ?? "", StringComparer.OrdinalIgnoreCase);
+
+                var entities = new List<object>();
+                foreach (var device in data.Devices)
+                {
+                    foreach (var o in device.Outlets.OrderBy(o => o.Key))
+                        entities.Add(BuildLiveEntity(device.Entity_DisplayName, o.Entity_DisplayName, "outlet", o.Key + 1,
+                            pdu.ResolveOutletState(device.Key, o.Key, o.State), o.Measurements));
+                    foreach (var e in device.Entity)
+                        entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
+                }
+
+                return Results.Json(new { ok = true, count = readings.Count, readings, entities, types, units }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -649,6 +668,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of a POST /api/control/outlet request.</summary>
     private sealed record ControlRequest(string DeviceId, int Index, string Action);
+
+    /// <summary>One pivoted live-view row: an outlet/entity with its numeric measurements + state.</summary>
+    private static object BuildLiveEntity(string device, string source, string kind, int? number, string? state, IEnumerable<Models.PDU.Measurement> measurements)
+    {
+        var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in measurements)
+            if (!string.IsNullOrEmpty(m.Type) && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                values[m.Type] = v;
+        return new { device, source, kind, number, state, values };
+    }
 
     /// <summary>Project a poll's measurements into the generated MQTT/Prometheus/EmonCMS paths.</summary>
     private static object BuildPaths(Models.PDU.PduData data, Config config)

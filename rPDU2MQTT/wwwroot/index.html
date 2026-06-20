@@ -504,39 +504,76 @@ function addLiveDataSection(nav, sections) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const viewSel = document.createElement('select');
+  [['grouped', 'Grouped (by outlet)'], ['flat', 'Flat (one row per reading)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; viewSel.appendChild(o); });
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
   const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
   autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
+  bar.appendChild(refresh); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
   sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
-  let rows = [], timer = null;
-  const draw = () => {
+  let body = { entities: [], types: [], units: {}, readings: [] }, timer = null;
+
+  // Pivoted: one row per outlet/entity, a column per measurement type, grouped by device.
+  const drawGrouped = () => {
     const f = filter.value.trim().toLowerCase();
-    const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f)) : rows;
+    const types = body.types || [];
+    const ents = (body.entities || []).filter(e => !f || (e.device + ' ' + e.source + ' ' + types.join(' ')).toLowerCase().includes(f));
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    const cols = ['Outlet / entity', 'State', ...types.map(ty => ty + (body.units[ty] ? ' (' + body.units[ty] + ')' : ''))];
+    cols.forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 2) th.className = 'num'; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    let lastDevice = null;
+    ents.forEach(e => {
+      if (e.device !== lastDevice) {
+        lastDevice = e.device;
+        const dr = document.createElement('tr'); const dtd = document.createElement('td'); dtd.colSpan = cols.length;
+        dtd.textContent = e.device; dtd.style.cssText = 'font-weight:600;background:var(--panel);color:var(--accent)';
+        dr.appendChild(dtd); tb.appendChild(dr);
+      }
+      const tr = document.createElement('tr');
+      const name = document.createElement('td'); name.textContent = (e.number ? '#' + e.number + ' ' : '') + (e.source || ''); tr.appendChild(name);
+      const st = document.createElement('td');
+      if (e.kind === 'outlet' && e.state) { const dot = document.createElement('span'); dot.className = 'dot ' + (e.state === 'on' ? 'good' : 'bad'); st.appendChild(dot); st.appendChild(document.createTextNode(e.state)); }
+      else { st.textContent = '—'; st.style.color = 'var(--muted)'; }
+      tr.appendChild(st);
+      types.forEach(ty => { const td = document.createElement('td'); td.className = 'num'; const v = (e.values || {})[ty]; td.textContent = (v == null) ? '' : formatNum(v); tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+  };
+
+  const drawFlat = () => {
+    const f = filter.value.trim().toLowerCase();
+    const rows = (body.readings || []).filter(r => !f || (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f));
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
     ['Device', 'Outlet / entity', 'Measurement', 'Value', 'Units'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    shown.forEach(r => {
+    rows.forEach(r => {
       const tr = document.createElement('tr');
-      const cells = [r.device, r.source, r.type, formatNum(r.value), r.units || ''];
-      cells.forEach((c, i) => { const td = document.createElement('td'); if (i === 3) td.className = 'num'; td.textContent = c; tr.appendChild(td); });
+      [r.device, r.source, r.type, formatNum(r.value), r.units || ''].forEach((c, i) => { const td = document.createElement('td'); if (i === 3) td.className = 'num'; td.textContent = c; tr.appendChild(td); });
       tb.appendChild(tr);
     });
-    t.appendChild(tb);
-    tableWrap.innerHTML = ''; tableWrap.appendChild(t);
+    t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
   };
+
+  const draw = () => viewSel.value === 'flat' ? drawFlat() : drawGrouped();
   const load = async () => {
     const r = await api('/api/livedata');
     if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; count.textContent = ''; return; }
-    rows = r.body.readings || []; count.textContent = rows.length + ' readings'; draw();
+    body = r.body;
+    count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings';
+    draw();
   };
   refresh.onclick = load;
   filter.oninput = draw;
+  viewSel.onchange = draw;
   auto.onchange = () => {
     clearInterval(timer);
     if (auto.checked) timer = setInterval(() => {

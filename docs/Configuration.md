@@ -444,8 +444,10 @@ The GUI:
   discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
   instead of typing keys blind. Existing overrides for entities that are not currently discovered
   (e.g. disabled ones) are still shown so they can be re-enabled.
-- **Live Data** — a read-only view of the current measurements being pulled from the PDU(s)
-  (device / outlet / measurement / value / units), with a filter and optional 5-second auto-refresh.
+- **Live Data** — a read-only view of the current measurements being pulled from the PDU(s). The
+  **Grouped** view pivots to one row per outlet/entity (grouped by device) with a column per
+  measurement type and the outlet on/off state; a **Flat** view lists one row per reading. Both have a
+  filter and optional 5-second auto-refresh.
 - **Paths** — shows the generated **MQTT topic**, **Prometheus metric**, and **EmonCMS key** for each
   measurement (reflecting your overrides), with click-to-copy. Prometheus/EmonCMS columns appear only
   when those exporters are enabled.
