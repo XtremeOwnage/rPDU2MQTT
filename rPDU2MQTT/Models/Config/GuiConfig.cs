@@ -13,6 +13,11 @@ public class GuiConfig
     [Description("Enable the embedded configuration web GUI.")]
     public bool Enabled { get; set; }
 
+    [DefaultValue(GuiAuthType.Basic)]
+    [Display(Name = "Authentication")]
+    [Description("How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).")]
+    public GuiAuthType AuthType { get; set; } = GuiAuthType.Basic;
+
     [DefaultValue(8080)]
     [Description("Port the configuration GUI listens on.")]
     public int Port { get; set; } = 8080;
@@ -24,11 +29,6 @@ public class GuiConfig
     [Description("Password required to access the GUI (HTTP Basic auth). Required unless Oidc is enabled.")]
     public string? Password { get; set; }
 
-    [Description("OpenID Connect (SSO) login for the GUI. When enabled, replaces HTTP Basic auth.")]
+    [Description("OpenID Connect (SSO) settings (used when AuthType is Oidc).")]
     public OidcConfig Oidc { get; set; } = new();
-
-    [DefaultValue(false)]
-    [Display(Name = "Disable Authentication")]
-    [Description("Disable ALL GUI authentication (no login). DANGEROUS — only use on a trusted, isolated network. Overrides Basic auth and OIDC.")]
-    public bool DisableAuthentication { get; set; }
 }

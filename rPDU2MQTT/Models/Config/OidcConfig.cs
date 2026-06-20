@@ -9,10 +9,6 @@ namespace rPDU2MQTT.Models.Config;
 /// </summary>
 public class OidcConfig
 {
-    [DefaultValue(false)]
-    [Description("Enable OpenID Connect (SSO) login for the GUI instead of HTTP Basic auth.")]
-    public bool Enabled { get; set; }
-
     [Description("OIDC authority / issuer URL (e.g. https://keycloak.example.com/realms/home).")]
     public string? Authority { get; set; }
 

@@ -276,16 +276,22 @@ function build() {
   addDiagnosticsSection(nav, sections);
 }
 
-// In the Gui section, grey out the Basic-auth Username/Password when OIDC is enabled.
+// In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
 function wireGuiAuth(sec) {
   const oidcFs = [...sec.querySelectorAll('fieldset')].find(fs => fs.querySelector('legend')?.textContent === 'Oidc');
-  if (!oidcFs) return;
-  const enabled = oidcFs.querySelector('input[type=checkbox]'); // Oidc.Enabled
-  if (!enabled) return;
-  // Username/Password are the text/password fields of the Gui section, outside the Oidc fieldset.
-  const basicInputs = [...sec.querySelectorAll('.field input')].filter(i => !oidcFs.contains(i) && (i.type === 'text' || i.type === 'password'));
-  const apply = () => basicInputs.forEach(i => { i.disabled = enabled.checked; i.style.opacity = enabled.checked ? '0.5' : '1'; });
-  enabled.addEventListener('change', apply);
+  // The AuthType dropdown is the only select in the Gui section (outside the Oidc fieldset).
+  const authSelect = [...sec.querySelectorAll('.field select')].find(s => !oidcFs || !oidcFs.contains(s));
+  if (!authSelect) return;
+  // Basic-auth fields = text/password inputs of the Gui section, outside the Oidc fieldset.
+  const basicInputs = [...sec.querySelectorAll('.field input')].filter(i => (!oidcFs || !oidcFs.contains(i)) && (i.type === 'text' || i.type === 'password'));
+  const oidcInputs = oidcFs ? [...oidcFs.querySelectorAll('input, select, textarea')] : [];
+  const setOff = (els, off) => els.forEach(e => { e.disabled = off; e.style.opacity = off ? '0.5' : '1'; });
+  const apply = () => {
+    const t = authSelect.value;
+    setOff(basicInputs, t !== 'Basic');
+    setOff(oidcInputs, t !== 'Oidc');
+  };
+  authSelect.addEventListener('change', apply);
   apply();
 }
 

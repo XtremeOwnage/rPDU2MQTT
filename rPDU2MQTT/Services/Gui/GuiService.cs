@@ -51,12 +51,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.pduApi = pduApi;
     }
 
-    /// <summary>Authentication is turned off entirely (Gui.DisableAuthentication).</summary>
-    private bool AuthDisabled => config.Gui.DisableAuthentication;
+    /// <summary>Authentication is turned off entirely (Gui.AuthType = None).</summary>
+    private bool AuthDisabled => config.Gui.AuthType == GuiAuthType.None;
 
-    /// <summary>OIDC is active when enabled and the minimum settings (authority + client id) are present.</summary>
-    private bool UseOidc => !AuthDisabled
-        && config.Gui.Oidc.Enabled
+    /// <summary>OIDC is selected and the minimum settings (authority + client id) are present.</summary>
+    private bool UseOidc => config.Gui.AuthType == GuiAuthType.Oidc
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.Authority)
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.ClientId);
 
@@ -67,15 +66,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return;
 
         if (AuthDisabled)
-            Log.Warning("GUI authentication is DISABLED (Gui.DisableAuthentication). Anyone who can reach the GUI port has full access — only do this on a trusted, isolated network.");
-        else if (!UseOidc && string.IsNullOrWhiteSpace(gui.Password))
         {
-            Log.Error("Configuration GUI is enabled but no authentication is configured (set Gui.Password, enable Gui.Oidc, or set Gui.DisableAuthentication). The GUI will not start.");
+            Log.Warning("GUI authentication is DISABLED (Gui.AuthType = None). Anyone who can reach the GUI port has full access — only do this on a trusted, isolated network.");
+        }
+        else if (gui.AuthType == GuiAuthType.Oidc && !UseOidc)
+        {
+            Log.Error("Gui.AuthType is Oidc but Gui.Oidc.Authority/ClientId are not set. The GUI will not start.");
             return;
         }
-
-        if (!AuthDisabled && gui.Oidc.Enabled && !UseOidc)
-            Log.Warning("Gui.Oidc.Enabled is set but Authority/ClientId are missing; falling back to Basic auth.");
+        else if (gui.AuthType == GuiAuthType.Basic && string.IsNullOrWhiteSpace(gui.Password))
+        {
+            Log.Error("Gui.AuthType is Basic but Gui.Password is not set. The GUI will not start.");
+            return;
+        }
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
