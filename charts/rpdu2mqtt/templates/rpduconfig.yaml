@@ -1,10 +1,26 @@
 {{- if .Values.kubernetesConfigSource.enabled }}
-apiVersion: {{ printf "rpdu2mqtt.xtremeownage.com/v1alpha1" }}
+{{- $name := include "rpdu2mqtt.crName" . }}
+{{- /*
+  Create-once: when preserveExisting (default), keep the live CR's spec on upgrade so config edited
+  through the GUI isn't reverted; values.config only seeds the CR on first install. Relies on Helm's
+  `lookup`, which works for `helm upgrade` against a live cluster but returns nothing under
+  `helm template` / Argo CD — for Argo, add an ignoreDifferences for the RpduConfig spec (see the
+  chart README). Set preserveExisting: false to always apply values.config (declarative).
+*/}}
+{{- $existing := dict }}
+{{- if .Values.kubernetesConfigSource.preserveExisting }}
+{{- $existing = (lookup "rpdu2mqtt.xtremeownage.com/v1alpha1" "RpduConfig" .Release.Namespace $name) | default dict }}
+{{- end }}
+apiVersion: rpdu2mqtt.xtremeownage.com/v1alpha1
 kind: RpduConfig
 metadata:
-  name: {{ include "rpdu2mqtt.crName" . }}
+  name: {{ $name }}
   labels:
     {{- include "rpdu2mqtt.labels" . | nindent 4 }}
 spec:
+  {{- if $existing.spec }}
+  {{- toYaml $existing.spec | nindent 2 }}
+  {{- else }}
   {{- toYaml .Values.config | nindent 2 }}
+  {{- end }}
 {{- end }}
