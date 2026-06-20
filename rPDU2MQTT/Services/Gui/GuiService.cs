@@ -239,6 +239,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private void MapEndpoints(WebApplication app)
     {
         app.MapGet("/", () => Results.Content(LoadIndexHtml(), "text/html"));
+        app.MapGet("/styles.css", () => Results.Content(LoadAsset("styles.css") ?? "", "text/css"));
+        app.MapGet("/app.js", () => Results.Content(LoadAsset("app.js") ?? "", "text/javascript"));
 
         // OIDC sign-out (clears the local cookie and ends the IdP session).
         if (UseOidc)
@@ -718,11 +720,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     }
 
     private static string LoadIndexHtml()
+        => LoadAsset("index.html") ?? "<html><body><h1>rPDU2MQTT</h1><p>GUI assets missing.</p></body></html>";
+
+    /// <summary>Read an embedded wwwroot asset by file-name suffix (e.g. "app.js").</summary>
+    private static string? LoadAsset(string endsWith)
     {
         var asm = Assembly.GetExecutingAssembly();
-        var name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("index.html", StringComparison.OrdinalIgnoreCase));
+        var name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(endsWith, StringComparison.OrdinalIgnoreCase));
         if (name is null)
-            return "<html><body><h1>rPDU2MQTT</h1><p>GUI assets missing.</p></body></html>";
+            return null;
 
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
