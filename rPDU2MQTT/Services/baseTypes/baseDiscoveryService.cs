@@ -191,10 +191,30 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
-    /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
+    /// Build discoveries for a group measurement: the aggregated <c>sum</c> (primary, kept under the
+    /// existing id), plus avg/min/max sensors when the PDU reports them.
     /// </summary>
-    protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)
-        => BuildMeasurement(measurement, Parent, "{{ value_json.sum }}");
+    protected IEnumerable<baseEntity> BuildGroupMeasurements(GroupMeasurement measurement, DiscoveryDevice Parent)
+    {
+        // Primary sum sensor keeps the original id/name for continuity with existing installs.
+        if (BuildMeasurement(measurement, Parent, "{{ value_json.sum }}") is { } sum)
+            yield return sum;
+
+        foreach (var (suffix, label, template, present) in new[]
+        {
+            ("avg", "Avg", "{{ value_json.avg }}", !string.IsNullOrEmpty(measurement.AvgValue)),
+            ("min", "Min", "{{ value_json.min }}", !string.IsNullOrEmpty(measurement.MinValue)),
+            ("max", "Max", "{{ value_json.max }}", !string.IsNullOrEmpty(measurement.MaxValue)),
+        })
+        {
+            if (!present || BuildMeasurement(measurement, Parent, template) is not SensorDiscovery s)
+                continue;
+            s.ID = measurement.Entity_Identifier + "_" + suffix;
+            s.Name = measurement.Entity_Name + "_" + suffix;
+            s.DisplayName = measurement.Entity_DisplayName + " (" + label + ")";
+            yield return s;
+        }
+    }
 
     private SensorDiscovery? BuildMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate)
     {

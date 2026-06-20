@@ -208,8 +208,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
         else if (entity is GroupMeasurement groupMeasurement)
         {
-            if (BuildGroupMeasurement(groupMeasurement, parent) is { } sensor)
-                components.Add(sensor);
+            components.AddRange(BuildGroupMeasurements(groupMeasurement, parent));
         }
         else if (entity is OneViewGroup group)
         {
