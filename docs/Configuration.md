@@ -438,8 +438,10 @@ The GUI:
   connectivity) and the PDU section a "Test PDU connection" button (fetches live data and reports the
   device/outlet counts).
 - **Home Assistant actions** — the Home Assistant section has "Republish discovery" and
-  "Clear discovery" buttons. Clear removes the retained discovery messages so the entities disappear
-  from Home Assistant (until discovery runs again).
+  "Clear discovery" buttons. **Republish** first **reloads the saved config from the source** and
+  re-reads the PDU, so discovery-affecting edits (overrides, names, templates) take effect without a
+  full restart. Clear removes the retained discovery messages so the entities disappear from Home
+  Assistant (until discovery runs again).
 - **Live-driven Overrides** — the Overrides section is populated from the **live PDU data**: it lists
   the actual devices, outlets (by index), measurement types, and OneView groups currently being
   discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
@@ -455,8 +457,9 @@ The GUI:
 - **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
   the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
   control, etc.
-- **Saves** back to this config file (keeping a `config.yaml.bak` copy). Changes apply on the next
-  restart, so restart the service after saving.
+- **Saves** back to this config file (keeping a `config.yaml.bak` copy). Discovery-affecting edits
+  (overrides, names, templates) can be applied by pressing **Republish discovery** (it reloads the
+  config); connection-level changes (MQTT/PDU host/port, GUI/Health ports) still need a restart.
 
 Notes:
 - Basic auth is sent in clear text, so only expose the GUI on a trusted network or behind a

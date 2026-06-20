@@ -39,4 +39,23 @@ public class Config
 
     [YamlMember(Alias = "Health", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "HTTP health-check endpoints")]
     public HealthConfig Health { get; set; } = new HealthConfig();
+
+    /// <summary>
+    /// Replace this instance's settings with another's. Used to hot-reload the shared singleton on
+    /// rediscovery (services read these sections live). Connection-level settings (MQTT/PDU host/port,
+    /// GUI/Health ports, command-topic filters) are bound at startup and still require a restart.
+    /// </summary>
+    public void CopyFrom(Config other)
+    {
+        MQTT = other.MQTT;
+        PDU = other.PDU;
+        HASS = other.HASS;
+        Overrides = other.Overrides;
+        Debug = other.Debug;
+        Prometheus = other.Prometheus;
+        EmonCMS = other.EmonCMS;
+        Logging = other.Logging;
+        Gui = other.Gui;
+        Health = other.Health;
+    }
 }
