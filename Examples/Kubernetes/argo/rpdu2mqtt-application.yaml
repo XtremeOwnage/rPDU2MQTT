@@ -1,0 +1,50 @@
+# Argo CD Application deploying rpdu2mqtt via the Helm chart in this repo.
+# Single-source with inline values. For the "chart here, values in your own repo" pattern, see README.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rpdu2mqtt
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/XtremeOwnage/rPDU2MQTT.git
+    targetRevision: main
+    path: charts/rpdu2mqtt
+    helm:
+      releaseName: rpdu2mqtt
+      valuesObject:
+        config:
+          MQTT:
+            Connection: { Host: mqtt.example.com, Port: 1883 }
+            ParentTopic: rPDU2MQTT
+          PDU:
+            Connection: { Host: pdu.example.com, Port: 80 }
+            PollInterval: 5
+          HomeAssistant:
+            DiscoveryEnabled: true
+            DiscoveryTopic: homeassistant
+        # Store config in a writable RpduConfig CR so the GUI's Save works.
+        kubernetesConfigSource:
+          enabled: true
+        # Credentials: provide a Secret you manage (keys = RPDU2MQTT_* env vars).
+        existingSecret: rpdu2mqtt-credentials
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rpdu2mqtt
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  # With the RpduConfig config source, let GUI edits to the CR persist instead of being
+  # reverted on every sync (Argo renders with `helm template`, which can't read the live CR).
+  # See docs/KubernetesCRD.md and issue #110.
+  ignoreDifferences:
+    - group: rpdu2mqtt.xtremeownage.com
+      kind: RpduConfig
+      jsonPointers:
+        - /spec

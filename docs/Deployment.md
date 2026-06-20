@@ -4,8 +4,10 @@ How to run rPDU2MQTT. Pick the method that matches your environment:
 
 | Method | Best for | Jump to |
 | --- | --- | --- |
+| **Docker (plain)** | Quick test / single `docker run` | [Docker](#docker-plain) |
 | **Docker Compose** | Most people / a single host | [Docker Compose](#docker-compose) |
 | **Kubernetes (Helm)** | Clusters (recommended k8s path) | [Kubernetes — Helm](#kubernetes--helm-chart) |
+| **Kubernetes (Argo CD)** | GitOps clusters | [Kubernetes — Argo CD](#kubernetes--argo-cd) |
 | **Kubernetes (manifests)** | Clusters without Helm | [Kubernetes — manifests](#kubernetes--raw-manifests) |
 | **unRAID** | unRAID servers | [unRAID](#unraid) |
 
@@ -32,6 +34,21 @@ Images are published to GitHub Container Registry: **`ghcr.io/xtremeownage/rpdu2
 | `:dev` | Latest build of a non-`main` branch — bleeding edge. |
 
 > The image is built on the ASP.NET Core runtime (the optional embedded GUI needs it).
+
+## Docker (plain)
+
+For a quick test, a single `docker run` with your `config.yaml` mounted:
+
+```bash
+docker run -d --name rpdu2mqtt --restart unless-stopped \
+  -v "$(pwd)/config.yaml:/config/config.yaml:ro" \
+  -e RPDU2MQTT_MQTT_PASSWORD="change-me" \
+  -e RPDU2MQTT_PDU_PASSWORD="change-me" \
+  -p 8080:8080 \
+  ghcr.io/xtremeownage/rpdu2mqtt:stable
+```
+
+Full walkthrough: [`Examples/Docker`](../Examples/Docker/README.md). For anything long-lived, use Compose.
 
 ## Docker Compose
 
@@ -107,6 +124,28 @@ Common toggles (full list in the [chart README](../charts/rpdu2mqtt/README.md)):
 
 > **GUI Save in Kubernetes:** a ConfigMap mount is read-only, so the GUI is view/test-only by default.
 > Either edit values and `helm upgrade`, or use the CRD config source above.
+
+A ready-to-edit example values file is in [`Examples/Kubernetes/helm`](../Examples/Kubernetes/helm/README.md).
+
+## Kubernetes — Argo CD
+
+Deploy the chart as an Argo CD `Application` — example (single-source, inline values) in
+[`Examples/Kubernetes/argo`](../Examples/Kubernetes/argo/README.md):
+
+```bash
+kubectl apply -f Examples/Kubernetes/argo/rpdu2mqtt-application.yaml
+```
+
+That example also shows the **chart-here / values-in-your-repo** multi-source pattern. If you use the
+**`RpduConfig` config source** so the GUI's Save works, add an `ignoreDifferences` for the CR `/spec`
+so Argo doesn't revert GUI edits on sync (Argo renders with `helm template` and can't read the live CR):
+
+```yaml
+ignoreDifferences:
+  - group: rpdu2mqtt.xtremeownage.com
+    kind: RpduConfig
+    jsonPointers: [ /spec ]
+```
 
 ## Kubernetes — raw manifests
 

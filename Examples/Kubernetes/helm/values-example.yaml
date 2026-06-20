@@ -1,0 +1,52 @@
+# Example values for the rpdu2mqtt Helm chart (charts/rpdu2mqtt).
+# Only the commonly-changed values are shown; see charts/rpdu2mqtt/values.yaml for everything.
+
+image:
+  tag: ""   # defaults to the chart appVersion; pin a version for production
+
+# The whole app config is rendered into a ConfigMap (or the RpduConfig CR — see below).
+config:
+  MQTT:
+    Connection:
+      Host: mqtt.example.com
+      Port: 1883
+    ParentTopic: rPDU2MQTT
+  PDU:
+    Connection:
+      Host: pdu.example.com
+      Port: 80
+    PollInterval: 5
+    ActionsEnabled: false   # set true (+ credentials) to control outlets
+  HomeAssistant:
+    DiscoveryEnabled: true
+    DiscoveryTopic: homeassistant
+  Prometheus:
+    Enabled: true
+    Port: 9184
+  # Gui:
+  #   Enabled: true
+  #   Port: 8080
+  #   AuthType: Basic       # Basic | Oidc | None
+
+# Credentials -> injected as a Secret (RPDU2MQTT_* env vars). Or set existingSecret.
+credentials:
+  mqtt:
+    password: "change-me"
+  pdu:
+    password: "change-me"          # only needed when ActionsEnabled
+
+# Store config in a writable RpduConfig custom resource so the GUI's Save works and
+# survives upgrades (see docs/KubernetesCRD.md). Requires the CRD (shipped in the chart's crds/).
+kubernetesConfigSource:
+  enabled: false
+
+# Prometheus Operator ServiceMonitor for /metrics (requires the operator CRDs).
+serviceMonitor:
+  enabled: false
+
+# Expose the GUI:
+# ingress:
+#   enabled: true
+#   hosts:
+#     - host: rpdu2mqtt.example.com
+#       paths: [{ path: /, pathType: Prefix }]
