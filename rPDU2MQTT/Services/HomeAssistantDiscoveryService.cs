@@ -18,8 +18,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
     private readonly SemaphoreSlim discoveryLock = new(1, 1);
 
-    // Built each discovery run: "deviceKey/outletIndex" -> outlet, for mirroring group member switches.
-    private Dictionary<string, Outlet> memberOutletLookup = new();
+    // Built each discovery run: "deviceKey/outletIndex" -> (outlet, owning device), for mirroring
+    // group member switches with an identifying name.
+    private Dictionary<string, (Outlet Outlet, Device Device)> memberOutletLookup = new();
 
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
     {
@@ -62,8 +63,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Lookup (deviceKey/index -> outlet) so group devices can mirror their member switches.
             memberOutletLookup = data.Devices
-                .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", outlet: o)))
-                .ToDictionary(x => x.key, x => x.outlet);
+                .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", value: (Outlet: o, Device: d))))
+                .ToDictionary(x => x.key, x => x.value);
 
             // Discover PDUs, Outlets, etc...
             foreach (rPDU nestedPDU in data.PDUs)
@@ -244,10 +245,11 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                 foreach (var (deviceId, index) in group.MemberOutlets)
                     if (memberOutletLookup.TryGetValue($"{deviceId}/{index}", out var member))
                     {
-                        var sw = BuildSwitch(member, newParent);
-                        sw.ID = group.Entity_Identifier + "_" + member.Entity_Identifier + "_switch";
-                        sw.Name = group.Entity_Identifier + "_" + member.Entity_Name + "_switch";
-                        sw.DisplayName = member.Entity_DisplayName;
+                        var sw = BuildSwitch(member.Outlet, newParent);
+                        sw.ID = group.Entity_Identifier + "_" + member.Outlet.Entity_Identifier + "_switch";
+                        sw.Name = group.Entity_Identifier + "_" + member.Outlet.Entity_Name + "_switch";
+                        // Identify which PDU + outlet, since outlet names can repeat across members.
+                        sw.DisplayName = $"{member.Device.Entity_DisplayName} — Outlet {member.Outlet.Key + 1} ({member.Outlet.Entity_DisplayName})";
                         components.Add(sw);
                     }
             }
