@@ -132,6 +132,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             foreach (var scope in (oidc.Scopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 o.Scope.Add(scope);
 
+            // Some providers (e.g. Authentik with no signing certificate) sign the id_token with
+            // HS256, whose key isn't published in JWKS. Offer the client secret as a symmetric key so
+            // those tokens validate; RS256 tokens still use the JWKS keys from discovery.
+            if (!string.IsNullOrEmpty(oidc.ClientSecret))
+                o.TokenValidationParameters.IssuerSigningKey =
+                    new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(Encoding.UTF8.GetBytes(oidc.ClientSecret));
+
             // The default correlation/nonce cookies are SameSite=None, which browsers drop without
             // Secure (e.g. plain-http localhost). Lax + SameAsRequest works over http locally and
             // https behind a TLS-terminating ingress (the code flow's callback is a top-level GET).
