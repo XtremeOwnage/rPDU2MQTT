@@ -6,8 +6,7 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 
 > New to these PDUs? See this [blog post on metered/switched PDUs](https://static.xtremeownage.com/blog/2024/metered-switch-pdu/) for background on the units and their capabilities.
 
-<!-- TODO(screenshot): a hero shot — the GUI Live Data (Grouped) view or a Home Assistant dashboard -->
-![rPDU2MQTT GUI](docs/images/hero.png)
+![rPDU2MQTT Live Data](docs/images/gui-live-data.png)
 
 ---
 
@@ -29,33 +28,31 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 
 ### Home Assistant
 
-<!-- TODO(screenshot): an outlet device in HA — switch, reboot button, delays/power-on, power/energy sensors -->
+An **outlet** as its own device — switch, sensors, configurable delays, and power-on action:
+
 ![Home Assistant outlet device](docs/images/home-assistant-outlet.png)
 
-<!-- TODO(screenshot): a OneView group device in HA — rollup sensors, member switches, All On/Off/Reboot buttons -->
+A **OneView group** device — Sum/Avg/Min/Max rollup sensors, the member outlet switches, and All On / All Off / Reboot All:
+
 ![Home Assistant group device](docs/images/home-assistant-group.png)
+
+Standard Home Assistant history, dashboards, and automations come for free:
+
+![Home Assistant power history](docs/images/home-assistant-history.png)
 
 ### Configuration & control GUI
 
-<!-- TODO(screenshot): the GUI config form (e.g. the PDU section), showing the structured form + nav -->
+The structured **configuration** form (every option, generated from the model):
+
 ![GUI configuration](docs/images/gui-config.png)
 
-<!-- TODO(screenshot): the GUI Control tab — per-outlet On/Off/Reboot/Reset + editable label, and the Groups section -->
+The **Control** tab — per-outlet On/Off/Reboot/Reset + editable label, plus group actions:
+
 ![GUI control tab](docs/images/gui-control.png)
 
-<!-- TODO(screenshot): the GUI Live Data (Grouped) view -->
-![GUI live data](docs/images/gui-live-data.png)
+The **Paths** tab — the generated MQTT topic / Prometheus metric / EmonCMS key for every measurement:
 
-<!-- TODO(screenshot): the GUI Paths tab — generated MQTT/Prometheus/EmonCMS paths -->
 ![GUI paths](docs/images/gui-paths.png)
-
-### Metrics
-
-<!-- TODO(screenshot): a Grafana dashboard built from the Prometheus metrics -->
-![Grafana / Prometheus](docs/images/grafana.png)
-
-<!-- TODO(screenshot): EmonCMS inputs/feeds populated by rPDU2MQTT -->
-![EmonCMS](docs/images/emoncms.png)
 
 ---
 
