@@ -79,6 +79,11 @@ kubernetesConfigSource:
   enabled: false
   # Name of the RpduConfig resource (defaults to the release fullname).
   crName: ""
+  # Create-once: keep the live CR's spec on upgrade (so GUI edits aren't reverted); values.config
+  # only seeds it on first install. Set false to always apply values.config (declarative).
+  # NOTE: relies on Helm `lookup` — under Argo CD (helm template) it can't read the live CR, so use
+  # an Argo ignoreDifferences on the RpduConfig spec instead (see the chart README).
+  preserveExisting: true
 
 # Kubernetes Services for the GUI and /metrics endpoints. Created only when the
 # corresponding feature is enabled in `config` AND the toggle here is true.

@@ -130,6 +130,31 @@ The CR can be the GitOps source of truth, so:
   ./charts/rpdu2mqtt` remains the canonical export — the GUI export focuses on the config/CR, which is
   the only thing it actually edits.
 
+### Keeping GUI edits across chart upgrades / Argo syncs
+
+Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` from `values.config`, a
+`helm upgrade` or Argo sync can otherwise **revert GUI changes**. To avoid that:
+
+- **Helm chart (`helm upgrade`):** the chart is **create-once** by default
+  (`kubernetesConfigSource.preserveExisting: true`) — it reads the live CR with Helm `lookup` and
+  re-emits its current `spec`, so `values.config` only seeds the CR on first install. Set
+  `preserveExisting: false` to manage the config declaratively (every upgrade applies `values.config`).
+- **Argo CD:** `lookup` returns nothing under `helm template`, so the rendered CR always carries
+  `values.config` and Argo would sync it. Tell Argo to ignore the CR `spec` so GUI edits stick:
+
+  ```yaml
+  # Argo CD Application
+  spec:
+    ignoreDifferences:
+      - group: rpdu2mqtt.xtremeownage.com
+        kind: RpduConfig
+        jsonPointers:
+          - /spec
+  ```
+
+  (Or keep config declarative in git and treat the GUI as view/test only — your choice of source of
+  truth. The GUI's Save already warns to update the GitOps source.)
+
 ### Reacting to changes & status (Phase 2)
 
 - **Watch** the CR; on change, the simplest correct behaviour is
