@@ -51,8 +51,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.pduApi = pduApi;
     }
 
+    /// <summary>Authentication is turned off entirely (Gui.DisableAuthentication).</summary>
+    private bool AuthDisabled => config.Gui.DisableAuthentication;
+
     /// <summary>OIDC is active when enabled and the minimum settings (authority + client id) are present.</summary>
-    private bool UseOidc => config.Gui.Oidc.Enabled
+    private bool UseOidc => !AuthDisabled
+        && config.Gui.Oidc.Enabled
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.Authority)
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.ClientId);
 
@@ -62,13 +66,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         if (!gui.Enabled)
             return;
 
-        if (!UseOidc && string.IsNullOrWhiteSpace(gui.Password))
+        if (AuthDisabled)
+            Log.Warning("GUI authentication is DISABLED (Gui.DisableAuthentication). Anyone who can reach the GUI port has full access — only do this on a trusted, isolated network.");
+        else if (!UseOidc && string.IsNullOrWhiteSpace(gui.Password))
         {
-            Log.Error("Configuration GUI is enabled but no authentication is configured (set Gui.Password, or enable Gui.Oidc). The GUI will not start.");
+            Log.Error("Configuration GUI is enabled but no authentication is configured (set Gui.Password, enable Gui.Oidc, or set Gui.DisableAuthentication). The GUI will not start.");
             return;
         }
 
-        if (gui.Oidc.Enabled && !UseOidc)
+        if (!AuthDisabled && gui.Oidc.Enabled && !UseOidc)
             Log.Warning("Gui.Oidc.Enabled is set but Authority/ClientId are missing; falling back to Basic auth.");
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
@@ -92,7 +98,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             app.UseAuthentication();
             app.UseAuthorization();
         }
-        else
+        else if (!AuthDisabled)
         {
             app.Use(AuthMiddleware);
         }
@@ -100,9 +106,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         MapEndpoints(app);
 
         await app.StartAsync(cancellationToken);
-        Log.Information(UseOidc
-            ? $"Configuration GUI listening on http://*:{gui.Port} (OIDC via {gui.Oidc.Authority})."
-            : $"Configuration GUI listening on http://*:{gui.Port} (user '{gui.Username}').");
+        var how = AuthDisabled ? "no authentication" : UseOidc ? $"OIDC via {gui.Oidc.Authority}" : $"user '{gui.Username}'";
+        Log.Information($"Configuration GUI listening on http://*:{gui.Port} ({how}).");
     }
 
     /// <summary>Wire cookie + OpenID Connect authentication and require an authenticated user.</summary>
@@ -308,7 +313,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
             actionsEnabled = config.PDU.ActionsEnabled,
-            auth = UseOidc ? "oidc" : "basic",
+            auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
             user = UseOidc ? ctx.User?.Identity?.Name : null,
         }, ConfigSchema.Json));
 

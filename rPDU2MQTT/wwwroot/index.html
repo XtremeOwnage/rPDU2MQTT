@@ -264,6 +264,7 @@ function build() {
         sec.appendChild(grid);
       }
       else renderNode(node, data, sec);
+      if (node.key === 'Gui') wireGuiAuth(sec);
       link.onclick = () => activate(link, sec);
     }
     if (i === 0) link.click();
@@ -273,6 +274,19 @@ function build() {
   addPathsSection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
+}
+
+// In the Gui section, grey out the Basic-auth Username/Password when OIDC is enabled.
+function wireGuiAuth(sec) {
+  const oidcFs = [...sec.querySelectorAll('fieldset')].find(fs => fs.querySelector('legend')?.textContent === 'Oidc');
+  if (!oidcFs) return;
+  const enabled = oidcFs.querySelector('input[type=checkbox]'); // Oidc.Enabled
+  if (!enabled) return;
+  // Username/Password are the text/password fields of the Gui section, outside the Oidc fieldset.
+  const basicInputs = [...sec.querySelectorAll('.field input')].filter(i => !oidcFs.contains(i) && (i.type === 'text' || i.type === 'password'));
+  const apply = () => basicInputs.forEach(i => { i.disabled = enabled.checked; i.style.opacity = enabled.checked ? '0.5' : '1'; });
+  enabled.addEventListener('change', apply);
+  apply();
 }
 
 // A click-to-copy monospace table cell (used by the path tables).

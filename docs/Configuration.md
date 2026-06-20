@@ -413,6 +413,20 @@ Gui:
   rather than in the config.
 - The GUI honors `X-Forwarded-Proto`/`-Host`, so behind an Ingress/Gateway terminating TLS the
   redirect URI is built with the external `https` URL.
+- In the GUI form, enabling OIDC greys out the Basic-auth Username/Password fields.
+
+### Disabling authentication
+
+For a trusted, isolated network you can turn GUI authentication off entirely:
+
+```yaml
+Gui:
+  Enabled: true
+  DisableAuthentication: true   # ⚠️ no login — anyone who can reach the port has full access
+```
+
+This overrides both Basic auth and OIDC. **Only** use it where the GUI port is otherwise protected
+(e.g. a private network or a NetworkPolicy); a warning is logged at startup.
 
 The GUI:
 - Renders a **structured form for every option**, generated from the configuration model (so it stays

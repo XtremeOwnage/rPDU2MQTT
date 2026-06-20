@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
@@ -25,4 +26,9 @@ public class GuiConfig
 
     [Description("OpenID Connect (SSO) login for the GUI. When enabled, replaces HTTP Basic auth.")]
     public OidcConfig Oidc { get; set; } = new();
+
+    [DefaultValue(false)]
+    [Display(Name = "Disable Authentication")]
+    [Description("Disable ALL GUI authentication (no login). DANGEROUS — only use on a trusted, isolated network. Overrides Basic auth and OIDC.")]
+    public bool DisableAuthentication { get; set; }
 }
