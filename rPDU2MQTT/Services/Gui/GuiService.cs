@@ -126,6 +126,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             o.Scope.Clear();
             foreach (var scope in (oidc.Scopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 o.Scope.Add(scope);
+
+            // The default correlation/nonce cookies are SameSite=None, which browsers drop without
+            // Secure (e.g. plain-http localhost). Lax + SameAsRequest works over http locally and
+            // https behind a TLS-terminating ingress (the code flow's callback is a top-level GET).
+            o.CorrelationCookie.SameSite = SameSiteMode.Lax;
+            o.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            o.NonceCookie.SameSite = SameSiteMode.Lax;
+            o.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+
+            // Surface the real reason instead of a bare 500 on a failed callback.
+            o.Events.OnRemoteFailure = ctx =>
+            {
+                Log.Error(ctx.Failure, $"OIDC sign-in failed: {ctx.Failure?.Message}");
+                ctx.HandleResponse();
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                ctx.Response.ContentType = "text/plain";
+                return ctx.Response.WriteAsync($"OIDC sign-in failed: {ctx.Failure?.Message}. See the bridge logs for details.");
+            };
+            o.Events.OnAuthenticationFailed = ctx =>
+            {
+                Log.Error(ctx.Exception, "OIDC authentication failed.");
+                return Task.CompletedTask;
+            };
         });
 
         // Everything requires an authenticated user unless explicitly AllowAnonymous.
