@@ -120,6 +120,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             o.ClientId = oidc.ClientId;
             o.ClientSecret = oidc.ClientSecret;
             o.ResponseType = "code";
+            // Code flow defaults to form_post (a cross-site POST callback), on which SameSite=Lax
+            // cookies aren't sent -> "Correlation failed". Use query so the callback is a top-level
+            // GET; PKCE (on by default) keeps the code exchange safe.
+            o.ResponseMode = "query";
+            o.UsePkce = true;
             o.CallbackPath = oidc.CallbackPath;
             o.SaveTokens = true;
             o.GetClaimsFromUserInfoEndpoint = true;
