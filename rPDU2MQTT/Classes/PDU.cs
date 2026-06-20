@@ -59,6 +59,32 @@ public partial class PDU
                 pendingOutletStates[$"{deviceId}/{outletIndex}"] = (action, DateTime.UtcNow.Add(PendingStateTimeout));
     }
 
+    /// <summary>
+    /// Apply a control action ("on"/"off"/"reboot") to every outlet in a OneView group. OneView has
+    /// no group control endpoint, so members are resolved from the host→group mapping and the existing
+    /// per-outlet control is fanned out. Aborts if no members resolve (so a bad mapping can't hit the
+    /// wrong outlets). Returns the number of outlets actioned. PDU.ActionsEnabled only.
+    /// </summary>
+    public async Task<int> ControlGroupAsync(string groupKey, string action, CancellationToken cancellationToken)
+    {
+        var oneview = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
+
+        var members = oneview.Hosts
+            .Where(h => string.Equals(h.Group, groupKey, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(h => h.Cache?.Devices ?? new List<Device>())
+            .SelectMany(dev => (dev.Outlets ?? new List<Outlet>()).Select(o => (deviceId: dev.Key, index: o.Key)))
+            .ToList();
+
+        if (members.Count == 0)
+            throw new Exception($"No member outlets resolved for group '{groupKey}' from the OneView host→group mapping. Group control aborted.");
+
+        Log.Information($"Group '{groupKey}' {action}: applying to {members.Count} outlet(s).");
+        foreach (var (deviceId, index) in members)
+            await ControlOutletAsync(deviceId, index, action, cancellationToken);
+
+        return members.Count;
+    }
+
     /// <summary>Write outlet configuration fields (delays, power-on action) — PDU.ActionsEnabled only.</summary>
     public async Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
     {
