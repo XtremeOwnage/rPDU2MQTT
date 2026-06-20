@@ -48,4 +48,14 @@ public class HomeAssistantConfig
     [Description("Name template for a group's mirrored member switches. Placeholders: {device}, {outlet}, {number}, {group}.")]
     [TemplateVariables("device", "outlet", "number", "group")]
     public string GroupMemberNameTemplate { get; set; } = "{device} — Outlet {number} ({outlet})";
+
+    /// <summary>
+    /// Stable entity/object_id template for a group's mirrored member switches. Defaults to the PDU
+    /// serial + outlet number so it doesn't change when names/labels do. Lower-cased + slugified.
+    /// Placeholders: {serial}, {number}, {device}, {group}.
+    /// </summary>
+    [DefaultValue("{serial}_outlet_{number}")]
+    [Description("Stable entity/object_id template for a group's mirrored member switches. Placeholders: {serial}, {number}, {device}, {group}.")]
+    [TemplateVariables("serial", "number", "device", "group")]
+    public string GroupMemberObjectIdTemplate { get; set; } = "{serial}_outlet_{number}";
 }

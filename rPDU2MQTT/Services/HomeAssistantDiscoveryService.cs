@@ -246,13 +246,21 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                     if (memberOutletLookup.TryGetValue($"{deviceId}/{index}", out var member))
                     {
                         var sw = BuildSwitch(member.Outlet, newParent);
+                        // unique_id stays raw-key based (stable across renames).
                         sw.ID = group.Entity_Identifier + "_" + member.Outlet.Entity_Identifier + "_switch";
-                        sw.Name = group.Entity_Identifier + "_" + member.Outlet.Entity_Name + "_switch";
-                        // Identify which PDU + outlet (names can repeat across members); customizable.
+                        var number = (member.Outlet.Key + 1).ToString();
+                        // entity/object_id — stable + templated (defaults to serial_outlet_number).
+                        sw.Name = (string.IsNullOrWhiteSpace(cfg.HASS.GroupMemberObjectIdTemplate) ? "{serial}_outlet_{number}" : cfg.HASS.GroupMemberObjectIdTemplate)
+                            .Replace("{serial}", member.Device.Key)
+                            .Replace("{number}", number)
+                            .Replace("{device}", member.Device.Entity_DisplayName)
+                            .Replace("{group}", group.Entity_DisplayName)
+                            .FormatName();
+                        // Friendly display name (names can repeat across members); customizable.
                         sw.DisplayName = (string.IsNullOrWhiteSpace(cfg.HASS.GroupMemberNameTemplate) ? "{device} — Outlet {number} ({outlet})" : cfg.HASS.GroupMemberNameTemplate)
                             .Replace("{device}", member.Device.Entity_DisplayName)
                             .Replace("{outlet}", member.Outlet.Entity_DisplayName)
-                            .Replace("{number}", (member.Outlet.Key + 1).ToString())
+                            .Replace("{number}", number)
                             .Replace("{group}", group.Entity_DisplayName);
                         components.Add(sw);
                     }
