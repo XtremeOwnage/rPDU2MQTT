@@ -18,6 +18,9 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
     private readonly SemaphoreSlim discoveryLock = new(1, 1);
 
+    // Built each discovery run: "deviceKey/outletIndex" -> outlet, for mirroring group member switches.
+    private Dictionary<string, Outlet> memberOutletLookup = new();
+
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
     {
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
@@ -56,6 +59,11 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Collect every entity, then publish one device-based discovery message per device.
             var components = new List<baseEntity>();
+
+            // Lookup (deviceKey/index -> outlet) so group devices can mirror their member switches.
+            memberOutletLookup = data.Devices
+                .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", outlet: o)))
+                .ToDictionary(x => x.key, x => x.outlet);
 
             // Discover PDUs, Outlets, etc...
             foreach (rPDU nestedPDU in data.PDUs)
@@ -224,12 +232,24 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Group actions (fan out to member outlets). The "Total"/"Unassigned" pseudo-groups have
             // no member mapping, so only offer actions on real groups.
-            if (cfg.PDU.ActionsEnabled && group.Entity.Outlets.Count > 0)
+            if (cfg.PDU.ActionsEnabled && group.MemberOutlets.Count > 0)
             {
                 var control = MQTTHelper.JoinPaths(group.GetTopicPath(), "control");
                 components.Add(BuildButton(group.Entity_Identifier + "_allOn", "All On", control, newParent, payloadPress: "on"));
                 components.Add(BuildButton(group.Entity_Identifier + "_allOff", "All Off", control, newParent, payloadPress: "off"));
                 components.Add(BuildButton(group.Entity_Identifier + "_rebootAll", "Reboot All", control, newParent, deviceClass: "restart", payloadPress: "reboot"));
+
+                // Mirror each member outlet's switch onto the group device (distinct id; shares the
+                // outlet's real state/command topics so it controls the actual outlet).
+                foreach (var (deviceId, index) in group.MemberOutlets)
+                    if (memberOutletLookup.TryGetValue($"{deviceId}/{index}", out var member))
+                    {
+                        var sw = BuildSwitch(member, newParent);
+                        sw.ID = group.Entity_Identifier + "_" + member.Entity_Identifier + "_switch";
+                        sw.Name = group.Entity_Identifier + "_" + member.Entity_Name + "_switch";
+                        sw.DisplayName = member.Entity_DisplayName;
+                        components.Add(sw);
+                    }
             }
         }
     }

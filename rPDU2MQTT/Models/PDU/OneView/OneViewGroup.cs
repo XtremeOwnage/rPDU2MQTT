@@ -25,4 +25,11 @@ public class OneViewGroup : EntityWithNameAndLabel, IDictionaryKey<string>
 
     [JsonPropertyName("entity")]
     public OneViewGroupEntities Entity { get; set; }
+
+    /// <summary>
+    /// Member outlets (deviceSerial + outlet index), resolved from the host <c>groupMap</c>. Used to
+    /// fan out group actions and to mirror member switches onto the group's Home Assistant device.
+    /// </summary>
+    [JsonIgnore]
+    public List<(string DeviceId, int OutletIndex)> MemberOutlets { get; } = new();
 }
