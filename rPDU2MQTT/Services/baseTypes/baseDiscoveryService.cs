@@ -92,7 +92,7 @@ public abstract class baseDiscoveryService : baseMQTTService
     /// <summary>
     /// Build a stateless button entity that publishes to <paramref name="commandTopic"/> when pressed.
     /// </summary>
-    public ButtonDiscovery BuildButton(string id, string displayName, string commandTopic, DiscoveryDevice Parent, string? deviceClass = null)
+    public ButtonDiscovery BuildButton(string id, string displayName, string commandTopic, DiscoveryDevice Parent, string? deviceClass = null, string payloadPress = "PRESS")
     {
         return new ButtonDiscovery
         {
@@ -106,6 +106,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             DeviceClass = deviceClass,
 
             CommandTopic = commandTopic,
+            PayloadPress = payloadPress,
             AvailabilityTopic = Availability,
         };
     }
@@ -191,10 +192,33 @@ public abstract class baseDiscoveryService : baseMQTTService
     }
 
     /// <summary>
-    /// Build a discovery for a group measurement, bound to its aggregated <c>sum</c> value.
+    /// Build discoveries for a group measurement: the aggregated <c>sum</c> (primary, kept under the
+    /// existing id), plus avg/min/max sensors when the PDU reports them.
     /// </summary>
-    protected baseEntity? BuildGroupMeasurement(GroupMeasurement measurement, DiscoveryDevice Parent)
-        => BuildMeasurement(measurement, Parent, "{{ value_json.sum }}");
+    protected IEnumerable<baseEntity> BuildGroupMeasurements(GroupMeasurement measurement, DiscoveryDevice Parent)
+    {
+        // The display base ("(Sum)/(Avg)/(Min)/(Max)" appended) comes from Entity_DisplayName, which is
+        // overridable via Overrides.OneviewGroups.Measurements.<type>.Name.
+        foreach (var (suffix, label, template, present) in new[]
+        {
+            // Sum is always emitted; its id stays unsuffixed for continuity with existing installs.
+            ("sum", "Sum", "{{ value_json.sum }}", true),
+            ("avg", "Avg", "{{ value_json.avg }}", !string.IsNullOrEmpty(measurement.AvgValue)),
+            ("min", "Min", "{{ value_json.min }}", !string.IsNullOrEmpty(measurement.MinValue)),
+            ("max", "Max", "{{ value_json.max }}", !string.IsNullOrEmpty(measurement.MaxValue)),
+        })
+        {
+            if (!present || BuildMeasurement(measurement, Parent, template) is not SensorDiscovery s)
+                continue;
+            if (suffix != "sum")
+            {
+                s.ID = measurement.Entity_Identifier + "_" + suffix;
+                s.Name = measurement.Entity_Name + "_" + suffix;
+            }
+            s.DisplayName = measurement.Entity_DisplayName + " (" + label + ")";
+            yield return s;
+        }
+    }
 
     private SensorDiscovery? BuildMeasurement(baseMeasurement measurement, DiscoveryDevice Parent, string valueTemplate)
     {

@@ -343,9 +343,34 @@ function addControlSection(nav, sections) {
   const warn = document.createElement('div'); warn.className = 'desc'; warn.style.color = 'var(--bad)'; warn.style.display = 'none';
   warn.textContent = 'Write actions are disabled (PDU.ActionsEnabled is false). Enable it in the PDU section and restart to control outlets.';
   sec.appendChild(warn);
+  const groupsWrap = document.createElement('div'); sec.appendChild(groupsWrap);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
-  let rows = [], enabled = false;
+  let rows = [], groups = [], enabled = false;
+  const actGroup = async (g, action) => {
+    const verb = action === 'on' ? 'turn ON' : action === 'off' ? 'turn OFF' : 'reboot';
+    if (!confirm('Group "' + (g.name || g.key) + '": ' + verb + ' ALL member outlets?')) return;
+    toast('Group ' + (g.name || g.key) + ': ' + action + '…', true);
+    const r = await api('/api/control/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupKey: g.key, action }) });
+    toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
+    setTimeout(load, 1000);
+  };
+  const drawGroups = () => {
+    groupsWrap.innerHTML = '';
+    if (!groups.length) return;
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '4px'; hh.textContent = 'Groups — act on all member outlets:'; groupsWrap.appendChild(hh);
+    const t = document.createElement('table'); t.className = 'ld'; const tb = document.createElement('tbody');
+    groups.forEach(g => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td'); nameTd.textContent = g.name || g.key; tr.appendChild(nameTd);
+      const actTd = document.createElement('td');
+      [['All On', 'on'], ['All Off', 'off'], ['Reboot All', 'reboot']].forEach(([lab, a]) => {
+        const b = document.createElement('button'); b.className = 'small' + (a !== 'on' ? ' danger' : ''); b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => actGroup(g, a); actTd.appendChild(b);
+      });
+      tr.appendChild(actTd); tb.appendChild(tr);
+    });
+    t.appendChild(tb); groupsWrap.appendChild(t);
+  };
   const act = async (o, action) => {
     if (action === 'off' && !confirm('Turn OFF outlet ' + o.number + ' (' + o.name + ')?')) return;
     if (action === 'reboot' && !confirm('Reboot outlet ' + o.number + ' (' + o.name + ')? Connected equipment will lose power briefly.')) return;
@@ -407,7 +432,8 @@ function addControlSection(nav, sections) {
   const load = async () => {
     const r = await api('/api/control/outlets');
     if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load outlets.') + '</div>'; return; }
-    rows = r.body.outlets || []; enabled = !!r.body.actionsEnabled; warn.style.display = enabled ? 'none' : 'block'; draw();
+    rows = r.body.outlets || []; groups = r.body.groups || []; enabled = !!r.body.actionsEnabled;
+    warn.style.display = enabled ? 'none' : 'block'; drawGroups(); draw();
   };
   refresh.onclick = load; filter.oninput = draw;
   link.onclick = () => { activate(link, sec); load(); };

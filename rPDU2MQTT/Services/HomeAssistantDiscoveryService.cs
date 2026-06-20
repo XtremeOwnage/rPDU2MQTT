@@ -18,6 +18,10 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 {
     private readonly SemaphoreSlim discoveryLock = new(1, 1);
 
+    // Built each discovery run: "deviceKey/outletIndex" -> (outlet, owning device), for mirroring
+    // group member switches with an identifying name.
+    private Dictionary<string, (Outlet Outlet, Device Device)> memberOutletLookup = new();
+
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
     {
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
@@ -56,6 +60,11 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Collect every entity, then publish one device-based discovery message per device.
             var components = new List<baseEntity>();
+
+            // Lookup (deviceKey/index -> outlet) so group devices can mirror their member switches.
+            memberOutletLookup = data.Devices
+                .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", value: (Outlet: o, Device: d))))
+                .ToDictionary(x => x.key, x => x.value);
 
             // Discover PDUs, Outlets, etc...
             foreach (rPDU nestedPDU in data.PDUs)
@@ -208,8 +217,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         }
         else if (entity is GroupMeasurement groupMeasurement)
         {
-            if (BuildGroupMeasurement(groupMeasurement, parent) is { } sensor)
-                components.Add(sensor);
+            components.AddRange(BuildGroupMeasurements(groupMeasurement, parent));
         }
         else if (entity is OneViewGroup group)
         {
@@ -222,6 +230,41 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Discover measurements (per-group aggregate, and the cluster-wide PduTotal rollup).
             collectDiscovery(group.Entity.Outlets.Concat(group.Entity.PduTotal).SelectMany(o => o.Measurements), newParent, components);
+
+            // Group actions (fan out to member outlets). The "Total"/"Unassigned" pseudo-groups have
+            // no member mapping, so only offer actions on real groups.
+            if (cfg.PDU.ActionsEnabled && group.MemberOutlets.Count > 0)
+            {
+                var control = MQTTHelper.JoinPaths(group.GetTopicPath(), "control");
+                components.Add(BuildButton(group.Entity_Identifier + "_allOn", "All On", control, newParent, payloadPress: "on"));
+                components.Add(BuildButton(group.Entity_Identifier + "_allOff", "All Off", control, newParent, payloadPress: "off"));
+                components.Add(BuildButton(group.Entity_Identifier + "_rebootAll", "Reboot All", control, newParent, deviceClass: "restart", payloadPress: "reboot"));
+
+                // Mirror each member outlet's switch onto the group device (distinct id; shares the
+                // outlet's real state/command topics so it controls the actual outlet).
+                foreach (var (deviceId, index) in group.MemberOutlets)
+                    if (memberOutletLookup.TryGetValue($"{deviceId}/{index}", out var member))
+                    {
+                        var sw = BuildSwitch(member.Outlet, newParent);
+                        // unique_id stays raw-key based (stable across renames).
+                        sw.ID = group.Entity_Identifier + "_" + member.Outlet.Entity_Identifier + "_switch";
+                        var number = (member.Outlet.Key + 1).ToString();
+                        // entity/object_id — stable + templated (defaults to serial_outlet_number).
+                        sw.Name = (string.IsNullOrWhiteSpace(cfg.HASS.GroupMemberObjectIdTemplate) ? "{serial}_outlet_{number}" : cfg.HASS.GroupMemberObjectIdTemplate)
+                            .Replace("{serial}", member.Device.Key)
+                            .Replace("{number}", number)
+                            .Replace("{device}", member.Device.Entity_DisplayName)
+                            .Replace("{group}", group.Entity_DisplayName)
+                            .FormatName();
+                        // Friendly display name (names can repeat across members); customizable.
+                        sw.DisplayName = (string.IsNullOrWhiteSpace(cfg.HASS.GroupMemberNameTemplate) ? "{device} — Outlet {number} ({outlet})" : cfg.HASS.GroupMemberNameTemplate)
+                            .Replace("{device}", member.Device.Entity_DisplayName)
+                            .Replace("{outlet}", member.Outlet.Entity_DisplayName)
+                            .Replace("{number}", number)
+                            .Replace("{group}", group.Entity_DisplayName);
+                        components.Add(sw);
+                    }
+            }
         }
     }
 

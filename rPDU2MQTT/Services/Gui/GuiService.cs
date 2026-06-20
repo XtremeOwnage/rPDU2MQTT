@@ -597,11 +597,41 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     rebootDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "rebootDelay", o.RebootDelay.ToString()),
                     poaAction = pdu.ResolveOutletConfig(d.Key, o.Key, "poaAction", o.PoaAction ?? ""),
                 })).ToList();
-                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets }, ConfigSchema.Json);
+                var groups = data.Groups.Select(g => new { key = g.Key, name = g.Entity_DisplayName }).ToList();
+                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets, groups }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Apply a control action to every outlet in a OneView group (fan-out). Gated by ActionsEnabled.
+        app.MapPost("/api/control/group", async (HttpContext ctx) =>
+        {
+            if (!config.PDU.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
+
+            GroupControlRequest? req;
+            try { req = await ctx.Request.ReadFromJsonAsync<GroupControlRequest>(ctx.RequestAborted); }
+            catch { req = null; }
+            if (req is null || string.IsNullOrWhiteSpace(req.GroupKey))
+                return Results.BadRequest(new { ok = false, message = "groupKey and action are required." });
+
+            var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
+            if (action is not ("on" or "off" or "reboot"))
+                return Results.BadRequest(new { ok = false, message = "action must be on, off or reboot." });
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            try
+            {
+                var n = await pdu.ControlGroupAsync(req.GroupKey, action, cts.Token);
+                return Results.Json(new { ok = true, message = $"Group {req.GroupKey} → {action} ({n} outlet(s))." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Group control failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 
@@ -701,6 +731,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of a POST /api/control/label request.</summary>
     private sealed record LabelRequest(string DeviceId, int Index, string Label);
+
+    /// <summary>Body of a POST /api/control/group request.</summary>
+    private sealed record GroupControlRequest(string GroupKey, string Action);
 
     /// <summary>One pivoted live-view row: an outlet/entity with its numeric measurements + state.</summary>
     private static object BuildLiveEntity(string device, string source, string kind, int? number, string? state, IEnumerable<Models.PDU.Measurement> measurements)

@@ -37,8 +37,12 @@ public class OutletCommandService : IHostedService
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", MqttPath.Reboot.ToJsonString()),
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", ResetStatsCommand),
             MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, "+", outlets, "+", "+", MqttPath.Set.ToJsonString()),
+            // <ParentTopic>/Groups/<key>/control  (payload = on/off/reboot, fans out to members)
+            MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MqttPath.Groups.ToJsonString(), "+", GroupControlCommand),
         };
     }
+
+    private const string GroupControlCommand = "control";
 
     // Command segment for the reset-statistics button, and the config fields settable via <field>/set.
     private const string ResetStatsCommand = "resetStats";
@@ -74,8 +78,19 @@ public class OutletCommandService : IHostedService
         var topic = e.PublishMessage.Topic ?? string.Empty;
         try
         {
-            // Expected topic: <parent>/<deviceId>/outlets/<index>/set
             var parts = topic.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+            // Group control: <parent>/Groups/<key>/control, payload on/off/reboot -> fan out to members.
+            var groupsIdx = Array.IndexOf(parts, MqttPath.Groups.ToJsonString());
+            if (groupsIdx >= 0 && parts.Length == groupsIdx + 3 && parts[^1].Equals(GroupControlCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                var groupAction = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim().ToLowerInvariant();
+                if (groupAction is "on" or "off" or "reboot")
+                    await pdu.ControlGroupAsync(parts[groupsIdx + 1], groupAction, CancellationToken.None);
+                return;
+            }
+
+            // Expected topic: <parent>/<deviceId>/outlets/<index>/set
             var outletsIdx = Array.IndexOf(parts, MqttPath.Outlets.ToJsonString());
             if (outletsIdx <= 0 || outletsIdx + 1 >= parts.Length)
                 return;

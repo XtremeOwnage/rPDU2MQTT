@@ -59,6 +59,42 @@ public partial class PDU
                 pendingOutletStates[$"{deviceId}/{outletIndex}"] = (action, DateTime.UtcNow.Add(PendingStateTimeout));
     }
 
+    /// <summary>
+    /// Apply a control action ("on"/"off"/"reboot") to every outlet in a OneView group. OneView has
+    /// no group control endpoint, so members are resolved from the host→group mapping and the existing
+    /// per-outlet control is fanned out. Aborts if no members resolve (so a bad mapping can't hit the
+    /// wrong outlets). Returns the number of outlets actioned. PDU.ActionsEnabled only.
+    /// </summary>
+    public async Task<int> ControlGroupAsync(string groupKey, string action, CancellationToken cancellationToken)
+    {
+        var oneview = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
+        var members = ResolveGroupMembers(oneview, groupKey);
+
+        if (members.Count == 0)
+            throw new Exception($"No member outlets resolved for group '{groupKey}' from the OneView host→group mapping. Group control aborted.");
+
+        Log.Information($"Group '{groupKey}' {action}: applying to {members.Count} outlet(s).");
+        foreach (var (deviceId, index) in members)
+            await ControlOutletAsync(deviceId, index, action, cancellationToken);
+
+        return members.Count;
+    }
+
+    /// <summary>
+    /// Resolve a group's member outlets (deviceSerial + index) from the OneView per-outlet group
+    /// mapping (host.groupMap.dev.&lt;serial&gt;.outlet.&lt;index&gt;.group == groupKey).
+    /// </summary>
+    internal static List<(string DeviceId, int Index)> ResolveGroupMembers(OneViewRootData oneview, string groupKey)
+    {
+        var members = new List<(string, int)>();
+        foreach (var host in oneview.Hosts)
+            foreach (var (deviceId, dev) in host.GroupMap?.Dev ?? new())
+                foreach (var (indexStr, outlet) in dev.Outlet ?? new())
+                    if (string.Equals(outlet.Group, groupKey, StringComparison.OrdinalIgnoreCase) && int.TryParse(indexStr, out var index))
+                        members.Add((deviceId, index));
+        return members;
+    }
+
     /// <summary>Write outlet configuration fields (delays, power-on action) — PDU.ActionsEnabled only.</summary>
     public async Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
     {
@@ -210,6 +246,13 @@ public partial class PDU
 
         // Process groups.
         await processOneViewGroups(data, data.Groups, cancellationToken);
+
+        // Resolve each group's member outlets from the per-outlet groupMap (for actions + member switches).
+        foreach (var group in data.Groups)
+        {
+            group.MemberOutlets.Clear();
+            group.MemberOutlets.AddRange(ResolveGroupMembers(data, group.Key));
+        }
 
 
         //Process individual hosts, as if they were stand-alone hosts.
