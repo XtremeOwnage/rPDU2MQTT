@@ -384,7 +384,14 @@ function addControlSection(nav, sections) {
       const lin = document.createElement('input'); lin.type = 'text'; lin.value = o.label || ''; lin.style.width = '150px'; lin.disabled = !enabled;
       const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
       setBtn.onclick = () => setLabel(o, lin.value);
-      tdLabel.appendChild(lin); tdLabel.appendChild(setBtn); tr.appendChild(tdLabel);
+      tdLabel.appendChild(lin); tdLabel.appendChild(setBtn);
+      // Reset only shows when a label is actually set; clears it back to the PDU default.
+      if ((o.label || '').trim()) {
+        const resetBtn = document.createElement('button'); resetBtn.className = 'small danger'; resetBtn.textContent = 'Reset'; resetBtn.disabled = !enabled; resetBtn.style.marginLeft = '4px';
+        resetBtn.onclick = () => { if (confirm('Clear the label for outlet ' + o.number + '?')) setLabel(o, ''); };
+        tdLabel.appendChild(resetBtn);
+      }
+      tr.appendChild(tdLabel);
       const tdState = document.createElement('td');
       const dot = document.createElement('span'); dot.className = 'dot ' + (o.state === 'on' ? 'good' : 'bad'); tdState.appendChild(dot);
       tdState.appendChild(document.createTextNode(o.state || '?')); tr.appendChild(tdState);
