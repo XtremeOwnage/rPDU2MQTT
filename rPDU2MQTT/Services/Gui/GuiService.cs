@@ -284,8 +284,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
                 var message = configSource.IsGitOpsManaged
-                    ? "Saved to the Kubernetes resource. Remember to update your GitOps source so it doesn't drift. Restart to apply."
-                    : "Saved. Restart the service to apply changes.";
+                    ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Press 'Republish discovery' to apply override/name/template changes; restart for connection changes."
+                    : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for connection changes (host/port).";
                 return Results.Json(new { ok = true, message, gitops = configSource.IsGitOpsManaged });
             }
             catch (Exception ex)

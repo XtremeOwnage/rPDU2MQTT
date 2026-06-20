@@ -188,6 +188,9 @@ public partial class PDU
     private PduData? cachedData;
     private DateTime cachedDataAtUtc;
 
+    /// <summary>Expire the cached poll so the next fetch re-reads + re-processes (e.g. after a config reload).</summary>
+    public void InvalidateCache() => cachedDataAtUtc = DateTime.MinValue;
+
     private async Task<PduData> FetchRootData(CancellationToken cancellationToken)
     {
         if (useOneView is null)
