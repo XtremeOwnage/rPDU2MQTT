@@ -248,8 +248,12 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                         var sw = BuildSwitch(member.Outlet, newParent);
                         sw.ID = group.Entity_Identifier + "_" + member.Outlet.Entity_Identifier + "_switch";
                         sw.Name = group.Entity_Identifier + "_" + member.Outlet.Entity_Name + "_switch";
-                        // Identify which PDU + outlet, since outlet names can repeat across members.
-                        sw.DisplayName = $"{member.Device.Entity_DisplayName} — Outlet {member.Outlet.Key + 1} ({member.Outlet.Entity_DisplayName})";
+                        // Identify which PDU + outlet (names can repeat across members); customizable.
+                        sw.DisplayName = (string.IsNullOrWhiteSpace(cfg.HASS.GroupMemberNameTemplate) ? "{device} — Outlet {number} ({outlet})" : cfg.HASS.GroupMemberNameTemplate)
+                            .Replace("{device}", member.Device.Entity_DisplayName)
+                            .Replace("{outlet}", member.Outlet.Entity_DisplayName)
+                            .Replace("{number}", (member.Outlet.Key + 1).ToString())
+                            .Replace("{group}", group.Entity_DisplayName);
                         components.Add(sw);
                     }
             }

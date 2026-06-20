@@ -39,4 +39,13 @@ public class HomeAssistantConfig
     /// </summary>
     [Description("expire_after (seconds) applied to sensors; after this long without an update Home Assistant marks them unavailable.")]
     public int SensorExpireAfterSeconds { get; set; } = (int)TimeSpan.FromMinutes(5).TotalSeconds;
+
+    /// <summary>
+    /// Name template for the member-outlet switches mirrored onto a OneView group's device.
+    /// Placeholders: {device}, {outlet}, {number}, {group}.
+    /// </summary>
+    [DefaultValue("{device} — Outlet {number} ({outlet})")]
+    [Description("Name template for a group's mirrored member switches. Placeholders: {device}, {outlet}, {number}, {group}.")]
+    [TemplateVariables("device", "outlet", "number", "group")]
+    public string GroupMemberNameTemplate { get; set; } = "{device} — Outlet {number} ({outlet})";
 }
