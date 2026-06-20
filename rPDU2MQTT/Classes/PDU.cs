@@ -69,11 +69,13 @@ public partial class PDU
     {
         var oneview = await api.GetAsync<OneViewRootData>("/oneview", cancellationToken);
 
-        var members = oneview.Hosts
-            .Where(h => string.Equals(h.Group, groupKey, StringComparison.OrdinalIgnoreCase))
-            .SelectMany(h => h.Cache?.Devices ?? new List<Device>())
-            .SelectMany(dev => (dev.Outlets ?? new List<Outlet>()).Select(o => (deviceId: dev.Key, index: o.Key)))
-            .ToList();
+        // Membership is per-outlet: host.groupMap.dev.<serial>.outlet.<index>.group == groupKey.
+        var members = new List<(string deviceId, int index)>();
+        foreach (var host in oneview.Hosts)
+            foreach (var (deviceId, dev) in host.GroupMap?.Dev ?? new())
+                foreach (var (indexStr, outlet) in dev.Outlet ?? new())
+                    if (string.Equals(outlet.Group, groupKey, StringComparison.OrdinalIgnoreCase) && int.TryParse(indexStr, out var index))
+                        members.Add((deviceId, index));
 
         if (members.Count == 0)
             throw new Exception($"No member outlets resolved for group '{groupKey}' from the OneView host→group mapping. Group control aborted.");

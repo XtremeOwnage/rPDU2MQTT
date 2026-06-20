@@ -14,9 +14,9 @@ public class OneViewHost : IDictionaryKey<string>
     [JsonPropertyName("snmpInstance")]
     public long SnmpInstance { get; set; }
 
-    // ToDo - Fix Later...
-    //[JsonPropertyName("groupMap")]
-    //public The0019850C269EGroupMap GroupMap { get; set; }
+    // Per-outlet group assignment: groupMap.dev.<serial>.outlet.<index>.group.
+    [JsonPropertyName("groupMap")]
+    public OneViewGroupMap? GroupMap { get; set; }
 
     [JsonPropertyName("type")]
     public string Type { get; set; }

@@ -221,6 +221,16 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Discover measurements (per-group aggregate, and the cluster-wide PduTotal rollup).
             collectDiscovery(group.Entity.Outlets.Concat(group.Entity.PduTotal).SelectMany(o => o.Measurements), newParent, components);
+
+            // Group actions (fan out to member outlets). The "Total"/"Unassigned" pseudo-groups have
+            // no member mapping, so only offer actions on real groups.
+            if (cfg.PDU.ActionsEnabled && group.Entity.Outlets.Count > 0)
+            {
+                var control = MQTTHelper.JoinPaths(group.GetTopicPath(), "control");
+                components.Add(BuildButton(group.Entity_Identifier + "_allOn", "All On", control, newParent, payloadPress: "on"));
+                components.Add(BuildButton(group.Entity_Identifier + "_allOff", "All Off", control, newParent, payloadPress: "off"));
+                components.Add(BuildButton(group.Entity_Identifier + "_rebootAll", "Reboot All", control, newParent, deviceClass: "restart", payloadPress: "reboot"));
+            }
         }
     }
 
