@@ -9,7 +9,6 @@ How to run rPDU2MQTT. Pick the method that matches your environment:
 | **Kubernetes (Helm)** | Clusters (recommended k8s path) | [Kubernetes — Helm](#kubernetes--helm-chart) |
 | **Kubernetes (Argo CD)** | GitOps clusters | [Kubernetes — Argo CD](#kubernetes--argo-cd) |
 | **Kubernetes (manifests)** | Clusters without Helm | [Kubernetes — manifests](#kubernetes--raw-manifests) |
-| **unRAID** | unRAID servers | [unRAID](#unraid) |
 
 All methods need the same two things below.
 
@@ -154,14 +153,11 @@ Without Helm:
 - Plain Deployment: [`Examples/Kubernetes/manifests.yaml`](../Examples/Kubernetes/manifests.yaml).
 - CRD config source (writable config + status): [`Examples/Kubernetes/crd`](../Examples/Kubernetes/crd/README.md).
 
-## unRAID
-
-Deploy via the unRAID Docker GUI — step-by-step guide:
-[`Examples/unRAID`](../Examples/unRAID/README.md).
-
 ## Credentials & secrets
 
-Keep secrets out of `config.yaml` by supplying them via environment variables (these override the file):
+Keep secrets out of `config.yaml` by supplying them via environment variables (these override the file).
+The **full list of environment variables and their precedence** is in
+[`Examples/Configuration/environment-variables.md`](../Examples/Configuration/environment-variables.md).
 
 | Variable | Overrides |
 | --- | --- |

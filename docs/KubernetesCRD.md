@@ -35,7 +35,7 @@ A Custom Resource (CR) is a first-class, **writable** API object. Backing config
   count / last poll).
 - Stay **GitOps-friendly** — the CR is a normal manifest you can keep in source control.
 
-It is deliberately **optional**: Docker/compose/unRAID and plain-ConfigMap users are unaffected.
+It is deliberately **optional**: Docker/compose and plain-ConfigMap users are unaffected.
 
 ## Non-goals
 

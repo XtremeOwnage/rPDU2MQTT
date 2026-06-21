@@ -16,11 +16,12 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 - **Home Assistant auto-discovery** — devices, sensors, and `problem` alarm binary-sensors created automatically; proper device hierarchy (`via_device`), MAC/IP connection info, and availability/`expire_after`.
 - **Outlet control** (opt-in) — on/off **switches**, **reboot** buttons, configurable **on/off/reboot delays** (`number`), **power-on action** (`select`), and a **reset-statistics** button.
 - **OneView clusters** — aggregates multiple PDUs; per-group **Sum/Avg/Min/Max** rollup sensors, plus **group actions** (All On / All Off / Reboot All) fanned out to member outlets, and the member switches mirrored onto the group device.
-- **Configuration & control GUI** — a built-in web UI to view/edit/test the config, control outlets, rename PDU labels, browse live data, and see the generated MQTT/Prometheus/EmonCMS paths. Basic-auth, **OIDC/SSO**, or no-auth.
+- **Configuration & control GUI** — a built-in web UI to view/edit/test the config, control outlets, rename PDU labels, browse live data, and see the generated MQTT/Prometheus/EmonCMS paths.
+- **GUI authentication** — HTTP Basic, **OpenID Connect (SSO)** against any OIDC provider (Keycloak, Authentik, Authelia, Entra ID, Google, …), or none.
 - **Prometheus** — scrape (`/metrics`) and/or Pushgateway, with a **customizable metric-name template**.
 - **EmonCMS** — pushes inputs on each poll.
-- **Kubernetes-native** — Helm chart, optional **`RpduConfig` CRD** as a writable config source, health probes, NetworkPolicy, and Gateway API `HTTPRoute`.
-- **Secrets-friendly** — credentials via `RPDU2MQTT_*` env vars / `*_FILE` Docker secrets, never required in the config file.
+- **Kubernetes-native** — Helm chart, optional **`RpduConfig` CRD** as a writable config source, Argo CD example, health probes, NetworkPolicy, and Gateway API `HTTPRoute`.
+- **Secrets-friendly** — credentials via `RPDU2MQTT_*` env vars / `*_FILE` Docker secrets, never required in the config file (see [environment variables & precedence](./Examples/Configuration/environment-variables.md)).
 
 ---
 
@@ -98,7 +99,8 @@ Then browse to `http://<host>:8080` for the GUI. See the full guides below.
 | Guide | What's inside |
 | --- | --- |
 | [Configuration](./docs/Configuration.md) | Every config option — MQTT, PDU, overrides, control, Prometheus, EmonCMS, the GUI (incl. OIDC) and health checks. |
-| [Deployment](./docs/Deployment.md) | Docker Compose, Helm, the CRD config source, unRAID, secrets, and verification. |
+| [Environment variables & precedence](./Examples/Configuration/environment-variables.md) | All `RPDU2MQTT_*` vars and what overrides what (env vs config file vs CRD). |
+| [Deployment](./docs/Deployment.md) | Docker, Docker Compose, Helm, Argo CD, the CRD config source, secrets, and verification. |
 | [Aggregation (OneView)](./docs/Aggregation.md) | Multi-PDU clusters: rollup sensors and group actions. |
 | [Kubernetes CRD](./docs/KubernetesCRD.md) | Using an `RpduConfig` custom resource as a writable config source. |
 

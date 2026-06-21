@@ -107,7 +107,9 @@ Pdu:
 
 ### Credentials via environment / secrets (Optional)
 To keep secrets out of `config.yaml`, MQTT and PDU credentials can be supplied via environment
-variables. These override whatever is in the config file:
+variables. These override whatever is in the config file. For the **complete list of variables and
+the full precedence rules** (env vs config file vs the Kubernetes CRD), see
+[environment-variables.md](../Examples/Configuration/environment-variables.md).
 
 | Variable | Overrides |
 | --- | --- |
