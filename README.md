@@ -9,7 +9,7 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 
 > New to these PDUs? See this [blog post on metered/switched PDUs](https://static.xtremeownage.com/blog/2024/metered-switch-pdu/) for background on the units and their capabilities.
 
-![rPDU2MQTT Live Data](docs/images/gui-live-data.png)
+![rPDU2MQTT Live Data](docs/images/gui-live-data.webp)
 
 ---
 
@@ -34,29 +34,29 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 
 An **outlet** as its own device — switch, sensors, configurable delays, and power-on action:
 
-![Home Assistant outlet device](docs/images/home-assistant-outlet.png)
+![Home Assistant outlet device](docs/images/home-assistant-outlet.webp)
 
 A **OneView group** device — Sum/Avg/Min/Max rollup sensors, the member outlet switches, and All On / All Off / Reboot All:
 
-![Home Assistant group device](docs/images/home-assistant-group.png)
+![Home Assistant group device](docs/images/home-assistant-group.webp)
 
 Standard Home Assistant history, dashboards, and automations come for free:
 
-![Home Assistant power history](docs/images/home-assistant-history.png)
+![Home Assistant power history](docs/images/home-assistant-history.webp)
 
 ### Configuration & control GUI
 
 The structured **configuration** form (every option, generated from the model):
 
-![GUI configuration](docs/images/gui-config.png)
+![GUI configuration](docs/images/gui-config.webp)
 
 The **Control** tab — per-outlet On/Off/Reboot/Reset + editable label, plus group actions:
 
-![GUI control tab](docs/images/gui-control.png)
+![GUI control tab](docs/images/gui-control.webp)
 
 The **Paths** tab — the generated MQTT topic / Prometheus metric / EmonCMS key for every measurement:
 
-![GUI paths](docs/images/gui-paths.png)
+![GUI paths](docs/images/gui-paths.webp)
 
 ---
 
