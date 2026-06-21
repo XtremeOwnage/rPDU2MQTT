@@ -35,7 +35,7 @@ A Custom Resource (CR) is a first-class, **writable** API object. Backing config
   count / last poll).
 - Stay **GitOps-friendly** — the CR is a normal manifest you can keep in source control.
 
-It is deliberately **optional**: Docker/compose/unRAID and plain-ConfigMap users are unaffected.
+It is deliberately **optional**: Docker/compose and plain-ConfigMap users are unaffected.
 
 ## Non-goals
 
@@ -130,6 +130,10 @@ The CR can be the GitOps source of truth, so:
   ./charts/rpdu2mqtt` remains the canonical export — the GUI export focuses on the config/CR, which is
   the only thing it actually edits.
 
+The GUI's **Export** view (secrets redacted), used to commit GUI edits back to the GitOps repo:
+
+![GUI config export](images/gui-export.webp)
+
 ### Keeping GUI edits across chart upgrades / Argo syncs
 
 Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` from `values.config`, a
@@ -164,6 +168,11 @@ Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` f
 - **Status:** a lightweight hosted service patches `status` (connected from the MQTT client, device
   count + last poll from `PDU.GetRootData_Public`) on the poll interval, using the values already
   surfaced by `/api/status` and `/api/livedata`.
+
+In-cluster, the GUI **Diagnostics** page confirms the config source is the `RpduConfig` CR and can pull
+the pod's logs/events on demand (using the RBAC the chart grants):
+
+![GUI Diagnostics in Kubernetes — RpduConfig source + pod logs](images/gui-diagnostics-kubernetes.webp)
 
 ## Manifests to ship
 

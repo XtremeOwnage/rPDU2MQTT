@@ -44,6 +44,14 @@ The sensor names are overridable via `Overrides.OneviewGroups.Measurements.<type
 > Reboot All** (in the GUI Control tab and Home Assistant). It aborts if it can't resolve a group's
 > members, so it never acts on the wrong outlets.
 
+A group as a Home Assistant device — rollup sensors, the member switches, and the group action buttons:
+
+![Home Assistant OneView group device](images/home-assistant-group.webp)
+
+The parent PDU device shows its sensors plus every outlet/group as connected devices (`via_device`):
+
+![Home Assistant PDU device](images/home-assistant-pdu.webp)
+
 Customize groups under `Overrides.OneviewGroups`:
 
 ```yaml
@@ -71,6 +79,10 @@ Overrides:
       total:
         Enabled: false   # hide the default "total" group
 ```
+
+The GUI's **Overrides** editor lists the discovered OneView groups, so you can rename or disable them:
+
+![GUI OneView group overrides](images/overrides-oneview-groups.webp)
 
 ## Outlet control in a cluster
 
