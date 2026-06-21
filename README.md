@@ -1,5 +1,8 @@
 # rPDU2MQTT
 
+**Yes**, This is partially coded by AI. You can stop scrolling if that is what you came here looking for. You- can either accept that claude has been handling PRs, or- you can wait another 5 years for me to find time to do them myself. If you prefer the latter, then please feel free to use the [0.3.5 release.](https://github.com/XtremeOwnage/rPDU2MQTT/releases/tag/v0.3.5)
+
+
 **Bridge your Vertiv / Geist rack PDU to MQTT — with first-class Home Assistant, Prometheus, EmonCMS, and Kubernetes support, and a built-in configuration & control GUI.**
 
 rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist rPDU's HTTP API, publishes every measurement to MQTT, and (optionally) auto-creates the matching **Home Assistant** devices & entities via MQTT discovery — including **controllable outlets** when you enable write actions. It also pushes metrics to **Prometheus** and **EmonCMS**, understands **OneView** PDU clusters, and ships a **Helm chart + CRD** for Kubernetes.
