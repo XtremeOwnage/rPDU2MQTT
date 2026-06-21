@@ -32,6 +32,10 @@ rPDU2MQTT is a small, container-friendly .NET service. It polls a Vertiv/Geist r
 
 ### Home Assistant
 
+The **bridge** device — every PDU, outlet, and OneView group as connected devices, plus Rediscover/Restart:
+
+![Home Assistant bridge device](docs/images/home-assistant-bridge.webp)
+
 An **outlet** as its own device — switch, sensors, configurable delays, and power-on action:
 
 ![Home Assistant outlet device](docs/images/home-assistant-outlet.webp)
@@ -57,6 +61,12 @@ The **Control** tab — per-outlet On/Off/Reboot/Reset + editable label, plus gr
 The **Paths** tab — the generated MQTT topic / Prometheus metric / EmonCMS key for every measurement:
 
 ![GUI paths](docs/images/gui-paths.webp)
+
+### Metrics (Prometheus / EmonCMS)
+
+Beyond MQTT, every measurement can be scraped by Prometheus and/or pushed to EmonCMS:
+
+![EmonCMS inputs populated by rPDU2MQTT](docs/images/emoncms-inputs.webp)
 
 ---
 

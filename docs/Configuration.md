@@ -80,6 +80,10 @@ Mqtt:
     ValidateCertificate: true  # Set to false if you're using self-signed certificates
 ```
 
+Everything is published under `ParentTopic` — here's the tree in MQTT Explorer:
+
+![Published MQTT topics in MQTT Explorer](images/mqtt-explorer.webp)
+
 ## PDU Configuration (Required)
 
 ### Connection Details (Required)
@@ -94,6 +98,10 @@ Pdu:
     Timeout: 15          # Request timeout in seconds
     ValidateCertificate: true  # Set to false if using self-signed certificates
 ```
+
+The same options in the GUI's **PDU** section (note **Enable Write Actions** for outlet control):
+
+![GUI PDU configuration](images/gui-pdu.webp)
 
 ### Credentials (Optional)
 Provide credentials if required to connect to the PDU.
@@ -178,6 +186,11 @@ ID fields, are only used when the device/entity is initially created. Changing t
 
 All fields, are optional.
 
+> The GUI's **Overrides** editor is the easiest way to set these — it's driven by your live PDU data,
+> so you pick real devices/outlets/measurements and can preview the generated paths before saving:
+>
+> ![GUI Overrides editor](images/gui-overrides.webp)
+
 ### PDU Override
 Override details about the PDU itself.
 
@@ -254,6 +267,18 @@ HomeAssistant:
   DiscoveryInterval: 300                      # Interval (in seconds) between discovery messages
   SensorExpireAfterSeconds: 300               # Time after which sensors are marked as unavailable
 ```
+
+The GUI's **HomeAssistant** section exposes these (and the group member name/object-id templates):
+
+![GUI Home Assistant configuration](images/gui-homeassistant.webp)
+
+The bridge, each PDU, every outlet, and each OneView group then appear as Home Assistant devices:
+
+![Home Assistant bridge device](images/home-assistant-bridge.webp)
+
+Outlets and power sensors are usable in automations too (device triggers like "power crossed threshold"):
+
+![Home Assistant device automation triggers](images/home-assistant-automation.webp)
 
 ## Debugging Configuration
 
@@ -365,6 +390,10 @@ Overrides:
 The GUI **Paths** tab (and the Overrides "Preview generated paths" button) show the resulting metric
 names so you can confirm them before deploying.
 
+The Prometheus section in the GUI (with the metric-name template and Pushgateway options):
+
+![GUI Prometheus configuration](images/gui-prometheus.webp)
+
 ### EmonCMS
 Pushes measurements to an EmonCMS server's `input/post` API (EmonCMS auto-creates the inputs).
 
@@ -376,6 +405,14 @@ EmonCMS:
   Node: "rpdu2mqtt"
   Path: "input/post"                  # API path (relative to Url) to post to
 ```
+
+The GUI's EmonCMS section, and the inputs/feeds it auto-creates in EmonCMS:
+
+![GUI EmonCMS configuration](images/gui-emoncms.webp)
+
+![EmonCMS inputs populated by rPDU2MQTT](images/emoncms-inputs.webp)
+
+![EmonCMS feed graph](images/emoncms-graph.webp)
 
 ## Configuration GUI (Optional)
 
@@ -411,6 +448,8 @@ Gui:
     Scopes: "openid profile email"
     CallbackPath: "/signin-oidc" # register <gui-url>/signin-oidc as the redirect URI
 ```
+
+![GUI authentication / OIDC settings](images/gui-oidc.webp)
 
 - Register the redirect URI `https://<your-gui-host>/signin-oidc` with your provider.
 - Provide the client secret out-of-band via **`RPDU2MQTT_OIDC_CLIENT_SECRET`** (or its `_FILE` form)
@@ -513,6 +552,8 @@ connection, last successful PDU poll, config source, and (in Kubernetes) the nam
 has a **Restart bridge** button (stops the process so the container/host restarts it) and, when using
 the Kubernetes config source, on-demand **pod logs** and **recent events** (requires the RBAC the Helm
 chart grants — `pods`, `pods/log`, `events`).
+
+![GUI Diagnostics page](images/gui-diagnostics.webp)
 
 ## Health Checks (Optional)
 
