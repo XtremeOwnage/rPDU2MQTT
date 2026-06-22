@@ -16,8 +16,8 @@ It points `source` at `charts/rpdu2mqtt` in this repo and supplies values inline
 
 If you use the **RpduConfig config source** (`kubernetesConfigSource.enabled: true`) so the GUI's **Save**
 works, Argo would otherwise revert those edits on every sync — Argo renders with `helm template`, which
-can't read the live CR. The example includes an `ignoreDifferences` for the `RpduConfig` `/spec` to
-prevent that:
+can't read the live CR (or the live Secret the GUI writes credentials into). The example includes an
+`ignoreDifferences` for the `RpduConfig` `/spec` **and** the companion Secret's `/data` to prevent that:
 
 ```yaml
 ignoreDifferences:
@@ -25,6 +25,11 @@ ignoreDifferences:
     kind: RpduConfig
     jsonPointers:
       - /spec
+  - group: ""
+    kind: Secret
+    name: rpdu2mqtt          # the release Secret (RPDU2MQTT_SECRET_NAME)
+    jsonPointers:
+      - /data
 ```
 
 See [KubernetesCRD.md](../../../docs/KubernetesCRD.md) for the full discussion.

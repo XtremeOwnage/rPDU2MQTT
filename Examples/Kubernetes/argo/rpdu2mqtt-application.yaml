@@ -40,11 +40,17 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-  # With the RpduConfig config source, let GUI edits to the CR persist instead of being
-  # reverted on every sync (Argo renders with `helm template`, which can't read the live CR).
-  # See docs/KubernetesCRD.md and issue #110.
+  # With the RpduConfig config source, let GUI edits persist instead of being reverted on every
+  # sync (Argo renders with `helm template`, which can't read the live CR or Secret). The CR holds
+  # the config; the GUI writes credentials (incl. the OIDC client secret) into the Secret.
+  # See docs/KubernetesCRD.md and issues #110, #123.
   ignoreDifferences:
     - group: rpdu2mqtt.xtremeownage.com
       kind: RpduConfig
       jsonPointers:
         - /spec
+    - group: ""
+      kind: Secret
+      name: rpdu2mqtt-credentials   # the Secret the GUI writes to (existingSecret / RPDU2MQTT_SECRET_NAME)
+      jsonPointers:
+        - /data

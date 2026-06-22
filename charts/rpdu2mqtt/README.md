@@ -36,7 +36,9 @@ credentials:
   — it is the single source of truth for app behaviour. See
   [docs/Configuration.md](../../docs/Configuration.md) for every option.
 - `credentials.*` (or `existingSecret`) become `RPDU2MQTT_*` env vars via a **Secret**, so passwords
-  stay out of the ConfigMap.
+  stay out of the ConfigMap. With `kubernetesConfigSource.enabled`, the GUI also writes credentials
+  (incl. the OIDC client secret) **into this Secret** — kept out of the CR `spec` — and the chart grants
+  the pod `get,patch,update` on just that Secret. Create-once preserves GUI-written values on upgrade.
 - The pod rolls automatically when the rendered config changes (config checksum annotation).
 
 ## Key values

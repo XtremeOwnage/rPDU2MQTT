@@ -136,14 +136,19 @@ kubectl apply -f Examples/Kubernetes/argo/rpdu2mqtt-application.yaml
 ```
 
 That example also shows the **chart-here / values-in-your-repo** multi-source pattern. If you use the
-**`RpduConfig` config source** so the GUI's Save works, add an `ignoreDifferences` for the CR `/spec`
-so Argo doesn't revert GUI edits on sync (Argo renders with `helm template` and can't read the live CR):
+**`RpduConfig` config source** so the GUI's Save works, add `ignoreDifferences` for the CR `/spec` and
+the companion Secret's `/data` so Argo doesn't revert GUI edits (config) or GUI-saved credentials on
+sync (Argo renders with `helm template` and can't read the live CR/Secret):
 
 ```yaml
 ignoreDifferences:
   - group: rpdu2mqtt.xtremeownage.com
     kind: RpduConfig
     jsonPointers: [ /spec ]
+  - group: ""
+    kind: Secret
+    name: rpdu2mqtt          # RPDU2MQTT_SECRET_NAME
+    jsonPointers: [ /data ]
 ```
 
 ## Kubernetes — raw manifests
