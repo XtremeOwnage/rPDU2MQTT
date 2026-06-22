@@ -598,7 +598,24 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     poaAction = pdu.ResolveOutletConfig(d.Key, o.Key, "poaAction", o.PoaAction ?? ""),
                 })).ToList();
                 var groups = data.Groups.Select(g => new { key = g.Key, name = g.Entity_DisplayName }).ToList();
-                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets, groups }, ConfigSchema.Json);
+                // PDUs and their circuits (breaker entities), with editable labels — resolved through the
+                // pending-write latch like outlets so a just-set value shows immediately.
+                var devices = data.Devices.Select(d => new
+                {
+                    deviceId = d.Key,
+                    name = d.Entity_DisplayName,
+                    label = pdu.ResolveDeviceConfig(d.Key, "label", d.Label ?? ""),
+                    circuits = d.Entity
+                        .Where(e => e.Key.StartsWith("breaker", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(e => e.Key)
+                        .Select(e => new
+                        {
+                            key = e.Key,
+                            name = e.Entity_DisplayName ?? e.Name,
+                            label = pdu.ResolveEntityConfig(d.Key, e.Key, "label", e.Label ?? ""),
+                        }).ToList(),
+                }).ToList();
+                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets, groups, devices }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -677,14 +694,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try { req = await ctx.Request.ReadFromJsonAsync<LabelRequest>(ctx.RequestAborted); }
             catch { req = null; }
             if (req is null || string.IsNullOrWhiteSpace(req.DeviceId))
-                return Results.BadRequest(new { ok = false, message = "deviceId, index and label are required." });
+                return Results.BadRequest(new { ok = false, message = "deviceId and label are required." });
+
+            var target = (req.Target ?? "outlet").Trim().ToLowerInvariant();
+            var label = new Dictionary<string, object> { ["label"] = (req.Label ?? string.Empty).Trim() };
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, new Dictionary<string, object> { ["label"] = (req.Label ?? string.Empty).Trim() }, cts.Token);
-                return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} label set." }, ConfigSchema.Json);
+                switch (target)
+                {
+                    case "device":
+                        await pdu.SetDeviceConfigAsync(req.DeviceId, label, cts.Token);
+                        return Results.Json(new { ok = true, message = "PDU label set." }, ConfigSchema.Json);
+                    case "entity":
+                        if (string.IsNullOrWhiteSpace(req.EntityKey))
+                            return Results.BadRequest(new { ok = false, message = "entityKey is required for an entity label." });
+                        await pdu.SetEntityConfigAsync(req.DeviceId, req.EntityKey, label, cts.Token);
+                        return Results.Json(new { ok = true, message = "Circuit label set." }, ConfigSchema.Json);
+                    default:
+                        await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, label, cts.Token);
+                        return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} label set." }, ConfigSchema.Json);
+                }
             }
             catch (Exception ex)
             {
@@ -730,7 +762,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private sealed record ControlRequest(string DeviceId, int Index, string Action);
 
     /// <summary>Body of a POST /api/control/label request.</summary>
-    private sealed record LabelRequest(string DeviceId, int Index, string Label);
+    private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string Label);
 
     /// <summary>Body of a POST /api/control/group request.</summary>
     private sealed record GroupControlRequest(string GroupKey, string Action);

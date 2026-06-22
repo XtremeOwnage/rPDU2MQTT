@@ -30,8 +30,9 @@ public partial class PDU
     // applies the change, during which it still reports the OLD state. Latch the commanded state
     // so polling doesn't flap Home Assistant back until the PDU actually catches up (or we time out).
     private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletStates = new();
-    // Same latch idea for writable config fields (delays / power-on action), keyed deviceId/index/field.
-    private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingOutletConfig = new();
+    // Same latch idea for writable config fields (outlet delays/power-on, device & circuit labels),
+    // keyed by a resource-qualified path (see LatchPending / ResolvePending).
+    private readonly Dictionary<string, (string expected, DateTime expiresUtc)> pendingConfig = new();
     private readonly object pendingLock = new();
     private static readonly TimeSpan PendingStateTimeout = TimeSpan.FromSeconds(120);
 
@@ -95,29 +96,58 @@ public partial class PDU
         return members;
     }
 
-    /// <summary>Write outlet configuration fields (delays, power-on action) — PDU.ActionsEnabled only.</summary>
+    /// <summary>Write outlet configuration fields (delays, power-on action, label) — PDU.ActionsEnabled only.</summary>
     public async Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
     {
         await api.SetOutletConfigAsync(deviceId, outletIndex, fields, cancellationToken);
-
-        // Latch the new values so polling doesn't flap HA back to the stale config while the PDU applies.
-        lock (pendingLock)
-            foreach (var (field, value) in fields)
-                pendingOutletConfig[$"{deviceId}/{outletIndex}/{field}"] = (value?.ToString() ?? string.Empty, DateTime.UtcNow.Add(PendingStateTimeout));
+        LatchPending($"o/{deviceId}/{outletIndex}", fields);
     }
 
-    /// <summary>Report the latched value for a writable config field until the PDU catches up (or we time out).</summary>
+    /// <summary>Report the latched value for a writable outlet config field until the PDU catches up (or we time out).</summary>
     public string ResolveOutletConfig(string deviceId, int outletIndex, string field, string actual)
+        => ResolvePending($"o/{deviceId}/{outletIndex}/{field}", actual);
+
+    /// <summary>Write device (PDU) configuration fields (e.g. <c>label</c>) — PDU.ActionsEnabled only.</summary>
+    public async Task SetDeviceConfigAsync(string deviceId, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+    {
+        await api.SetDeviceConfigAsync(deviceId, fields, cancellationToken);
+        LatchPending($"d/{deviceId}", fields);
+    }
+
+    /// <summary>Report the latched value for a writable device config field until the PDU catches up.</summary>
+    public string ResolveDeviceConfig(string deviceId, string field, string actual)
+        => ResolvePending($"d/{deviceId}/{field}", actual);
+
+    /// <summary>Write entity (circuit/phase/total) configuration fields (e.g. <c>label</c>) — PDU.ActionsEnabled only.</summary>
+    public async Task SetEntityConfigAsync(string deviceId, string entityKey, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+    {
+        await api.SetEntityConfigAsync(deviceId, entityKey, fields, cancellationToken);
+        LatchPending($"e/{deviceId}/{entityKey}", fields);
+    }
+
+    /// <summary>Report the latched value for a writable entity config field until the PDU catches up.</summary>
+    public string ResolveEntityConfig(string deviceId, string entityKey, string field, string actual)
+        => ResolvePending($"e/{deviceId}/{entityKey}/{field}", actual);
+
+    /// <summary>Latch written config values (keyed <c>{prefix}/{field}</c>) so polling doesn't flap back to stale data.</summary>
+    private void LatchPending(string prefix, IReadOnlyDictionary<string, object> fields)
+    {
+        lock (pendingLock)
+            foreach (var (field, value) in fields)
+                pendingConfig[$"{prefix}/{field}"] = (value?.ToString() ?? string.Empty, DateTime.UtcNow.Add(PendingStateTimeout));
+    }
+
+    /// <summary>Report the latched value for a config field until the PDU catches up (or we time out).</summary>
+    private string ResolvePending(string key, string actual)
     {
         lock (pendingLock)
         {
-            var key = $"{deviceId}/{outletIndex}/{field}";
-            if (!pendingOutletConfig.TryGetValue(key, out var pending))
+            if (!pendingConfig.TryGetValue(key, out var pending))
                 return actual;
 
             if (string.Equals(actual, pending.expected, StringComparison.OrdinalIgnoreCase) || DateTime.UtcNow >= pending.expiresUtc)
             {
-                pendingOutletConfig.Remove(key);
+                pendingConfig.Remove(key);
                 return actual;
             }
 

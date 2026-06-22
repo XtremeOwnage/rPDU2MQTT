@@ -344,9 +344,10 @@ function addControlSection(nav, sections) {
   warn.textContent = 'Write actions are disabled (PDU.ActionsEnabled is false). Enable it in the PDU section and restart to control outlets.';
   sec.appendChild(warn);
   const groupsWrap = document.createElement('div'); sec.appendChild(groupsWrap);
+  const devicesWrap = document.createElement('div'); sec.appendChild(devicesWrap);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
-  let rows = [], groups = [], enabled = false;
+  let rows = [], groups = [], devices = [], enabled = false;
   const actGroup = async (g, action) => {
     const verb = action === 'on' ? 'turn ON' : action === 'off' ? 'turn OFF' : 'reboot';
     if (!confirm('Group "' + (g.name || g.key) + '": ' + verb + ' ALL member outlets?')) return;
@@ -380,12 +381,39 @@ function addControlSection(nav, sections) {
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800); // let the PDU apply, then re-read state
   };
-  const setLabel = async (o, value) => {
-    value = (value || '').trim();
-    toast('Outlet ' + o.number + ': set label…', true);
-    const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, label: value }) });
+  const postLabel = async (payload, desc) => {
+    toast(desc + ': set label…', true);
+    const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800);
+  };
+  const setLabel = (o, value) => postLabel({ deviceId: o.deviceId, target: 'outlet', index: o.index, label: (value || '').trim() }, 'Outlet ' + o.number);
+  const drawDevices = () => {
+    devicesWrap.innerHTML = '';
+    if (!devices.length) return;
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '4px';
+    hh.textContent = 'PDUs & circuits — labels are written to the PDU:'; devicesWrap.appendChild(hh);
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['Type', 'Name', 'Label (on PDU)'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    const labelRow = (kind, name, current, payload) => {
+      const tr = document.createElement('tr');
+      const td0 = document.createElement('td'); td0.textContent = kind; tr.appendChild(td0);
+      const td1 = document.createElement('td'); td1.textContent = name || ''; tr.appendChild(td1);
+      const td2 = document.createElement('td');
+      const lin = document.createElement('input'); lin.type = 'text'; lin.value = current || ''; lin.style.width = '150px'; lin.disabled = !enabled;
+      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      setBtn.onclick = () => postLabel(Object.assign({}, payload, { label: (lin.value || '').trim() }), kind + ' ' + (name || ''));
+      td2.appendChild(lin); td2.appendChild(setBtn); tr.appendChild(td2);
+      tb.appendChild(tr);
+    };
+    devices.forEach(d => {
+      labelRow('PDU', d.name, d.label, { deviceId: d.deviceId, target: 'device' });
+      (d.circuits || []).forEach(c => labelRow('Circuit', c.name, c.label, { deviceId: d.deviceId, target: 'entity', entityKey: c.key }));
+    });
+    t.appendChild(tb); devicesWrap.appendChild(t);
   };
   const draw = () => {
     const f = filter.value.trim().toLowerCase();
@@ -432,8 +460,8 @@ function addControlSection(nav, sections) {
   const load = async () => {
     const r = await api('/api/control/outlets');
     if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load outlets.') + '</div>'; return; }
-    rows = r.body.outlets || []; groups = r.body.groups || []; enabled = !!r.body.actionsEnabled;
-    warn.style.display = enabled ? 'none' : 'block'; drawGroups(); draw();
+    rows = r.body.outlets || []; groups = r.body.groups || []; devices = r.body.devices || []; enabled = !!r.body.actionsEnabled;
+    warn.style.display = enabled ? 'none' : 'block'; drawGroups(); drawDevices(); draw();
   };
   refresh.onclick = load; filter.oninput = draw;
   link.onclick = () => { activate(link, sec); load(); };
