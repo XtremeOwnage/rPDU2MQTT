@@ -23,6 +23,11 @@ handful of **environment variables** layered on top for secrets and to select th
 > So for a secret field: **`RPDU2MQTT_…_FILE` > `RPDU2MQTT_…` > value in the config file / CR**.
 > Everything else comes from the config source only.
 
+> **Kubernetes CRD source:** secrets are never stored in the `RpduConfig` CR. When you set them in the
+> GUI, they're written to a companion **Kubernetes Secret** (`RPDU2MQTT_SECRET_NAME`) that the chart also
+> mounts as env vars — so the precedence above still holds, and an explicit `RPDU2MQTT_*` env var still
+> wins. Credential changes apply on restart. See [KubernetesCRD.md](../../docs/KubernetesCRD.md).
+
 ## Variables
 
 ### Secrets (override the config source; each also has a `*_FILE` variant)
@@ -52,6 +57,7 @@ services:
 | --- | --- | --- |
 | `RPDU2MQTT_CONFIG_SOURCE` | `file` (default) or `k8s` / `kubernetes` to read from an `RpduConfig` CR | `file` |
 | `RPDU2MQTT_CR_NAME` | Name of the `RpduConfig` resource (required when source is `k8s`) | — |
+| `RPDU2MQTT_SECRET_NAME` | Companion Secret the GUI reads/writes credentials from (k8s source) | CR name |
 | `RPDU2MQTT_NAMESPACE` | Namespace of the CR; falls back to the pod's service-account namespace | service-account namespace |
 
 ### Set by the Helm chart (informational)

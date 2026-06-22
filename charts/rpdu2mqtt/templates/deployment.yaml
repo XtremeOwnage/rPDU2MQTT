@@ -40,10 +40,11 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if include "rpdu2mqtt.hasSecret" . }}
+          {{- if or (include "rpdu2mqtt.hasSecret" .) .Values.kubernetesConfigSource.enabled }}
           envFrom:
             - secretRef:
                 name: {{ include "rpdu2mqtt.secretName" . }}
+                optional: true
           {{- end }}
           env:
             - name: RPDU2MQTT_POD_NAME
@@ -57,6 +58,9 @@ spec:
               value: k8s
             - name: RPDU2MQTT_CR_NAME
               value: {{ include "rpdu2mqtt.crName" . | quote }}
+            # Companion Secret the GUI writes credentials into (kept out of the CR spec).
+            - name: RPDU2MQTT_SECRET_NAME
+              value: {{ include "rpdu2mqtt.secretName" . | quote }}
             - name: RPDU2MQTT_NAMESPACE
               valueFrom:
                 fieldRef:

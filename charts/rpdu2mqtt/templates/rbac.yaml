@@ -16,6 +16,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events"]
     verbs: ["get", "list"]
+  # Lets the GUI persist credentials (incl. OIDC client secret) into the companion Secret,
+  # instead of the CR spec. Scoped to just that Secret (the chart pre-creates it).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "patch", "update"]
+    resourceNames: ["{{ include "rpdu2mqtt.secretName" . }}"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -111,10 +111,22 @@ IConfigSource
 
 ### Secrets (decided)
 
-When the Kubernetes config source is used, credentials live in a **Kubernetes Secret**, never inline in
-the CR `spec`. The CR references them (e.g. a `secretRef`/`secretName` field), and the existing
-`RPDU2MQTT_*` env overrides continue to populate them at runtime — so the secret-handling story is the
-same one the Helm chart already uses. GUI write-back **never** writes secret values into the CR.
+When the Kubernetes config source is used, credentials live in a **companion Kubernetes Secret**, never
+inline in the CR `spec`. GUI write-back **never** writes secret values into the CR — instead, on Save the
+app writes the secret fields (MQTT/PDU credentials, EmonCMS API key, GUI password, **OIDC client
+secret**) into that Secret, and reads them back at startup (the chart also mounts it via `envFrom`, so the
+existing `RPDU2MQTT_*` overrides still apply; an explicit env var still wins). This means enabling OIDC
+from the GUI just works — no hand-editing the CR.
+
+Mechanics:
+
+- The Secret name comes from **`RPDU2MQTT_SECRET_NAME`** (the chart sets it to the release Secret; it
+  defaults to the CR name otherwise).
+- The chart **pre-creates** the Secret (create-once, like the CR) so GUI-written values survive `helm
+  upgrade`, and grants the pod `get,patch,update` on **just that Secret**. Non-Helm/Argo deploys must
+  create the Secret, mount it, and grant the same RBAC (and add an Argo `ignoreDifferences` on its data).
+- Credential **changes apply on restart** (use the Diagnostics **Restart bridge** button) — the same as
+  any other connection change, and required for OIDC which is wired up at startup.
 
 ### GitOps & exporting manifests (decided)
 
