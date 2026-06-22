@@ -59,37 +59,47 @@ public class PduApiHandler
     /// outlet resource with the session token in the body. Only invoked when ActionsEnabled.
     /// </remarks>
     public Task ControlOutletAsync(string deviceId, int outletIndex, string action, CancellationToken cancellationToken)
-        => SendOutletCommandAsync(deviceId, outletIndex, "control", new { action, delay = false }, $"control '{action}'", cancellationToken);
+        => SendCommandAsync(deviceId, $"/outlet/{outletIndex}", "control", new { action, delay = false }, $"outlet {outletIndex} control '{action}'", cancellationToken);
 
     /// <summary>
     /// Write outlet configuration fields (e.g. onDelay/offDelay/rebootDelay/poaAction) via cmd "set".
     /// </summary>
     public Task SetOutletConfigAsync(string deviceId, int outletIndex, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
-        => SendOutletCommandAsync(deviceId, outletIndex, "set", fields, $"set {string.Join(",", fields.Keys)}", cancellationToken);
+        => SendCommandAsync(deviceId, $"/outlet/{outletIndex}", "set", fields, $"outlet {outletIndex} set {string.Join(",", fields.Keys)}", cancellationToken);
 
     /// <summary>
     /// Reset an outlet's accumulated energy statistics (cmd "reset", target "energy").
     /// </summary>
     public Task ResetOutletStatsAsync(string deviceId, int outletIndex, CancellationToken cancellationToken)
-        => SendOutletCommandAsync(deviceId, outletIndex, "reset", new { target = "energy" }, "reset statistics", cancellationToken);
+        => SendCommandAsync(deviceId, $"/outlet/{outletIndex}", "reset", new { target = "energy" }, $"outlet {outletIndex} reset statistics", cancellationToken);
+
+    /// <summary>Write device (PDU) configuration fields (e.g. <c>label</c>) via cmd "set".</summary>
+    public Task SetDeviceConfigAsync(string deviceId, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+        => SendCommandAsync(deviceId, "", "set", fields, $"device set {string.Join(",", fields.Keys)}", cancellationToken);
+
+    /// <summary>Write entity (circuit/breaker, phase, total) configuration fields (e.g. <c>label</c>) via cmd "set".</summary>
+    public Task SetEntityConfigAsync(string deviceId, string entityKey, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+        => SendCommandAsync(deviceId, $"/entity/{entityKey}", "set", fields, $"entity {entityKey} set {string.Join(",", fields.Keys)}", cancellationToken);
 
     /// <summary>
-    /// POST a command (control/set) to an outlet resource on the owning host, validating the result.
+    /// POST a command (control/set/reset) to a device resource (or a sub-resource like an outlet or
+    /// entity) on the owning host, validating the result.
     /// </summary>
     /// <remarks>
     /// Endpoint/auth match the Geist firmware (apiVersion 1.0.1): the session token travels in the
-    /// body, against the same /api/dev/{device}/outlet/{index} path as the read API (a proxy port
-    /// for cluster members). Only invoked when ActionsEnabled.
+    /// body, against the same /api/dev/{device}[/{sub}] path as the read API (a proxy port for cluster
+    /// members). <paramref name="resourceSuffix"/> is "" for the device itself, "/outlet/{i}" for an
+    /// outlet, or "/entity/{key}" for a circuit/phase/total. Only invoked when ActionsEnabled.
     /// </remarks>
-    private async Task SendOutletCommandAsync(string deviceId, int outletIndex, string cmd, object data, string description, CancellationToken cancellationToken)
+    private async Task SendCommandAsync(string deviceId, string resourceSuffix, string cmd, object data, string description, CancellationToken cancellationToken)
     {
         var webPort = await ResolveWebPortAsync(deviceId, cancellationToken);
         var token = await GetTokenAsync(webPort, cancellationToken);
 
-        var url = BuildUrl(webPort, $"/api/dev/{deviceId}/outlet/{outletIndex}");
+        var url = BuildUrl(webPort, $"/api/dev/{deviceId}{resourceSuffix}");
         var body = new { cmd, token, data };
 
-        Log.Information($"[PduApiHandler] Outlet {deviceId}/{outletIndex}: {description}");
+        Log.Information($"[PduApiHandler] {deviceId}: {description}");
         var response = await PostJsonWithRetryAsync(url, body, cancellationToken);
         var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
 
@@ -97,7 +107,7 @@ public class PduApiHandler
         {
             // A stale token is the most likely failure; drop it so the next call re-authenticates.
             tokensByPort.Remove(webPort);
-            throw new Exception($"[PduApiHandler] Outlet {description} failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
+            throw new Exception($"[PduApiHandler] {description} failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
         }
     }
 
