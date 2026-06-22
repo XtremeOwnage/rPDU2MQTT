@@ -55,7 +55,7 @@ spec:
   # Mirrors the existing Config model (MQTT, PDU, HomeAssistant, Overrides, Prometheus, EmonCMS, ...)
   MQTT:
     Connection: { Host: mqtt.example.com, Port: 1883 }
-    ParentTopic: Rack_PDU
+    ParentTopic: rPDU2MQTT
   PDU:
     Connection: { Host: rack-pdu-1.example.com, Port: 80 }
     PollInterval: 5

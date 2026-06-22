@@ -8,7 +8,7 @@ Mqtt:
         Password: "password"
 
     # This will be the parent topic in MQTT, where keys are published to.
-    ParentTopic: "Rack_PDU"
+    ParentTopic: "rPDU2MQTT"
 
     # This is the client-ID used.
     ClientID: "rpdu2mqtt"

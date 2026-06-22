@@ -17,7 +17,7 @@ A minimal `my-values.yaml`:
 config:
   MQTT:
     Connection: { Host: mqtt.lan, Port: 1883 }
-    ParentTopic: Rack_PDU
+    ParentTopic: rPDU2MQTT
   PDU:
     Connection: { Host: pdu.lan, Port: 80 }
     PollInterval: 5
