@@ -61,7 +61,7 @@
   table.ld { width:100%; border-collapse:collapse; font-size:13px; }
   table.ld th, table.ld td { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line); }
   table.ld th { color:var(--muted); font-weight:600; position:sticky; top:53px; background:var(--bg); }
-  table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.ld th.num, table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; }
   table.ld tr:hover td { background:var(--panel); }
   .ro-note { color:var(--bad); font-size:12px; display:none; }
   .ro-note code { background:var(--panel2); padding:0 4px; border-radius:4px; }
