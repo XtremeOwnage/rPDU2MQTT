@@ -29,13 +29,11 @@ public class EmonCmsExportService : baseMQTTService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var data = LatestFreshData();
-        if (data is null)
-            return;
-
+        // Aggregate readings across every fresh source into one post (input keys are unique per device).
         var values = new Dictionary<string, double>();
-        foreach (var r in MetricsHelper.EnumerateReadings(data))
-            values[MetricsHelper.EmonCmsInputName(r, config)] = r.Value;
+        foreach (var data in FreshSnapshots())
+            foreach (var r in MetricsHelper.EnumerateReadings(data))
+                values[MetricsHelper.EmonCmsInputName(r, config)] = r.Value;
 
         if (values.Count == 0)
             return;

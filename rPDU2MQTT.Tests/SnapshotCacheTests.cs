@@ -75,6 +75,31 @@ public class SnapshotCacheTests
         Assert.Null(cache.Latest);
         Assert.Empty(cache.All);
     }
+
+    [Fact]
+    public async Task FanOut_SelectsOnlyFreshSourcesAcrossInstances()
+    {
+        var bus = new ChannelMessageBus();
+        var cache = new SnapshotCache(bus);
+        await cache.StartAsync(CancellationToken.None);
+        try
+        {
+            var now = DateTime.UtcNow;
+            await bus.PublishAsync(new PduSnapshot("fresh", now, new PduData()));
+            await bus.PublishAsync(new PduSnapshot("stale", now.AddMinutes(-10), new PduData()));
+            await WaitUntil(() => cache.All.Count == 2, TimeSpan.FromSeconds(2));
+
+            // Mirrors baseMQTTService.FreshSnapshots(): keep only sources whose snapshot is still fresh.
+            var fresh = cache.All.Where(s => !SnapshotFreshness.IsStale(s.TimestampUtc, 5, now)).ToList();
+
+            Assert.Single(fresh);
+            Assert.Equal("fresh", fresh[0].InstanceId);
+        }
+        finally
+        {
+            await cache.StopAsync(CancellationToken.None);
+        }
+    }
 }
 
 public class SnapshotFreshnessTests

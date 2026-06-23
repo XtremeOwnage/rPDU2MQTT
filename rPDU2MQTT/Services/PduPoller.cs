@@ -1,42 +1,50 @@
-using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
 
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// v2 producer: polls the PDU on its interval and publishes a <see cref="PduSnapshot"/> to the bus.
-/// For now there is a single instance (today's one PDU); multi-instance comes in a later phase.
-/// Consumers still read the PDU directly until they are migrated onto the bus.
+/// v2 producer for a single PDU instance: polls on its interval and publishes a <see cref="PduSnapshot"/>
+/// (tagged with the instance id) to the bus. Created and owned by <see cref="InstanceManager"/>;
+/// Start/Stop map to loading/unloading the instance.
 /// </summary>
-public sealed class PduPoller : BackgroundService
+public sealed class PduPoller
 {
-    private readonly Config cfg;
+    private readonly string instanceId;
     private readonly PDU pdu;
+    private readonly int pollIntervalSeconds;
     private readonly IMessageBus bus;
     private readonly HealthState health;
-    private readonly string instanceId;
+    private readonly CancellationTokenSource cts = new();
+    private Task loop = Task.CompletedTask;
 
-    public PduPoller(Config cfg, PDU pdu, IMessageBus bus, HealthState health)
+    public PduPoller(string instanceId, PDU pdu, int pollIntervalSeconds, IMessageBus bus, HealthState health)
     {
-        this.cfg = cfg;
+        this.instanceId = instanceId;
         this.pdu = pdu;
+        this.pollIntervalSeconds = pollIntervalSeconds;
         this.bus = bus;
         this.health = health;
-        instanceId = string.IsNullOrWhiteSpace(cfg.PDU?.Connection?.Host) ? "pdu" : cfg.PDU!.Connection!.Host!;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public void Start() => loop = RunAsync(cts.Token);
+
+    public async Task StopAsync()
     {
-        var interval = TimeSpan.FromSeconds(Math.Max(1, cfg.PDU.PollInterval));
-        using var timer = new PeriodicTimer(interval);
+        await cts.CancelAsync();
+        try { await loop; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, pollIntervalSeconds)));
 
         while (true)
         {
             try
             {
-                var data = await pdu.GetRootData_Public(stoppingToken);
-                await bus.PublishAsync(new PduSnapshot(instanceId, DateTime.UtcNow, data), stoppingToken);
+                var data = await pdu.GetRootData_Public(cancellationToken);
+                await bus.PublishAsync(new PduSnapshot(instanceId, DateTime.UtcNow, data), cancellationToken);
 
                 // A successful poll is the readiness signal: we can reach the PDU.
                 health.RecordPollSuccess();
@@ -47,12 +55,12 @@ public sealed class PduPoller : BackgroundService
             }
             catch (Exception ex)
             {
-                Log.Error(ex, $"{nameof(PduPoller)} poll failed.");
+                Log.Error(ex, $"PduPoller '{instanceId}' poll failed.");
             }
 
             try
             {
-                if (!await timer.WaitForNextTickAsync(stoppingToken))
+                if (!await timer.WaitForNextTickAsync(cancellationToken))
                     break;
             }
             catch (OperationCanceledException)

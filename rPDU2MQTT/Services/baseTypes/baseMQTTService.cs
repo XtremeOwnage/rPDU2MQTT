@@ -167,20 +167,17 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// The most recent pipeline snapshot's data, or null if there is none or it has gone stale (the
-    /// PduPoller stopped producing — e.g. the PDU is unreachable). Returning null lets consumers skip
-    /// publishing so Home Assistant's expire_after can mark entities unavailable instead of us
-    /// republishing the last-known values forever.
+    /// The latest data from every source whose snapshot is still fresh. Stale sources (a poller that
+    /// stopped producing — e.g. an unreachable PDU) are skipped, so Home Assistant's expire_after can
+    /// mark their entities unavailable instead of us republishing last-known values forever.
     /// </summary>
-    protected Models.PDU.PduData? LatestFreshData()
+    protected IReadOnlyList<Models.PDU.PduData> FreshSnapshots()
     {
-        var snapshot = snapshotCache.Latest;
-        if (snapshot is null)
-            return null;
-
-        return Core.SnapshotFreshness.IsStale(snapshot.TimestampUtc, cfg.PDU.PollInterval, DateTime.UtcNow)
-            ? null
-            : snapshot.Data;
+        var now = DateTime.UtcNow;
+        return snapshotCache.All
+            .Where(s => !Core.SnapshotFreshness.IsStale(s.TimestampUtc, cfg.PDU.PollInterval, now))
+            .Select(s => s.Data)
+            .ToList();
     }
 
     /// <summary>
