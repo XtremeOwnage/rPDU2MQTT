@@ -6,7 +6,9 @@ using System.Globalization;
 namespace rPDU2MQTT.Helpers;
 
 /// <summary>A single numeric measurement, flattened for export to Prometheus / EmonCMS / etc.</summary>
-public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic);
+/// <param name="SourceName">The source's formatted display name (vs <paramref name="Source"/>'s object-id form).</param>
+/// <param name="Number">The 1-based outlet number, or null for non-outlet entities (circuits/phase/total).</param>
+public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number);
 
 public static class MetricsHelper
 {
@@ -19,20 +21,20 @@ public static class MetricsHelper
         foreach (var device in data.Devices)
         {
             foreach (var outlet in device.Outlets)
-                foreach (var reading in ToReadings(device.Entity_Name, outlet.Entity_Name, outlet.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements))
                     yield return reading;
 
             foreach (var entity in device.Entity)
-                foreach (var reading in ToReadings(device.Entity_Name, entity.Entity_Name, entity.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements))
                     yield return reading;
         }
     }
 
-    private static IEnumerable<MeasurementReading> ToReadings(string device, string source, IEnumerable<Measurement> measurements)
+    private static IEnumerable<MeasurementReading> ToReadings(string device, string source, string sourceName, int? number, IEnumerable<Measurement> measurements)
     {
         foreach (var m in measurements)
             if (double.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath());
+                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number);
     }
 
     /// <summary>
@@ -85,6 +87,8 @@ public static class MetricsHelper
             .Replace("{device}", r.Device)
             .Replace("{source}", r.Source)
             .Replace("{outlet}", r.Source)
+            .Replace("{name}", r.SourceName ?? r.Source)
+            .Replace("{number}", r.Number?.ToString() ?? string.Empty)
             .Replace("{units}", r.Units);
 
         return Sanitize(name);

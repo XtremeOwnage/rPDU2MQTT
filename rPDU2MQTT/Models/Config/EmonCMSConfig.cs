@@ -38,8 +38,8 @@ public class EmonCMSConfig
     /// {type}, {units}. When blank, the full generated identifier is used (legacy behaviour).
     /// </summary>
     [DefaultValue("{device}_{source}_{type}")]
-    [Description("Template for EmonCMS input keys. Placeholders: {device}, {source} (a.k.a. {outlet}), {type}, {units}. e.g. '{device}_{source}_{type}' -> rack_pdu_1_dell_md1200_realpower. Leave blank to use the full raw identifier.")]
-    [TemplateVariables("device", "source", "type", "units")]
+    [Description("Template for EmonCMS input keys. Placeholders: {device}, {source} (object-id form), {name} (formatted display name), {number} (outlet number), {type}, {units}. e.g. '{device}_{source}_{type}' -> rack_pdu_1_dell_md1200_realpower. Leave blank to use the full raw identifier.")]
+    [TemplateVariables("device", "source", "name", "number", "type", "units")]
     public string InputNameTemplate { get; set; } = "{device}_{source}_{type}";
 
     /// <summary>Base MQTT topic for EmonCMS's MQTT input (the Mqtt transport publishes to base/node).</summary>

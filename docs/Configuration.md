@@ -411,7 +411,8 @@ EmonCMS:
 ```
 
 **Input names (templating).** `InputNameTemplate` controls the per-measurement input key, the same way
-`Prometheus.MetricNameTemplate` does. Placeholders: `{device}`, `{source}` (a.k.a. `{outlet}`), `{type}`
+`Prometheus.MetricNameTemplate` does. Placeholders: `{device}`, `{source}` (object-id form), `{name}`
+(the formatted display name), `{number}` (outlet number; blank for circuits/phase/total), `{type}`
 (honoring its `Overrides.Measurements` ID), and `{units}`. For example `{device}_{source}_{type}` →
 `rack_pdu_1_dell_md1200_realpower`. Leave it **blank** to fall back to the full raw identifier (the old,
 verbose default). The result is lower-cased with non-alphanumeric characters replaced by `_`.
