@@ -560,30 +560,46 @@ function addLiveDataSection(nav, sections) {
     t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
   };
 
-  // OneView group rollups (Sum/Avg/Min/Max per measurement type) — one row per group/measurement.
+  // OneView group rollups — one row per group, a column per measurement type showing the group
+  // total (Sum, falling back to Avg); hover a cell for the full sum/avg/min/max breakdown.
   const drawGroupRollups = () => {
     groupsWrap.innerHTML = '';
     const gs = body.groups || [];
     if (!gs.length) return;
     const f = filter.value.trim().toLowerCase();
+    const shown = gs.filter(g => !f || (g.name || '').toLowerCase().includes(f));
+    if (!shown.length) return;
+    // Union of measurement types (+ units) across all groups, for stable columns.
+    const types = []; const units = {};
+    gs.forEach(g => (g.measurements || []).forEach(m => { if (!types.includes(m.type)) types.push(m.type); if (m.units && !units[m.type]) units[m.type] = m.units; }));
+    types.sort();
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
-    ['OneView group', 'Measurement', 'Sum', 'Avg', 'Min', 'Max', 'Units'].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 2 && i <= 5) th.className = 'num'; head.appendChild(th); });
+    ['OneView group', ...types.map(ty => ty + (units[ty] ? ' (' + units[ty] + ')' : ''))].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 1) th.className = 'num'; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    let any = false;
-    gs.forEach(g => {
-      const ms = (g.measurements || []).filter(m => !f || (g.name + ' ' + m.type).toLowerCase().includes(f));
-      ms.forEach((m, idx) => {
-        any = true;
-        const tr = document.createElement('tr');
-        const gtd = document.createElement('td'); gtd.textContent = idx === 0 ? g.name : ''; if (idx === 0) gtd.style.fontWeight = '600'; tr.appendChild(gtd);
-        [m.type, m.sum, m.avg, m.min, m.max, m.units || ''].forEach((c, i) => { const td = document.createElement('td'); if (i >= 1 && i <= 4) { td.className = 'num'; td.textContent = (c == null) ? '' : formatNum(c); } else td.textContent = c; tr.appendChild(td); });
-        tb.appendChild(tr);
+    shown.forEach(g => {
+      const byType = {}; (g.measurements || []).forEach(m => byType[m.type] = m);
+      const tr = document.createElement('tr');
+      const gtd = document.createElement('td'); gtd.textContent = g.name; gtd.style.fontWeight = '600'; tr.appendChild(gtd);
+      types.forEach(ty => {
+        const td = document.createElement('td'); td.className = 'num';
+        const m = byType[ty];
+        if (m) {
+          const v = (m.sum != null) ? m.sum : (m.avg != null ? m.avg : null);
+          td.textContent = (v == null) ? '' : formatNum(v);
+          const parts = [];
+          if (m.sum != null) parts.push('sum ' + formatNum(m.sum));
+          if (m.avg != null) parts.push('avg ' + formatNum(m.avg));
+          if (m.min != null) parts.push('min ' + formatNum(m.min));
+          if (m.max != null) parts.push('max ' + formatNum(m.max));
+          if (parts.length) td.title = ty + ': ' + parts.join(' · ');
+        }
+        tr.appendChild(td);
       });
+      tb.appendChild(tr);
     });
-    if (!any) return;
-    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '12px'; hh.textContent = 'OneView groups (rollups):'; groupsWrap.appendChild(hh);
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '12px'; hh.textContent = 'OneView groups (rollups — group totals; hover a value for sum/avg/min/max):'; groupsWrap.appendChild(hh);
     t.appendChild(tb); groupsWrap.appendChild(t);
   };
   const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
