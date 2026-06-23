@@ -116,6 +116,8 @@ public static class ServiceConfiguration
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
+        // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
+        services.AddSingleton<Services.EmonCmsStatus>();
 
         // Created hosted services.
         services.AddHostedService<MQTTPublishingService>();
@@ -126,7 +128,9 @@ public static class ServiceConfiguration
 
         if (cfg.EmonCMS.Enabled)
         {
-            ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
+            // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
+            if (cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http)
+                ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
             services.AddHostedService<EmonCmsExportService>();
         }
 

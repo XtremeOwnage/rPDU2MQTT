@@ -37,9 +37,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
     private readonly PduApiHandler pduApi;
+    private readonly EmonCmsStatus emonCmsStatus;
+    private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduApiHandler pduApi)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduApiHandler pduApi, EmonCmsStatus emonCmsStatus)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -49,6 +51,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.lifetime = lifetime;
         this.health = health;
         this.pduApi = pduApi;
+        this.emonCmsStatus = emonCmsStatus;
     }
 
     /// <summary>Authentication is turned off entirely (Gui.AuthType = None).</summary>
@@ -342,6 +345,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 kubernetes = k8s is not null,
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
+                emoncms = config.EmonCMS.Enabled
+                    ? new { enabled = true, transport = config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonCmsStatus.Snapshot() }
+                    : new { enabled = false, transport = (string?)null, status = (object?)null },
             }, ConfigSchema.Json);
         });
 
@@ -434,6 +440,45 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"PDU request failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Validate the EmonCMS configuration (HTTP: reach the server + check the API key; MQTT: broker up).
+        app.MapPost("/api/test/emoncms", async (HttpContext ctx) =>
+        {
+            var e = config.EmonCMS;
+            if (!e.Enabled)
+                return Results.Json(new { ok = false, message = "EmonCMS is disabled (EmonCMS.Enabled is false)." }, ConfigSchema.Json);
+
+            if (e.Transport == EmonCmsTransport.Mqtt)
+            {
+                var topic = $"{(e.MqttBaseTopic ?? "emon").TrimEnd('/')}/{e.Node}";
+                return mqtt.IsConnected()
+                    ? Results.Json(new { ok = true, message = $"MQTT broker connected; publishing to '{topic}'. (EmonCMS receipt can't be confirmed from here.)" }, ConfigSchema.Json)
+                    : Results.Json(new { ok = false, message = "MQTT broker is not connected — check the MQTT settings." }, ConfigSchema.Json);
+            }
+
+            if (string.IsNullOrWhiteSpace(e.Url))
+                return Results.Json(new { ok = false, message = "EmonCMS.Url is required for the HTTP transport." }, ConfigSchema.Json);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                var url = $"{e.Url.TrimEnd('/')}/feed/list.json?apikey={Uri.EscapeDataString(e.ApiKey ?? string.Empty)}";
+                using var resp = await testHttp.GetAsync(url, cts.Token);
+                var body = (await resp.Content.ReadAsStringAsync(cts.Token)).TrimStart();
+                if (!resp.IsSuccessStatusCode)
+                    return Results.Json(new { ok = false, message = $"EmonCMS returned HTTP {(int)resp.StatusCode}." }, ConfigSchema.Json);
+                if (body.StartsWith("["))
+                    return Results.Json(new { ok = true, message = "Reached EmonCMS and the API key was accepted." }, ConfigSchema.Json);
+                if (body.Contains("\"success\":false", StringComparison.OrdinalIgnoreCase) || body.Equals("false", StringComparison.OrdinalIgnoreCase) || body.Contains("invalid", StringComparison.OrdinalIgnoreCase))
+                    return Results.Json(new { ok = false, message = "Reached EmonCMS but the API key was rejected (a read/write key is required)." }, ConfigSchema.Json);
+                return Results.Json(new { ok = true, message = "Reached EmonCMS." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not reach EmonCMS: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 

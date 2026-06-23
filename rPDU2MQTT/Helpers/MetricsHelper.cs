@@ -65,6 +65,31 @@ public static class MetricsHelper
     public static string PrometheusMetricName(MeasurementReading r, Config config)
         => PrometheusMetricName(r.Type, r.Device, r.Source, r.Units, config);
 
+    /// <summary>
+    /// The EmonCMS input key for a reading, applying <c>EmonCMS.InputNameTemplate</c>. Placeholders:
+    /// <c>{type}</c> (honoring its Overrides.Measurements ID), <c>{device}</c>, <c>{source}</c> /
+    /// <c>{outlet}</c>, <c>{units}</c>. A blank template falls back to the full raw identifier.
+    /// </summary>
+    public static string EmonCmsInputName(MeasurementReading r, Config config)
+    {
+        var template = config.EmonCMS.InputNameTemplate;
+        if (string.IsNullOrWhiteSpace(template))
+            return r.Identifier;
+
+        var effectiveType = config.Overrides.Measurements.TryGetValue(r.Type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
+            ? ov!.ID!
+            : r.Type;
+
+        var name = template
+            .Replace("{type}", effectiveType)
+            .Replace("{device}", r.Device)
+            .Replace("{source}", r.Source)
+            .Replace("{outlet}", r.Source)
+            .Replace("{units}", r.Units);
+
+        return Sanitize(name);
+    }
+
     private static string Sanitize(string value)
         => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
 }
