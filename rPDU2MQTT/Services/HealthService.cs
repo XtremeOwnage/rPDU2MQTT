@@ -76,7 +76,7 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
         if (last is null)
             return "no successful PDU poll yet";
 
-        var staleAfter = TimeSpan.FromSeconds(Math.Max(30, cfg.PDU.PollInterval * 3));
+        var staleAfter = TimeSpan.FromSeconds(Math.Max(30, cfg.Primary.PollInterval * 3));
         var age = DateTime.UtcNow - last.Value;
         if (age >= staleAfter)
             return $"last PDU poll {age.TotalSeconds:0}s ago (> {staleAfter.TotalSeconds:0}s)";

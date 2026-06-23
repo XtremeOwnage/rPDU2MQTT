@@ -10,7 +10,7 @@ namespace rPDU2MQTT.Services.baseTypes;
 
 public abstract class basePublishingService : baseMQTTService
 {
-    protected basePublishingService(MQTTServiceDependencies dependencies) : base(dependencies, dependencies.Cfg.PDU.PollInterval) { }
+    protected basePublishingService(MQTTServiceDependencies dependencies) : base(dependencies, dependencies.Cfg.Primary.PollInterval) { }
     protected basePublishingService(MQTTServiceDependencies dependencies, int Interval) : base(dependencies, Interval) { }
 
     /// <summary>

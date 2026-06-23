@@ -22,7 +22,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
-    protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.PDU.PollInterval) { }
+    protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.Primary.PollInterval) { }
     protected baseMQTTService(MQTTServiceDependencies dependencies, int Interval)
     {
         mqtt = dependencies.Mqtt;
@@ -175,7 +175,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     {
         var now = DateTime.UtcNow;
         return snapshotCache.All
-            .Where(s => !Core.SnapshotFreshness.IsStale(s.TimestampUtc, cfg.PDU.PollInterval, now))
+            .Where(s => !Core.SnapshotFreshness.IsStale(s.TimestampUtc, cfg.Primary.PollInterval, now))
             .Select(s => s.Data)
             .ToList();
     }

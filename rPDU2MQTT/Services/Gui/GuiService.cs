@@ -36,12 +36,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IConfigSource configSource;
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
-    private readonly PduApiHandler pduApi;
+    private readonly PduInstanceFactory pduFactory;
     private readonly EmonCmsStatus emonCmsStatus;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduApiHandler pduApi, EmonCmsStatus emonCmsStatus)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, EmonCmsStatus emonCmsStatus)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -50,7 +50,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.configSource = configSource;
         this.lifetime = lifetime;
         this.health = health;
-        this.pduApi = pduApi;
+        this.pduFactory = pduFactory;
         this.emonCmsStatus = emonCmsStatus;
     }
 
@@ -320,7 +320,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             gitops = configSource.IsGitOpsManaged,
             mqttConnected = mqtt.IsConnected(),
             mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
-            actionsEnabled = config.PDU.ActionsEnabled,
+            actionsEnabled = config.Primary.ActionsEnabled,
             auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
             user = UseOidc ? ctx.User?.Identity?.Name : null,
         }, ConfigSchema.Json));
@@ -628,7 +628,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var data = await new PDU(parsed, pduApi).GetRootData_Public(cts.Token);
+                var data = await pduFactory.Create(parsed.Primary, parsed).GetRootData_Public(cts.Token);
                 return Results.Json(BuildPaths(data, parsed), ConfigSchema.Json);
             }
             catch (Exception ex)
@@ -698,7 +698,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             label = pdu.ResolveEntityConfig(d.Key, e.Key, "label", e.Label ?? ""),
                         }).ToList(),
                 }).ToList();
-                return Results.Json(new { ok = true, actionsEnabled = config.PDU.ActionsEnabled, outlets, groups, devices }, ConfigSchema.Json);
+                return Results.Json(new { ok = true, actionsEnabled = config.Primary.ActionsEnabled, outlets, groups, devices }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -709,7 +709,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Apply a control action to every outlet in a OneView group (fan-out). Gated by ActionsEnabled.
         app.MapPost("/api/control/group", async (HttpContext ctx) =>
         {
-            if (!config.PDU.ActionsEnabled)
+            if (!config.Primary.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
 
             GroupControlRequest? req;
@@ -738,7 +738,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Issue an outlet control action (on/off/reboot). Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/outlet", async (HttpContext ctx) =>
         {
-            if (!config.PDU.ActionsEnabled)
+            if (!config.Primary.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
 
             ControlRequest? req;
@@ -770,7 +770,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Write an outlet's label on the PDU itself (cmd "set"). Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/label", async (HttpContext ctx) =>
         {
-            if (!config.PDU.ActionsEnabled)
+            if (!config.Primary.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
 
             LabelRequest? req;

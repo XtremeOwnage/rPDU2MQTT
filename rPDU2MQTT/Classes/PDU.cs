@@ -10,6 +10,7 @@ namespace rPDU2MQTT.Classes;
 public partial class PDU
 {
     private readonly Config config;
+    private readonly Models.Config.PduConfig instanceConfig;
     private readonly PduApiHandler api;
 
     /// <summary>
@@ -20,8 +21,9 @@ public partial class PDU
     /// </remarks>
     private bool? useOneView { get; set; } = null;
 
-    public PDU(Config config, PduApiHandler api)
+    public PDU(Models.Config.PduConfig instanceConfig, Config config, PduApiHandler api)
     {
+        this.instanceConfig = instanceConfig;
         this.config = config;
         this.api = api;
     }
@@ -205,7 +207,7 @@ public partial class PDU
     /// <returns></returns>
     public async Task<PduData> GetRootData_Public(CancellationToken cancellationToken)
     {
-        var ttl = TimeSpan.FromSeconds(Math.Max(1, config.PDU.PollInterval / 2.0));
+        var ttl = TimeSpan.FromSeconds(Math.Max(1, instanceConfig.PollInterval / 2.0));
 
         // Always under the lock: cache hits are cheap, and concurrent callers coalesce onto a
         // single in-flight fetch instead of each hitting the PDU API.

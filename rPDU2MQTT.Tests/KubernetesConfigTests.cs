@@ -1,4 +1,5 @@
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Services.Gui;
 using rPDU2MQTT.Startup.ConfigSources;
 using Xunit;
@@ -27,8 +28,8 @@ public class KubernetesConfigTests
     {
         var cfg = new Config();
         cfg.MQTT.ParentTopic = "homelab";
-        cfg.PDU.PollInterval = 9;
-        cfg.PDU.Connection.Port = 8080;
+        cfg.Pdus[Config.DefaultInstanceKey] = new PduConfig { PollInterval = 9 };
+        cfg.Pdus[Config.DefaultInstanceKey].Connection.Port = 8080;
         cfg.HASS.DiscoveryEnabled = true;
 
         // Simulates the CR spec round-trip (write spec, then read it back).
@@ -36,8 +37,8 @@ public class KubernetesConfigTests
         var back = ConfigSchema.FromJson(specJson);
 
         Assert.Equal("homelab", back.MQTT.ParentTopic);
-        Assert.Equal(9, back.PDU.PollInterval);
-        Assert.Equal(8080, back.PDU.Connection.Port);   // stays an int, not a string
+        Assert.Equal(9, back.Primary.PollInterval);
+        Assert.Equal(8080, back.Primary.Connection.Port);   // stays an int, not a string
         Assert.True(back.HASS.DiscoveryEnabled);
     }
 
@@ -46,14 +47,14 @@ public class KubernetesConfigTests
     {
         var cfg = new Config();
         cfg.MQTT.Credentials = new() { Username = "u", Password = "p" };
-        cfg.PDU.Credentials = new() { Username = "hass", Password = "pw" };
+        cfg.Pdus[Config.DefaultInstanceKey] = new PduConfig { Credentials = new() { Username = "hass", Password = "pw" } };
         cfg.EmonCMS.ApiKey = "key";
         cfg.Gui.Password = "guipass";
 
         var redacted = ConfigSchema.RedactSecrets(cfg);
 
         Assert.Null(redacted.MQTT.Credentials);
-        Assert.Null(redacted.PDU.Credentials);
+        Assert.Null(redacted.Primary.Credentials);
         Assert.Null(redacted.EmonCMS.ApiKey);
         Assert.Null(redacted.Gui.Password);
         // Original is untouched.

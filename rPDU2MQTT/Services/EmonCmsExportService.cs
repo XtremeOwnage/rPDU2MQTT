@@ -19,7 +19,7 @@ public class EmonCmsExportService : baseMQTTService
     private readonly EmonCmsStatus status;
     private readonly string postUrl;
 
-    public EmonCmsExportService(MQTTServiceDependencies deps, EmonCmsStatus status) : base(deps, deps.Cfg.PDU.PollInterval)
+    public EmonCmsExportService(MQTTServiceDependencies deps, EmonCmsStatus status) : base(deps, deps.Cfg.Primary.PollInterval)
     {
         config = deps.Cfg;
         c = deps.Cfg.EmonCMS;

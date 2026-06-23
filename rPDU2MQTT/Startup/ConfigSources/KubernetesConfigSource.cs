@@ -33,8 +33,8 @@ public sealed class KubernetesConfigSource : IConfigSource
     {
         ("RPDU2MQTT_MQTT_USERNAME", c => c.MQTT.Credentials?.Username, (c, v) => (c.MQTT.Credentials ??= new()).Username = v),
         ("RPDU2MQTT_MQTT_PASSWORD", c => c.MQTT.Credentials?.Password, (c, v) => (c.MQTT.Credentials ??= new()).Password = v),
-        ("RPDU2MQTT_PDU_USERNAME",  c => c.PDU.Credentials?.Username,  (c, v) => (c.PDU.Credentials  ??= new()).Username = v),
-        ("RPDU2MQTT_PDU_PASSWORD",  c => c.PDU.Credentials?.Password,  (c, v) => (c.PDU.Credentials  ??= new()).Password = v),
+        ("RPDU2MQTT_PDU_USERNAME",  c => c.Primary.Credentials?.Username,  (c, v) => (c.Primary.Credentials  ??= new()).Username = v),
+        ("RPDU2MQTT_PDU_PASSWORD",  c => c.Primary.Credentials?.Password,  (c, v) => (c.Primary.Credentials  ??= new()).Password = v),
         ("RPDU2MQTT_EMONCMS_APIKEY", c => c.EmonCMS.ApiKey, (c, v) => c.EmonCMS.ApiKey = v),
         ("RPDU2MQTT_GUI_PASSWORD",   c => c.Gui.Password,   (c, v) => c.Gui.Password = v),
         ("RPDU2MQTT_OIDC_CLIENT_SECRET", c => c.Gui.Oidc?.ClientSecret, (c, v) => (c.Gui.Oidc ??= new()).ClientSecret = v),

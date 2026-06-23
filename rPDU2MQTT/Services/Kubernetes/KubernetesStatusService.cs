@@ -23,7 +23,7 @@ public sealed class KubernetesStatusService : IHostedService, IDisposable
         this.source = source;
         this.mqtt = mqtt;
         this.pdu = pdu;
-        timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(5, cfg.PDU.PollInterval)));
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(5, cfg.Primary.PollInterval)));
     }
 
     public Task StartAsync(CancellationToken cancellationToken)

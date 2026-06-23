@@ -350,10 +350,10 @@ public abstract class baseDiscoveryService : baseMQTTService
         if (parent is null)
             return;
 
-        if (cfg.PDU.RemapModel)
+        if (cfg.Primary.RemapModel)
             discoveryDevice.Model = $"{parent.Name} {Model}";
 
-        if (cfg.PDU.RemapManufacturer)
+        if (cfg.Primary.RemapManufacturer)
             discoveryDevice.Manufacturer = Make;
 
     }

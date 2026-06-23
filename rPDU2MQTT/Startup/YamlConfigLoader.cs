@@ -117,14 +117,15 @@ internal class YamlConfigLoader
             if (dvc is not null)
                 dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
-        // Backwards-compatible alias: Enable_Actions -> ActionsEnabled.
-        if (config.PDU.EnableActionsAlias.HasValue)
-            config.PDU.ActionsEnabled = config.PDU.EnableActionsAlias.Value;
-
-        // v2 multi-PDU: derive the instance set from the single PDU config (auto-migrates v1 configs).
-        // Persisted Pdus / GUI management come in a later phase; for now this is in-memory groundwork.
+        // Ensure at least one instance exists so a fresh/empty config doesn't NPE; a missing
+        // Connection.Host then surfaces via the per-instance validation when the PDU is built.
         if (config.Pdus is null || config.Pdus.Count == 0)
-            config.Pdus = new Dictionary<string, Models.Config.PduConfig> { [Config.DefaultInstanceKey] = config.PDU };
+            config.Pdus = new Dictionary<string, Models.Config.PduConfig> { [Config.DefaultInstanceKey] = new() };
+
+        // Backwards-compatible alias: Enable_Actions -> ActionsEnabled (per instance).
+        foreach (var instance in config.Pdus.Values)
+            if (instance.EnableActionsAlias.HasValue)
+                instance.ActionsEnabled = instance.EnableActionsAlias.Value;
 
         // Backwards-compatible alias: the old Prometheus.Enabled meant "run the exporter".
         if (config.Prometheus.EnabledAlias == true)
@@ -154,9 +155,9 @@ internal class YamlConfigLoader
         var pduPass = ResolveSecret("RPDU2MQTT_PDU_PASSWORD");
         if (pduUser is not null || pduPass is not null)
         {
-            config.PDU.Credentials ??= new Models.Config.Schemas.Credentials();
-            if (pduUser is not null) { config.PDU.Credentials.Username = pduUser; Log.Information("Using PDU username from environment."); }
-            if (pduPass is not null) { config.PDU.Credentials.Password = pduPass; Log.Information("Using PDU password from environment."); }
+            config.Primary.Credentials ??= new Models.Config.Schemas.Credentials();
+            if (pduUser is not null) { config.Primary.Credentials.Username = pduUser; Log.Information("Using PDU username from environment."); }
+            if (pduPass is not null) { config.Primary.Credentials.Password = pduPass; Log.Information("Using PDU password from environment."); }
         }
 
         var emonKey = ResolveSecret("RPDU2MQTT_EMONCMS_APIKEY");

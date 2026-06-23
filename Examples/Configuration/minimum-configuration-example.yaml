@@ -8,10 +8,11 @@ Mqtt:
         Username: "admin"
         Password: "password"
 
-PDU:
-    Connection:        
-        Host: your-pdu-ip-or-hostname
-        Port: 80
+Pdus:
+    default:
+        Connection:
+            Host: your-pdu-ip-or-hostname
+            Port: 80
 
 HomeAssistant:
     DiscoveryEnabled: true
