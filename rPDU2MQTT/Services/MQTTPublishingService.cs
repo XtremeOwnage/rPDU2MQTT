@@ -8,20 +8,17 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class MQTTPublishingService : basePublishingService
 {
-    private readonly HealthState health;
-
-    public MQTTPublishingService(MQTTServiceDependencies deps, HealthState health) : base(deps)
+    public MQTTPublishingService(MQTTServiceDependencies deps) : base(deps)
     {
-        this.health = health;
     }
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var data = await pdu.GetRootData_Public(cancellationToken);
-
-        // A successful fetch is the readiness signal: we can reach the PDU. Record it before
-        // publishing so a later publish hiccup can't keep the pod permanently NotReady.
-        health.RecordPollSuccess();
+        // Consume the latest pipeline snapshot (the PduPoller is the sole PDU reader). Skip while it's
+        // stale/absent so a PDU outage surfaces via expire_after instead of republishing old values.
+        var data = LatestFreshData();
+        if (data is null)
+            return;
 
         // Run through each device.
         foreach (var device in data.Devices)

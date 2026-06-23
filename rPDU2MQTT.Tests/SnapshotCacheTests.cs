@@ -76,3 +76,24 @@ public class SnapshotCacheTests
         Assert.Empty(cache.All);
     }
 }
+
+public class SnapshotFreshnessTests
+{
+    private static readonly DateTime Now = new(2026, 6, 23, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void FreshSnapshot_IsNotStale()
+        => Assert.False(SnapshotFreshness.IsStale(Now.AddSeconds(-5), pollIntervalSeconds: 5, Now));
+
+    [Fact]
+    public void OldSnapshot_IsStale()
+        => Assert.True(SnapshotFreshness.IsStale(Now.AddSeconds(-60), pollIntervalSeconds: 5, Now));
+
+    [Fact]
+    public void ShortInterval_HasA30sFloor()
+    {
+        // 1s poll -> 2.5s would be too twitchy; the 30s floor keeps it tolerant.
+        Assert.False(SnapshotFreshness.IsStale(Now.AddSeconds(-20), pollIntervalSeconds: 1, Now));
+        Assert.True(SnapshotFreshness.IsStale(Now.AddSeconds(-31), pollIntervalSeconds: 1, Now));
+    }
+}

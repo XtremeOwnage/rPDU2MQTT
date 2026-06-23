@@ -60,12 +60,16 @@ public class PrometheusExportService : baseMQTTService
         }
     }
 
-    protected override async Task Execute(CancellationToken cancellationToken)
+    protected override Task Execute(CancellationToken cancellationToken)
     {
-        var data = await pdu.GetRootData_Public(cancellationToken);
+        var data = LatestFreshData();
+        if (data is null)
+            return Task.CompletedTask;
 
         foreach (var r in MetricsHelper.EnumerateReadings(data))
             GetGauge(MetricsHelper.PrometheusMetricName(r, cfg)).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
+
+        return Task.CompletedTask;
     }
 
     // Cached by the resolved metric name (the template may vary the name by device/source/units).
