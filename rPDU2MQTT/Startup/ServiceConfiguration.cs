@@ -114,6 +114,9 @@ public static class ServiceConfiguration
 
         services.AddSingleton<MQTTServiceDependencies>();
 
+        // v2 producer/consumer pipeline bus (not yet wired to producers/consumers; see docs/v2-architecture.md).
+        services.AddSingleton<Core.IMessageBus, Core.ChannelMessageBus>();
+
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
         // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
