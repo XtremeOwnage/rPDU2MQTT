@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test --configuration Release
+
+  chart:
+    name: Helm chart smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint
+        run: helm lint charts/rpdu2mqtt
+      - name: helm template (defaults)
+        run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
+      - name: helm template (CRD config source)
+        run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null

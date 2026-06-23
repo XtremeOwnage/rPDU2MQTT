@@ -17,6 +17,11 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <!-- Expose internals (converters, ResolveGroupMembers, etc.) to the test project. -->
+	  <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<!-- Embedded configuration GUI (optional, gated by Gui.Enabled). -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 		<!-- GUI assets are embedded so the single binary serves them without a wwwroot on disk. -->
