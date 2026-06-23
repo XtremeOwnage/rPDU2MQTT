@@ -82,6 +82,28 @@ public class PduApiHandler
         => SendCommandAsync(deviceId, $"/entity/{entityKey}", "set", fields, $"entity {entityKey} set {string.Join(",", fields.Keys)}", cancellationToken);
 
     /// <summary>
+    /// Write OneView group configuration fields (e.g. <c>label</c>) via cmd "set". Groups are a master
+    /// (OneView) concept, reached at <c>/oneview/group/{key}</c> on the base host — not per-member.
+    /// </summary>
+    public async Task SetGroupConfigAsync(string groupKey, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+    {
+        var token = await GetTokenAsync(0, cancellationToken);
+        var url = BuildUrl(0, $"/oneview/group/{groupKey}");
+        var body = new { cmd = "set", token, data = fields };
+
+        var description = $"group {groupKey} set {string.Join(",", fields.Keys)}";
+        Log.Information($"[PduApiHandler] {description}");
+        var response = await PostJsonWithRetryAsync(url, body, cancellationToken);
+        var result = await response.Content.ReadFromJsonAsync<GetResponse<JsonElement>>(cancellationToken);
+
+        if (!response.IsSuccessStatusCode || result is null || result.RetCode != 0)
+        {
+            tokensByPort.Remove(0);
+            throw new Exception($"[PduApiHandler] {description} failed (HTTP {(int)response.StatusCode}, retCode {result?.RetCode} {result?.RetMsg}).");
+        }
+    }
+
+    /// <summary>
     /// POST a command (control/set/reset) to a device resource (or a sub-resource like an outlet or
     /// entity) on the owning host, validating the result.
     /// </summary>

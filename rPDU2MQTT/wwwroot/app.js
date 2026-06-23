@@ -356,14 +356,38 @@ function addControlSection(nav, sections) {
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 1000);
   };
+  const setGroupLabel = (g, value) => postLabel({ target: 'group', groupKey: g.key, label: (value || '').trim() }, 'Group ' + (g.name || g.key));
   const drawGroups = () => {
     groupsWrap.innerHTML = '';
     if (!groups.length) return;
-    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '4px'; hh.textContent = 'Groups — act on all member outlets:'; groupsWrap.appendChild(hh);
-    const t = document.createElement('table'); t.className = 'ld'; const tb = document.createElement('tbody');
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '4px'; hh.textContent = 'Groups — rename, see member states, and act on all member outlets:'; groupsWrap.appendChild(hh);
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['Group', 'Label (on PDU)', 'Members', 'Actions'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
     groups.forEach(g => {
       const tr = document.createElement('tr');
       const nameTd = document.createElement('td'); nameTd.textContent = g.name || g.key; tr.appendChild(nameTd);
+      // Editable group label (written to the PDU).
+      const labTd = document.createElement('td');
+      const lin = document.createElement('input'); lin.type = 'text'; lin.value = g.label || ''; lin.style.width = '140px'; lin.disabled = !enabled;
+      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      setBtn.onclick = () => setGroupLabel(g, lin.value);
+      labTd.appendChild(lin); labTd.appendChild(setBtn); tr.appendChild(labTd);
+      // Aggregate member state: a dot per member outlet + an "n/m on" summary.
+      const memTd = document.createElement('td');
+      const members = g.members || [];
+      const onCount = members.filter(m => m.state === 'on').length;
+      members.forEach(m => {
+        const dot = document.createElement('span');
+        dot.className = 'dot ' + (m.state === 'on' ? 'good' : m.state === 'off' ? 'bad' : 'muted');
+        dot.style.marginRight = '3px'; dot.title = (m.name || ('#' + m.number)) + ': ' + (m.state || '?');
+        memTd.appendChild(dot);
+      });
+      if (members.length) { const c = document.createElement('span'); c.className = 'ld-count'; c.style.marginLeft = '4px'; c.textContent = onCount + '/' + members.length + ' on'; memTd.appendChild(c); }
+      else { memTd.textContent = '—'; memTd.style.color = 'var(--muted)'; }
+      tr.appendChild(memTd);
       const actTd = document.createElement('td');
       [['All On', 'on'], ['All Off', 'off'], ['Reboot All', 'reboot']].forEach(([lab, a]) => {
         const b = document.createElement('button'); b.className = 'small' + (a !== 'on' ? ' danger' : ''); b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => actGroup(g, a); actTd.appendChild(b);
@@ -485,8 +509,9 @@ function addLiveDataSection(nav, sections) {
   bar.appendChild(refresh); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
   sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
+  const groupsWrap = document.createElement('div'); sec.appendChild(groupsWrap);
 
-  let body = { entities: [], types: [], units: {}, readings: [] }, timer = null;
+  let body = { entities: [], types: [], units: {}, readings: [], groups: [] }, timer = null;
 
   // Pivoted: one row per outlet/entity, a column per measurement type, grouped by device.
   const drawGrouped = () => {
@@ -535,12 +560,38 @@ function addLiveDataSection(nav, sections) {
     t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
   };
 
-  const draw = () => viewSel.value === 'flat' ? drawFlat() : drawGrouped();
+  // OneView group rollups (Sum/Avg/Min/Max per measurement type) — one row per group/measurement.
+  const drawGroupRollups = () => {
+    groupsWrap.innerHTML = '';
+    const gs = body.groups || [];
+    if (!gs.length) return;
+    const f = filter.value.trim().toLowerCase();
+    const t = document.createElement('table'); t.className = 'ld';
+    const head = document.createElement('tr');
+    ['OneView group', 'Measurement', 'Sum', 'Avg', 'Min', 'Max', 'Units'].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 2 && i <= 5) th.className = 'num'; head.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    let any = false;
+    gs.forEach(g => {
+      const ms = (g.measurements || []).filter(m => !f || (g.name + ' ' + m.type).toLowerCase().includes(f));
+      ms.forEach((m, idx) => {
+        any = true;
+        const tr = document.createElement('tr');
+        const gtd = document.createElement('td'); gtd.textContent = idx === 0 ? g.name : ''; if (idx === 0) gtd.style.fontWeight = '600'; tr.appendChild(gtd);
+        [m.type, m.sum, m.avg, m.min, m.max, m.units || ''].forEach((c, i) => { const td = document.createElement('td'); if (i >= 1 && i <= 4) { td.className = 'num'; td.textContent = (c == null) ? '' : formatNum(c); } else td.textContent = c; tr.appendChild(td); });
+        tb.appendChild(tr);
+      });
+    });
+    if (!any) return;
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '12px'; hh.textContent = 'OneView groups (rollups):'; groupsWrap.appendChild(hh);
+    t.appendChild(tb); groupsWrap.appendChild(t);
+  };
+  const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
   const load = async () => {
     const r = await api('/api/livedata');
-    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; count.textContent = ''; return; }
+    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; groupsWrap.innerHTML = ''; count.textContent = ''; return; }
     body = r.body;
-    count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings';
+    count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings · ' + (body.groups || []).length + ' groups';
     draw();
   };
   refresh.onclick = load;

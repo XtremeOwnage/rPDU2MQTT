@@ -129,6 +129,17 @@ public partial class PDU
     public string ResolveEntityConfig(string deviceId, string entityKey, string field, string actual)
         => ResolvePending($"e/{deviceId}/{entityKey}/{field}", actual);
 
+    /// <summary>Write OneView group configuration fields (e.g. <c>label</c>) — PDU.ActionsEnabled only.</summary>
+    public async Task SetGroupConfigAsync(string groupKey, IReadOnlyDictionary<string, object> fields, CancellationToken cancellationToken)
+    {
+        await api.SetGroupConfigAsync(groupKey, fields, cancellationToken);
+        LatchPending($"g/{groupKey}", fields);
+    }
+
+    /// <summary>Report the latched value for a writable group config field until the PDU catches up.</summary>
+    public string ResolveGroupConfig(string groupKey, string field, string actual)
+        => ResolvePending($"g/{groupKey}/{field}", actual);
+
     /// <summary>Latch written config values (keyed <c>{prefix}/{field}</c>) so polling doesn't flap back to stale data.</summary>
     private void LatchPending(string prefix, IReadOnlyDictionary<string, object> fields)
     {

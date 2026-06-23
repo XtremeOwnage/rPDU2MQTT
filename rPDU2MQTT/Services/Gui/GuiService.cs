@@ -523,7 +523,26 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
                 }
 
-                return Results.Json(new { ok = true, count = readings.Count, readings, entities, types, units }, ConfigSchema.Json);
+                // OneView group rollups (Sum/Avg/Min/Max per measurement type). The group's aggregate
+                // measurements live on its single synthetic outlet (normal groups) or pduTotal (the Total group).
+                var groups = data.Groups.Select(g =>
+                {
+                    var src = g.Entity?.Outlets?.FirstOrDefault()?.Measurements
+                              ?? g.Entity?.PduTotal?.FirstOrDefault()?.Measurements
+                              ?? new List<Models.PDU.GroupMeasurement>();
+                    var measurements = src.Where(m => !string.IsNullOrEmpty(m.Type)).Select(m => new
+                    {
+                        type = m.Type,
+                        units = m.Units,
+                        sum = ParseMeasure(m.SumValue),
+                        avg = ParseMeasure(m.AvgValue),
+                        min = ParseMeasure(m.MinValue),
+                        max = ParseMeasure(m.MaxValue),
+                    }).ToList();
+                    return new { name = g.Entity_DisplayName, measurements };
+                }).Where(g => g.measurements.Count > 0).ToList();
+
+                return Results.Json(new { ok = true, count = readings.Count, readings, entities, groups, types, units }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -597,7 +616,26 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     rebootDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "rebootDelay", o.RebootDelay.ToString()),
                     poaAction = pdu.ResolveOutletConfig(d.Key, o.Key, "poaAction", o.PoaAction ?? ""),
                 })).ToList();
-                var groups = data.Groups.Select(g => new { key = g.Key, name = g.Entity_DisplayName }).ToList();
+                // Member-outlet lookup (deviceId, index) so each group can show per-member state.
+                var outletByKey = data.Devices
+                    .SelectMany(d => d.Outlets.Select(o => (dev: d, outlet: o)))
+                    .ToDictionary(x => (x.dev.Key, x.outlet.Key));
+                var groups = data.Groups.Select(g => new
+                {
+                    key = g.Key,
+                    name = g.Entity_DisplayName,
+                    label = pdu.ResolveGroupConfig(g.Key, "label", g.Label ?? ""),
+                    members = g.MemberOutlets.Select(m =>
+                    {
+                        outletByKey.TryGetValue((m.DeviceId, m.OutletIndex), out var hit);
+                        return new
+                        {
+                            number = m.OutletIndex + 1,
+                            name = hit.outlet?.Entity_DisplayName ?? $"#{m.OutletIndex + 1}",
+                            state = hit.outlet is null ? "unknown" : pdu.ResolveOutletState(m.DeviceId, m.OutletIndex, hit.outlet.State),
+                        };
+                    }).ToList(),
+                }).ToList();
                 // PDUs and their circuits (breaker entities), with editable labels — resolved through the
                 // pending-write latch like outlets so a just-set value shows immediately.
                 var devices = data.Devices.Select(d => new
@@ -693,10 +731,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             LabelRequest? req;
             try { req = await ctx.Request.ReadFromJsonAsync<LabelRequest>(ctx.RequestAborted); }
             catch { req = null; }
-            if (req is null || string.IsNullOrWhiteSpace(req.DeviceId))
-                return Results.BadRequest(new { ok = false, message = "deviceId and label are required." });
+            if (req is null)
+                return Results.BadRequest(new { ok = false, message = "A label request body is required." });
 
             var target = (req.Target ?? "outlet").Trim().ToLowerInvariant();
+            // Group labels target the OneView master, not a specific device; everything else needs a deviceId.
+            if (target != "group" && string.IsNullOrWhiteSpace(req.DeviceId))
+                return Results.BadRequest(new { ok = false, message = "deviceId is required." });
+
             var label = new Dictionary<string, object> { ["label"] = (req.Label ?? string.Empty).Trim() };
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -713,6 +755,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             return Results.BadRequest(new { ok = false, message = "entityKey is required for an entity label." });
                         await pdu.SetEntityConfigAsync(req.DeviceId, req.EntityKey, label, cts.Token);
                         return Results.Json(new { ok = true, message = "Circuit label set." }, ConfigSchema.Json);
+                    case "group":
+                        if (string.IsNullOrWhiteSpace(req.GroupKey))
+                            return Results.BadRequest(new { ok = false, message = "groupKey is required for a group label." });
+                        await pdu.SetGroupConfigAsync(req.GroupKey, label, cts.Token);
+                        return Results.Json(new { ok = true, message = "Group label set." }, ConfigSchema.Json);
                     default:
                         await pdu.SetOutletConfigAsync(req.DeviceId, req.Index, label, cts.Token);
                         return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} label set." }, ConfigSchema.Json);
@@ -762,7 +809,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private sealed record ControlRequest(string DeviceId, int Index, string Action);
 
     /// <summary>Body of a POST /api/control/label request.</summary>
-    private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string Label);
+    private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string? GroupKey, string Label);
 
     /// <summary>Body of a POST /api/control/group request.</summary>
     private sealed record GroupControlRequest(string GroupKey, string Action);
@@ -776,6 +823,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 values[m.Type] = v;
         return new { device, source, kind, number, state, values };
     }
+
+    /// <summary>Parse a PDU measurement string to a number (null if missing/unparseable).</summary>
+    private static double? ParseMeasure(string? s)
+        => double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
 
     /// <summary>Project a poll's measurements into the generated MQTT/Prometheus/EmonCMS paths.</summary>
     private static object BuildPaths(Models.PDU.PduData data, Config config)
