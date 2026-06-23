@@ -631,7 +631,7 @@ function addLiveDataSection(nav, sections) {
   link.onclick = () => { activate(link, sec); load(); };
 }
 
-function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? (Math.round(v * 1000) / 1000).toString() : String(v); }
+function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
 
 function activate(link, sec) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
