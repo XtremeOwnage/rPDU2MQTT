@@ -569,41 +569,44 @@ function addLiveDataSection(nav, sections) {
     const f = filter.value.trim().toLowerCase();
     const shown = gs.filter(g => !f || (g.name || '').toLowerCase().includes(f));
     if (!shown.length) return;
-    // Union of measurement types (+ units) across all groups, for stable columns.
-    const types = []; const units = {};
-    gs.forEach(g => (g.measurements || []).forEach(m => { if (!types.includes(m.type)) types.push(m.type); if (m.units && !units[m.type]) units[m.type] = m.units; }));
+    // Union of measurement types (+ units) across all groups, for stable columns. A type whose members
+    // vary gets Min/Max columns flanking its total (e.g. Min | realPower (W) | Max).
+    const types = []; const units = {}; const spread = {};
+    gs.forEach(g => (g.measurements || []).forEach(m => {
+      if (!types.includes(m.type)) types.push(m.type);
+      if (m.units && !units[m.type]) units[m.type] = m.units;
+      if (m.min != null && m.max != null) spread[m.type] = true;
+    }));
     types.sort();
+    // Flatten types into ordered columns.
+    const cols = [];
+    types.forEach(ty => {
+      if (spread[ty]) cols.push({ ty, kind: 'min', label: 'Min' });
+      cols.push({ ty, kind: 'val', label: ty + (units[ty] ? ' (' + units[ty] + ')' : '') });
+      if (spread[ty]) cols.push({ ty, kind: 'max', label: 'Max' });
+    });
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
-    ['OneView group', ...types.map(ty => ty + (units[ty] ? ' (' + units[ty] + ')' : ''))].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 1) th.className = 'num'; head.appendChild(th); });
+    ['OneView group', ...cols.map(c => c.label)].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 1) th.className = 'num'; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
     shown.forEach(g => {
       const byType = {}; (g.measurements || []).forEach(m => byType[m.type] = m);
       const tr = document.createElement('tr');
       const gtd = document.createElement('td'); gtd.textContent = g.name; gtd.style.fontWeight = '600'; tr.appendChild(gtd);
-      types.forEach(ty => {
+      cols.forEach(c => {
         const td = document.createElement('td'); td.className = 'num';
-        const m = byType[ty];
+        const m = byType[c.ty];
         if (m) {
-          const v = (m.sum != null) ? m.sum : (m.avg != null ? m.avg : null);
-          const main = document.createElement('div'); main.textContent = (v == null) ? '' : formatNum(v); td.appendChild(main);
-          // Show the per-member spread (min–max) under the group total when it varies.
-          if (m.min != null && m.max != null) {
-            const sub = document.createElement('div'); sub.className = 'ld-count'; sub.textContent = formatNum(m.min) + '–' + formatNum(m.max); td.appendChild(sub);
-          }
-          const parts = [];
-          if (m.sum != null) parts.push('sum ' + formatNum(m.sum));
-          if (m.avg != null) parts.push('avg ' + formatNum(m.avg));
-          if (m.min != null) parts.push('min ' + formatNum(m.min));
-          if (m.max != null) parts.push('max ' + formatNum(m.max));
-          if (parts.length) td.title = ty + ': ' + parts.join(' · ');
+          const v = c.kind === 'min' ? m.min : c.kind === 'max' ? m.max : (m.sum != null ? m.sum : m.avg);
+          td.textContent = (v == null) ? '' : formatNum(v);
+          if (c.kind === 'val' && m.avg != null) td.title = c.ty + ' avg ' + formatNum(m.avg);
         }
         tr.appendChild(td);
       });
       tb.appendChild(tr);
     });
-    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '12px'; hh.textContent = 'OneView groups (rollups — group totals; hover a value for sum/avg/min/max):'; groupsWrap.appendChild(hh);
+    const hh = document.createElement('div'); hh.className = 'desc'; hh.style.marginTop = '12px'; hh.textContent = 'OneView groups (rollups — group totals, with per-member Min/Max):'; groupsWrap.appendChild(hh);
     t.appendChild(tb); groupsWrap.appendChild(t);
   };
   const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
