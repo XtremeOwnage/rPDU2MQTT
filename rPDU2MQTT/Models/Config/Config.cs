@@ -15,6 +15,18 @@ public class Config
     [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "PDU Configuration")]
     public PduConfig PDU { get; set; } = new PduConfig();
 
+    /// <summary>
+    /// v2 multi-PDU instance set, keyed by instance name. Derived from <see cref="PDU"/> on load for now
+    /// (a v1 single-PDU config migrates to a one-entry map under <see cref="DefaultInstanceKey"/>); not
+    /// yet persisted or shown in the GUI. The runtime moves onto this in a later phase (#127).
+    /// </summary>
+    [JsonIgnore]
+    [YamlIgnore]
+    public Dictionary<string, PduConfig> Pdus { get; set; } = new();
+
+    /// <summary>Instance key a migrated v1 single-PDU config is stored under.</summary>
+    public const string DefaultInstanceKey = "default";
+
     [YamlMember(Alias = "HomeAssistant", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Home Assistant Configuration")]
     [JsonPropertyName("HomeAssistant")]
     public HomeAssistantConfig HASS { get; set; } = new HomeAssistantConfig();
@@ -49,6 +61,7 @@ public class Config
     {
         MQTT = other.MQTT;
         PDU = other.PDU;
+        Pdus = other.Pdus;
         HASS = other.HASS;
         Overrides = other.Overrides;
         Debug = other.Debug;
