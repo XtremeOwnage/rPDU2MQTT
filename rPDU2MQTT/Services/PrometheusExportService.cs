@@ -62,12 +62,9 @@ public class PrometheusExportService : baseMQTTService
 
     protected override Task Execute(CancellationToken cancellationToken)
     {
-        var data = LatestFreshData();
-        if (data is null)
-            return Task.CompletedTask;
-
-        foreach (var r in MetricsHelper.EnumerateReadings(data))
-            GetGauge(MetricsHelper.PrometheusMetricName(r, cfg)).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
+        foreach (var data in FreshSnapshots())
+            foreach (var r in MetricsHelper.EnumerateReadings(data))
+                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg)).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
 
         return Task.CompletedTask;
     }

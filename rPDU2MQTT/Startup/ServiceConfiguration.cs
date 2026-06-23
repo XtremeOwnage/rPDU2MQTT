@@ -120,7 +120,8 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.SnapshotCache>();
         services.AddSingleton<Core.ISnapshotCache>(sp => sp.GetRequiredService<Core.SnapshotCache>());
         services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
-        services.AddHostedService<PduPoller>();
+        // Owns the PDU producer(s) — one poller per configured instance.
+        services.AddHostedService<InstanceManager>();
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
