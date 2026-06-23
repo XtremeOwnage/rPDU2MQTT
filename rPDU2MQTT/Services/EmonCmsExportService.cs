@@ -29,7 +29,9 @@ public class EmonCmsExportService : baseMQTTService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        var data = await pdu.GetRootData_Public(cancellationToken);
+        var data = LatestFreshData();
+        if (data is null)
+            return;
 
         var values = new Dictionary<string, double>();
         foreach (var r in MetricsHelper.EnumerateReadings(data))

@@ -18,6 +18,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     private readonly CancellationTokenSource stoppingCts = new();
     protected Config cfg { get; }
     protected PDU pdu { get; }
+    private readonly Core.ISnapshotCache snapshotCache;
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
@@ -27,6 +28,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         mqtt = dependencies.Mqtt;
         cfg = dependencies.Cfg;
         pdu = dependencies.PDU;
+        snapshotCache = dependencies.SnapshotCache;
 
         // If the interval is 0, don't create a timer.
         if (Interval <= 0)
@@ -162,6 +164,23 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
         // publish failures surface in tick(). No need to check connectivity per message.
         return mqtt.PublishAsync(msg, cancellationToken);
+    }
+
+    /// <summary>
+    /// The most recent pipeline snapshot's data, or null if there is none or it has gone stale (the
+    /// PduPoller stopped producing — e.g. the PDU is unreachable). Returning null lets consumers skip
+    /// publishing so Home Assistant's expire_after can mark entities unavailable instead of us
+    /// republishing the last-known values forever.
+    /// </summary>
+    protected Models.PDU.PduData? LatestFreshData()
+    {
+        var snapshot = snapshotCache.Latest;
+        if (snapshot is null)
+            return null;
+
+        return Core.SnapshotFreshness.IsStale(snapshot.TimestampUtc, cfg.PDU.PollInterval, DateTime.UtcNow)
+            ? null
+            : snapshot.Data;
     }
 
     /// <summary>

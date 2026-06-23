@@ -14,13 +14,15 @@ public sealed class PduPoller : BackgroundService
     private readonly Config cfg;
     private readonly PDU pdu;
     private readonly IMessageBus bus;
+    private readonly HealthState health;
     private readonly string instanceId;
 
-    public PduPoller(Config cfg, PDU pdu, IMessageBus bus)
+    public PduPoller(Config cfg, PDU pdu, IMessageBus bus, HealthState health)
     {
         this.cfg = cfg;
         this.pdu = pdu;
         this.bus = bus;
+        this.health = health;
         instanceId = string.IsNullOrWhiteSpace(cfg.PDU?.Connection?.Host) ? "pdu" : cfg.PDU!.Connection!.Host!;
     }
 
@@ -35,6 +37,9 @@ public sealed class PduPoller : BackgroundService
             {
                 var data = await pdu.GetRootData_Public(stoppingToken);
                 await bus.PublishAsync(new PduSnapshot(instanceId, DateTime.UtcNow, data), stoppingToken);
+
+                // A successful poll is the readiness signal: we can reach the PDU.
+                health.RecordPollSuccess();
             }
             catch (OperationCanceledException)
             {
