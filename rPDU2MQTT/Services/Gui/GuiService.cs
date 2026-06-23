@@ -97,7 +97,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // The GUI typically runs behind an ingress/gateway terminating TLS; honor the forwarded
             // scheme/host so OIDC builds the correct (https) redirect_uri.
             var fwd = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost };
-            fwd.KnownNetworks.Clear();
+            fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
             app.UseForwardedHeaders(fwd);
 
@@ -346,7 +346,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
                 emoncms = config.EmonCMS.Enabled
-                    ? new { enabled = true, transport = config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonCmsStatus.Snapshot() }
+                    ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = (object?)emonCmsStatus.Snapshot() }
                     : new { enabled = false, transport = (string?)null, status = (object?)null },
             }, ConfigSchema.Json);
         });

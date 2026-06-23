@@ -60,7 +60,7 @@ public static class ServiceConfiguration
                 mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
 
             if (cfg.MQTT.Credentials?.Password is not null)
-                mqttBuilder.WithPassword(cfg.MQTT.Credentials.Password);
+                mqttBuilder.WithPassword(ToSecureString(cfg.MQTT.Credentials.Password));
 
             // Return new client, with options applied.
             return new HiveMQClient(mqttBuilder.Build());
@@ -165,5 +165,15 @@ public static class ServiceConfiguration
             Log.Information("Outlet control is ENABLED (ActionsEnabled).");
             services.AddHostedService<OutletCommandService>();
         }
+    }
+
+    /// <summary>Wrap a plaintext secret as a read-only SecureString (for APIs that require one).</summary>
+    private static System.Security.SecureString ToSecureString(string value)
+    {
+        var secure = new System.Security.SecureString();
+        foreach (var c in value)
+            secure.AppendChar(c);
+        secure.MakeReadOnly();
+        return secure;
     }
 }
