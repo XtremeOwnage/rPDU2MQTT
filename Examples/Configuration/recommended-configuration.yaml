@@ -6,7 +6,7 @@ Mqtt:
         Username: "admin"
         Password: "password"
 
-    ParentTopic: "Rack_PDU"
+    ParentTopic: "rPDU2MQTT"
 
 PDU:
     Connection:
