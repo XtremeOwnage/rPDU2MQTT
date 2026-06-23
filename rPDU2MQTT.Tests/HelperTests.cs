@@ -115,6 +115,40 @@ public class MetricsHelperTests
     }
 
     [Fact]
+    public void EmonCmsInputName_DefaultTemplate_BuildsCleanKey()
+    {
+        var r = new MeasurementReading("rack-pdu-1", "dell-md1200", "realPower", 5, "W", "raw_identifier", "topic", "Dell: MD1200", 7);
+        Assert.Equal("rack_pdu_1_dell_md1200_realpower", MetricsHelper.EmonCmsInputName(r, new Config()));
+    }
+
+    [Fact]
+    public void EmonCmsInputName_BlankTemplate_FallsBackToIdentifier()
+    {
+        var cfg = new Config();
+        cfg.EmonCMS.InputNameTemplate = "";
+        var r = new MeasurementReading("dev", "src", "realPower", 5, "W", "the_identifier", "topic", "Src", 1);
+        Assert.Equal("the_identifier", MetricsHelper.EmonCmsInputName(r, cfg));
+    }
+
+    [Fact]
+    public void EmonCmsInputName_HonorsMeasurementIdOverride()
+    {
+        var cfg = new Config();
+        cfg.Overrides.Measurements["realPower"] = new EntityOverride { ID = "power" };
+        var r = new MeasurementReading("pdu", "kube02", "realPower", 5, "W", "id", "topic", "Kube02", 5);
+        Assert.Equal("pdu_kube02_power", MetricsHelper.EmonCmsInputName(r, cfg));
+    }
+
+    [Fact]
+    public void EmonCmsInputName_SupportsNameAndNumber()
+    {
+        var cfg = new Config();
+        cfg.EmonCMS.InputNameTemplate = "outlet{number}_{name}_{type}";
+        var r = new MeasurementReading("pdu", "src", "realPower", 5, "W", "id", "topic", "kube02", 3);
+        Assert.Equal("outlet3_kube02_realpower", MetricsHelper.EmonCmsInputName(r, cfg));
+    }
+
+    [Fact]
     public void PrometheusMetricName_SupportsDeviceSourceUnitsPlaceholders()
     {
         var cfg = new Config();

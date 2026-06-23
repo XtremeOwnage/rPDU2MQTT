@@ -282,6 +282,14 @@ function addDiagnosticsSection(nav, sections) {
     info.appendChild(row('Started (UTC)', b.startedUtc));
     info.appendChild(row('MQTT', (b.mqttConnected ? 'connected' : 'disconnected') + ' — ' + b.mqttHost));
     info.appendChild(row('Last PDU poll (UTC)', b.lastPollUtc));
+    if (b.emoncms && b.emoncms.enabled) {
+      const s = b.emoncms.status || {};
+      let txt;
+      if (s.ok === true) txt = 'ok (' + b.emoncms.transport + ') — last sent ' + (s.lastSuccessUtc || '?') + (s.count ? ', ' + s.count + ' inputs' : '');
+      else if (s.ok === false) txt = 'error (' + b.emoncms.transport + ') — ' + (s.lastError || 'unknown');
+      else txt = 'enabled (' + b.emoncms.transport + ') — no export yet';
+      info.appendChild(row('EmonCMS', txt));
+    }
     info.appendChild(row('Config source', b.configSource));
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
@@ -811,6 +819,7 @@ function sectionActions(node) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'EmonCMS') add('Test EmonCMS connection', testEmonCms);
   else if (node.key === 'HomeAssistant') {
     if ((data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
     add('Republish discovery', rediscoverHa);
@@ -877,6 +886,7 @@ async function refreshStatus() {
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function testEmonCms() { toast('Testing EmonCMS…', true); const r = await api('/api/test/emoncms', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function clearHa() {
   if (!confirm('Clear all Home Assistant discovery messages? The entities will disappear from Home Assistant until discovery runs again.')) return;
