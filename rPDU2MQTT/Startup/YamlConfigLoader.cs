@@ -121,6 +121,11 @@ internal class YamlConfigLoader
         if (config.PDU.EnableActionsAlias.HasValue)
             config.PDU.ActionsEnabled = config.PDU.EnableActionsAlias.Value;
 
+        // v2 multi-PDU: derive the instance set from the single PDU config (auto-migrates v1 configs).
+        // Persisted Pdus / GUI management come in a later phase; for now this is in-memory groundwork.
+        if (config.Pdus is null || config.Pdus.Count == 0)
+            config.Pdus = new Dictionary<string, Models.Config.PduConfig> { [Config.DefaultInstanceKey] = config.PDU };
+
         // Backwards-compatible alias: the old Prometheus.Enabled meant "run the exporter".
         if (config.Prometheus.EnabledAlias == true)
             config.Prometheus.Exporter = true;
