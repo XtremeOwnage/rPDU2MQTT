@@ -587,7 +587,11 @@ function addLiveDataSection(nav, sections) {
         const m = byType[ty];
         if (m) {
           const v = (m.sum != null) ? m.sum : (m.avg != null ? m.avg : null);
-          td.textContent = (v == null) ? '' : formatNum(v);
+          const main = document.createElement('div'); main.textContent = (v == null) ? '' : formatNum(v); td.appendChild(main);
+          // Show the per-member spread (min–max) under the group total when it varies.
+          if (m.min != null && m.max != null) {
+            const sub = document.createElement('div'); sub.className = 'ld-count'; sub.textContent = formatNum(m.min) + '–' + formatNum(m.max); td.appendChild(sub);
+          }
           const parts = [];
           if (m.sum != null) parts.push('sum ' + formatNum(m.sum));
           if (m.avg != null) parts.push('avg ' + formatNum(m.avg));
