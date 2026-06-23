@@ -50,7 +50,10 @@ function renderNode(node, obj, container) {
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    (node.properties || []).forEach(child => renderNode(child, target, fs));
+    // Lay nested fields out in columns to use the horizontal space.
+    const grid = document.createElement('div'); grid.className = 'grid';
+    (node.properties || []).forEach(child => renderNode(child, target, grid));
+    fs.appendChild(grid);
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
     container.appendChild(renderMap(node, ensure(obj, node.key, {})));
@@ -96,7 +99,10 @@ function renderValue(valueSchema, holder, keyName, container) {
   const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
-    (node.properties || []).forEach(child => renderNode(child, target, container));
+    // Multi-column layout for a dictionary/list entry's fields (e.g. each PDU instance).
+    const grid = document.createElement('div'); grid.className = 'grid';
+    (node.properties || []).forEach(child => renderNode(child, target, grid));
+    container.appendChild(grid);
   } else {
     renderNode(node, holder, container);
   }
