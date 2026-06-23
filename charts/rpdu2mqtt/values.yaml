@@ -166,11 +166,14 @@ healthProbes:
     periodSeconds: 20
     timeoutSeconds: 3
     failureThreshold: 3
+  # Readiness becomes true once MQTT is connected + the first PDU poll succeeds (usually a few
+  # seconds). Poll frequently with a short initial delay so the pod is marked Ready promptly
+  # instead of waiting a full (long) period between checks.
   readiness:
-    initialDelaySeconds: 10
-    periodSeconds: 15
+    initialDelaySeconds: 3
+    periodSeconds: 5
     timeoutSeconds: 3
-    failureThreshold: 3
+    failureThreshold: 6
 
 resources: {}
 podAnnotations: {}
