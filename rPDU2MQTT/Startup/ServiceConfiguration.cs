@@ -114,8 +114,13 @@ public static class ServiceConfiguration
 
         services.AddSingleton<MQTTServiceDependencies>();
 
-        // v2 producer/consumer pipeline bus (not yet wired to producers/consumers; see docs/v2-architecture.md).
+        // v2 producer/consumer pipeline (see docs/v2-architecture.md): the bus, a PDU poller (producer)
+        // and the snapshot cache (first consumer). Existing services still read the PDU directly for now.
         services.AddSingleton<Core.IMessageBus, Core.ChannelMessageBus>();
+        services.AddSingleton<Core.SnapshotCache>();
+        services.AddSingleton<Core.ISnapshotCache>(sp => sp.GetRequiredService<Core.SnapshotCache>());
+        services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
+        services.AddHostedService<PduPoller>();
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
