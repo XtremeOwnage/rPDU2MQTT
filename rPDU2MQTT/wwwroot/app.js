@@ -3,6 +3,23 @@ let schema = [], data = {};
 
 function ensure(obj, key, fallback) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
 
+// --- DOM helpers ---------------------------------------------------------------------------------
+// Create an element with optional props and children, to cut createElement/append boilerplate.
+function el(tag, props, ...children) {
+  const e = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k === 'style') Object.assign(e.style, v);
+    else if (k === 'text') e.textContent = v;
+    else if (k in e) e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) e.append(c);
+  return e;
+}
+// A small ".small" button (add a class like "danger"/"primary" via cls).
+function btn(label, cls) { return el('button', { class: 'small' + (cls ? ' ' + cls : ''), text: label }); }
+
+// === Config form (schema-driven rendering) ===
 function scalarInput(node, obj) {
   let el;
   if (node.type === 'bool') {
@@ -96,7 +113,7 @@ function renderMap(node, mapObj) {
     const head = document.createElement('div'); head.className = 'head';
     const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
     keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
-    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    const del = btn('Remove', 'danger');
     del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
     head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
     if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
@@ -105,7 +122,7 @@ function renderMap(node, mapObj) {
   };
 
   Object.keys(mapObj).forEach(drawEntry);
-  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  const add = btn('+ Add');
   add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
   fs.appendChild(add);
   return fs;
@@ -117,7 +134,7 @@ function renderList(node, arr) {
   const entries = document.createElement('div'); fs.appendChild(entries);
   const draw = (idx) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
-    const del = document.createElement('button'); del.className = 'small danger'; del.textContent = 'Remove';
+    const del = btn('Remove', 'danger');
     del.onclick = () => { arr.splice(idx, 1); rebuild(); };
     wrap.appendChild(del);
     renderValue(node.valueSchema, arr, idx, wrap);
@@ -125,7 +142,7 @@ function renderList(node, arr) {
   };
   const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
   rebuild();
-  const add = document.createElement('button'); add.className = 'small'; add.textContent = '+ Add';
+  const add = btn('+ Add');
   add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
   fs.appendChild(add);
   return fs;
@@ -145,8 +162,8 @@ function build() {
     if (node.key === 'Overrides') {
       // Bespoke, live-data-driven editor instead of the blind dictionary form.
       const tools = document.createElement('div'); tools.className = 'sec-actions';
-      const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh live data';
-      const preview = document.createElement('button'); preview.className = 'small'; preview.textContent = 'Preview generated paths (with unsaved edits)';
+      const refresh = btn('Refresh live data');
+      const preview = btn('Preview generated paths (with unsaved edits)');
       tools.appendChild(refresh); tools.appendChild(preview);
       const pathsBox = document.createElement('div');
       const container = document.createElement('div');
@@ -223,6 +240,7 @@ function pathsTable(rows, promOn, emonOn) {
 }
 
 // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key).
+// === GUI sections (Paths, Diagnostics, Control, Live Data) ===
 function addPathsSection(nav, sections) {
   const link = document.createElement('a'); link.textContent = 'Paths'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
@@ -232,7 +250,7 @@ function addPathsSection(nav, sections) {
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const refresh = btn('Refresh');
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement / path)…';
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(count); sec.appendChild(bar);
@@ -263,8 +281,8 @@ function addDiagnosticsSection(nav, sections) {
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Runtime status and maintenance actions.'; sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
-  const restart = document.createElement('button'); restart.className = 'small danger'; restart.textContent = 'Restart bridge';
+  const refresh = btn('Refresh');
+  const restart = btn('Restart bridge', 'danger');
   bar.appendChild(refresh); bar.appendChild(restart); sec.appendChild(bar);
 
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
@@ -309,8 +327,8 @@ function addDiagnosticsSection(nav, sections) {
 // Kubernetes-only: on-demand pod logs + recent events.
 function buildK8sTools(container) {
   const tools = document.createElement('div'); tools.className = 'sec-actions';
-  const logsBtn = document.createElement('button'); logsBtn.className = 'small'; logsBtn.textContent = 'Load logs';
-  const evBtn = document.createElement('button'); evBtn.className = 'small'; evBtn.textContent = 'Load events';
+  const logsBtn = btn('Load logs');
+  const evBtn = btn('Load events');
   tools.appendChild(logsBtn); tools.appendChild(evBtn); container.appendChild(tools);
   const out = document.createElement('div'); container.appendChild(out);
 
@@ -345,7 +363,7 @@ function addControlSection(nav, sections) {
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const refresh = btn('Refresh');
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet)…';
   bar.appendChild(refresh); bar.appendChild(filter); sec.appendChild(bar);
   const warn = document.createElement('div'); warn.className = 'desc'; warn.style.color = 'var(--bad)'; warn.style.display = 'none';
@@ -380,7 +398,7 @@ function addControlSection(nav, sections) {
       // Editable group label (written to the PDU).
       const labTd = document.createElement('td');
       const lin = document.createElement('input'); lin.type = 'text'; lin.value = g.label || ''; lin.style.width = '140px'; lin.disabled = !enabled;
-      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      const setBtn = btn('Set'); setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
       setBtn.onclick = () => setGroupLabel(g, lin.value);
       labTd.appendChild(lin); labTd.appendChild(setBtn); tr.appendChild(labTd);
       // Aggregate member state: a dot per member outlet + an "n/m on" summary.
@@ -398,7 +416,7 @@ function addControlSection(nav, sections) {
       tr.appendChild(memTd);
       const actTd = document.createElement('td');
       [['All On', 'on'], ['All Off', 'off'], ['Reboot All', 'reboot']].forEach(([lab, a]) => {
-        const b = document.createElement('button'); b.className = 'small' + (a !== 'on' ? ' danger' : ''); b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => actGroup(g, a); actTd.appendChild(b);
+        const b = btn(lab, a !== 'on' ? 'danger' : ''); b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => actGroup(g, a); actTd.appendChild(b);
       });
       tr.appendChild(actTd); tb.appendChild(tr);
     });
@@ -436,7 +454,7 @@ function addControlSection(nav, sections) {
       const td1 = document.createElement('td'); td1.textContent = name || ''; tr.appendChild(td1);
       const td2 = document.createElement('td');
       const lin = document.createElement('input'); lin.type = 'text'; lin.value = current || ''; lin.style.width = '150px'; lin.disabled = !enabled;
-      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      const setBtn = btn('Set'); setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
       setBtn.onclick = () => postLabel(Object.assign({}, payload, { label: (lin.value || '').trim() }), kind + ' ' + (name || ''));
       td2.appendChild(lin); td2.appendChild(setBtn); tr.appendChild(td2);
       tb.appendChild(tr);
@@ -467,12 +485,12 @@ function addControlSection(nav, sections) {
       // Editable PDU label.
       const tdLabel = document.createElement('td');
       const lin = document.createElement('input'); lin.type = 'text'; lin.value = o.label || ''; lin.style.width = '150px'; lin.disabled = !enabled;
-      const setBtn = document.createElement('button'); setBtn.className = 'small'; setBtn.textContent = 'Set'; setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
+      const setBtn = btn('Set'); setBtn.disabled = !enabled; setBtn.style.marginLeft = '6px';
       setBtn.onclick = () => setLabel(o, lin.value);
       tdLabel.appendChild(lin); tdLabel.appendChild(setBtn);
       // Reset only shows when a label is actually set; clears it back to the PDU default.
       if ((o.label || '').trim()) {
-        const resetBtn = document.createElement('button'); resetBtn.className = 'small danger'; resetBtn.textContent = 'Reset'; resetBtn.disabled = !enabled; resetBtn.style.marginLeft = '4px';
+        const resetBtn = btn('Reset', 'danger'); resetBtn.disabled = !enabled; resetBtn.style.marginLeft = '4px';
         resetBtn.onclick = () => { if (confirm('Clear the label for outlet ' + o.number + '?')) setLabel(o, ''); };
         tdLabel.appendChild(resetBtn);
       }
@@ -482,8 +500,7 @@ function addControlSection(nav, sections) {
       tdState.appendChild(document.createTextNode(o.state || '?')); tr.appendChild(tdState);
       const tdAct = document.createElement('td');
       [['On', 'on'], ['Off', 'off'], ['Reboot', 'reboot'], ['Reset Stats', 'resetstats']].forEach(([lab, a]) => {
-        const b = document.createElement('button'); b.className = 'small' + (a === 'off' ? ' danger' : '');
-        b.textContent = lab; b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => act(o, a); tdAct.appendChild(b);
+        const b = btn(lab, a === 'off' ? 'danger' : ''); b.disabled = !enabled; b.style.marginRight = '6px'; b.onclick = () => act(o, a); tdAct.appendChild(b);
       });
       tr.appendChild(tdAct); tb.appendChild(tr);
     });
@@ -507,7 +524,7 @@ function addLiveDataSection(nav, sections) {
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const refresh = btn('Refresh');
   const viewSel = document.createElement('select');
   [['grouped', 'Grouped (by outlet)'], ['flat', 'Flat (one row per reading)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; viewSel.appendChild(o); });
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
@@ -648,6 +665,7 @@ function activate(link, sec) {
 }
 
 // ---- Overrides editor (driven by live PDU data) ----
+// === Overrides editor ===
 function ovGet(path) { let o = data.Overrides; for (const p of path) { if (o == null) return undefined; o = o[p]; } return o; }
 function ovSet(path, val) {
   let o = data.Overrides = data.Overrides || {};
@@ -815,7 +833,7 @@ function pruneEmpty(o) {
 // Section-specific action buttons (connection tests; Home Assistant discovery actions).
 function sectionActions(node) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const add = (label, fn, cls) => { const b = document.createElement('button'); b.className = 'small ' + (cls || ''); b.textContent = label; b.onclick = fn; bar.appendChild(b); };
+  const add = (label, fn, cls) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
@@ -841,8 +859,8 @@ function addExportSection(nav, sections) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
   const fmt = document.createElement('select');
   [['yaml', 'config.yaml'], ['manifest', 'RpduConfig (Kubernetes)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; fmt.appendChild(o); });
-  const copy = document.createElement('button'); copy.className = 'small'; copy.textContent = 'Copy';
-  const refresh = document.createElement('button'); refresh.className = 'small'; refresh.textContent = 'Refresh';
+  const copy = btn('Copy');
+  const refresh = btn('Refresh');
   bar.appendChild(fmt); bar.appendChild(copy); bar.appendChild(refresh); sec.appendChild(bar);
 
   const ta = document.createElement('textarea'); ta.className = 'yaml'; ta.readOnly = true; ta.spellcheck = false; sec.appendChild(ta);
@@ -860,6 +878,7 @@ function addExportSection(nav, sections) {
 
 function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// === Bootstrap & shared actions ===
 async function load() {
   schema = (await api('/api/schema')).body;
   data = (await api('/api/config')).body;
