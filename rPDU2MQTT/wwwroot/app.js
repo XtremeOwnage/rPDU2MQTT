@@ -561,7 +561,7 @@ function addLiveDataSection(nav, sections) {
   };
 
   // OneView group rollups — one row per group, a column per measurement type showing the group
-  // total (Sum, falling back to Avg); hover a cell for the full sum/avg/min/max breakdown.
+  // total (Sum, falling back to Avg), flanked by Min/Max columns for types whose members vary.
   const drawGroupRollups = () => {
     groupsWrap.innerHTML = '';
     const gs = body.groups || [];
