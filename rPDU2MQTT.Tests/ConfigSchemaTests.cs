@@ -14,7 +14,7 @@ public class ConfigSchemaTests
         var keys = schema.Select(n => n.Key).ToHashSet();
 
         Assert.Contains("MQTT", keys);
-        Assert.Contains("PDU", keys);
+        Assert.Contains("Pdus", keys);
         Assert.Contains("Gui", keys);
         Assert.All(schema, n => Assert.False(string.IsNullOrEmpty(n.Label)));
     }
@@ -62,7 +62,9 @@ public class ConfigSchemaTests
     [Fact]
     public void Build_UsesFriendlyDisplayNamesAndHelpText()
     {
-        var pdu = ConfigSchema.Build().Single(n => n.Key == "PDU");
+        // PDU settings now live under the Pdus instance map; the per-instance schema is its ValueSchema.
+        var pdus = ConfigSchema.Build().Single(n => n.Key == "Pdus");
+        var pdu = pdus.ValueSchema!;
         var actions = pdu.Properties!.Single(n => n.Key == "ActionsEnabled");
 
         // Key stays the config field; Label is the friendly GUI title from [Display(Name)].

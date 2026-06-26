@@ -17,7 +17,7 @@ public class SecretRedactionTests
     {
         var cfg = new Config();
         cfg.MQTT.Credentials = new Credentials { Username = "mqttUser", Password = "mqttPass" };
-        cfg.PDU.Credentials = new Credentials { Username = "pduUser", Password = "pduPass" };
+        cfg.Pdus[Config.DefaultInstanceKey] = new Models.Config.PduConfig { Credentials = new Credentials { Username = "pduUser", Password = "pduPass" } };
         cfg.EmonCMS.ApiKey = "emonKey";
         cfg.Gui.Password = "guiPass";
         cfg.Gui.Oidc.ClientSecret = "oidcSecret";
@@ -25,7 +25,7 @@ public class SecretRedactionTests
         var redacted = ConfigSchema.RedactSecrets(cfg);
 
         Assert.Null(redacted.MQTT.Credentials);
-        Assert.Null(redacted.PDU.Credentials);
+        Assert.Null(redacted.Primary.Credentials);
         Assert.Null(redacted.EmonCMS.ApiKey);
         Assert.Null(redacted.Gui.Password);
         Assert.Null(redacted.Gui.Oidc?.ClientSecret);

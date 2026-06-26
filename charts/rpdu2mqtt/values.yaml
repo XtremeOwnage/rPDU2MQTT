@@ -27,11 +27,12 @@ config:
       Host: mqtt.example.com
       Port: 1883
     ParentTopic: rPDU2MQTT
-  PDU:
-    Connection:
-      Host: pdu.example.com
-      Port: 80
-    PollInterval: 5
+  Pdus:
+    default:
+      Connection:
+        Host: pdu.example.com
+        Port: 80
+      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
     DiscoveryTopic: homeassistant

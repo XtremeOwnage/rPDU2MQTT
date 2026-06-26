@@ -13,16 +13,16 @@ namespace rPDU2MQTT.Classes;
 public class PduApiHandler
 {
     private readonly HttpClient http;
-    private readonly Config config;
+    private readonly PduConfig instanceConfig;
     // Session token per host web port (OneView cluster members are reached via the master's proxy port).
     private readonly Dictionary<long, string> tokensByPort = new();
     // deviceId -> owning host web port (0 = the directly-connected/base host).
     private Dictionary<string, long>? deviceWebPorts;
 
-    public PduApiHandler([DisallowNull, NotNull] HttpClient http, Config config)
+    public PduApiHandler([DisallowNull, NotNull] HttpClient http, PduConfig instanceConfig)
     {
         this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
-        this.config = config;
+        this.instanceConfig = instanceConfig;
     }
 
     public string BaseAddress => http.BaseAddress?.ToString() ?? string.Empty;
@@ -146,7 +146,7 @@ public class PduApiHandler
         if (tokensByPort.TryGetValue(webPort, out var cached) && !string.IsNullOrEmpty(cached))
             return cached;
 
-        var creds = config.PDU.Credentials;
+        var creds = instanceConfig.Credentials;
         if (string.IsNullOrEmpty(creds?.Username) || string.IsNullOrEmpty(creds?.Password))
             throw new Exception("PDU username and password are required for write-actions (PDU.ActionsEnabled).");
 

@@ -16,7 +16,7 @@ public class PrometheusExportService : baseMQTTService
     private readonly IMetricServer? exporter;
     private readonly IMetricServer? pusher;
 
-    public PrometheusExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.PDU.PollInterval)
+    public PrometheusExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.Primary.PollInterval)
     {
         var cfg = deps.Cfg.Prometheus;
 
@@ -43,7 +43,7 @@ public class PrometheusExportService : baseMQTTService
             {
                 try
                 {
-                    var seconds = cfg.Pushgateway.IntervalSeconds > 0 ? cfg.Pushgateway.IntervalSeconds : deps.Cfg.PDU.PollInterval;
+                    var seconds = cfg.Pushgateway.IntervalSeconds > 0 ? cfg.Pushgateway.IntervalSeconds : deps.Cfg.Primary.PollInterval;
                     pusher = new MetricPusher(new MetricPusherOptions
                     {
                         Endpoint = cfg.Pushgateway.Url,

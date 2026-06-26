@@ -199,7 +199,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // When write-actions are enabled, expose the controllable switch plus the outlet
             // operations: reboot, configurable delays, power-on action, and a reset-stats button.
-            if (cfg.PDU.ActionsEnabled)
+            if (cfg.Primary.ActionsEnabled)
                 collectOutletOperations(outlet, newParent, components);
 
             // Discover measurements
@@ -233,7 +233,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // Group actions (fan out to member outlets). The "Total"/"Unassigned" pseudo-groups have
             // no member mapping, so only offer actions on real groups.
-            if (cfg.PDU.ActionsEnabled && group.MemberOutlets.Count > 0)
+            if (cfg.Primary.ActionsEnabled && group.MemberOutlets.Count > 0)
             {
                 var control = MQTTHelper.JoinPaths(group.GetTopicPath(), "control");
                 components.Add(BuildButton(group.Entity_Identifier + "_allOn", "All On", control, newParent, payloadPress: "on"));

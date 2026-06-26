@@ -12,20 +12,34 @@ public class Config
     [YamlMember(Alias = "MQTT", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "MQTT Configuration")]
     public MQTTConfig MQTT { get; set; } = new MQTTConfig();
 
-    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "PDU Configuration")]
-    public PduConfig PDU { get; set; } = new PduConfig();
+    /// <summary>
+    /// The PDU instances to bridge, keyed by instance name. Each is polled independently and its data
+    /// published to MQTT/exporters. (v2 replaced the single <c>PDU</c> section with this map.)
+    /// </summary>
+    [YamlMember(Alias = "Pdus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "PDU instances to bridge, keyed by instance name.")]
+    public Dictionary<string, PduConfig> Pdus { get; set; } = new();
+
+    /// <summary>Instance key used for a single/primary PDU.</summary>
+    public const string DefaultInstanceKey = "default";
 
     /// <summary>
-    /// v2 multi-PDU instance set, keyed by instance name. Derived from <see cref="PDU"/> on load for now
-    /// (a v1 single-PDU config migrates to a one-entry map under <see cref="DefaultInstanceKey"/>); not
-    /// yet persisted or shown in the GUI. The runtime moves onto this in a later phase (#127).
+    /// Deprecated v1 single-PDU section. Captured only so an existing <c>PDU:</c> config auto-migrates
+    /// to a one-entry <see cref="Pdus"/> map (key <see cref="DefaultInstanceKey"/>) during load; it is
+    /// cleared afterwards and never re-serialised. Hidden from the GUI/JSON schema — use <see cref="Pdus"/>.
+    /// </summary>
+    [JsonIgnore]
+    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    public PduConfig? PDU { get; set; }
+
+    /// <summary>
+    /// The primary instance — the one GUI control/live/discovery operate on, and the source of the
+    /// cross-cutting settings (poll cadence, write actions, model/manufacturer remap). It's the
+    /// <see cref="DefaultInstanceKey"/> entry if present, else the first configured instance.
     /// </summary>
     [JsonIgnore]
     [YamlIgnore]
-    public Dictionary<string, PduConfig> Pdus { get; set; } = new();
-
-    /// <summary>Instance key a migrated v1 single-PDU config is stored under.</summary>
-    public const string DefaultInstanceKey = "default";
+    public PduConfig Primary =>
+        Pdus.TryGetValue(DefaultInstanceKey, out var p) ? p! : (Pdus.Values.FirstOrDefault() ?? new PduConfig());
 
     [YamlMember(Alias = "HomeAssistant", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Home Assistant Configuration")]
     [JsonPropertyName("HomeAssistant")]
@@ -60,7 +74,6 @@ public class Config
     public void CopyFrom(Config other)
     {
         MQTT = other.MQTT;
-        PDU = other.PDU;
         Pdus = other.Pdus;
         HASS = other.HASS;
         Overrides = other.Overrides;

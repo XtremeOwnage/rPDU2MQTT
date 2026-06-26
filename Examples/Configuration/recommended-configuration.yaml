@@ -8,22 +8,24 @@ Mqtt:
 
     ParentTopic: "rPDU2MQTT"
 
-PDU:
-    Connection:
-        Host: 192.168.1.2   # Update to the IP of your PDU.
-        Port: 80
+# One or more PDU instances, keyed by instance name.
+Pdus:
+    default:
+        Connection:
+            Host: 192.168.1.2   # Update to the IP of your PDU.
+            Port: 80
 
-    PollInterval: 5
+        PollInterval: 5
 
-    # Required only if you enable outlet on/off control below.
-    # Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD env vars.
-    #Credentials:
-    #    Username: "actions-user"
-    #    Password: "actions-pass"
+        # Required only if you enable outlet on/off control below.
+        # Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD env vars.
+        #Credentials:
+        #    Username: "actions-user"
+        #    Password: "actions-pass"
 
-    # Enables outlet on/off control from Home Assistant (publishes switch entities).
-    # Requires Credentials above with "Control" permission on every PDU in a cluster. Default: false.
-    #ActionsEnabled: true
+        # Enables outlet on/off control from Home Assistant (publishes switch entities).
+        # Requires Credentials above with "Control" permission on every PDU in a cluster. Default: false.
+        #ActionsEnabled: true
 Overrides:
     PDU: 
         Name: "Your PDU"

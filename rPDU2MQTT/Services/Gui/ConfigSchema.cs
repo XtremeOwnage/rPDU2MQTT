@@ -181,7 +181,8 @@ public static class ConfigSchema
     {
         var clone = FromJson(ToJson(config));
         clone.MQTT.Credentials = null;
-        clone.PDU.Credentials = null;
+        foreach (var instance in clone.Pdus.Values)
+            instance.Credentials = null;
         clone.EmonCMS.ApiKey = null;
         clone.Gui.Password = null;
         if (clone.Gui.Oidc is not null)

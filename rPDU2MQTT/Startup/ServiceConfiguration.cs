@@ -70,47 +70,11 @@ public static class ServiceConfiguration
         // Instantiated explicitly in Program.cs before the initial connect.
         services.AddSingleton(sp => new MqttEventHandler((HiveMQClient)sp.GetRequiredService<IHiveMQClient>()));
 
-        //Configure Services
-        services.AddSingleton<PDU>();
-
-        // Create HttpClient for PDU.
-        var pduHttpClient = services.AddHttpClient<PduApiHandler>(client =>
-        {
-            ThrowError.TestRequiredConfigurationSection(cfg.PDU, "PDU");
-            ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection, "PDU.Connection");
-            ThrowError.TestRequiredConfigurationSection(cfg.PDU.Connection.Host, "PDU.Connection.Host");
-            UriBuilder uriBuilder = new UriBuilder();
-
-            uriBuilder.Host = cfg.PDU.Connection.Host;
-            uriBuilder.Port = cfg.PDU.Connection.Port ?? 80;
-
-            if (!string.IsNullOrEmpty(cfg.PDU.Connection.Scheme))
-                uriBuilder.Scheme = cfg.PDU.Connection.Scheme;
-            else
-                uriBuilder.Scheme = uriBuilder.Port switch
-                {
-                    80 => "http",
-                    443 => "https",
-                    _ => uriBuilder.Scheme
-                };
-
-            client.BaseAddress = uriBuilder.Uri;
-            client.Timeout = TimeSpan.FromSeconds(cfg.PDU.Connection.TimeoutSecs ?? 15);
-        });
-
-        if (cfg.PDU.Connection.ValidateCertificate == false)
-        {
-            pduHttpClient.ConfigurePrimaryHttpMessageHandler(() =>
-            {
-                // Return HttpClientHandler with certificate validation completely disabled.
-                return new HttpClientHandler
-                {
-                    ClientCertificateOptions = ClientCertificateOption.Manual,
-                    ServerCertificateCustomValidationCallback = (_, _, _, _) => true
-                };
-            });
-        }
-
+        //Configure Services: one PDU per configured instance, built by the factory + held in the registry.
+        services.AddSingleton<PduInstanceFactory>();
+        services.AddSingleton<PduInstanceRegistry>();
+        // The "primary" instance backs GUI control/live/discovery; the registry holds every instance.
+        services.AddSingleton<PDU>(sp => sp.GetRequiredService<PduInstanceRegistry>().Primary);
 
         services.AddSingleton<MQTTServiceDependencies>();
 
@@ -163,9 +127,9 @@ public static class ServiceConfiguration
             services.AddHostedService<Services.Gui.GuiService>();
 
         // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
-        if (cfg.PDU.ActionsEnabled)
+        if (cfg.Primary.ActionsEnabled)
         {
-            if (string.IsNullOrEmpty(cfg.PDU.Credentials?.Username) || string.IsNullOrEmpty(cfg.PDU.Credentials?.Password))
+            if (string.IsNullOrEmpty(cfg.Primary.Credentials?.Username) || string.IsNullOrEmpty(cfg.Primary.Credentials?.Password))
                 Log.Warning("PDU.ActionsEnabled is true, but PDU credentials are not set. Outlet on/off control will fail until Pdu.Credentials (or RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD) are provided.");
 
             Log.Information("Outlet control is ENABLED (ActionsEnabled).");
