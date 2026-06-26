@@ -19,6 +19,35 @@ function el(tag, props, ...children) {
 // A small ".small" button (add a class like "danger"/"primary" via cls).
 function btn(label, cls) { return el('button', { class: 'small' + (cls ? ' ' + cls : ''), text: label }); }
 
+// --- Multi-PDU: per-tab instance selector ---
+let _instancesCache = null;
+async function getInstances() {
+  if (_instancesCache) return _instancesCache;
+  const r = await api('/api/instances');
+  _instancesCache = (r.body && r.body.ok) ? (r.body.instances || []) : [];
+  return _instancesCache;
+}
+// A per-tab PDU instance picker. Returns { wrap, get } — append `wrap` to a toolbar; `get()` is the
+// selected instance id. Stays hidden when only one instance is configured (single-PDU UX unchanged);
+// then get() === '' so the backend falls back to the primary. `onChange` fires when the user switches.
+function instanceSelector(onChange) {
+  const sel = el('select');
+  const wrap = el('label', { class: 'ld-inst', style: { display: 'none' } }, 'Instance ', sel);
+  getInstances().then(list => {
+    if (list.length <= 1) return;
+    list.forEach(i => sel.appendChild(el('option', { value: i.id, text: i.id + (i.primary ? ' (primary)' : '') })));
+    sel.value = (list.find(i => i.primary) || list[0]).id;
+    wrap.style.display = '';
+  });
+  sel.onchange = () => onChange && onChange(sel.value);
+  return { wrap, get: () => sel.value || '' };
+}
+// Append `?instance=<id>` to a path when an instance is selected (empty -> primary, omit the param).
+function withInstance(path, instSel) {
+  const v = instSel.get();
+  return v ? path + (path.includes('?') ? '&' : '?') + 'instance=' + encodeURIComponent(v) : path;
+}
+
 // === Config form (schema-driven rendering) ===
 function scalarInput(node, obj) {
   let el;
@@ -370,8 +399,9 @@ function addControlSection(nav, sections) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = btn('Refresh');
+  const instSel = instanceSelector(() => load());
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet)…';
-  bar.appendChild(refresh); bar.appendChild(filter); sec.appendChild(bar);
+  bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(filter); sec.appendChild(bar);
   const warn = document.createElement('div'); warn.className = 'desc'; warn.style.color = 'var(--bad)'; warn.style.display = 'none';
   warn.textContent = 'Write actions are disabled (PDU.ActionsEnabled is false). Enable it in the PDU section and restart to control outlets.';
   sec.appendChild(warn);
@@ -384,7 +414,7 @@ function addControlSection(nav, sections) {
     const verb = action === 'on' ? 'turn ON' : action === 'off' ? 'turn OFF' : 'reboot';
     if (!confirm('Group "' + (g.name || g.key) + '": ' + verb + ' ALL member outlets?')) return;
     toast('Group ' + (g.name || g.key) + ': ' + action + '…', true);
-    const r = await api('/api/control/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupKey: g.key, action }) });
+    const r = await api('/api/control/group', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groupKey: g.key, action, instance: instSel.get() }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 1000);
   };
@@ -433,13 +463,13 @@ function addControlSection(nav, sections) {
     if (action === 'reboot' && !confirm('Reboot outlet ' + o.number + ' (' + o.name + ')? Connected equipment will lose power briefly.')) return;
     if (action === 'resetstats' && !confirm('Reset statistics for outlet ' + o.number + ' (' + o.name + ')?')) return;
     toast('Outlet ' + o.number + ': ' + action + '…', true);
-    const r = await api('/api/control/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, action }) });
+    const r = await api('/api/control/outlet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: o.deviceId, index: o.index, action, instance: instSel.get() }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800); // let the PDU apply, then re-read state
   };
   const postLabel = async (payload, desc) => {
     toast(desc + ': set label…', true);
-    const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, instance: instSel.get() }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800);
   };
@@ -513,7 +543,7 @@ function addControlSection(nav, sections) {
     t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
   };
   const load = async () => {
-    const r = await api('/api/control/outlets');
+    const r = await api(withInstance('/api/control/outlets', instSel));
     if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load outlets.') + '</div>'; return; }
     rows = r.body.outlets || []; groups = r.body.groups || []; devices = r.body.devices || []; enabled = !!r.body.actionsEnabled;
     warn.style.display = enabled ? 'none' : 'block'; drawGroups(); drawDevices(); draw();
@@ -537,7 +567,8 @@ function addLiveDataSection(nav, sections) {
   const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
   autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
+  const instSel = instanceSelector(() => load());
+  bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
   sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
   const groupsWrap = document.createElement('div'); sec.appendChild(groupsWrap);
@@ -642,7 +673,7 @@ function addLiveDataSection(nav, sections) {
   };
   const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
   const load = async () => {
-    const r = await api('/api/livedata');
+    const r = await api(withInstance('/api/livedata', instSel));
     if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; groupsWrap.innerHTML = ''; count.textContent = ''; return; }
     body = r.body;
     count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings · ' + (body.groups || []).length + ' groups';

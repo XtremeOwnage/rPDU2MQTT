@@ -37,11 +37,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
     private readonly PduInstanceFactory pduFactory;
+    private readonly PduInstanceRegistry registry;
     private readonly EmonCmsStatus emonCmsStatus;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, EmonCmsStatus emonCmsStatus)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, EmonCmsStatus emonCmsStatus)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -51,7 +52,21 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.lifetime = lifetime;
         this.health = health;
         this.pduFactory = pduFactory;
+        this.registry = registry;
         this.emonCmsStatus = emonCmsStatus;
+    }
+
+    /// <summary>The instance id a request targets — a usable (registry) instance, else the primary's.</summary>
+    private string ResolveInstanceId(string? requested) =>
+        !string.IsNullOrEmpty(requested) && registry.All.ContainsKey(requested)
+            ? requested
+            : (registry.All.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : registry.All.Keys.First());
+
+    /// <summary>Resolve the PDU + its config for a request, from <c>?instance=</c> (GET) or a body field (POST).</summary>
+    private (string Id, PDU Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
+    {
+        var id = ResolveInstanceId(requested);
+        return (id, registry.Get(id), config.Pdus[id]);
     }
 
     /// <summary>Authentication is turned off entirely (Gui.AuthType = None).</summary>
@@ -325,6 +340,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             user = UseOidc ? ctx.User?.Identity?.Name : null,
         }, ConfigSchema.Json));
 
+        // Configured PDU instances (the per-tab instance selector on Live Data / Control reads this).
+        app.MapGet("/api/instances", () =>
+        {
+            var primaryId = ResolveInstanceId(null);
+            // Only usable (pollable) instances — registry skips entries missing a Connection.Host.
+            var instances = registry.All.Keys.Select(id => new
+            {
+                id,
+                primary = string.Equals(id, primaryId, StringComparison.OrdinalIgnoreCase),
+                actionsEnabled = config.Pdus.TryGetValue(id, out var c) && c.ActionsEnabled,
+            }).ToList();
+            return Results.Json(new { ok = true, instances }, ConfigSchema.Json);
+        });
+
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", () =>
         {
@@ -428,6 +457,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
+                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
                 var devices = data.Devices?.Count ?? 0;
                 var outlets = data.Devices?.Sum(d => d.Outlets?.Count ?? 0) ?? 0;
@@ -490,6 +520,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
+                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
 
                 // Expose the raw PDU label/name plus the currently-discovered display name and
@@ -544,6 +575,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
+                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
                 var readingList = MetricsHelper.EnumerateReadings(data)
                     .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
@@ -603,6 +635,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
+                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
                 return Results.Json(BuildPaths(data, config), ConfigSchema.Json);
             }
@@ -644,6 +677,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
+                var (_, pdu, instanceCfg) = ResolveInstance(ctx.Request.Query["instance"]);
                 var data = await pdu.GetRootData_Public(cts.Token);
                 var outlets = data.Devices.SelectMany(d => d.Outlets.OrderBy(o => o.Key).Select(o => new
                 {
@@ -698,7 +732,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             label = pdu.ResolveEntityConfig(d.Key, e.Key, "label", e.Label ?? ""),
                         }).ToList(),
                 }).ToList();
-                return Results.Json(new { ok = true, actionsEnabled = config.Primary.ActionsEnabled, outlets, groups, devices }, ConfigSchema.Json);
+                return Results.Json(new { ok = true, actionsEnabled = instanceCfg.ActionsEnabled, outlets, groups, devices }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -709,14 +743,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Apply a control action to every outlet in a OneView group (fan-out). Gated by ActionsEnabled.
         app.MapPost("/api/control/group", async (HttpContext ctx) =>
         {
-            if (!config.Primary.ActionsEnabled)
-                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
-
             GroupControlRequest? req;
             try { req = await ctx.Request.ReadFromJsonAsync<GroupControlRequest>(ctx.RequestAborted); }
             catch { req = null; }
             if (req is null || string.IsNullOrWhiteSpace(req.GroupKey))
                 return Results.BadRequest(new { ok = false, message = "groupKey and action are required." });
+
+            var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (!instanceCfg.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
             var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
             if (action is not ("on" or "off" or "reboot"))
@@ -738,14 +773,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Issue an outlet control action (on/off/reboot). Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/outlet", async (HttpContext ctx) =>
         {
-            if (!config.Primary.ActionsEnabled)
-                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
-
             ControlRequest? req;
             try { req = await ctx.Request.ReadFromJsonAsync<ControlRequest>(ctx.RequestAborted); }
             catch { req = null; }
             if (req is null || string.IsNullOrWhiteSpace(req.DeviceId))
                 return Results.BadRequest(new { ok = false, message = "deviceId, index and action are required." });
+
+            var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (!instanceCfg.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
             var action = (req.Action ?? string.Empty).Trim().ToLowerInvariant();
             if (action is not ("on" or "off" or "reboot" or "resetstats"))
@@ -770,14 +806,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Write an outlet's label on the PDU itself (cmd "set"). Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/label", async (HttpContext ctx) =>
         {
-            if (!config.Primary.ActionsEnabled)
-                return Results.Json(new { ok = false, message = "Write actions are disabled (PDU.ActionsEnabled is false)." }, statusCode: 409);
-
             LabelRequest? req;
             try { req = await ctx.Request.ReadFromJsonAsync<LabelRequest>(ctx.RequestAborted); }
             catch { req = null; }
             if (req is null)
                 return Results.BadRequest(new { ok = false, message = "A label request body is required." });
+
+            var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (!instanceCfg.ActionsEnabled)
+                return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
             var target = (req.Target ?? "outlet").Trim().ToLowerInvariant();
             // Group labels target the OneView master, not a specific device; everything else needs a deviceId.
@@ -851,13 +888,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     }
 
     /// <summary>Body of a POST /api/control/outlet request.</summary>
-    private sealed record ControlRequest(string DeviceId, int Index, string Action);
+    private sealed record ControlRequest(string DeviceId, int Index, string Action, string? Instance = null);
 
     /// <summary>Body of a POST /api/control/label request.</summary>
-    private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string? GroupKey, string Label);
+    private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string? GroupKey, string Label, string? Instance = null);
 
     /// <summary>Body of a POST /api/control/group request.</summary>
-    private sealed record GroupControlRequest(string GroupKey, string Action);
+    private sealed record GroupControlRequest(string GroupKey, string Action, string? Instance = null);
 
     /// <summary>One pivoted live-view row: an outlet/entity with its numeric measurements + state.</summary>
     private static object BuildLiveEntity(string device, string source, string kind, int? number, string? state, IEnumerable<Models.PDU.Measurement> measurements)

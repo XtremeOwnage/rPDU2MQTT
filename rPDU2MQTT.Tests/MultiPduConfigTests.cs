@@ -70,6 +70,31 @@ public class MultiPduConfigTests
     }
 
     [Fact]
+    public void Registry_SkipsInstancesMissingHost_AndKeepsValidOnes()
+    {
+        var cfg = new Config();
+        cfg.Pdus["default"] = new PduConfig(); cfg.Pdus["default"].Connection.Host = "10.0.0.1";
+        cfg.Pdus["new"] = new PduConfig(); // no Host — a half-configured GUI addition
+
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+
+        Assert.True(registry.All.ContainsKey("default"));
+        Assert.False(registry.All.ContainsKey("new"));
+        // An unknown/skipped instance resolves to the primary instead of throwing.
+        Assert.Same(registry.Primary, registry.Get("new"));
+    }
+
+    [Fact]
+    public void Registry_ThrowsWhenNoInstanceHasAHost()
+    {
+        var cfg = new Config();
+        cfg.Pdus["a"] = new PduConfig(); // no Host
+        cfg.Pdus["b"] = new PduConfig(); // no Host
+
+        Assert.Throws<Exception>(() => new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg)));
+    }
+
+    [Fact]
     public void Initialize_PrefersPdusOverDeprecatedPduWhenBothPresent()
     {
         var cfg = new Config { PDU = new PduConfig() };
