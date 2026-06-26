@@ -23,6 +23,15 @@ public class Config
     public const string DefaultInstanceKey = "default";
 
     /// <summary>
+    /// Deprecated v1 single-PDU section. Captured only so an existing <c>PDU:</c> config auto-migrates
+    /// to a one-entry <see cref="Pdus"/> map (key <see cref="DefaultInstanceKey"/>) during load; it is
+    /// cleared afterwards and never re-serialised. Hidden from the GUI/JSON schema — use <see cref="Pdus"/>.
+    /// </summary>
+    [JsonIgnore]
+    [YamlMember(Alias = "PDU", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    public PduConfig? PDU { get; set; }
+
+    /// <summary>
     /// The primary instance — the one GUI control/live/discovery operate on, and the source of the
     /// cross-cutting settings (poll cadence, write actions, model/manufacturer remap). It's the
     /// <see cref="DefaultInstanceKey"/> entry if present, else the first configured instance.

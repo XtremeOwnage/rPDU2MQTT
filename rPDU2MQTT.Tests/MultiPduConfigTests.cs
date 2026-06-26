@@ -53,4 +53,34 @@ public class MultiPduConfigTests
 
         Assert.True(result.Primary.ActionsEnabled);
     }
+
+    [Fact]
+    public void Initialize_MigratesDeprecatedPduSectionToDefaultInstance()
+    {
+        var cfg = new Config { PDU = new PduConfig { PollInterval = 7 } };
+        cfg.PDU.Connection.Host = "rack-pdu-1.example.com";
+
+        var result = YamlConfigLoader.Initialize(cfg);
+
+        var migrated = Assert.Contains(Config.DefaultInstanceKey, result.Pdus);
+        Assert.Equal("rack-pdu-1.example.com", migrated.Connection.Host);
+        Assert.Equal(7, migrated.PollInterval);
+        Assert.Same(migrated, result.Primary);
+        Assert.Null(result.PDU); // cleared so it never round-trips
+    }
+
+    [Fact]
+    public void Initialize_PrefersPdusOverDeprecatedPduWhenBothPresent()
+    {
+        var cfg = new Config { PDU = new PduConfig() };
+        cfg.PDU.Connection.Host = "legacy.example.com";
+        cfg.Pdus["a"] = new PduConfig();
+        cfg.Pdus["a"].Connection.Host = "explicit.example.com";
+
+        var result = YamlConfigLoader.Initialize(cfg);
+
+        Assert.False(result.Pdus.ContainsKey(Config.DefaultInstanceKey));
+        Assert.Equal("explicit.example.com", result.Pdus["a"].Connection.Host);
+        Assert.Null(result.PDU);
+    }
 }

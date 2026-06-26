@@ -117,10 +117,27 @@ internal class YamlConfigLoader
             if (dvc is not null)
                 dvc.Outlets ??= new Dictionary<int, Models.Config.Schemas.EntityOverride?>();
 
+        config.Pdus ??= new Dictionary<string, Models.Config.PduConfig>();
+
+        // v1 -> v2 auto-migration: a single `PDU:` section becomes the `default` instance in `Pdus`.
+        if (config.PDU is not null)
+        {
+            if (config.Pdus.Count == 0)
+            {
+                Log.Warning($"Config uses the deprecated single 'PDU:' section; migrating it to 'Pdus: {{ {Config.DefaultInstanceKey}: ... }}'. Update your config to silence this warning.");
+                config.Pdus[Config.DefaultInstanceKey] = config.PDU;
+            }
+            else
+            {
+                Log.Warning("Config has both the deprecated 'PDU:' section and 'Pdus:'; ignoring 'PDU:' (use 'Pdus:').");
+            }
+            config.PDU = null;
+        }
+
         // Ensure at least one instance exists so a fresh/empty config doesn't NPE; a missing
         // Connection.Host then surfaces via the per-instance validation when the PDU is built.
-        if (config.Pdus is null || config.Pdus.Count == 0)
-            config.Pdus = new Dictionary<string, Models.Config.PduConfig> { [Config.DefaultInstanceKey] = new() };
+        if (config.Pdus.Count == 0)
+            config.Pdus[Config.DefaultInstanceKey] = new();
 
         // Backwards-compatible alias: Enable_Actions -> ActionsEnabled (per instance).
         foreach (var instance in config.Pdus.Values)
