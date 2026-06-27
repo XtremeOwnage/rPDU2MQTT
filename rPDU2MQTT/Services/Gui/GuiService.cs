@@ -38,11 +38,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly HealthState health;
     private readonly PduInstanceFactory pduFactory;
     private readonly PduInstanceRegistry registry;
+    private readonly InstanceManager instances;
     private readonly EmonCmsStatus emonCmsStatus;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, EmonCmsStatus emonCmsStatus)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -53,6 +54,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.health = health;
         this.pduFactory = pduFactory;
         this.registry = registry;
+        this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
     }
 
@@ -301,9 +303,25 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
-                var message = configSource.IsGitOpsManaged
-                    ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Credentials are stored in the companion Secret. Press 'Republish discovery' to apply override/name/template changes; restart for connection/credential changes (incl. OIDC)."
-                    : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for connection changes (host/port).";
+
+                // Apply PDU instance add/remove live: refresh the instance set from the saved config and
+                // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
+                // restart. Other live-read settings (overrides/names/templates) still apply on Republish.
+                var instanceMessage = "";
+                try
+                {
+                    config.Pdus = configSource.Load().Pdus;
+                    await instances.ReconcileAsync();
+                    instanceMessage = " PDU instances were applied live.";
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning($"Could not reconcile PDU instances after save ({ex.Message}); a restart will apply them.");
+                }
+
+                var message = (configSource.IsGitOpsManaged
+                    ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Credentials are stored in the companion Secret. Press 'Republish discovery' to apply override/name/template changes; restart for primary connection/credential changes (incl. OIDC)."
+                    : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for primary connection changes (host/port).") + instanceMessage;
                 return Results.Json(new { ok = true, message, gitops = configSource.IsGitOpsManaged });
             }
             catch (Exception ex)
