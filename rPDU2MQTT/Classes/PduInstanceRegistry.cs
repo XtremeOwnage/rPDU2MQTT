@@ -13,7 +13,19 @@ public sealed class PduInstanceRegistry
     {
         this.config = config;
         foreach (var (id, pduCfg) in config.Pdus)
+        {
+            // A half-configured instance (e.g. one just added in the GUI without a Host yet) must not
+            // take down the whole bridge; skip it with a warning so the valid instances still run.
+            if (string.IsNullOrWhiteSpace(pduCfg.Connection?.Host))
+            {
+                Log.Warning($"PDU instance '{id}' has no Connection.Host; skipping it. Set its host (or remove it) to enable polling.");
+                continue;
+            }
             instances[id] = factory.Create(pduCfg);
+        }
+
+        if (instances.Count == 0)
+            throw new Exception("No usable PDU instances configured — every entry in 'Pdus' is missing Connection.Host. Set at least one PDU host.");
     }
 
     public IReadOnlyDictionary<string, PDU> All => instances;
