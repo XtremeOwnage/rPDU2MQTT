@@ -100,9 +100,10 @@ config:
   MQTT:
     Connection: { Host: mqtt.lan, Port: 1883 }
     ParentTopic: rPDU2MQTT
-  PDU:
-    Connection: { Host: pdu.lan, Port: 80 }
-    PollInterval: 5
+  Pdus:
+    default:
+      Connection: { Host: pdu.lan, Port: 80 }
+      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
     DiscoveryTopic: homeassistant
@@ -200,5 +201,5 @@ for you from `credentials.*` (or an `existingSecret`).
 | `MQTT broker refused the connection` | Bad MQTT credentials/permissions. Fix `MQTT.Credentials` or the `RPDU2MQTT_MQTT_*` vars. |
 | No data / can't reach PDU | PDU host/port wrong or unreachable from the container; for `https` PDUs set `PDU.Connection.Scheme: https` (and `ValidateCertificate: false` for self-signed). |
 | Nothing appears in Home Assistant | `HomeAssistant.DiscoveryEnabled` is false, or HA's MQTT discovery prefix differs from `DiscoveryTopic`. |
-| Outlet switches missing | Outlet control is opt-in: set `PDU.ActionsEnabled: true` (a.k.a. "Enable Write Actions") **and** provide PDU credentials. |
+| Outlet switches missing | Outlet control is opt-in: set `Pdus.<name>.ActionsEnabled: true` (a.k.a. "Enable Write Actions") **and** provide PDU credentials. |
 | GUI "Save" disabled in Kubernetes | The ConfigMap mount is read-only — use `helm upgrade`, or the [CRD config source](KubernetesCRD.md). |

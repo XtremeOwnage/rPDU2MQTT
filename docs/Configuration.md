@@ -86,17 +86,40 @@ Everything is published under `ParentTopic` — here's the tree in MQTT Explorer
 
 ## PDU Configuration (Required)
 
+PDUs are configured under **`Pdus:`** — a map of named instances. A single PDU is just one entry
+named `default`; add more entries to bridge several PDUs from one deployment. Each instance is polled
+independently and published under its own MQTT/Home Assistant namespace (a lone instance is
+un-namespaced, identical to a single-PDU setup).
+
+```yaml
+Pdus:
+  default:                 # instance name (any key; "default" for a single PDU)
+    Connection:
+      Host: "10.0.0.10"
+      Port: 80
+    PollInterval: 5
+  rack-b:                  # add more instances as needed
+    Connection:
+      Host: "10.0.0.11"
+      Port: 80
+```
+
+> **Upgrading from v1:** the old single `PDU:` section is auto-migrated to `Pdus: { default: ... }`
+> on load (with a one-time warning), so existing configs keep working — but update to `Pdus:` to
+> silence it. The fields below apply **per instance** (under `Pdus.<name>`).
+
 ### Connection Details (Required)
 Set up the connection details to your Power Distribution Unit (PDU).
 
 ```yaml
-Pdu:
-  Connection:
-    Scheme: http         # http or https, based on your PDU's configuration
-    Host: "localhost"    # Replace with your PDU's IP or hostname
-    Port: 80             # Replace with your PDU's port number
-    Timeout: 15          # Request timeout in seconds
-    ValidateCertificate: true  # Set to false if using self-signed certificates
+Pdus:
+  default:
+    Connection:
+      Scheme: http         # http or https, based on your PDU's configuration
+      Host: "localhost"    # Replace with your PDU's IP or hostname
+      Port: 80             # Replace with your PDU's port number
+      Timeout: 15          # Request timeout in seconds
+      ValidateCertificate: true  # Set to false if using self-signed certificates
 ```
 
 The same options in the GUI's **PDU** section (note **Enable Write Actions** for outlet control):
@@ -107,10 +130,11 @@ The same options in the GUI's **PDU** section (note **Enable Write Actions** for
 Provide credentials if required to connect to the PDU.
 
 ```yaml
-Pdu:
-  Credentials:
-    Username: "actionsUser"  # Replace with your PDU username
-    Password: "actionsPass"  # Replace with your PDU password
+Pdus:
+  default:
+    Credentials:
+      Username: "actionsUser"  # Replace with your PDU username
+      Password: "actionsPass"  # Replace with your PDU password
 ```
 
 ### Credentials via environment / secrets (Optional)
@@ -145,8 +169,9 @@ services:
 Set how often the PDU sensors should be polled and published to MQTT (in seconds).
 
 ```yaml
-Pdu:
-  PollInterval: 5  # Adjust the polling interval as needed
+Pdus:
+  default:
+    PollInterval: 5  # Adjust the polling interval as needed
 ```
 
 ### Actions Enabled
@@ -154,8 +179,9 @@ Enable or disable the ability to perform write-actions on the PDU (e.g., togglin
 Requires PDU `Credentials`. Disabled by default.
 
 ```yaml
-Pdu:
-  ActionsEnabled: true  # Set to false to disable any changes on the PDU
+Pdus:
+  default:
+    ActionsEnabled: true  # Set to false to disable any changes on the PDU
 ```
 
 When enabled, each outlet gains the following **outlet operations** in Home Assistant
@@ -592,6 +618,44 @@ Health:
 
 The Helm chart wires these as `livenessProbe` / `readinessProbe` automatically (toggle with
 `healthProbes.enabled`, default on). For Docker Compose you can point a `healthcheck` at `/healthz`.
+
+## REST API (Optional)
+
+A read-only REST API with OpenAPI + a [Scalar](https://scalar.com/) docs UI, hosted on its own port
+and independent of the GUI. Off by default; intended for monitoring/automation on a **trusted
+network** (it is unauthenticated, like the health endpoints).
+
+```yaml
+Api:
+  Enabled: false        # default
+  Port: 8082            # default
+  ApiKey: ""            # optional; set to enable the write/control endpoints (see below)
+```
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/v1/instances` | Configured PDU instances (id, primary, host, poll interval, actions). |
+| `GET /api/v1/health` | Uptime, MQTT connectivity, last poll. |
+| `GET /api/v1/snapshots` | Latest snapshot timestamp/age per instance. |
+| `GET /api/v1/readings` | Flattened measurements from the latest snapshot(s); filter with `?instance=`. |
+| `GET /openapi/v1.json`, `/scalar/v1` | OpenAPI document + interactive docs UI. |
+
+### Control endpoints (opt-in)
+
+Outlet/group control is **disabled unless `Api.ApiKey` is set**. When set, write requests must send a
+matching `X-Api-Key` header, the target instance must exist, and that instance must have
+`ActionsEnabled: true`.
+
+| Endpoint | Body | Description |
+| --- | --- | --- |
+| `POST /api/v1/instances/{id}/outlets/{deviceId}/{index}/control` | `{ "action": "on\|off\|reboot\|resetStats" }` | Control one outlet on instance `id`. |
+| `POST /api/v1/instances/{id}/groups/{groupKey}/control` | `{ "action": "on\|off\|reboot" }` | Control every outlet in a OneView group. |
+
+```bash
+curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"action":"reboot"}' \
+  http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
+```
 
 ## Example Configurations
 

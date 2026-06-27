@@ -527,6 +527,20 @@ spec:
                     type: integer
                     description: Port the health-check endpoints listen on.
                 description: HTTP health-check endpoints
+              Api:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Enabled:
+                    type: boolean
+                    description: Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network — it is unauthenticated, like the health endpoints.
+                  Port:
+                    type: integer
+                    description: Port the REST API + docs listen on.
+                  ApiKey:
+                    type: string
+                    description: Optional API key enabling the write/control endpoints. When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).
+                description: Read-only REST API + OpenAPI/Scalar docs
           status:
             type: object
             x-kubernetes-preserve-unknown-fields: true

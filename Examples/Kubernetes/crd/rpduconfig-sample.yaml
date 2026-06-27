@@ -11,11 +11,13 @@ spec:
       Host: mqtt.lan
       Port: 1883
     ParentTopic: rPDU2MQTT
-  PDU:
-    Connection:
-      Host: pdu.lan
-      Port: 80
-    PollInterval: 5
+  # One or more PDU instances, keyed by name. A single PDU is just one "default" entry.
+  Pdus:
+    default:
+      Connection:
+        Host: pdu.lan
+        Port: 80
+      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
     DiscoveryTopic: homeassistant

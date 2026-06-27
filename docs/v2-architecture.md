@@ -110,16 +110,18 @@ InstanceManager ──manages──> PduPoller (×N)
 
 ## Migration plan (incremental — each step ships)
 
-1. **Introduce the bus + snapshot model** — add `IMessageBus` (Channels) and `PduSnapshot` in `Core`; no
-   behavior change yet.
-2. **Move polling into a `PduPoller`** — one poller wrapping today's single PDU; it publishes snapshots to
-   the bus. Existing services keep working via a temporary shim that reads the latest snapshot.
-3. **Move consumers onto the bus** — convert MQTT/Prometheus/EmonCMS/HA to bus subscribers, one at a time,
-   removing the shared-cache coupling.
-4. **Multi-instance config + `InstanceManager`** — `Config.Pdus`, with v1 auto-migration; add/remove
-   instances (still restart-applied at first).
-5. **Live add/remove** — the manager starts/stops pollers at runtime; GUI wired up.
-6. **Project split + REST API/Swagger** — extract `Core`/`Engine`/`Api`/`Web`; UI talks to the API.
+**Status: all phases complete (#127).** Each shipped as its own PR; the pipeline is in place.
+
+1. ✅ **Bus + snapshot model** — `IMessageBus` (Channels) + `PduSnapshot` in `Core`.
+2. ✅ **`PduPoller`** — polling moved into a producer publishing snapshots to the bus.
+3. ✅ **Consumers on the snapshot pipeline** — MQTT/Prometheus/EmonCMS/HA read the cached snapshots
+   (pull-cache) instead of polling the PDU directly.
+4. ✅ **Multi-instance config + `InstanceManager`** — `Config.Pdus` (with v1 `PDU:` auto-migration);
+   per-instance PDU construction + output namespacing; GUI per-tab instance selection.
+5. ✅ **Live add/remove** — `InstanceManager` reconciles pollers at runtime when instances are
+   saved in the GUI (the primary stays fixed; its connection change still needs a restart).
+6. ✅ **REST API + project split** — read + control REST API with OpenAPI/Scalar (`Api.*`); the code
+   is split into `rPDU2MQTT.Core` / `.Engine` / `.Api` / `.Web` + the host exe.
 
 Later (separate issues, built on this): energy-flow mapping (#128/#129), Tigo producer (#130),
 Sankey (#97).
