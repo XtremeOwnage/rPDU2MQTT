@@ -66,6 +66,9 @@ public class Config
     [YamlMember(Alias = "Health", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "HTTP health-check endpoints")]
     public HealthConfig Health { get; set; } = new HealthConfig();
 
+    [YamlMember(Alias = "Api", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Read-only REST API + OpenAPI/Scalar docs")]
+    public ApiConfig Api { get; set; } = new ApiConfig();
+
     /// <summary>
     /// Replace this instance's settings with another's. Used to hot-reload the shared singleton on
     /// rediscovery (services read these sections live). Connection-level settings (MQTT/PDU host/port,
@@ -83,5 +86,6 @@ public class Config
         Logging = other.Logging;
         Gui = other.Gui;
         Health = other.Health;
+        Api = other.Api;
     }
 }

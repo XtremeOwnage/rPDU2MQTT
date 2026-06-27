@@ -124,6 +124,10 @@ public static class ServiceConfiguration
         if (cfg.Health.Enabled)
             services.AddHostedService<HealthService>();
 
+        // Optional read-only REST API + OpenAPI/Scalar docs on its own port.
+        if (cfg.Api.Enabled)
+            services.AddHostedService<ApiService>();
+
         // Optional embedded configuration GUI.
         if (cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
