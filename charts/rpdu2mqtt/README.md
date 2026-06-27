@@ -18,9 +18,10 @@ config:
   MQTT:
     Connection: { Host: mqtt.lan, Port: 1883 }
     ParentTopic: rPDU2MQTT
-  PDU:
-    Connection: { Host: pdu.lan, Port: 80 }
-    PollInterval: 5
+  Pdus:
+    default:
+      Connection: { Host: pdu.lan, Port: 80 }
+      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
     DiscoveryTopic: homeassistant

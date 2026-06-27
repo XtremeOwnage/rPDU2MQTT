@@ -52,13 +52,14 @@ metadata:
   name: rack-pdu-1
   namespace: rpdu2mqtt
 spec:
-  # Mirrors the existing Config model (MQTT, PDU, HomeAssistant, Overrides, Prometheus, EmonCMS, ...)
+  # Mirrors the existing Config model (MQTT, Pdus, HomeAssistant, Overrides, Prometheus, EmonCMS, ...)
   MQTT:
     Connection: { Host: mqtt.example.com, Port: 1883 }
     ParentTopic: rPDU2MQTT
-  PDU:
-    Connection: { Host: rack-pdu-1.example.com, Port: 80 }
-    PollInterval: 5
+  Pdus:
+    default:
+      Connection: { Host: rack-pdu-1.example.com, Port: 80 }
+      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
 status:
