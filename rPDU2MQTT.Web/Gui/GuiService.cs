@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Startup;
@@ -660,6 +661,25 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
+        app.MapGet("/api/flow", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
+                var data = await pdu.GetRootData_Public(cts.Token);
+                var metric = ctx.Request.Query["metric"].ToString();
+                var graph = FlowGraphBuilder.Build(data, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
+                return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Could not build flow graph: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 

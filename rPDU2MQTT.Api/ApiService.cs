@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
+using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using Scalar.AspNetCore;
@@ -100,6 +101,15 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
                 .OrderBy(r => r.InstanceId).ThenBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
                 .ToList();
         }).WithName("ListReadings").WithSummary("Flattened measurements from the latest snapshot(s); filter with ?instance=.");
+
+        v1.MapGet("/flow", (string? instance, string? metric) =>
+        {
+            var snap = string.IsNullOrEmpty(instance) ? snapshots.Latest : snapshots.Get(instance);
+            if (snap is null)
+                return Results.NotFound(new { ok = false, message = "No snapshot available yet for that instance." });
+
+            return Results.Ok(FlowGraphBuilder.Build(snap.Data, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric));
+        }).WithName("GetFlow").WithSummary("Energy/power flow graph (PDU -> outlets) for a Sankey view; ?instance= and ?metric= (default realpower).");
 
         // --- Write/control (opt-in: requires Api.ApiKey set + a matching X-Api-Key header) ---
 

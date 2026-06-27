@@ -253,6 +253,7 @@ function build() {
   navHeader(nav, 'Tools');
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
+  addFlowSection(nav, sections);
   addPathsSection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
@@ -728,6 +729,103 @@ function addLiveDataSection(nav, sections) {
 }
 
 function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
+
+// SVG element helper (separate namespace from el()).
+function svgEl(tag, attrs) {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  return e;
+}
+
+// A read-only Sankey of power/energy flow (PDU -> outlets) from /api/flow.
+function addFlowSection(nav, sections) {
+  const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'Power flow through each PDU to its outlets (live, from the latest poll). Link width is proportional to the measurement.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const refresh = btn('Refresh');
+  const instSel = instanceSelector(() => load());
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  const wrap = document.createElement('div'); sec.appendChild(wrap);
+
+  const draw = (graph) => {
+    wrap.innerHTML = '';
+    const links = graph.links || [];
+    if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display.</div>'; count.textContent = ''; return; }
+
+    const units = graph.units || '';
+    const byId = Object.fromEntries((graph.nodes || []).map(n => [n.id, n]));
+    const pduIds = (graph.nodes || []).filter(n => n.kind === 'pdu').map(n => n.id);
+    const grand = links.reduce((s, l) => s + l.value, 0);
+    count.textContent = `${pduIds.length} PDU(s) · ${links.length} outlet(s) · ${formatNum(grand)} ${units}`;
+
+    // Geometry. One shared px-per-unit scale so widths line up across both columns.
+    const W = 920, padTop = 14, gap = 6, nodeW = 14, leftX = 170, rightX = W - 170;
+    const rows = links.length, pduGaps = Math.max(0, pduIds.length - 1);
+    const H = padTop * 2 + (rows - 1) * gap + pduGaps * gap;     // total node-stack gaps
+    const usable = 460;                                          // vertical px for the flow itself
+    const pxPerUnit = usable / grand;
+    const totalH = usable + (rows - 1) * gap + pduGaps * gap + padTop * 2;
+
+    const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${W} ${totalH}`, style: 'max-width:920px' });
+
+    let outletY = padTop;     // running y on the right (outlets)
+    let pduY = padTop;        // running y on the left (PDUs)
+    const colors = ['#4f9', '#49f', '#fa4', '#f49', '#9f4', '#4ff', '#f94'];
+
+    pduIds.forEach((pduId, pi) => {
+      const pduLinks = links.filter(l => l.source === pduId);
+      if (!pduLinks.length) return;
+      const pduTotal = pduLinks.reduce((s, l) => s + l.value, 0);
+      const pduH = pduTotal * pxPerUnit;
+      const color = colors[pi % colors.length];
+
+      // PDU node (left) + label.
+      svg.appendChild(svgEl('rect', { x: leftX, y: pduY, width: nodeW, height: Math.max(1, pduH), fill: color, rx: 2 }));
+      const plab = svgEl('text', { x: leftX - 8, y: pduY + pduH / 2, 'text-anchor': 'end', 'dominant-baseline': 'middle', fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' });
+      plab.textContent = `${byId[pduId]?.label || pduId} (${formatNum(pduTotal)} ${units})`;
+      svg.appendChild(plab);
+
+      let srcY = pduY;  // cumulative band on the PDU's right edge
+      pduLinks.sort((a, b) => b.value - a.value).forEach(l => {
+        const lh = Math.max(1, l.value * pxPerUnit);
+
+        // Ribbon: PDU right edge band [srcY..srcY+lh] -> outlet left edge band [outletY..outletY+lh].
+        const x1 = leftX + nodeW, x2 = rightX, xc = (x1 + x2) / 2;
+        const sTop = srcY, sBot = srcY + lh, tTop = outletY, tBot = outletY + lh;
+        const path = svgEl('path', {
+          d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tBot} C${xc},${tBot} ${xc},${sBot} ${x1},${sBot} Z`,
+          fill: color, 'fill-opacity': '0.35',
+        });
+        svg.appendChild(path);
+
+        // Outlet node (right) + label.
+        svg.appendChild(svgEl('rect', { x: rightX, y: outletY, width: nodeW, height: lh, fill: color, rx: 2 }));
+        const olab = svgEl('text', { x: rightX + nodeW + 8, y: outletY + lh / 2, 'dominant-baseline': 'middle', fill: 'var(--fg)', 'font-size': '12' });
+        olab.textContent = `${byId[l.target]?.label || l.target} · ${formatNum(l.value)} ${units}`;
+        svg.appendChild(olab);
+
+        srcY += lh; outletY += lh + gap;
+      });
+      pduY += pduH + gap + gap;
+    });
+
+    wrap.appendChild(svg);
+  };
+
+  const load = async () => {
+    const r = await api(withInstance('/api/flow', instSel));
+    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; return; }
+    draw(r.body);
+  };
+  refresh.onclick = load;
+  link.onclick = () => { activate(link, sec); load(); };
+}
 
 function activate(link, sec) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
