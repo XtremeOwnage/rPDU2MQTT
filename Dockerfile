@@ -8,6 +8,10 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["rPDU2MQTT/rPDU2MQTT.csproj", "rPDU2MQTT/"]
+COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
+COPY ["rPDU2MQTT.Engine/rPDU2MQTT.Engine.csproj", "rPDU2MQTT.Engine/"]
+COPY ["rPDU2MQTT.Api/rPDU2MQTT.Api.csproj", "rPDU2MQTT.Api/"]
+COPY ["rPDU2MQTT.Web/rPDU2MQTT.Web.csproj", "rPDU2MQTT.Web/"]
 RUN dotnet restore "./rPDU2MQTT/rPDU2MQTT.csproj"
 COPY . .
 WORKDIR "/src/rPDU2MQTT"

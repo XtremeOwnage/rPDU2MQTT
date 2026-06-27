@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<InvariantGlobalization>true</InvariantGlobalization>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="HiveMQtt" Version="0.44.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
+		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- GUI assets are embedded so the binary serves them without a wwwroot on disk. -->
+		<EmbeddedResource Include="wwwroot\index.html" />
+		<EmbeddedResource Include="wwwroot\styles.css" />
+		<EmbeddedResource Include="wwwroot\app.js" />
+	</ItemGroup>
+
+</Project>
