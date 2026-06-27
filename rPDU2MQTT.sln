@@ -26,6 +26,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "root", "root", "{D58602A8-4
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Tests", "rPDU2MQTT.Tests\rPDU2MQTT.Tests.csproj", "{E41FE814-A431-40F1-A280-4E277DC0A842}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Core", "rPDU2MQTT.Core\rPDU2MQTT.Core.csproj", "{0ADCC650-8561-4307-A43D-09DD9380E7BE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -60,6 +62,18 @@ Global
 		{E41FE814-A431-40F1-A280-4E277DC0A842}.Release|x64.Build.0 = Release|Any CPU
 		{E41FE814-A431-40F1-A280-4E277DC0A842}.Release|x86.ActiveCfg = Release|Any CPU
 		{E41FE814-A431-40F1-A280-4E277DC0A842}.Release|x86.Build.0 = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|x64.Build.0 = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Debug|x86.Build.0 = Debug|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|x64.ActiveCfg = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|x64.Build.0 = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|x86.ActiveCfg = Release|Any CPU
+		{0ADCC650-8561-4307-A43D-09DD9380E7BE}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
