@@ -108,7 +108,7 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
             if (snap is null)
                 return Results.NotFound(new { ok = false, message = "No snapshot available yet for that instance." });
 
-            return Results.Ok(FlowGraphBuilder.Build(snap.Data, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric));
+            return Results.Ok(FlowGraphBuilder.Build(snap.Data, cfg.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric));
         }).WithName("GetFlow").WithSummary("Energy/power flow graph (PDU -> outlets) for a Sankey view; ?instance= and ?metric= (default realpower).");
 
         // --- Write/control (opt-in: requires Api.ApiKey set + a matching X-Api-Key header) ---

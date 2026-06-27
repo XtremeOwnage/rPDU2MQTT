@@ -674,7 +674,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
                 var metric = ctx.Request.Query["metric"].ToString();
-                var graph = FlowGraphBuilder.Build(data, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
+                var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
                 return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
             }
             catch (Exception ex)

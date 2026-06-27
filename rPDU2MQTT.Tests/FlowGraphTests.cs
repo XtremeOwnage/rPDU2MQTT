@@ -1,4 +1,5 @@
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
 using Xunit;
 
@@ -57,5 +58,57 @@ public class FlowGraphTests
         var graph = FlowGraphBuilder.Build(OnePdu(Outlet(0, "Idle", "realpower", "0")));
         Assert.Empty(graph.Nodes);
         Assert.Empty(graph.Links);
+    }
+
+    [Fact]
+    public void Build_MergesCustomHierarchy_AndPropagatesValuesUp()
+    {
+        var data = OnePdu(Outlet(0, "A", "realpower", "60"), Outlet(1, "B", "realpower", "40"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "total", Label = "Total" }, new EnergyFlowNode { Id = "breaker", Label = "Breaker 15" } },
+            // outlets -> PDU (auto); PDU -> breaker -> total (custom). Energy flows parent -> child.
+            Parents = { ["pdu:pdu1"] = "breaker", ["breaker"] = "total" },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        // The custom upstream links carry the aggregated downstream power (60 + 40 = 100).
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "total" && l.Target == "breaker").Value);
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "breaker" && l.Target == "pdu:pdu1").Value);
+        Assert.Equal(60, graph.Links.Single(l => l.Target == "outlet:pdu1:0").Value);
+        Assert.Contains(graph.Nodes, n => n.Id == "total" && n.Label == "Total");
+    }
+
+    [Fact]
+    public void Build_UsesManualLeafValueForSensorlessNodes_AndAggregatesWithPduFlow()
+    {
+        // A panel fed by the PDU (60W of outlets) plus an untracked-but-known 40W load, under "Total".
+        var data = OnePdu(Outlet(0, "Server", "realpower", "60"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "total", Label = "Panel" },
+                new EnergyFlowNode { Id = "lights", Label = "Lights (known)", Value = 40 },
+            },
+            Parents = { ["pdu:pdu1"] = "total", ["lights"] = "total" },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(40, graph.Links.Single(l => l.Target == "lights").Value);   // manual leaf value
+        Assert.Equal(100, graph.Links.Single(l => l.Target == "pdu:pdu1").Value + graph.Links.Single(l => l.Target == "lights").Value);
+    }
+
+    [Fact]
+    public void Build_IgnoresParentLinksToUnknownNodes()
+    {
+        var data = OnePdu(Outlet(0, "A", "realpower", "10"));
+        var flow = new EnergyFlowConfig { Parents = { ["pdu:pdu1"] = "ghost" } }; // 'ghost' has no node def
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Nodes, n => n.Id == "ghost");
+        Assert.DoesNotContain(graph.Links, l => l.Source == "ghost");
     }
 }

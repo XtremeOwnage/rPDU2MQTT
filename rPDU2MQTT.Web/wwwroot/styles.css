@@ -70,3 +70,8 @@
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
   .toast { margin-left:auto; font-size:13px; } .toast.good { color:var(--good); } .toast.bad { color:var(--bad); }
   .tools button { margin-right:8px; }
+  .flow-cards { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .flow-card { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); cursor:grab; }
+  .flow-card[draggable=true]:active { cursor:grabbing; }
+  .flow-card-title { font-weight:600; }
+  .flow-card-id { color:var(--muted); font-size:11px; }

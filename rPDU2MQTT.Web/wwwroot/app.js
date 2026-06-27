@@ -743,7 +743,7 @@ function addFlowSection(nav, sections) {
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'Power flow through each PDU to its outlets (live, from the latest poll). Link width is proportional to the measurement.';
+  d.textContent = 'Live power flow (from the latest poll). Outlet→PDU is auto-derived; add upstream nodes (panels, breakers, a “Total”) and drag to set each node’s feeder to model the full hierarchy. Link width is proportional to the measurement.';
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
@@ -752,76 +752,166 @@ function addFlowSection(nav, sections) {
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
+  const ed = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
+  let lastGraph = null;
 
+  // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph) => {
     wrap.innerHTML = '';
-    const links = graph.links || [];
-    if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display.</div>'; count.textContent = ''; return; }
+    const links = (graph.links || []).slice();
+    const nodes = graph.nodes || [];
+    if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
-    const byId = Object.fromEntries((graph.nodes || []).map(n => [n.id, n]));
-    const pduIds = (graph.nodes || []).filter(n => n.kind === 'pdu').map(n => n.id);
-    const grand = links.reduce((s, l) => s + l.value, 0);
-    count.textContent = `${pduIds.length} PDU(s) · ${links.length} outlet(s) · ${formatNum(grand)} ${units}`;
+    const incoming = {}, outgoing = {};
+    nodes.forEach(n => { incoming[n.id] = []; outgoing[n.id] = []; });
+    links.forEach(l => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
+    const sumv = arr => (arr || []).reduce((s, l) => s + l.value, 0);
+    const nodeValue = id => Math.max(sumv(incoming[id]), sumv(outgoing[id]));
 
-    // Geometry. One shared px-per-unit scale so widths line up across both columns.
-    const W = 920, padTop = 14, gap = 6, nodeW = 14, leftX = 170, rightX = W - 170;
-    const rows = links.length, pduGaps = Math.max(0, pduIds.length - 1);
-    const H = padTop * 2 + (rows - 1) * gap + pduGaps * gap;     // total node-stack gaps
-    const usable = 460;                                          // vertical px for the flow itself
-    const pxPerUnit = usable / grand;
-    const totalH = usable + (rows - 1) * gap + pduGaps * gap + padTop * 2;
+    // Column index = longest path from a root (a node with no incoming links).
+    const colMemo = {};
+    const col = (id, seen) => {
+      if (colMemo[id] != null) return colMemo[id];
+      seen = seen || new Set();
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      const ins = incoming[id] || [];
+      const c = ins.length ? Math.max(...ins.map(l => col(l.source, seen) + 1)) : 0;
+      seen.delete(id);
+      return colMemo[id] = c;
+    };
+    nodes.forEach(n => col(n.id));
+    const maxCol = Math.max(0, ...nodes.map(n => colMemo[n.id]));
 
-    const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${W} ${totalH}`, style: 'max-width:920px' });
+    const cols = [];
+    nodes.forEach(n => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
-    let outletY = padTop;     // running y on the right (outlets)
-    let pduY = padTop;        // running y on the left (PDUs)
-    const colors = ['#4f9', '#49f', '#fa4', '#f49', '#9f4', '#4ff', '#f94'];
+    const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
+    const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s, n) => s + nodeValue(n.id), 0)));
+    const pxPerUnit = usableH / maxTotal;
+    const colX = c => 150 + (maxCol > 0 ? c * ((W - 320) / maxCol) : 0);
 
-    pduIds.forEach((pduId, pi) => {
-      const pduLinks = links.filter(l => l.source === pduId);
-      if (!pduLinks.length) return;
-      const pduTotal = pduLinks.reduce((s, l) => s + l.value, 0);
-      const pduH = pduTotal * pxPerUnit;
-      const color = colors[pi % colors.length];
-
-      // PDU node (left) + label.
-      svg.appendChild(svgEl('rect', { x: leftX, y: pduY, width: nodeW, height: Math.max(1, pduH), fill: color, rx: 2 }));
-      const plab = svgEl('text', { x: leftX - 8, y: pduY + pduH / 2, 'text-anchor': 'end', 'dominant-baseline': 'middle', fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' });
-      plab.textContent = `${byId[pduId]?.label || pduId} (${formatNum(pduTotal)} ${units})`;
-      svg.appendChild(plab);
-
-      let srcY = pduY;  // cumulative band on the PDU's right edge
-      pduLinks.sort((a, b) => b.value - a.value).forEach(l => {
-        const lh = Math.max(1, l.value * pxPerUnit);
-
-        // Ribbon: PDU right edge band [srcY..srcY+lh] -> outlet left edge band [outletY..outletY+lh].
-        const x1 = leftX + nodeW, x2 = rightX, xc = (x1 + x2) / 2;
-        const sTop = srcY, sBot = srcY + lh, tTop = outletY, tBot = outletY + lh;
-        const path = svgEl('path', {
-          d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tBot} C${xc},${tBot} ${xc},${sBot} ${x1},${sBot} Z`,
-          fill: color, 'fill-opacity': '0.35',
-        });
-        svg.appendChild(path);
-
-        // Outlet node (right) + label.
-        svg.appendChild(svgEl('rect', { x: rightX, y: outletY, width: nodeW, height: lh, fill: color, rx: 2 }));
-        const olab = svgEl('text', { x: rightX + nodeW + 8, y: outletY + lh / 2, 'dominant-baseline': 'middle', fill: 'var(--fg)', 'font-size': '12' });
-        olab.textContent = `${byId[l.target]?.label || l.target} · ${formatNum(l.value)} ${units}`;
-        svg.appendChild(olab);
-
-        srcY += lh; outletY += lh + gap;
-      });
-      pduY += pduH + gap + gap;
+    const pos = {};
+    cols.forEach((cn, c) => {
+      cn.sort((a, b) => nodeValue(b.id) - nodeValue(a.id));
+      let y = padTop;
+      cn.forEach(n => { const h = Math.max(2, nodeValue(n.id) * pxPerUnit); pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 }; y += h + gap; });
     });
 
+    const totalH = padTop * 2 + usableH;
+    const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${W} ${totalH}`, style: 'max-width:960px' });
+    const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+
+    // Ribbons (filled bezier bands), stacked on each node edge by target order.
+    links.sort((a, b) => pos[a.target].y - pos[b.target].y).forEach(l => {
+      const s = pos[l.source], t = pos[l.target];
+      if (!s || !t) return;
+      const h = Math.max(1, l.value * pxPerUnit);
+      const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
+      const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
+      const color = colors[colMemo[l.source] % colors.length];
+      svg.appendChild(svgEl('path', { d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`, fill: color, 'fill-opacity': '0.3' }));
+      s.outOff += h; t.inOff += h;
+    });
+
+    // Nodes + labels (above each node).
+    nodes.forEach(n => {
+      const p = pos[n.id]; if (!p) return;
+      svg.appendChild(svgEl('rect', { x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2, fill: colors[colMemo[n.id] % colors.length] }));
+      const lab = svgEl('text', { x: p.x, y: p.y - 4, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600' });
+      lab.textContent = `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
+      svg.appendChild(lab);
+    });
+
+    count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`;
     wrap.appendChild(svg);
+  };
+
+  // --- Drag-and-drop hierarchy editor (edits data.EnergyFlow, persisted via the config save) ---
+  const renderEditor = () => {
+    const flow = ensure(data, 'EnergyFlow', {});
+    const customNodes = ensure(flow, 'Nodes', []);
+    const parents = ensure(flow, 'Parents', {});
+    ed.innerHTML = '';
+
+    ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node onto its upstream feeder (or use the parent dropdown). Drop onto “(top / grid)” to clear.' }));
+
+    // Add a custom upstream/leaf node.
+    const addBar = el('div', { class: 'ld-toolbar' });
+    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. panel-main)' });
+    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Main Panel)' });
+    const valIn = el('input', { type: 'number', placeholder: 'known value (optional)', style: { width: '150px' } });
+    const addBtn = btn('Add node', 'primary');
+    addBtn.onclick = () => {
+      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
+      if (customNodes.some(n => n.Id === id) || (lastGraph && lastGraph.nodes.some(n => n.id === id))) { toast('That id already exists.', false); return; }
+      const node = { Id: id, Label: (labIn.value || '').trim() || id };
+      if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
+      customNodes.push(node); idIn.value = labIn.value = valIn.value = ''; renderEditor();
+    };
+    addBar.append(idIn, labIn, valIn, addBtn); ed.appendChild(addBar);
+
+    // Candidate nodes: everything currently in the graph + custom nodes (deduped).
+    const cand = new Map();
+    (lastGraph?.nodes || []).forEach(n => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+    customNodes.forEach(n => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
+    const setParent = (child, parent) => { if (!parent) delete parents[child]; else if (parent !== child) parents[child] = parent; renderEditor(); };
+
+    // "Top / grid" drop zone clears a node's parent.
+    const root = el('div', { class: 'flow-card', style: { borderStyle: 'dashed', opacity: '0.8' }, text: '⤴ (top / grid) — drop here to clear a feeder' });
+    root.ondragover = e => e.preventDefault();
+    root.ondrop = e => { e.preventDefault(); setParent(e.dataTransfer.getData('text/plain'), ''); };
+    ed.appendChild(root);
+
+    const list = el('div', { class: 'flow-cards' });
+    [...cand.values()].forEach(c => {
+      const card = el('div', { class: 'flow-card', draggable: 'true' });
+      card.ondragstart = e => e.dataTransfer.setData('text/plain', c.id);
+      card.ondragover = e => e.preventDefault();
+      card.ondrop = e => { e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if (dragged) setParent(dragged, c.id); };
+
+      card.appendChild(el('span', { class: 'flow-card-title', text: c.label }));
+      card.appendChild(el('span', { class: 'flow-card-id', text: c.id + (c.custom ? '' : ' · ' + c.kind) }));
+
+      // Parent dropdown (accessible alternative to dragging).
+      const sel = el('select');
+      sel.appendChild(el('option', { value: '', text: 'feeder: (top / grid)' }));
+      [...cand.values()].filter(o => o.id !== c.id).forEach(o => sel.appendChild(el('option', { value: o.id, text: 'feeder: ' + o.label })));
+      sel.value = parents[c.id] || '';
+      sel.onchange = () => setParent(c.id, sel.value);
+      card.appendChild(sel);
+
+      if (c.custom) {
+        const rm = btn('✕', 'danger');
+        rm.onclick = () => {
+          const i = customNodes.findIndex(n => n.Id === c.id); if (i >= 0) customNodes.splice(i, 1);
+          delete parents[c.id];
+          Object.keys(parents).forEach(k => { if (parents[k] === c.id) delete parents[k]; });
+          renderEditor();
+        };
+        card.appendChild(rm);
+      }
+      list.appendChild(card);
+    });
+    ed.appendChild(list);
+
+    const save = btn('Save hierarchy', 'primary');
+    save.onclick = async () => {
+      const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+      toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
+      if (r.ok && r.body.ok) load();
+    };
+    const sbar = el('div', { class: 'ld-toolbar', style: { marginTop: '10px' } }); sbar.appendChild(save); ed.appendChild(sbar);
   };
 
   const load = async () => {
     const r = await api(withInstance('/api/flow', instSel));
-    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; return; }
+    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
+    lastGraph = r.body;
     draw(r.body);
+    renderEditor();
   };
   refresh.onclick = load;
   link.onclick = () => { activate(link, sec); load(); };
