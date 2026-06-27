@@ -187,6 +187,7 @@ public static class ConfigSchema
         clone.Gui.Password = null;
         if (clone.Gui.Oidc is not null)
             clone.Gui.Oidc.ClientSecret = null;
+        clone.Api.ApiKey = null;
         return clone;
     }
 
