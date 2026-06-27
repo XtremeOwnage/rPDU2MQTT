@@ -109,3 +109,126 @@ public class MultiPduConfigTests
         Assert.Null(result.PDU);
     }
 }
+
+/// <summary>Runtime reconcile planner (phase 5): what to start/stop when Config.Pdus changes.</summary>
+public class InstanceReconcileTests
+{
+    private static PduConfig Pdu(string host, int poll = 5)
+    {
+        var c = new PduConfig { PollInterval = poll };
+        c.Connection.Host = host;
+        return c;
+    }
+
+    [Fact]
+    public void Plan_StartsAddedInstances()
+    {
+        var running = new Dictionary<string, string> { ["default"] = InstanceReconcile.Signature(Pdu("a")) };
+        var desired = new Dictionary<string, PduConfig> { ["default"] = Pdu("a"), ["b"] = Pdu("b") };
+
+        var (toStop, toStart, primaryChanged) = InstanceReconcile.Plan(running, desired, "default");
+
+        Assert.Equal(new[] { "b" }, toStart);
+        Assert.Empty(toStop);
+        Assert.False(primaryChanged);
+    }
+
+    [Fact]
+    public void Plan_StopsRemovedInstances()
+    {
+        var running = new Dictionary<string, string>
+        {
+            ["default"] = InstanceReconcile.Signature(Pdu("a")),
+            ["b"] = InstanceReconcile.Signature(Pdu("b")),
+        };
+        var desired = new Dictionary<string, PduConfig> { ["default"] = Pdu("a") };
+
+        var (toStop, toStart, _) = InstanceReconcile.Plan(running, desired, "default");
+
+        Assert.Equal(new[] { "b" }, toStop);
+        Assert.Empty(toStart);
+    }
+
+    [Fact]
+    public void Plan_RebuildsChangedNonPrimary()
+    {
+        var running = new Dictionary<string, string>
+        {
+            ["default"] = InstanceReconcile.Signature(Pdu("a")),
+            ["b"] = InstanceReconcile.Signature(Pdu("b1")),
+        };
+        var desired = new Dictionary<string, PduConfig> { ["default"] = Pdu("a"), ["b"] = Pdu("b2") };
+
+        var (toStop, toStart, _) = InstanceReconcile.Plan(running, desired, "default");
+
+        Assert.Contains("b", toStop);
+        Assert.Contains("b", toStart);
+    }
+
+    [Fact]
+    public void Plan_PrimaryConnectionChange_FlagsRestart_AndIsNotStopped()
+    {
+        var running = new Dictionary<string, string> { ["default"] = InstanceReconcile.Signature(Pdu("a1")) };
+        var desired = new Dictionary<string, PduConfig> { ["default"] = Pdu("a2") };
+
+        var (toStop, toStart, primaryChanged) = InstanceReconcile.Plan(running, desired, "default");
+
+        Assert.True(primaryChanged);
+        Assert.Empty(toStop);
+        Assert.Empty(toStart);
+    }
+
+    [Fact]
+    public void Plan_IgnoresHostlessDesiredInstances()
+    {
+        var running = new Dictionary<string, string> { ["default"] = InstanceReconcile.Signature(Pdu("a")) };
+        var desired = new Dictionary<string, PduConfig> { ["default"] = Pdu("a"), ["b"] = new PduConfig() }; // b has no host
+
+        var (toStop, toStart, _) = InstanceReconcile.Plan(running, desired, "default");
+
+        Assert.Empty(toStart);
+        Assert.Empty(toStop);
+    }
+}
+
+/// <summary>Registry runtime add/remove (phase 5), keeping the primary fixed.</summary>
+public class PduInstanceRegistryRuntimeTests
+{
+    private static PduConfig Pdu(string host) { var c = new PduConfig(); c.Connection.Host = host; return c; }
+
+    private static PduInstanceRegistry Registry()
+    {
+        var cfg = new Config();
+        cfg.Pdus["default"] = Pdu("10.0.0.1");
+        return new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+    }
+
+    [Fact]
+    public void TryCreate_AddsAnInstance_AndRemoveDropsNonPrimary()
+    {
+        var registry = Registry();
+
+        Assert.NotNull(registry.TryCreate("b", Pdu("10.0.0.2")));
+        Assert.True(registry.All.ContainsKey("b"));
+        Assert.NotSame(registry.Primary, registry.Get("b"));
+
+        Assert.True(registry.Remove("b"));
+        Assert.False(registry.All.ContainsKey("b"));
+    }
+
+    [Fact]
+    public void Remove_RefusesToRemoveThePrimary()
+    {
+        var registry = Registry();
+        Assert.False(registry.Remove(registry.PrimaryId));
+        Assert.True(registry.All.ContainsKey(registry.PrimaryId));
+    }
+
+    [Fact]
+    public void TryCreate_SkipsHostlessInstance()
+    {
+        var registry = Registry();
+        Assert.Null(registry.TryCreate("b", new PduConfig())); // no host
+        Assert.False(registry.All.ContainsKey("b"));
+    }
+}
