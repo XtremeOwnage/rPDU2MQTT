@@ -8,6 +8,8 @@
   .dot.good { background:var(--good); } .dot.bad { background:var(--bad); }
   .layout { display:flex; min-height:calc(100vh - 53px); }
   nav { width:200px; border-right:1px solid var(--line); background:var(--panel); padding:10px 0; }
+  .nav-group { padding:14px 20px 4px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); opacity:.65; }
+  .nav-group:first-child { padding-top:6px; }
   nav a { display:block; padding:8px 20px; color:var(--muted); cursor:pointer; border-left:3px solid transparent; }
   nav a:hover { color:var(--fg); }
   nav a.active { color:var(--fg); border-left-color:var(--accent); background:var(--panel2); }

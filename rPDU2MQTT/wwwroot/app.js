@@ -183,47 +183,81 @@ function renderList(node, arr) {
   return fs;
 }
 
+// Config sections grouped by role (mirrors the v2 producer/consumer model): data sources are Inputs,
+// data sinks are Outputs, shared transport/UI settings are General. Unlisted sections fall into General.
+const NAV_GROUPS = [
+  { title: 'Inputs', keys: ['Pdus'] },
+  { title: 'Outputs', keys: ['HomeAssistant', 'Prometheus', 'EmonCMS'] },
+  { title: 'General', keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
+];
+
+function navHeader(nav, title) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
+
+// Render one schema-driven config section (nav link + panel); returns the nav link.
+function renderConfigSection(node, nav, sections) {
+  const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
+  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
+  // Section-specific actions belong with the section they act on, not on every page.
+  const acts = sectionActions(node);
+  if (acts) sec.appendChild(acts);
+  if (node.key === 'Overrides') {
+    // Bespoke, live-data-driven editor instead of the blind dictionary form.
+    const tools = document.createElement('div'); tools.className = 'sec-actions';
+    const refresh = btn('Refresh live data');
+    const preview = btn('Preview generated paths (with unsaved edits)');
+    tools.appendChild(refresh); tools.appendChild(preview);
+    const pathsBox = document.createElement('div');
+    const container = document.createElement('div');
+    refresh.onclick = () => renderOverrides(container);
+    preview.onclick = () => previewOverridePaths(pathsBox);
+    sec.appendChild(tools); sec.appendChild(pathsBox); sec.appendChild(container);
+    link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
+  } else {
+    if (node.type === 'object') {
+      ensure(data, node.key, {});
+      const grid = document.createElement('div'); grid.className = 'grid';
+      (node.properties || []).forEach(c => renderNode(c, data[node.key], grid));
+      sec.appendChild(grid);
+    }
+    else renderNode(node, data, sec);
+    if (node.key === 'Gui') wireGuiAuth(sec);
+    link.onclick = () => activate(link, sec);
+  }
+  return link;
+}
+
 function build() {
   const nav = document.getElementById('nav'); const sections = document.getElementById('sections');
   nav.innerHTML = ''; sections.innerHTML = '';
-  schema.forEach((node, i) => {
-    const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
-    const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-    const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
-    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
-    // Section-specific actions belong with the section they act on, not on every page.
-    const acts = sectionActions(node);
-    if (acts) sec.appendChild(acts);
-    if (node.key === 'Overrides') {
-      // Bespoke, live-data-driven editor instead of the blind dictionary form.
-      const tools = document.createElement('div'); tools.className = 'sec-actions';
-      const refresh = btn('Refresh live data');
-      const preview = btn('Preview generated paths (with unsaved edits)');
-      tools.appendChild(refresh); tools.appendChild(preview);
-      const pathsBox = document.createElement('div');
-      const container = document.createElement('div');
-      refresh.onclick = () => renderOverrides(container);
-      preview.onclick = () => previewOverridePaths(pathsBox);
-      sec.appendChild(tools); sec.appendChild(pathsBox); sec.appendChild(container);
-      link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
-    } else {
-      if (node.type === 'object') {
-        ensure(data, node.key, {});
-        const grid = document.createElement('div'); grid.className = 'grid';
-        (node.properties || []).forEach(c => renderNode(c, data[node.key], grid));
-        sec.appendChild(grid);
-      }
-      else renderNode(node, data, sec);
-      if (node.key === 'Gui') wireGuiAuth(sec);
-      link.onclick = () => activate(link, sec);
+
+  const byKey = new Map(schema.map(n => [n.key, n]));
+  // Any schema section not explicitly grouped lands in General, so a new config section is never lost.
+  const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
+  const general = NAV_GROUPS.find(g => g.title === 'General');
+  schema.forEach(n => { if (!known.has(n.key)) general.keys.push(n.key); });
+
+  let first = null;
+  for (const g of NAV_GROUPS) {
+    const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
+    if (!nodes.length) continue;
+    navHeader(nav, g.title);
+    for (const node of nodes) {
+      const link = renderConfigSection(node, nav, sections);
+      if (!first) first = link;
     }
-    if (i === 0) link.click();
-  });
+  }
+
+  // Tools: the functional (non-config) tabs.
+  navHeader(nav, 'Tools');
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
   addPathsSection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
+
+  if (first) first.click();
 }
 
 // In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
