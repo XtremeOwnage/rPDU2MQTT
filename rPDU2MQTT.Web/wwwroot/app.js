@@ -828,82 +828,129 @@ function addFlowSection(nav, sections) {
     wrap.appendChild(svg);
   };
 
-  // --- Drag-and-drop hierarchy editor (edits data.EnergyFlow, persisted via the config save) ---
+  // --- Node-graph hierarchy editor: drag nodes to arrange, drag a node's port onto another to set
+  //     its feeder (parent->child). Positions persist per-instance in localStorage. ---
+  const NW = 172, NH = 46;
+  const posKey = () => 'rpdu-flowpos:' + (instSel.get() || 'default');
+  const loadPos = () => { try { return JSON.parse(localStorage.getItem(posKey())) || {}; } catch { return {}; } };
+  const savePos = p => { try { localStorage.setItem(posKey(), JSON.stringify(p)); } catch { /* ignore */ } };
+
   const renderEditor = () => {
+    if (ed._cleanup) ed._cleanup();
     const flow = ensure(data, 'EnergyFlow', {});
     const customNodes = ensure(flow, 'Nodes', []);
     const parents = ensure(flow, 'Parents', {});
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node onto its upstream feeder (or use the parent dropdown). Drop onto “(top / grid)” to clear.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node by its body to arrange it. Drag from a node’s right ● onto another node to make it the feeder (parent → child). Click ✕ on a link to remove it.' }));
 
-    // Add a custom upstream/leaf node.
     const addBar = el('div', { class: 'ld-toolbar' });
     const idIn = el('input', { type: 'text', placeholder: 'id (e.g. panel-main)' });
     const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Main Panel)' });
     const valIn = el('input', { type: 'number', placeholder: 'known value (optional)', style: { width: '150px' } });
     const addBtn = btn('Add node', 'primary');
-    addBtn.onclick = () => {
-      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
-      if (customNodes.some(n => n.Id === id) || (lastGraph && lastGraph.nodes.some(n => n.id === id))) { toast('That id already exists.', false); return; }
-      const node = { Id: id, Label: (labIn.value || '').trim() || id };
-      if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
-      customNodes.push(node); idIn.value = labIn.value = valIn.value = ''; renderEditor();
-    };
-    addBar.append(idIn, labIn, valIn, addBtn); ed.appendChild(addBar);
+    const save = btn('Save hierarchy', 'primary');
+    addBar.append(idIn, labIn, valIn, addBtn, save); ed.appendChild(addBar);
 
-    // Candidate nodes: everything currently in the graph + custom nodes (deduped).
+    // Candidate nodes (graph + custom) and the edges between them.
     const cand = new Map();
     (lastGraph?.nodes || []).forEach(n => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
     customNodes.forEach(n => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
-    const setParent = (child, parent) => { if (!parent) delete parents[child]; else if (parent !== child) parents[child] = parent; renderEditor(); };
 
-    // "Top / grid" drop zone clears a node's parent.
-    const root = el('div', { class: 'flow-card', style: { borderStyle: 'dashed', opacity: '0.8' }, text: '⤴ (top / grid) — drop here to clear a feeder' });
-    root.ondragover = e => e.preventDefault();
-    root.ondrop = e => { e.preventDefault(); setParent(e.dataTransfer.getData('text/plain'), ''); };
-    ed.appendChild(root);
+    const autoParent = id => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
+    const parentOf = id => parents[id] || autoParent(id);
+    const depth = (id, seen) => { seen = seen || new Set(); if (seen.has(id)) return 0; seen.add(id); const p = parentOf(id); return (p && cand.has(p)) ? depth(p, seen) + 1 : 0; };
 
-    const list = el('div', { class: 'flow-cards' });
+    // Auto-layout any node without a saved position (column = depth, stacked per column).
+    const pos = loadPos();
+    const perCol = {};
     [...cand.values()].forEach(c => {
-      const card = el('div', { class: 'flow-card', draggable: 'true' });
-      card.ondragstart = e => e.dataTransfer.setData('text/plain', c.id);
-      card.ondragover = e => e.preventDefault();
-      card.ondrop = e => { e.preventDefault(); const dragged = e.dataTransfer.getData('text/plain'); if (dragged) setParent(dragged, c.id); };
-
-      card.appendChild(el('span', { class: 'flow-card-title', text: c.label }));
-      card.appendChild(el('span', { class: 'flow-card-id', text: c.id + (c.custom ? '' : ' · ' + c.kind) }));
-
-      // Parent dropdown (accessible alternative to dragging).
-      const sel = el('select');
-      sel.appendChild(el('option', { value: '', text: 'feeder: (top / grid)' }));
-      [...cand.values()].filter(o => o.id !== c.id).forEach(o => sel.appendChild(el('option', { value: o.id, text: 'feeder: ' + o.label })));
-      sel.value = parents[c.id] || '';
-      sel.onchange = () => setParent(c.id, sel.value);
-      card.appendChild(sel);
-
-      if (c.custom) {
-        const rm = btn('✕', 'danger');
-        rm.onclick = () => {
-          const i = customNodes.findIndex(n => n.Id === c.id); if (i >= 0) customNodes.splice(i, 1);
-          delete parents[c.id];
-          Object.keys(parents).forEach(k => { if (parents[k] === c.id) delete parents[k]; });
-          renderEditor();
-        };
-        card.appendChild(rm);
-      }
-      list.appendChild(card);
+      if (!pos[c.id]) { const dc = depth(c.id); const r = (perCol[dc] = perCol[dc] || 0); pos[c.id] = { x: 24 + dc * (NW + 90), y: 20 + r * (NH + 22) }; perCol[dc] = r + 1; }
     });
-    ed.appendChild(list);
 
-    const save = btn('Save hierarchy', 'primary');
+    const edges = [];
+    cand.forEach(c => { const ap = autoParent(c.id); if (ap && cand.has(ap)) edges.push({ from: ap, to: c.id, custom: false }); });
+    Object.entries(parents).forEach(([child, par]) => { if (cand.has(child) && cand.has(par)) edges.push({ from: par, to: child, custom: true }); });
+
+    const allX = [...cand.values()].map(c => pos[c.id].x), allY = [...cand.values()].map(c => pos[c.id].y);
+    const W = Math.max(600, Math.max(...allX, 0) + NW + 40), H = Math.max(280, Math.max(...allY, 0) + NH + 40);
+    const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px', marginTop: '10px', maxHeight: '640px' } });
+    const svg = svgEl('svg', { width: W, height: H, style: 'background:var(--panel2)' });
+    scroll.appendChild(svg); ed.appendChild(scroll);
+    const edgeLayer = svgEl('g', {}); svg.appendChild(edgeLayer);
+    const nodeLayer = svgEl('g', {}); svg.appendChild(nodeLayer);
+    const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff'];
+
+    const edgeD = e => { const a = pos[e.from], b = pos[e.to], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
+    const edgeEls = [];
+    edges.forEach(e => {
+      const p = svgEl('path', { d: edgeD(e), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3' });
+      edgeLayer.appendChild(p); edgeEls.push({ e, p });
+      if (e.custom) {
+        const a = pos[e.from], b = pos[e.to], mx = (a.x + NW + b.x) / 2, my = (a.y + b.y) / 2 + NH / 2;
+        const del = svgEl('text', { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'middle', fill: 'var(--bad)', 'font-size': '15', style: 'cursor:pointer' });
+        del.textContent = '✕'; del.onclick = () => { delete parents[e.to]; renderEditor(); };
+        edgeLayer.appendChild(del);
+      }
+    });
+
+    const nodeG = {};
+    [...cand.values()].forEach(c => {
+      const g = svgEl('g', { transform: `translate(${pos[c.id].x},${pos[c.id].y})`, style: 'cursor:grab' }); g.dataset.id = c.id;
+      const color = colors[depth(c.id) % colors.length];
+      g.appendChild(svgEl('rect', { width: NW, height: NH, rx: 7, fill: 'var(--panel)', stroke: color, 'stroke-width': 2 }));
+      const t1 = svgEl('text', { x: 11, y: 19, fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' }); t1.textContent = c.label.length > 24 ? c.label.slice(0, 23) + '…' : c.label; g.appendChild(t1);
+      const t2 = svgEl('text', { x: 11, y: 35, fill: 'var(--muted)', 'font-size': '10' }); t2.textContent = c.id; g.appendChild(t2);
+      g.appendChild(svgEl('circle', { cx: NW, cy: NH / 2, r: 7, fill: color, style: 'cursor:crosshair', 'data-port': c.id }));
+      if (c.custom) {
+        const rm = svgEl('text', { x: NW - 12, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
+      }
+      nodeLayer.appendChild(g); nodeG[c.id] = g;
+    });
+
+    // Interactions.
+    const rect = () => svg.getBoundingClientRect();
+    let drag = null, linkFrom = null, tempLine = null;
+    const onDown = e => {
+      const portId = e.target.getAttribute && e.target.getAttribute('data-port');
+      const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
+      if (rmId) { const i = customNodes.findIndex(n => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); delete parents[rmId]; Object.keys(parents).forEach(k => { if (parents[k] === rmId) delete parents[k]; }); renderEditor(); return; }
+      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
+      const g = e.target.closest && e.target.closest('g[data-id]');
+      if (g) { const r = rect(); drag = { id: g.dataset.id, ox: (e.clientX - r.left) - pos[g.dataset.id].x, oy: (e.clientY - r.top) - pos[g.dataset.id].y }; e.preventDefault(); }
+    };
+    const onMove = e => {
+      const r = rect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+      if (drag) { pos[drag.id] = { x: Math.max(0, mx - drag.ox), y: Math.max(0, my - drag.oy) }; nodeG[drag.id].setAttribute('transform', `translate(${pos[drag.id].x},${pos[drag.id].y})`); edgeEls.forEach(({ e, p }) => { if (e.from === drag.id || e.to === drag.id) p.setAttribute('d', edgeD(e)); }); }
+      else if (linkFrom) { const a = pos[linkFrom]; tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${mx},${my}`); }
+    };
+    const onUp = e => {
+      if (drag) { savePos(pos); drag = null; }
+      else if (linkFrom) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        const gn = hit && hit.closest && hit.closest('g[data-id]');
+        if (gn && gn.dataset.id !== linkFrom) { parents[gn.dataset.id] = linkFrom; renderEditor(); return; }
+        if (tempLine) tempLine.remove(); linkFrom = null;
+      }
+    };
+    svg.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    ed._cleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+
+    addBtn.onclick = () => {
+      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
+      if (cand.has(id)) { toast('That id already exists.', false); return; }
+      const node = { Id: id, Label: (labIn.value || '').trim() || id };
+      if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
+      customNodes.push(node); renderEditor();
+    };
     save.onclick = async () => {
       const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
       toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
       if (r.ok && r.body.ok) load();
     };
-    const sbar = el('div', { class: 'ld-toolbar', style: { marginTop: '10px' } }); sbar.appendChild(save); ed.appendChild(sbar);
   };
 
   const load = async () => {
