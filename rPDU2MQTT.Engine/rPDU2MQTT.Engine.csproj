@@ -8,22 +8,22 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- IHostedService/BackgroundService (SnapshotCache) live in the ASP.NET shared framework. -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Serilog" Version="4.3.0" />
-		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+		<PackageReference Include="HiveMQtt" Version="0.44.0" />
+		<PackageReference Include="KubernetesClient" Version="19.0.2" />
+		<PackageReference Include="prometheus-net" Version="8.2.1" />
 		<PackageReference Include="YamlDotNet" Version="18.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Core was split out of the single assembly; keep its internals visible to the app layers + tests. -->
+		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<InternalsVisibleTo Include="rPDU2MQTT" />
-		<InternalsVisibleTo Include="rPDU2MQTT.Engine" />
-		<InternalsVisibleTo Include="rPDU2MQTT.Api" />
-		<InternalsVisibleTo Include="rPDU2MQTT.Web" />
 		<InternalsVisibleTo Include="rPDU2MQTT.Tests" />
 	</ItemGroup>
 

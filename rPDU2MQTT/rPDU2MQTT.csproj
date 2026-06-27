@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
@@ -17,38 +17,26 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <!-- Expose internals (converters, ResolveGroupMembers, etc.) to the test project. -->
-	  <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <!-- Foundational library: pipeline (bus/snapshots), data models, helpers, extensions. -->
-	  <ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<!-- Embedded configuration GUI (optional, gated by Gui.Enabled). -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
-		<!-- GUI assets are embedded so the single binary serves them without a wwwroot on disk. -->
-		<EmbeddedResource Include="wwwroot\index.html" />
-		<EmbeddedResource Include="wwwroot\styles.css" />
-		<EmbeddedResource Include="wwwroot\app.js" />
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Composition root references every layer. -->
+		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
+		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
+		<ProjectReference Include="..\rPDU2MQTT.Api\rPDU2MQTT.Api.csproj" />
+		<ProjectReference Include="..\rPDU2MQTT.Web\rPDU2MQTT.Web.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Host composition (DI wiring) + logging setup use HiveMQ + Serilog directly. -->
 		<PackageReference Include="HiveMQtt" Version="0.44.0" />
-		<PackageReference Include="KubernetesClient" Version="19.0.2" />
-		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
-		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
-		<PackageReference Include="prometheus-net" Version="8.2.1" />
-		<PackageReference Include="Scalar.AspNetCore" Version="2.16.6" />
 		<PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
 		<PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
 		<PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
 		<PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
 		<PackageReference Include="Serilog.Sinks.SyslogMessages" Version="4.1.0" />
-		<PackageReference Include="YamlDotNet" Version="18.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
