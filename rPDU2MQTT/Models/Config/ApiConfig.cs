@@ -15,4 +15,8 @@ public class ApiConfig
     [DefaultValue(8082)]
     [Description("Port the REST API + docs listen on.")]
     public int Port { get; set; } = 8082;
+
+    [DefaultValue(null)]
+    [Description("Optional API key enabling the write/control endpoints. When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).")]
+    public string? ApiKey { get; set; } = null;
 }

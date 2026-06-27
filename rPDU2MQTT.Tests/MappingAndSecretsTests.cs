@@ -21,6 +21,7 @@ public class SecretRedactionTests
         cfg.EmonCMS.ApiKey = "emonKey";
         cfg.Gui.Password = "guiPass";
         cfg.Gui.Oidc.ClientSecret = "oidcSecret";
+        cfg.Api.ApiKey = "apiKey";
 
         var redacted = ConfigSchema.RedactSecrets(cfg);
 
@@ -29,6 +30,7 @@ public class SecretRedactionTests
         Assert.Null(redacted.EmonCMS.ApiKey);
         Assert.Null(redacted.Gui.Password);
         Assert.Null(redacted.Gui.Oidc?.ClientSecret);
+        Assert.Null(redacted.Api.ApiKey);
     }
 
     [Fact]
