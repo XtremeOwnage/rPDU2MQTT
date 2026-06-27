@@ -843,7 +843,7 @@ function addFlowSection(nav, sections) {
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node by its body to arrange it. Drag from a node’s right ● onto another node to make it the feeder (parent → child). Click ✕ on a link to remove it.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node by its body to arrange it. To set what feeds a node, drag from the feeder’s right ● onto the target node (it highlights green) — each node has exactly one feeder, so this replaces any existing one. Click ✕ on a link to clear it (an outlet reverts to its own PDU).' }));
 
     const addBar = el('div', { class: 'ld-toolbar' });
     const idIn = el('input', { type: 'text', placeholder: 'id (e.g. panel-main)' });
@@ -869,9 +869,14 @@ function addFlowSection(nav, sections) {
       if (!pos[c.id]) { const dc = depth(c.id); const r = (perCol[dc] = perCol[dc] || 0); pos[c.id] = { x: 24 + dc * (NW + 90), y: 20 + r * (NH + 22) }; perCol[dc] = r + 1; }
     });
 
+    // One feeder per node: an explicit (custom) parent replaces the auto-derived PDU link.
     const edges = [];
-    cand.forEach(c => { const ap = autoParent(c.id); if (ap && cand.has(ap)) edges.push({ from: ap, to: c.id, custom: false }); });
-    Object.entries(parents).forEach(([child, par]) => { if (cand.has(child) && cand.has(par)) edges.push({ from: par, to: child, custom: true }); });
+    cand.forEach(c => {
+      const cp = parents[c.id];
+      if (cp && cand.has(cp)) { edges.push({ from: cp, to: c.id, custom: true }); return; }
+      const ap = autoParent(c.id);
+      if (ap && cand.has(ap)) edges.push({ from: ap, to: c.id, custom: false });
+    });
 
     const allX = [...cand.values()].map(c => pos[c.id].x), allY = [...cand.values()].map(c => pos[c.id].y);
     const W = Math.max(600, Math.max(...allX, 0) + NW + 40), H = Math.max(280, Math.max(...allY, 0) + NH + 40);
@@ -885,7 +890,7 @@ function addFlowSection(nav, sections) {
     const edgeD = e => { const a = pos[e.from], b = pos[e.to], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
     const edgeEls = [];
     edges.forEach(e => {
-      const p = svgEl('path', { d: edgeD(e), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3' });
+      const p = svgEl('path', { d: edgeD(e), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3', 'pointer-events': 'none' });
       edgeLayer.appendChild(p); edgeEls.push({ e, p });
       if (e.custom) {
         const a = pos[e.from], b = pos[e.to], mx = (a.x + NW + b.x) / 2, my = (a.y + b.y) / 2 + NH / 2;
@@ -911,27 +916,37 @@ function addFlowSection(nav, sections) {
 
     // Interactions.
     const rect = () => svg.getBoundingClientRect();
-    let drag = null, linkFrom = null, tempLine = null;
+    let drag = null, linkFrom = null, tempLine = null, hovered = null;
+    // Walking up the feeder chain from `parent`, do we hit `child`? (prevents loops)
+    const wouldCycle = (child, parent) => { let p = parent, g = 0; while (p && g++ < 1000) { if (p === child) return true; p = parents[p] || autoParent(p); } return false; };
+    const highlight = id => {
+      if (id === hovered) return;
+      if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', colors[depth(hovered) % colors.length]); rc.setAttribute('stroke-width', '2'); }
+      hovered = id;
+      if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', '#46c46a'); rc.setAttribute('stroke-width', '3'); }
+    };
+    const targetUnder = (cx, cy) => { const hit = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== linkFrom ? gn.dataset.id : null; };
     const onDown = e => {
       const portId = e.target.getAttribute && e.target.getAttribute('data-port');
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
       if (rmId) { const i = customNodes.findIndex(n => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); delete parents[rmId]; Object.keys(parents).forEach(k => { if (parents[k] === rmId) delete parents[k]; }); renderEditor(); return; }
-      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
+      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
       const g = e.target.closest && e.target.closest('g[data-id]');
       if (g) { const r = rect(); drag = { id: g.dataset.id, ox: (e.clientX - r.left) - pos[g.dataset.id].x, oy: (e.clientY - r.top) - pos[g.dataset.id].y }; e.preventDefault(); }
     };
     const onMove = e => {
       const r = rect(), mx = e.clientX - r.left, my = e.clientY - r.top;
       if (drag) { pos[drag.id] = { x: Math.max(0, mx - drag.ox), y: Math.max(0, my - drag.oy) }; nodeG[drag.id].setAttribute('transform', `translate(${pos[drag.id].x},${pos[drag.id].y})`); edgeEls.forEach(({ e, p }) => { if (e.from === drag.id || e.to === drag.id) p.setAttribute('d', edgeD(e)); }); }
-      else if (linkFrom) { const a = pos[linkFrom]; tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${mx},${my}`); }
+      else if (linkFrom) { const a = pos[linkFrom]; tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${mx},${my}`); highlight(targetUnder(e.clientX, e.clientY)); }
     };
     const onUp = e => {
-      if (drag) { savePos(pos); drag = null; }
-      else if (linkFrom) {
-        const hit = document.elementFromPoint(e.clientX, e.clientY);
-        const gn = hit && hit.closest && hit.closest('g[data-id]');
-        if (gn && gn.dataset.id !== linkFrom) { parents[gn.dataset.id] = linkFrom; renderEditor(); return; }
-        if (tempLine) tempLine.remove(); linkFrom = null;
+      if (drag) { savePos(pos); drag = null; return; }
+      if (linkFrom) {
+        const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
+        if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
+        if (!tgt) return;
+        if (wouldCycle(tgt, src)) { toast('That would create a feeder loop.', false); return; }
+        parents[tgt] = src; renderEditor();
       }
     };
     svg.addEventListener('mousedown', onDown);

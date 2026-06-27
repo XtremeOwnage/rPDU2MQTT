@@ -102,6 +102,25 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void Build_ExplicitParentOverridesAutoPduLink_OneFeederPerNode()
+    {
+        // Reparenting an outlet onto a custom breaker must suppress its auto PDU->outlet link,
+        // so the outlet ends up with exactly one feeder (the bug: it had both).
+        var data = OnePdu(Outlet(0, "Server", "realpower", "60"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "breaker", Label = "Breaker 15" } },
+            Parents = { ["outlet:pdu1:0"] = "breaker" },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Source == "pdu:pdu1" && l.Target == "outlet:pdu1:0");
+        Assert.Equal(60, graph.Links.Single(l => l.Source == "breaker" && l.Target == "outlet:pdu1:0").Value);
+        Assert.Single(graph.Links, l => l.Target == "outlet:pdu1:0");
+    }
+
+    [Fact]
     public void Build_IgnoresParentLinksToUnknownNodes()
     {
         var data = OnePdu(Outlet(0, "A", "realpower", "10"));

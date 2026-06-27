@@ -46,7 +46,10 @@ public static class FlowGraphBuilder
                 var outletId = $"outlet:{device.Entity_Name}:{outlet.Key}";
                 label[outletId] = outlet.Entity_DisplayName; kind[outletId] = "outlet"; leaf[outletId] = value;
                 label[pduId] = device.Entity_DisplayName; kind[pduId] = "pdu";
-                AddEdge(pduId, outletId);
+                // Each node has exactly one feeder: skip the auto PDU link when the user has set an
+                // explicit parent for this outlet (the custom feeder overrides the auto-derived one).
+                if (!flow.Parents.ContainsKey(outletId))
+                    AddEdge(pduId, outletId);
             }
         }
 
