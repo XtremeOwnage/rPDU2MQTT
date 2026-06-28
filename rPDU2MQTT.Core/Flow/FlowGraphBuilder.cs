@@ -118,8 +118,7 @@ public static class FlowGraphBuilder
                 inCount[to] = inCount.GetValueOrDefault(to) + 1;
 
         // Need(id): power this node must receive = its known value (outlet sink or producer), else the sum
-        // of the flows on its outgoing links. EdgeFlow: a producer supplies its measured generation; a
-        // demand link carries its share (target demand ÷ number of feeders). Memoized + cycle-guarded.
+        // of the flows on its outgoing links. Memoized + cycle-guarded.
         var needMemo = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         double Need(string id, HashSet<string> path)
         {
@@ -132,10 +131,20 @@ public static class FlowGraphBuilder
             needMemo[id] = v;
             return v;
         }
+        // EdgeFlow(from -> to): a demand link carries the target's demand split among its feeders. A
+        // producer supplies its measured generation, divided across the things it powers in proportion to
+        // their downstream demand (equal split if none draw anything) — so a producer feeding several
+        // consumers isn't counted once per link.
         double EdgeFlow(string from, string to, HashSet<string> path)
-            => leaf.TryGetValue(from, out var produced)
-                ? produced
-                : Need(to, path) / Math.Max(1, inCount.GetValueOrDefault(to));
+        {
+            if (!leaf.TryGetValue(from, out var produced))
+                return Need(to, path) / Math.Max(1, inCount.GetValueOrDefault(to));
+
+            var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
+            if (kids.Count <= 1) return produced;
+            var totalDemand = kids.Sum(c => Need(c, path));
+            return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
+        }
 
         // Emit one link per edge, valued by the flow it carries.
         var links = new List<FlowLink>();
