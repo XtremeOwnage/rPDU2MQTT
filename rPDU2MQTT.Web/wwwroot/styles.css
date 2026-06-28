@@ -70,3 +70,8 @@
   .actions { position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line); padding:12px 28px; display:flex; gap:10px; align-items:center; margin:24px -28px -24px; }
   .toast { margin-left:auto; font-size:13px; } .toast.good { color:var(--good); } .toast.bad { color:var(--bad); }
   .tools button { margin-right:8px; }
+
+  /* Subtle "energy flowing" effect: dashes drift source -> target along each link's centerline. */
+  @keyframes rpdu-flow { to { stroke-dashoffset:-18; } }
+  .flow-line { animation:rpdu-flow 1s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .flow-line { animation:none; } }

@@ -72,6 +72,21 @@ function scalarInput(node, obj) {
   return el;
 }
 
+// Render an object's child properties into `container`: scalar fields flow into a multi-column grid
+// (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
+// and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
+function renderObjectBody(properties, target, container) {
+  const isComplex = c => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
+  const scalars = (properties || []).filter(c => !isComplex(c));
+  const complex = (properties || []).filter(isComplex);
+  if (scalars.length) {
+    const grid = document.createElement('div'); grid.className = 'grid';
+    scalars.forEach(child => renderNode(child, target, grid));
+    container.appendChild(grid);
+  }
+  complex.forEach(child => renderNode(child, target, container));
+}
+
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
 function renderNode(node, obj, container) {
   if (node.type === 'object') {
@@ -79,10 +94,7 @@ function renderNode(node, obj, container) {
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    // Lay nested fields out in columns to use the horizontal space.
-    const grid = document.createElement('div'); grid.className = 'grid';
-    (node.properties || []).forEach(child => renderNode(child, target, grid));
-    fs.appendChild(grid);
+    renderObjectBody(node.properties, target, fs);
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
     container.appendChild(renderMap(node, ensure(obj, node.key, {})));
@@ -128,10 +140,8 @@ function renderValue(valueSchema, holder, keyName, container) {
   const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
-    // Multi-column layout for a dictionary/list entry's fields (e.g. each PDU instance).
-    const grid = document.createElement('div'); grid.className = 'grid';
-    (node.properties || []).forEach(child => renderNode(child, target, grid));
-    container.appendChild(grid);
+    // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
+    renderObjectBody(node.properties, target, container);
   } else {
     renderNode(node, holder, container);
   }
@@ -217,9 +227,7 @@ function renderConfigSection(node, nav, sections) {
   } else {
     if (node.type === 'object') {
       ensure(data, node.key, {});
-      const grid = document.createElement('div'); grid.className = 'grid';
-      (node.properties || []).forEach(c => renderNode(c, data[node.key], grid));
-      sec.appendChild(grid);
+      renderObjectBody(node.properties, data[node.key], sec);
     }
     else renderNode(node, data, sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
@@ -233,10 +241,12 @@ function build() {
   nav.innerHTML = ''; sections.innerHTML = '';
 
   const byKey = new Map(schema.map(n => [n.key, n]));
-  // Any schema section not explicitly grouped lands in General, so a new config section is never lost.
+  // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
+  const HIDDEN = new Set(['EnergyFlow']);
+  // Any schema section not explicitly grouped (and not hidden) lands in General, so a new config section is never lost.
   const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
   const general = NAV_GROUPS.find(g => g.title === 'General');
-  schema.forEach(n => { if (!known.has(n.key)) general.keys.push(n.key); });
+  schema.forEach(n => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
 
   let first = null;
   for (const g of NAV_GROUPS) {
@@ -425,7 +435,7 @@ function buildK8sTools(container) {
 
 // Direct outlet control (on/off/reboot). A convenient place to exercise write actions.
 function addControlSection(nav, sections) {
-  const link = document.createElement('a'); link.textContent = 'Control'; nav.appendChild(link);
+  const link = document.createElement('a'); link.textContent = 'PDU Control'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -737,6 +747,28 @@ function svgEl(tag, attrs) {
   return e;
 }
 
+// Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
+// we scale by setting its width/height and keep the point under the cursor fixed. Returns a detach fn.
+function attachZoom(scroll, svg, baseW, baseH) {
+  let z = 1; const min = 0.25, max = 6;
+  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
+  apply();
+  const onWheel = e => {
+    e.preventDefault();
+    const r = scroll.getBoundingClientRect();
+    const cx = scroll.scrollLeft + (e.clientX - r.left), cy = scroll.scrollTop + (e.clientY - r.top);
+    const prev = z;
+    z = Math.min(max, Math.max(min, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+    if (z === prev) return;
+    apply();
+    const k = z / prev;
+    scroll.scrollLeft = cx * k - (e.clientX - r.left);
+    scroll.scrollTop = cy * k - (e.clientY - r.top);
+  };
+  scroll.addEventListener('wheel', onWheel, { passive: false });
+  return () => scroll.removeEventListener('wheel', onWheel);
+}
+
 // A read-only Sankey of power/energy flow (PDU -> outlets) from /api/flow.
 function addFlowSection(nav, sections) {
   const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
@@ -788,19 +820,26 @@ function addFlowSection(nav, sections) {
     nodes.forEach(n => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
+    // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
+    const leftPad = 16, rightGutter = 232;
     const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s, n) => s + nodeValue(n.id), 0)));
     const pxPerUnit = usableH / maxTotal;
-    const colX = c => 150 + (maxCol > 0 ? c * ((W - 320) / maxCol) : 0);
+    const colX = c => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
     const pos = {};
+    // Barycenter: a node's preferred y is the value-weighted mean of its (already positioned) feeders.
+    const bary = id => { let w = 0, s = 0; (incoming[id] || []).forEach(l => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
     cols.forEach((cn, c) => {
-      cn.sort((a, b) => nodeValue(b.id) - nodeValue(a.id));
+      // Roots stack by size; downstream columns follow their feeder's order (groups children, avoids crossings).
+      if (c === 0) cn.sort((a, b) => nodeValue(b.id) - nodeValue(a.id));
+      else cn.sort((a, b) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       let y = padTop;
       cn.forEach(n => { const h = Math.max(2, nodeValue(n.id) * pxPerUnit); pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 }; y += h + gap; });
     });
 
-    const totalH = padTop * 2 + usableH;
-    const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${W} ${totalH}`, style: 'max-width:960px' });
+    // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
+    const totalH = Math.ceil(Math.max(padTop + usableH, ...nodes.map(n => pos[n.id] ? pos[n.id].y + pos[n.id].h : 0))) + padTop;
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
 
     // Ribbons (filled bezier bands), stacked on each node edge by target order.
@@ -815,113 +854,148 @@ function addFlowSection(nav, sections) {
       s.outOff += h; t.inOff += h;
     });
 
-    // Nodes + labels (above each node).
+    // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
+    // where they cross a ribbon).
     nodes.forEach(n => {
       const p = pos[n.id]; if (!p) return;
       svg.appendChild(svgEl('rect', { x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2, fill: colors[colMemo[n.id] % colors.length] }));
-      const lab = svgEl('text', { x: p.x, y: p.y - 4, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600' });
+      const lab = svgEl('text', {
+        x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
+        'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
+      });
       lab.textContent = `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
       svg.appendChild(lab);
     });
 
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`;
-    wrap.appendChild(svg);
+    const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
+    scroll.appendChild(svg); wrap.appendChild(scroll);
+    attachZoom(scroll, svg, W, totalH);  // scroll-into-view container is replaced on each draw(), so no leak.
   };
 
-  // --- Node-graph hierarchy editor: drag nodes to arrange, drag a node's port onto another to set
-  //     its feeder (parent->child). Positions persist per-instance in localStorage. ---
-  const NW = 172, NH = 46;
-  const posKey = () => 'rpdu-flowpos:' + (instSel.get() || 'default');
-  const loadPos = () => { try { return JSON.parse(localStorage.getItem(posKey())) || {}; } catch { return {}; } };
-  const savePos = p => { try { localStorage.setItem(posKey(), JSON.stringify(p)); } catch { /* ignore */ } };
+  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
+  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
+  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
+  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
+  const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
+  const NW = 190, NH = 46;
 
   const renderEditor = () => {
     if (ed._cleanup) ed._cleanup();
     const flow = ensure(data, 'EnergyFlow', {});
     const customNodes = ensure(flow, 'Nodes', []);
-    const parents = ensure(flow, 'Parents', {});
+    const links = ensure(flow, 'Links', []);
+    const legacy = ensure(flow, 'Parents', {});
+    // One-time migration: fold any legacy single-feeder Parents (child→parent) into directed Links.
+    if (Object.keys(legacy).length) {
+      Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some(l => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
+      Object.keys(legacy).forEach(k => delete legacy[k]);
+    }
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node by its body to arrange it. To set what feeds a node, drag from the feeder’s right ● onto the target node (it highlights green) — each node has exactly one feeder, so this replaces any existing one. Click ✕ on a link to clear it (an outlet reverts to its own PDU).' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target). A node can have several feeders, and a producer is just a feed into what it powers — e.g. drag from Solar onto your inverter. The target highlights green when in range; click ✕ on a link to remove it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder.' }));
 
     const addBar = el('div', { class: 'ld-toolbar' });
-    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. panel-main)' });
-    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Main Panel)' });
+    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
+    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
     const valIn = el('input', { type: 'number', placeholder: 'known value (optional)', style: { width: '150px' } });
     const addBtn = btn('Add node', 'primary');
     const save = btn('Save hierarchy', 'primary');
     addBar.append(idIn, labIn, valIn, addBtn, save); ed.appendChild(addBar);
 
-    // Candidate nodes (graph + custom) and the edges between them.
+    // Candidate nodes (from the built graph + custom defs).
     const cand = new Map();
     (lastGraph?.nodes || []).forEach(n => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
     customNodes.forEach(n => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
+    const nm = id => (cand.get(id) || {}).label || id;
+    const byLabel = (a, b) => (cand.get(a).label || a).localeCompare(cand.get(b).label || b);
 
     const autoParent = id => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
-    const parentOf = id => parents[id] || autoParent(id);
-    const depth = (id, seen) => { seen = seen || new Set(); if (seen.has(id)) return 0; seen.add(id); const p = parentOf(id); return (p && cand.has(p)) ? depth(p, seen) + 1 : 0; };
 
-    // Auto-layout any node without a saved position (column = depth, stacked per column).
-    const pos = loadPos();
-    const perCol = {};
-    [...cand.values()].forEach(c => {
-      if (!pos[c.id]) { const dc = depth(c.id); const r = (perCol[dc] = perCol[dc] || 0); pos[c.id] = { x: 24 + dc * (NW + 90), y: 20 + r * (NH + 22) }; perCol[dc] = r + 1; }
-    });
-
-    // One feeder per node: an explicit (custom) parent replaces the auto-derived PDU link.
+    // Edges: explicit directed Links, plus the auto PDU → outlet feed (suppressed once an outlet is
+    // explicitly fed). `custom` edges are user links (deletable); auto edges are dashed and fixed.
+    const customTo = new Set(links.map(l => l.To));
     const edges = [];
-    cand.forEach(c => {
-      const cp = parents[c.id];
-      if (cp && cand.has(cp)) { edges.push({ from: cp, to: c.id, custom: true }); return; }
-      const ap = autoParent(c.id);
-      if (ap && cand.has(ap)) edges.push({ from: ap, to: c.id, custom: false });
+    cand.forEach(c => { const ap = autoParent(c.id); if (ap && cand.has(ap) && !customTo.has(c.id)) edges.push({ from: ap, to: c.id, custom: false }); });
+    links.forEach(l => { if (cand.has(l.From) && cand.has(l.To)) edges.push({ from: l.From, to: l.To, custom: true, ref: l }); });
+
+    // Adjacency + column = longest path from a root (every edge therefore points strictly rightward).
+    const incoming = {}, outgoing = {};
+    cand.forEach((_, id) => { incoming[id] = []; outgoing[id] = []; });
+    edges.forEach(e => { outgoing[e.from].push(e); incoming[e.to].push(e); });
+    const colMemo = {};
+    const col = (id, seen) => {
+      if (colMemo[id] != null) return colMemo[id];
+      seen = seen || new Set(); if (seen.has(id)) return 0; seen.add(id);
+      const ins = incoming[id] || [];
+      const c = ins.length ? Math.max(...ins.map(e => col(e.from, seen) + 1)) : 0;
+      seen.delete(id); return colMemo[id] = c;
+    };
+    [...cand.keys()].forEach(id => col(id));
+    // Would adding from→to create a loop? (can `to` already reach `from`?)
+    const reaches = (a, b) => { const stack = [a], seen = new Set(); while (stack.length) { const x = stack.pop(); if (x === b) return true; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach(e => stack.push(e.to)); } return false; };
+
+    // Layout: stack each column top-to-bottom; order downstream columns by feeder barycenter.
+    const padX = 22, padY = 18, rowGap = 16, step = NW + 96;
+    const cols = [];
+    [...cand.keys()].forEach(id => { const c = col(id); (cols[c] = cols[c] || []).push(id); });
+    const pos = {};
+    const bary = id => { const ins = incoming[id] || []; if (!ins.length) return 1e9; let s = 0, w = 0; ins.forEach(e => { const p = pos[e.from]; if (p) { s += p.y + NH / 2; w++; } }); return w ? s / w : 1e9; };
+    cols.forEach((ids, c) => {
+      if (c === 0) ids.sort((a, b) => (cand.get(a).kind === 'pdu' ? 0 : 1) - (cand.get(b).kind === 'pdu' ? 0 : 1) || byLabel(a, b));
+      else ids.sort((a, b) => (bary(a) - bary(b)) || byLabel(a, b));
+      let y = padY;
+      ids.forEach(id => { pos[id] = { x: padX + c * step, y }; y += NH + rowGap; });
     });
 
-    const allX = [...cand.values()].map(c => pos[c.id].x), allY = [...cand.values()].map(c => pos[c.id].y);
-    const W = Math.max(600, Math.max(...allX, 0) + NW + 40), H = Math.max(280, Math.max(...allY, 0) + NH + 40);
-    const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px', marginTop: '10px', maxHeight: '640px' } });
-    const svg = svgEl('svg', { width: W, height: H, style: 'background:var(--panel2)' });
+    const W = Math.max(640, ...[...cand.keys()].map(id => pos[id].x + NW + padX));
+    const H = Math.max(260, ...[...cand.keys()].map(id => pos[id].y + NH + padY));
+    const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px', marginTop: '10px', maxHeight: '72vh' } });
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
+    const detachZoom = attachZoom(scroll, svg, W, H);
+    const defs = svgEl('defs', {}); svg.appendChild(defs);
+    [['fh-arrow', 'var(--line)'], ['fh-arrow-c', '#5ab0ff']].forEach(([id, fill]) => {
+      const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
+      mk.appendChild(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill })); defs.appendChild(mk);
+    });
     const edgeLayer = svgEl('g', {}); svg.appendChild(edgeLayer);
     const nodeLayer = svgEl('g', {}); svg.appendChild(nodeLayer);
-    const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff'];
 
-    const edgeD = e => { const a = pos[e.from], b = pos[e.to], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
-    const edgeEls = [];
+    const edgeD = (a, b) => { const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
     edges.forEach(e => {
-      const p = svgEl('path', { d: edgeD(e), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3', 'pointer-events': 'none' });
-      edgeLayer.appendChild(p); edgeEls.push({ e, p });
+      const a = pos[e.from], b = pos[e.to];
+      edgeLayer.appendChild(svgEl('path', { d: edgeD(a, b), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3', 'marker-end': `url(#${e.custom ? 'fh-arrow-c' : 'fh-arrow'})`, 'pointer-events': 'none' }));
       if (e.custom) {
-        const a = pos[e.from], b = pos[e.to], mx = (a.x + NW + b.x) / 2, my = (a.y + b.y) / 2 + NH / 2;
+        // Drifting dashes along the link, hinting at flow direction.
+        edgeLayer.appendChild(svgEl('path', { class: 'flow-line', d: edgeD(a, b), fill: 'none', stroke: '#cfe8ff', 'stroke-opacity': '0.85', 'stroke-width': '2.6', 'stroke-linecap': 'round', 'stroke-dasharray': '7 11', 'pointer-events': 'none' }));
+        const mx = (a.x + NW + b.x) / 2, my = (a.y + b.y) / 2 + NH / 2;
         const del = svgEl('text', { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'middle', fill: 'var(--bad)', 'font-size': '15', style: 'cursor:pointer' });
-        del.textContent = '✕'; del.onclick = () => { delete parents[e.to]; renderEditor(); };
+        del.textContent = '✕'; del.onclick = () => { const i = links.indexOf(e.ref); if (i >= 0) links.splice(i, 1); toast(`${nm(e.from)} → ${nm(e.to)} removed.`, true); renderEditor(); };
         edgeLayer.appendChild(del);
       }
     });
 
     const nodeG = {};
     [...cand.values()].forEach(c => {
-      const g = svgEl('g', { transform: `translate(${pos[c.id].x},${pos[c.id].y})`, style: 'cursor:grab' }); g.dataset.id = c.id;
-      const color = colors[depth(c.id) % colors.length];
+      const p = pos[c.id], color = colors[col(c.id) % colors.length];
+      const g = svgEl('g', { transform: `translate(${p.x},${p.y})`, style: 'cursor:default' }); g.dataset.id = c.id;
       g.appendChild(svgEl('rect', { width: NW, height: NH, rx: 7, fill: 'var(--panel)', stroke: color, 'stroke-width': 2 }));
-      const t1 = svgEl('text', { x: 11, y: 19, fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' }); t1.textContent = c.label.length > 24 ? c.label.slice(0, 23) + '…' : c.label; g.appendChild(t1);
+      const t1 = svgEl('text', { x: 11, y: 19, fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' }); t1.textContent = c.label.length > 26 ? c.label.slice(0, 25) + '…' : c.label; g.appendChild(t1);
       const t2 = svgEl('text', { x: 11, y: 35, fill: 'var(--muted)', 'font-size': '10' }); t2.textContent = c.id; g.appendChild(t2);
       g.appendChild(svgEl('circle', { cx: NW, cy: NH / 2, r: 7, fill: color, style: 'cursor:crosshair', 'data-port': c.id }));
-      if (c.custom) {
-        const rm = svgEl('text', { x: NW - 12, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
-      }
+      if (c.custom) { const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm); }
       nodeLayer.appendChild(g); nodeG[c.id] = g;
     });
 
-    // Interactions.
-    const rect = () => svg.getBoundingClientRect();
-    let drag = null, linkFrom = null, tempLine = null, hovered = null;
-    // Walking up the feeder chain from `parent`, do we hit `child`? (prevents loops)
-    const wouldCycle = (child, parent) => { let p = parent, g = 0; while (p && g++ < 1000) { if (p === child) return true; p = parents[p] || autoParent(p); } return false; };
+    // Interactions: drag a node's output port onto another node to add a directed feed. Map screen
+    // coords through the SVG CTM so the drag line stays correct under zoom/scroll.
+    const toUser = (cx, cy) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
+    let linkFrom = null, tempLine = null, hovered = null;
     const highlight = id => {
       if (id === hovered) return;
-      if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', colors[depth(hovered) % colors.length]); rc.setAttribute('stroke-width', '2'); }
+      if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', colors[col(hovered) % colors.length]); rc.setAttribute('stroke-width', '2'); }
       hovered = id;
       if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', '#46c46a'); rc.setAttribute('stroke-width', '3'); }
     };
@@ -929,30 +1003,30 @@ function addFlowSection(nav, sections) {
     const onDown = e => {
       const portId = e.target.getAttribute && e.target.getAttribute('data-port');
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
-      if (rmId) { const i = customNodes.findIndex(n => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); delete parents[rmId]; Object.keys(parents).forEach(k => { if (parents[k] === rmId) delete parents[k]; }); renderEditor(); return; }
-      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
-      const g = e.target.closest && e.target.closest('g[data-id]');
-      if (g) { const r = rect(); drag = { id: g.dataset.id, ox: (e.clientX - r.left) - pos[g.dataset.id].x, oy: (e.clientY - r.top) - pos[g.dataset.id].y }; e.preventDefault(); }
+      if (rmId) { const i = customNodes.findIndex(n => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
+      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); }
     };
     const onMove = e => {
-      const r = rect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-      if (drag) { pos[drag.id] = { x: Math.max(0, mx - drag.ox), y: Math.max(0, my - drag.oy) }; nodeG[drag.id].setAttribute('transform', `translate(${pos[drag.id].x},${pos[drag.id].y})`); edgeEls.forEach(({ e, p }) => { if (e.from === drag.id || e.to === drag.id) p.setAttribute('d', edgeD(e)); }); }
-      else if (linkFrom) { const a = pos[linkFrom]; tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${mx},${my}`); highlight(targetUnder(e.clientX, e.clientY)); }
+      if (!linkFrom) return;
+      const u = toUser(e.clientX, e.clientY), a = pos[linkFrom];
+      tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${u.x},${u.y}`);
+      highlight(targetUnder(e.clientX, e.clientY));
     };
     const onUp = e => {
-      if (drag) { savePos(pos); drag = null; return; }
-      if (linkFrom) {
-        const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
-        if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
-        if (!tgt) return;
-        if (wouldCycle(tgt, src)) { toast('That would create a feeder loop.', false); return; }
-        parents[tgt] = src; renderEditor();
-      }
+      if (!linkFrom) return;
+      const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
+      if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
+      if (!tgt || src === tgt) return;
+      if (reaches(tgt, src)) { toast('That would create a feeder loop.', false); return; }
+      if (links.some(l => l.From === src && l.To === tgt)) { toast('That feed already exists.', false); return; }
+      links.push({ From: src, To: tgt });
+      toast(`${nm(src)} → ${nm(tgt)} added.`, true);
+      renderEditor();
     };
     svg.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-    ed._cleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    ed._cleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); detachZoom(); };
 
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
