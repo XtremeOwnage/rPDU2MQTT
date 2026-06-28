@@ -305,13 +305,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
 
+                // Re-read the just-saved config so live-readable settings take effect without a restart.
+                var reloaded = configSource.Load();
+                // The energy-flow hierarchy is read fresh on every /api/flow request, so applying it here
+                // makes Flow/Sankey edits show up on the next refresh (previously they needed a restart).
+                config.EnergyFlow = reloaded.EnergyFlow;
+
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
                 // restart. Other live-read settings (overrides/names/templates) still apply on Republish.
                 var instanceMessage = "";
                 try
                 {
-                    config.Pdus = configSource.Load().Pdus;
+                    config.Pdus = reloaded.Pdus;
                     await instances.ReconcileAsync();
                     instanceMessage = " PDU instances were applied live.";
                 }
@@ -674,7 +680,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
                 var data = await pdu.GetRootData_Public(cts.Token);
                 var metric = ctx.Request.Query["metric"].ToString();
-                var graph = FlowGraphBuilder.Build(data, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
+                var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
                 return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
             }
             catch (Exception ex)

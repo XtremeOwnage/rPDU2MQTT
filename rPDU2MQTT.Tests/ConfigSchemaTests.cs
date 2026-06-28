@@ -1,6 +1,8 @@
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.Config.Schemas;
 using rPDU2MQTT.Services.Gui;
+using rPDU2MQTT.Startup;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
@@ -57,6 +59,30 @@ public class ConfigSchemaTests
 
         var mqtt = ConfigSchema.Build().Single(n => n.Key == "MQTT");
         Assert.Contains("LastWill", mqtt.Properties!.Select(n => n.Key));
+    }
+
+    [Fact]
+    public void EnergyFlow_SurvivesTheSaveThenReloadRoundTrip()
+    {
+        // The GUI saves a hierarchy edit and the app re-reads it live (config.EnergyFlow = source.Load()),
+        // which only reflects the change if EnergyFlow survives the exact serialization path: the browser
+        // posts JSON -> the endpoint parses it -> SaveAsync writes YAML -> Load() parses YAML back.
+        var posted = new Config();
+        posted.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "gridboss", Label = "Grid Boss", Value = 1234 });
+        posted.EnergyFlow.Links.Add(new EnergyFlowLink { From = "grid", To = "gridboss" });
+        posted.EnergyFlow.Links.Add(new EnergyFlowLink { From = "gridboss", To = "main_panel" });
+
+        var parsed = ConfigSchema.FromJson(ConfigSchema.ToJson(posted));   // browser -> endpoint
+        var yaml = ConfigSchema.ToYaml(parsed);                            // endpoint -> disk (SaveAsync)
+        var reloaded = YamlConfigLoader.DeserializeString(yaml);           // disk -> memory (Load)
+
+        var node = Assert.Single(reloaded.EnergyFlow.Nodes);
+        Assert.Equal("gridboss", node.Id);
+        Assert.Equal("Grid Boss", node.Label);
+        Assert.Equal(1234, node.Value);
+        Assert.Equal(2, reloaded.EnergyFlow.Links.Count);
+        Assert.Contains(reloaded.EnergyFlow.Links, l => l.From == "grid" && l.To == "gridboss");
+        Assert.Contains(reloaded.EnergyFlow.Links, l => l.From == "gridboss" && l.To == "main_panel");
     }
 
     [Fact]

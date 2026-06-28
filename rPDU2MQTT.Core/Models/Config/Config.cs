@@ -69,6 +69,9 @@ public class Config
     [YamlMember(Alias = "Api", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Read-only REST API + OpenAPI/Scalar docs")]
     public ApiConfig Api { get; set; } = new ApiConfig();
 
+    [YamlMember(Alias = "EnergyFlow", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.")]
+    public EnergyFlowConfig EnergyFlow { get; set; } = new EnergyFlowConfig();
+
     /// <summary>
     /// Replace this instance's settings with another's. Used to hot-reload the shared singleton on
     /// rediscovery (services read these sections live). Connection-level settings (MQTT/PDU host/port,
@@ -87,5 +90,6 @@ public class Config
         Gui = other.Gui;
         Health = other.Health;
         Api = other.Api;
+        EnergyFlow = other.EnergyFlow;
     }
 }
