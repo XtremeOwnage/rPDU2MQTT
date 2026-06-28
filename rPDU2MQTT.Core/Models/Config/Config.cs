@@ -69,7 +69,7 @@ public class Config
     [YamlMember(Alias = "Api", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Read-only REST API + OpenAPI/Scalar docs")]
     public ApiConfig Api { get; set; } = new ApiConfig();
 
-    [YamlMember(Alias = "EnergyFlow", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "User-defined energy-flow hierarchy (Flow/Sankey view)")]
+    [YamlMember(Alias = "EnergyFlow", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.")]
     public EnergyFlowConfig EnergyFlow { get; set; } = new EnergyFlowConfig();
 
     /// <summary>

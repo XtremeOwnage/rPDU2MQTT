@@ -18,12 +18,30 @@ public class EnergyFlowConfig
     public List<EnergyFlowNode> Nodes { get; set; } = new();
 
     /// <summary>
-    /// Maps a node id to the id of the node that **feeds** it (its upstream parent). Keys/values may be
-    /// custom node ids or auto ids. Energy flows parent → child; values aggregate up from the leaf
-    /// (outlet) measurements.
+    /// Directed energy-flow links — each entry means energy flows <c>From</c> → <c>To</c>. A node may be
+    /// the <c>To</c> of several links (multiple feeders, e.g. a transfer switch fed by grid + generator +
+    /// inverter), and a producer is just a link pointing into the thing it powers (solar → inverter).
+    /// Endpoints may be custom node ids or auto ids (<c>pdu:…</c> / <c>outlet:…</c>).
     /// </summary>
-    [Description("child node id -> parent (feeder) node id. Energy flows parent -> child.")]
+    [Description("Directed energy-flow links (From feeds To). Allows multiple feeders per node and producer inputs.")]
+    public List<EnergyFlowLink> Links { get; set; } = new();
+
+    /// <summary>
+    /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
+    /// load (each entry behaves like a link parent → child) so older configs keep working.
+    /// </summary>
+    [Description("Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.")]
     public Dictionary<string, string> Parents { get; set; } = new();
+}
+
+/// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>
+public class EnergyFlowLink
+{
+    [Description("Source node id — energy flows out of here.")]
+    public string From { get; set; } = "";
+
+    [Description("Target node id — energy flows into here.")]
+    public string To { get; set; } = "";
 }
 
 /// <summary>A custom flow node (see <see cref="EnergyFlowConfig.Nodes"/>).</summary>
