@@ -23,6 +23,16 @@ public static class ServiceConfiguration
 
         Config cfg = configSource.Load() ?? throw new Exception("Unable to load configuration");
 
+        // Which workload(s) this process runs. Default All = a single node that does everything. Singletons
+        // (the object graph) are always registered; only the hosted services (the actual work) are gated by
+        // role, so the default deployment is unchanged and a single role can be run per process to scale out.
+        var roles = HostRoles.Resolve(context.Configuration);
+        services.AddSingleton(typeof(HostRole), roles);
+        Log.Information($"Active host role(s): {roles}.");
+        bool worker = roles.HasFlag(HostRole.Worker);
+        bool api = roles.HasFlag(HostRole.Api);
+        bool ui = roles.HasFlag(HostRole.Ui);
+
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
         services.AddSingleton(configSource);
@@ -83,64 +93,73 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.IMessageBus, Core.ChannelMessageBus>();
         services.AddSingleton<Core.SnapshotCache>();
         services.AddSingleton<Core.ISnapshotCache>(sp => sp.GetRequiredService<Core.SnapshotCache>());
-        services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
         // Owns the PDU producer(s) — one poller per configured instance; reconciled at runtime when the
         // GUI saves instance changes. Singleton + hosted-service facade so the GUI can trigger reconcile.
         services.AddSingleton<InstanceManager>();
-        services.AddHostedService(sp => sp.GetRequiredService<InstanceManager>());
+        // Data production runs in the Worker role; the cache/bus singletons stay registered so the API/GUI
+        // can read them in-process (a single-node 'all' deployment). Splitting these across processes is the
+        // job of the planned message-bus transport.
+        if (worker)
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
+            services.AddHostedService(sp => sp.GetRequiredService<InstanceManager>());
+        }
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
         // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
         services.AddSingleton<Services.EmonCmsStatus>();
 
-        // Created hosted services.
-        services.AddHostedService<MQTTPublishingService>();
-
-        // Optional metric exporters.
-        if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
-            services.AddHostedService<PrometheusExportService>();
-
-        if (cfg.EmonCMS.Enabled)
-        {
-            // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
-            if (cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http)
-                ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
-            services.AddHostedService<EmonCmsExportService>();
-        }
-
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
 
-        if (cfg.HASS.DiscoveryEnabled)
+        // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
+        if (worker)
         {
-            services.AddHostedService<HomeAssistantDiscoveryService>();
-            services.AddHostedService<DiagnosticService>();
-        }
-        else
-            Log.Warning($"Home Assistant Discovery Disabled.");
+            services.AddHostedService<MQTTPublishingService>();
 
-        // Optional HTTP health endpoints for container probes.
+            // Optional metric exporters.
+            if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
+                services.AddHostedService<PrometheusExportService>();
+
+            if (cfg.EmonCMS.Enabled)
+            {
+                // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
+                if (cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http)
+                    ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
+                services.AddHostedService<EmonCmsExportService>();
+            }
+
+            if (cfg.HASS.DiscoveryEnabled)
+            {
+                services.AddHostedService<HomeAssistantDiscoveryService>();
+                services.AddHostedService<DiagnosticService>();
+            }
+            else
+                Log.Warning($"Home Assistant Discovery Disabled.");
+
+            // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
+            if (cfg.Primary.ActionsEnabled)
+            {
+                if (string.IsNullOrEmpty(cfg.Primary.Credentials?.Username) || string.IsNullOrEmpty(cfg.Primary.Credentials?.Password))
+                    Log.Warning("PDU.ActionsEnabled is true, but PDU credentials are not set. Outlet on/off control will fail until Pdu.Credentials (or RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD) are provided.");
+
+                Log.Information("Outlet control is ENABLED (ActionsEnabled).");
+                services.AddHostedService<OutletCommandService>();
+            }
+        }
+
+        // Optional HTTP health endpoints for container probes — useful in any role.
         if (cfg.Health.Enabled)
             services.AddHostedService<HealthService>();
 
-        // Optional read-only REST API + OpenAPI/Scalar docs on its own port.
-        if (cfg.Api.Enabled)
+        // ---- Api role: the read-only REST API + OpenAPI/Scalar docs on its own port. ----
+        if (api && cfg.Api.Enabled)
             services.AddHostedService<ApiService>();
 
-        // Optional embedded configuration GUI.
-        if (cfg.Gui.Enabled)
+        // ---- Ui role: the embedded configuration GUI. ----
+        if (ui && cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
-
-        // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
-        if (cfg.Primary.ActionsEnabled)
-        {
-            if (string.IsNullOrEmpty(cfg.Primary.Credentials?.Username) || string.IsNullOrEmpty(cfg.Primary.Credentials?.Password))
-                Log.Warning("PDU.ActionsEnabled is true, but PDU credentials are not set. Outlet on/off control will fail until Pdu.Credentials (or RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD) are provided.");
-
-            Log.Information("Outlet control is ENABLED (ActionsEnabled).");
-            services.AddHostedService<OutletCommandService>();
-        }
     }
 
     /// <summary>Wrap a plaintext secret as a read-only SecureString (for APIs that require one).</summary>
