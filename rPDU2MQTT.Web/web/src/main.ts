@@ -1,8 +1,18 @@
 // Bootstrap & shared status: load the schema + config, build the UI, and wire the global Save/Reload.
-import { api, toast } from './helpers.js';
+import { api, toast, slug } from './helpers.js';
 import { state } from './state.js';
 import { build } from './config-form.js';
 import { exportData } from './overrides.js';
+
+// Back/forward navigation + direct hash edits: open the matching tab if it isn't already active. (Normal
+// tab clicks already set the hash via activate(), so by the time this fires the tab is active -> no-op,
+// which also avoids re-loading a tab's data on every click.)
+window.addEventListener('hashchange', () => {
+  const wanted = decodeURIComponent((location.hash || '').slice(1));
+  if (!wanted) return;
+  const link = ([...document.querySelectorAll('nav a')] as any[]).find(a => slug(a.textContent) === wanted);
+  if (link && !link.classList.contains('active')) link.click();
+});
 
 export async function load() {
   state.schema = (await api('/api/schema')).body;
