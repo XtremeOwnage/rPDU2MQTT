@@ -29,23 +29,32 @@ public class EmonCmsExportService : baseMQTTService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        // Aggregate readings across every fresh source into one post (input keys are unique per device).
-        var values = new Dictionary<string, double>();
+        // Group readings into payloads. Normally one combined payload (input keys are unique per device),
+        // but when the MQTT topic template contains {device} (#165) we split per PDU so each goes to its
+        // own topic. The HTTP transport always posts one combined payload (the split is a topic concept).
+        var splitByDevice = c.Transport == EmonCmsTransport.Mqtt && MetricsHelper.EmonCmsSplitsByDevice(config);
+        var payloads = new Dictionary<string, Dictionary<string, double>>();
         foreach (var data in FreshSnapshots())
             foreach (var r in MetricsHelper.EnumerateReadings(data))
+            {
+                var key = splitByDevice ? r.Device : string.Empty;
+                if (!payloads.TryGetValue(key, out var values)) payloads[key] = values = new();
                 values[MetricsHelper.EmonCmsInputName(r, config)] = r.Value;
+            }
 
-        if (values.Count == 0)
+        var total = payloads.Sum(p => p.Value.Count);
+        if (total == 0)
             return;
 
         try
         {
             if (c.Transport == EmonCmsTransport.Mqtt)
-                await SendViaMqtt(values, cancellationToken);
+                foreach (var (device, values) in payloads)
+                    await SendViaMqtt(MetricsHelper.EmonCmsMqttTopic(device, config), values, cancellationToken);
             else
-                await SendViaHttp(values, cancellationToken);
+                await SendViaHttp(payloads[string.Empty], cancellationToken);
 
-            status.RecordSuccess(values.Count);
+            status.RecordSuccess(total);
         }
         catch (Exception ex)
         {
@@ -74,10 +83,7 @@ public class EmonCmsExportService : baseMQTTService
             throw new Exception($"EmonCMS rejected the post: {body}");
     }
 
-    private Task SendViaMqtt(Dictionary<string, double> values, CancellationToken cancellationToken)
-    {
-        // EmonCMS's MQTT input parses a JSON payload on <baseTopic>/<node>.
-        var topic = $"{(c.MqttBaseTopic ?? "emon").TrimEnd('/')}/{c.Node}";
-        return PublishString(topic, JsonSerializer.Serialize(values), cancellationToken);
-    }
+    private Task SendViaMqtt(string topic, Dictionary<string, double> values, CancellationToken cancellationToken)
+        // EmonCMS's MQTT input parses a JSON payload on the rendered topic (see MqttTopicTemplate).
+        => PublishString(topic, JsonSerializer.Serialize(values), cancellationToken);
 }

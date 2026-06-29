@@ -42,8 +42,17 @@ public class EmonCMSConfig
     [TemplateVariables("device", "source", "name", "number", "type", "units")]
     public string InputNameTemplate { get; set; } = "{device}_{source}_{type}";
 
-    /// <summary>Base MQTT topic for EmonCMS's MQTT input (the Mqtt transport publishes to base/node).</summary>
+    /// <summary>Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate).</summary>
     [DefaultValue("emon")]
-    [Description("Base MQTT topic for EmonCMS's MQTT input; values are published to <base>/<node> as JSON. (Mqtt transport.)")]
+    [Description("Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate). (Mqtt transport.)")]
     public string MqttBaseTopic { get; set; } = "emon";
+
+    /// <summary>
+    /// Template for the EmonCMS MQTT topic each JSON payload is published to. Including <c>{device}</c>
+    /// splits the export so each PDU goes to its own topic instead of one combined payload (#165).
+    /// </summary>
+    [DefaultValue("{base}/{node}")]
+    [Description("Template for the EmonCMS MQTT topic each JSON payload is published to. Placeholders: {base} (MqttBaseTopic), {node}, {device} (the PDU's name). Including {device} splits the export so each PDU publishes to its own topic instead of one combined payload, e.g. '{base}/{node}/{device}'. (Mqtt transport.)")]
+    [TemplateVariables("base", "node", "device")]
+    public string MqttTopicTemplate { get; set; } = "{base}/{node}";
 }
