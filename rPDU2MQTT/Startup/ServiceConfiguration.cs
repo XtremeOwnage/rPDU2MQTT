@@ -113,6 +113,16 @@ public static class ServiceConfiguration
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
 
+        // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
+        // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
+        // Single-node "all" keeps the bus fully in-process and skips this (no extra broker traffic).
+        if (roles != HostRole.All)
+            services.AddHostedService(sp => new Services.MqttBusBridge(
+                sp.GetRequiredService<IHiveMQClient>(),
+                sp.GetRequiredService<Core.IMessageBus>(),
+                sp.GetRequiredService<Config>(),
+                producer: worker));
+
         // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
         if (worker)
         {
