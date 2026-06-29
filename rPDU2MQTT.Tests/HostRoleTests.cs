@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using rPDU2MQTT.Core;
 using rPDU2MQTT.Startup;
 using Xunit;
 
