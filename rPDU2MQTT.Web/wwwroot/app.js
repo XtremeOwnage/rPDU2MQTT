@@ -365,14 +365,34 @@ function addDiagnosticsSection(nav, sections) {
   const restart = btn('Restart bridge', 'danger');
   bar.appendChild(refresh); bar.appendChild(restart); sec.appendChild(bar);
 
+  const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
+
+  // A "Components" panel: which roles this node runs, MQTT transport, and whether PDU data is flowing.
+  const compLine = (dotClass, label) => {
+    const ln = document.createElement('div'); ln.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px;';
+    const dot = document.createElement('span'); dot.className = 'dot' + (dotClass ? ' ' + dotClass : '');
+    const t = document.createElement('span'); t.textContent = label;
+    ln.appendChild(dot); ln.appendChild(t); return ln;
+  };
+  const renderComponents = (b) => {
+    comp.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Components'; head.style.cssText = 'font-weight:600;color:var(--accent);margin-bottom:6px;'; comp.appendChild(head);
+    const roles = b.roles || [];
+    comp.appendChild(compLine('good', 'Roles on this node: ' + (roles.length ? roles.join(', ') : 'all')));
+    comp.appendChild(compLine(b.mqttConnected ? 'good' : 'bad', 'MQTT — ' + (b.mqttConnected ? 'connected' : 'disconnected') + ' (' + (b.mqttHost || '?') + ')'));
+    const ds = b.dataSources || [];
+    if (!ds.length) comp.appendChild(compLine('', 'PDU data — none yet' + (roles.length && !roles.includes('worker') ? ' (waiting on a worker)' : '')));
+    else ds.forEach(s => comp.appendChild(compLine(s.stale ? 'bad' : 'good', 'PDU data · ' + s.instance + ' — ' + (s.stale ? 'stale, ' : '') + 'updated ' + s.ageSeconds + 's ago')));
+  };
 
   const fmtUptime = s => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
   const row = (k, v) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
 
   const load = async () => {
     const r = await api('/api/diagnostics'); const b = r.body;
+    renderComponents(b);
     info.innerHTML = '';
     info.appendChild(row('App version', b.version));
     if (b.image) info.appendChild(row('Container image', b.image));

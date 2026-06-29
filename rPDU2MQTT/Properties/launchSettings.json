@@ -1,7 +1,19 @@
 {
   "profiles": {
-    "rPDU2MQTT": {
+    "rPDU2MQTT (all)": {
       "commandName": "Project"
+    },
+    "Worker (role)": {
+      "commandName": "Project",
+      "commandLineArgs": "--role worker"
+    },
+    "Api (role)": {
+      "commandName": "Project",
+      "commandLineArgs": "--role api"
+    },
+    "Ui (role)": {
+      "commandName": "Project",
+      "commandLineArgs": "--role ui"
     },
     "Container (Dockerfile)": {
       "commandName": "Docker"

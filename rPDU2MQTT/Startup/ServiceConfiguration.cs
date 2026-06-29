@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Services;
 using rPDU2MQTT.Services.Kubernetes;

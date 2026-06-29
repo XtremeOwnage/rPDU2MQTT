@@ -42,10 +42,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly InstanceManager instances;
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.ISnapshotCache snapshots;
+    private readonly Core.HostRole hostRoles;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -59,6 +60,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
         this.snapshots = snapshots;
+        this.hostRoles = hostRoles;
     }
 
     /// <summary>
@@ -406,6 +408,25 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
                 configSource = configSource.Describe,
                 lastPollUtc = health.LastPollUtc,
+                // Component health: which workloads this process runs, and whether PDU data is flowing
+                // (from the local poller, or a remote worker via the MQTT bus bridge).
+                roles = Enum.GetValues<Core.HostRole>()
+                    .Where(r => r is Core.HostRole.Worker or Core.HostRole.Api or Core.HostRole.Ui && hostRoles.HasFlag(r))
+                    .Select(r => r.ToString().ToLowerInvariant())
+                    .ToArray(),
+                dataSources = snapshots.All
+                    .OrderBy(s => s.InstanceId)
+                    .Select(s =>
+                    {
+                        var interval = config.Pdus.TryGetValue(s.InstanceId, out var pc) ? pc.PollInterval : 30;
+                        return new
+                        {
+                            instance = s.InstanceId,
+                            ageSeconds = (long)Math.Max(0, (DateTime.UtcNow - s.TimestampUtc).TotalSeconds),
+                            stale = Core.SnapshotFreshness.IsStale(s.TimestampUtc, interval, DateTime.UtcNow),
+                        };
+                    })
+                    .ToArray(),
                 kubernetes = k8s is not null,
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
