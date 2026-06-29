@@ -1,6 +1,6 @@
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
-import { ensure, el, btn, activate } from './helpers.js';
+import { ensure, el, btn, activate, slug } from './helpers.js';
 import { state } from './state.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { testMqtt, testPdu, testEmonCms, rediscoverHa, clearHa } from './actions.js';
@@ -230,7 +230,10 @@ export function build() {
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
 
-  if (first) first.click();
+  // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
+  const wanted = decodeURIComponent((location.hash || '').slice(1));
+  const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(a.textContent) === wanted) : null;
+  (target || first)?.click();
 }
 
 // In the Gui section, grey out the auth fields that don't apply to the selected AuthType.

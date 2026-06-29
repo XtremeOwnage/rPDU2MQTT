@@ -38,10 +38,19 @@ function svgEl(tag        , attrs      )      {
 
 function toast(msg        , good          ) { const t      = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// A URL-friendly slug for a nav label (used to put the active tab in the address bar).
+function slug(text        )         {
+  return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function activate(link     , sec     ) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   link.classList.add('active'); sec.classList.add('active');
+  // Reflect the active tab in the URL hash so a refresh (or a shared link) reopens it. Only write when it
+  // actually changes, to avoid spurious history entries / hashchange loops (see the listener in main.ts).
+  const s = slug(link.textContent);
+  if (s && decodeURIComponent((location.hash || '').slice(1)) !== s) location.hash = s;
 }
 
 // Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
@@ -1280,7 +1289,10 @@ function build() {
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
 
-  if (first) first.click();
+  // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
+  const wanted = decodeURIComponent((location.hash || '').slice(1));
+  const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => slug(a.textContent) === wanted) : null;
+  (target || first)?.click();
 }
 
 // In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
@@ -1334,6 +1346,16 @@ async function clearHa() {
 
 // ── main.ts ─────────────────────────────────────────────────────
 // Bootstrap & shared status: load the schema + config, build the UI, and wire the global Save/Reload.
+
+// Back/forward navigation + direct hash edits: open the matching tab if it isn't already active. (Normal
+// tab clicks already set the hash via activate(), so by the time this fires the tab is active -> no-op,
+// which also avoids re-loading a tab's data on every click.)
+window.addEventListener('hashchange', () => {
+  const wanted = decodeURIComponent((location.hash || '').slice(1));
+  if (!wanted) return;
+  const link = ([...document.querySelectorAll('nav a')]         ).find(a => slug(a.textContent) === wanted);
+  if (link && !link.classList.contains('active')) link.click();
+});
 
 async function load() {
   state.schema = (await api('/api/schema')).body;

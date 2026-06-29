@@ -32,10 +32,19 @@ export function svgEl(tag: string, attrs?: any): any {
 
 export function toast(msg: string, good?: boolean) { const t: any = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// A URL-friendly slug for a nav label (used to put the active tab in the address bar).
+export function slug(text: string): string {
+  return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 export function activate(link: any, sec: any) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   link.classList.add('active'); sec.classList.add('active');
+  // Reflect the active tab in the URL hash so a refresh (or a shared link) reopens it. Only write when it
+  // actually changes, to avoid spurious history entries / hashchange loops (see the listener in main.ts).
+  const s = slug(link.textContent);
+  if (s && decodeURIComponent((location.hash || '').slice(1)) !== s) location.hash = s;
 }
 
 // Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
