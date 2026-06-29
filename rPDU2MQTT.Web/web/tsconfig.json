@@ -1,0 +1,17 @@
+{
+  // Editor / optional CI type-checking for the GUI source. The build itself doesn't run tsc — it strips
+  // types with Node's built-in (no npm) — so this is for IDEs and an optional `tsc --noEmit` gate.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": false,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"]
+}

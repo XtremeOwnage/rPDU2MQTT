@@ -6,6 +6,9 @@ WORKDIR /app
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
+# The GUI assets are built from TypeScript by an MSBuild target using only the `node` binary (no npm).
+# Bring Node in from the official image; if it's ever unavailable the build falls back to the committed bundle.
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 WORKDIR /src
 COPY ["rPDU2MQTT/rPDU2MQTT.csproj", "rPDU2MQTT/"]
 COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
