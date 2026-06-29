@@ -1,26 +1,73 @@
-const api = (p, opt) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
-let schema = [], data = {};
+// ── state.ts ────────────────────────────────────────────────────
+// Shared, mutable app state: the config schema and the editable config document, both set on load().
+// (Authored as ES modules; the build bundles them into one shared scope, as the GUI has always run.)
+const state                               = { schema: [], data: {} };
 
-function ensure(obj, key, fallback) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
+// ── helpers.ts ──────────────────────────────────────────────────
+// Generic, dependency-free helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
+// zoom helper, and the multi-PDU instance selector.
+
+const api = (p        , opt      ) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+
+function ensure(obj     , key        , fallback     ) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
 
 // --- DOM helpers ---------------------------------------------------------------------------------
 // Create an element with optional props and children, to cut createElement/append boilerplate.
-function el(tag, props, ...children) {
-  const e = document.createElement(tag);
+function el(tag        , props      , ...children       )      {
+  const e      = document.createElement(tag);
   if (props) for (const [k, v] of Object.entries(props)) {
     if (k === 'class') e.className = v;
     else if (k === 'style') Object.assign(e.style, v);
     else if (k === 'text') e.textContent = v;
-    else if (k in e) e[k] = v; else e.setAttribute(k, v);
+    else if (k in e) e[k] = v; else e.setAttribute(k, v       );
   }
   for (const c of children) if (c != null) e.append(c);
   return e;
 }
 // A small ".small" button (add a class like "danger"/"primary" via cls).
-function btn(label, cls) { return el('button', { class: 'small' + (cls ? ' ' + cls : ''), text: label }); }
+function btn(label        , cls         )      { return el('button', { class: 'small' + (cls ? ' ' + cls : ''), text: label }); }
+
+function formatNum(v     ) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
+
+// SVG element helper (separate namespace from el()).
+function svgEl(tag        , attrs      )      {
+  const e      = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v       );
+  return e;
+}
+
+function toast(msg        , good          ) { const t      = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+
+function activate(link     , sec     ) {
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  link.classList.add('active'); sec.classList.add('active');
+}
+
+// Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
+// we scale by setting its width/height and keep the point under the cursor fixed. Returns a detach fn.
+function attachZoom(scroll     , svg     , baseW        , baseH        ) {
+  let z = 1; const min = 0.25, max = 6;
+  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
+  apply();
+  const onWheel = (e     ) => {
+    e.preventDefault();
+    const r = scroll.getBoundingClientRect();
+    const cx = scroll.scrollLeft + (e.clientX - r.left), cy = scroll.scrollTop + (e.clientY - r.top);
+    const prev = z;
+    z = Math.min(max, Math.max(min, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+    if (z === prev) return;
+    apply();
+    const k = z / prev;
+    scroll.scrollLeft = cx * k - (e.clientX - r.left);
+    scroll.scrollTop = cy * k - (e.clientY - r.top);
+  };
+  scroll.addEventListener('wheel', onWheel, { passive: false });
+  return () => scroll.removeEventListener('wheel', onWheel);
+}
 
 // --- Multi-PDU: per-tab instance selector ---
-let _instancesCache = null;
+let _instancesCache      = null;
 async function getInstances() {
   if (_instancesCache) return _instancesCache;
   const r = await api('/api/instances');
@@ -30,10 +77,10 @@ async function getInstances() {
 // A per-tab PDU instance picker. Returns { wrap, get } — append `wrap` to a toolbar; `get()` is the
 // selected instance id. Stays hidden when only one instance is configured (single-PDU UX unchanged);
 // then get() === '' so the backend falls back to the primary. `onChange` fires when the user switches.
-function instanceSelector(onChange) {
-  const sel = el('select');
+function instanceSelector(onChange                       ) {
+  const sel      = el('select');
   const wrap = el('label', { class: 'ld-inst', style: { display: 'none' } }, 'Instance ', sel);
-  getInstances().then(list => {
+  getInstances().then((list       ) => {
     if (list.length <= 1) return;
     list.forEach(i => sel.appendChild(el('option', { value: i.id, text: i.id + (i.primary ? ' (primary)' : '') })));
     sel.value = (list.find(i => i.primary) || list[0]).id;
@@ -43,255 +90,183 @@ function instanceSelector(onChange) {
   return { wrap, get: () => sel.value || '' };
 }
 // Append `?instance=<id>` to a path when an instance is selected (empty -> primary, omit the param).
-function withInstance(path, instSel) {
+function withInstance(path        , instSel     ) {
   const v = instSel.get();
   return v ? path + (path.includes('?') ? '&' : '?') + 'instance=' + encodeURIComponent(v) : path;
 }
 
-// === Config form (schema-driven rendering) ===
-function scalarInput(node, obj) {
-  let el;
-  if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
-    el.onchange = () => obj[node.key] = el.checked;
-  } else if (node.type === 'enum') {
-    el = document.createElement('select');
-    (node.enumValues || []).forEach(v => { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); });
-    if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value;
-  } else if (node.type === 'int' || node.type === 'double') {
-    el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
-    if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
-    if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
-  } else {
-    el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
-    if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
-  }
-  return el;
+// ── overrides.ts ────────────────────────────────────────────────
+// Overrides editor (driven by live PDU data) + the config export/prune helpers.
+
+function ovGet(path          ) { let o = state.data.Overrides; for (const p of path) { if (o == null) return undefined; o = o[p]; } return o; }
+function ovSet(path          , val     ) {
+  let o = state.data.Overrides = state.data.Overrides || {};
+  for (let i = 0; i < path.length - 1; i++) { if (o[path[i]] == null) o[path[i]] = {}; o = o[path[i]]; }
+  const last = path[path.length - 1];
+  if (val === undefined || val === null || val === '') delete o[last]; else o[last] = val;
 }
 
-// Render an object's child properties into `container`: scalar fields flow into a multi-column grid
-// (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
-// and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
-function renderObjectBody(properties, target, container) {
-  const isComplex = c => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
-  const scalars = (properties || []).filter(c => !isComplex(c));
-  const complex = (properties || []).filter(isComplex);
-  if (scalars.length) {
-    const grid = document.createElement('div'); grid.className = 'grid';
-    scalars.forEach(child => renderNode(child, target, grid));
-    container.appendChild(grid);
-  }
-  complex.forEach(child => renderNode(child, target, container));
+function ovText(label        , path          , placeholder         ) {
+  const f = document.createElement('label'); f.className = 'ov-field';
+  const s = document.createElement('span'); s.textContent = label; f.appendChild(s);
+  const inp = document.createElement('input'); inp.type = 'text';
+  const v = ovGet(path); if (v != null) inp.value = v;
+  if (placeholder) inp.placeholder = placeholder;
+  inp.onchange = () => ovSet(path, inp.value.trim());
+  f.appendChild(inp); return f;
 }
-
-// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-function renderNode(node, obj, container) {
-  if (node.type === 'object') {
-    const target = ensure(obj, node.key, {});
-    const fs = document.createElement('fieldset');
-    const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
-    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs);
-    container.appendChild(fs);
-  } else if (node.type === 'dictionary') {
-    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
-  } else if (node.type === 'list') {
-    container.appendChild(renderList(node, ensure(obj, node.key, [])));
-  } else {
-    const f = document.createElement('div'); f.className = 'field';
-    const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
-    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
-    const input = scalarInput(node, obj);
-    f.appendChild(input);
-    if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
-    container.appendChild(f);
-  }
+function ovEnabled(path          ) {
+  const f = document.createElement('label'); f.className = 'ov-field ov-check';
+  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = ovGet(path) !== false;
+  // Checked == default (true) -> drop the key; unchecked -> persist Enabled:false.
+  inp.onchange = () => ovSet(path, inp.checked ? undefined : false);
+  const s = document.createElement('span'); s.textContent = 'Enabled';
+  f.appendChild(inp); f.appendChild(s); return f;
 }
-
-// Click-to-insert / draggable chips for a templated field's available {variables}.
-function templateVarChips(vars, input, obj, node) {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
-  const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
-  wrap.appendChild(label);
-  vars.forEach(v => {
-    const token = '{' + v + '}';
-    const chip = document.createElement('span'); chip.textContent = token; chip.draggable = true;
-    chip.style.cssText = 'cursor:grab;user-select:none;font:12px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;';
-    chip.title = 'Click to insert at the cursor, or drag into the field';
-    chip.onclick = () => {
-      const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
-      input.value = input.value.slice(0, s) + token + input.value.slice(e);
-      const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
-      obj[node.key] = input.value === '' ? null : input.value;
-    };
-    // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
-    chip.ondragstart = (ev) => ev.dataTransfer.setData('text/plain', token);
-    wrap.appendChild(chip);
-  });
+// ph: { name, id } placeholders showing the current (default) values.
+// makeModel: also render Manufacturer/Model overrides (devices/outlets/groups, not measurements).
+function overrideFields(objPath          , ph     , makeModel          ) {
+  ph = ph || {};
+  const wrap = document.createElement('div'); wrap.className = 'ov-fields';
+  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
+  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
+  if (makeModel) {
+    // Keep Make + Model together on one line.
+    const pair = document.createElement('div'); pair.className = 'ov-pair';
+    pair.appendChild(ovText('Make (manufacturer)', [...objPath, 'Make'], 'e.g. Dell'));
+    pair.appendChild(ovText('Model', [...objPath, 'Model'], 'e.g. PowerEdge R730xd'));
+    wrap.appendChild(pair);
+  }
+  wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
+  if (makeModel) {
+    const note = document.createElement('div'); note.className = 'ov-note';
+    note.textContent = 'Make/Model: leave blank to use the PDU’s value (or the Remap Model/Manufacturer result, if those toggles are enabled).';
+    wrap.appendChild(note);
+  }
   return wrap;
 }
+// A muted line of "label value" context bits; empty values are skipped.
+function ovContext(parts       ) {
+  const span = document.createElement('span'); span.className = 'ov-sub';
+  span.textContent = parts.filter(p => p[1]).map(p => (p[0] ? p[0] + ' ' : '') + p[1]).join('   ·   ');
+  return span;
+}
+function overrideCard(title        , contextParts       , objPath          , ph     , makeModel          ) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
+  if (contextParts && contextParts.some(p => p[1])) head.appendChild(ovContext(contextParts));
+  card.appendChild(head);
+  card.appendChild(overrideFields(objPath, ph, makeModel));
+  return card;
+}
+function groupHeader(title        , sub               ) {
+  const w = document.createElement('div'); w.className = 'ov-group';
+  const h = document.createElement('h3'); h.textContent = title; w.appendChild(h);
+  if (sub) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = sub; w.appendChild(d); }
+  return w;
+}
+function outletRow(deviceKey        , o     ) {
+  const row = document.createElement('div'); row.className = 'ov-outlet';
+  const lab = document.createElement('div'); lab.className = 'ov-outlet-label';
+  const strong = document.createElement('strong'); strong.textContent = 'Outlet ' + o.index; lab.appendChild(strong);
+  const friendly = o.label || o.name;
+  if (friendly) { const s = document.createElement('span'); s.textContent = ' — ' + friendly; lab.appendChild(s); }
+  row.appendChild(lab);
+  if (o.name || o.displayName) row.appendChild(ovContext([['PDU name:', o.name], ['discovered as:', o.displayName]]));
+  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }, true));
+  return row;
+}
+function deviceCard(dev     ) {
+  const card = document.createElement('div'); card.className = 'ov-card';
+  const head = document.createElement('div'); head.className = 'ov-head';
+  const friendly = dev.label || dev.name || dev.key;
+  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + friendly; head.appendChild(t);
+  head.appendChild(ovContext([['key', dev.key], ['PDU name:', dev.name], ['discovered as:', dev.displayName]]));
+  card.appendChild(head);
+  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }, true));
 
-// Render the value of a dictionary/list element (valueSchema has no key of its own).
-function renderValue(valueSchema, holder, keyName, container) {
-  const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
-  if (node.type === 'object') {
-    const target = ensure(holder, keyName, {});
-    // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
-    renderObjectBody(node.properties, target, container);
-  } else {
-    renderNode(node, holder, container);
+  // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
+  const live = dev.outlets || [];
+  const ovOutlets = ovGet(['Devices', dev.key, 'Outlets']) || {};
+  const merged = [...live];
+  Object.keys(ovOutlets).forEach(idx => { if (!live.some((o     ) => String(o.index) === String(idx))) merged.push({ index: Number(idx), displayName: '(not currently discovered)' }); });
+  if (merged.length) {
+    const ol = document.createElement('div'); ol.className = 'ov-outlets';
+    merged.sort((a     , b     ) => a.index - b.index).forEach((o     ) => ol.appendChild(outletRow(dev.key, o)));
+    card.appendChild(ol);
+  }
+  return card;
+}
+
+async function renderOverrides(container     ) {
+  container.dataset.loaded = '1';
+  container.innerHTML = '<div class="desc">Loading live PDU data…</div>';
+  const r = await api('/api/live');
+  ensure(state.data, 'Overrides', {}); ensure(state.data.Overrides, 'Devices', {}); ensure(state.data.Overrides, 'Measurements', {});
+  container.innerHTML = '';
+  if (!r.body.ok) {
+    const w = document.createElement('div'); w.className = 'desc'; w.style.color = 'var(--bad)';
+    w.textContent = (r.body.message || 'Could not load live data.') + ' Showing existing overrides only.';
+    container.appendChild(w);
+  }
+  const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
+  const ov = state.data.Overrides;
+
+  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['PDU'], {}, true));
+
+  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
+  const liveKeys = new Set();
+  lv.devices.forEach((d     ) => { liveKeys.add(d.key); container.appendChild(deviceCard(d)); });
+  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, displayName: '(not currently discovered)', outlets: [] })));
+
+  container.appendChild(groupHeader('Measurements', 'Applied to every measurement of this type, across all outlets.'));
+  const units      = {}; (lv.measurements || []).forEach((m     ) => { units[m.type] = m.units; });
+  const types = [...new Set([...(lv.measurements || []).map((m     ) => m.type), ...Object.keys(ov.Measurements || {})])];
+  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, [['units:', units[tp]]], ['Measurements', tp], {})));
+
+  if (lv.groups && lv.groups.length) {
+    container.appendChild(groupHeader('OneView Groups', null));
+    lv.groups.forEach((g     ) => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName }, true)));
   }
 }
 
-function renderMap(node, mapObj) {
-  const fs = document.createElement('fieldset');
-  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
-  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-  const entries = document.createElement('div'); fs.appendChild(entries);
-
-  const drawEntry = (key) => {
-    const wrap = document.createElement('div'); wrap.className = 'map-entry';
-    const head = document.createElement('div'); head.className = 'head';
-    const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
-    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
-    const del = btn('Remove', 'danger');
-    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
-    head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
-    if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
-    renderValue(node.valueSchema, mapObj, key, wrap);
-    entries.appendChild(wrap);
-  };
-
-  Object.keys(mapObj).forEach(drawEntry);
-  const add = btn('+ Add');
-  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
-  fs.appendChild(add);
-  return fs;
+// Show the generated paths produced by the current (unsaved) overrides, computed server-side
+// against the real processing pipeline so it matches what would actually be published.
+async function previewOverridePaths(box     ) {
+  box.innerHTML = '<div class="desc">Computing paths with your unsaved edits…</div>';
+  const r = await fetch('/api/paths/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) })
+    .then(async res => ({ ok: res.ok, body: await res.json().catch(() => ({}       )) }));
+  box.innerHTML = '';
+  if (!r.body.ok) { box.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not compute paths.') + '</div>'; return; }
+  const note = document.createElement('div'); note.className = 'desc';
+  note.innerHTML = 'Paths with unsaved overrides applied. Note: overrides change the <b>HA name/object_id</b> and <b>Prometheus device/source labels</b>; the <b>MQTT topic</b> and <b>EmonCMS key</b> derive from the PDU’s raw keys and are not affected.';
+  box.appendChild(note);
+  box.appendChild(pathsTable(r.body.rows || [], !!r.body.prometheusEnabled, !!r.body.emonEnabled));
 }
 
-function renderList(node, arr) {
-  const fs = document.createElement('fieldset');
-  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
-  const entries = document.createElement('div'); fs.appendChild(entries);
-  const draw = (idx) => {
-    const wrap = document.createElement('div'); wrap.className = 'list-entry';
-    const del = btn('Remove', 'danger');
-    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
-    wrap.appendChild(del);
-    renderValue(node.valueSchema, arr, idx, wrap);
-    entries.appendChild(wrap);
-  };
-  const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
-  rebuild();
-  const add = btn('+ Add');
-  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
-  fs.appendChild(add);
-  return fs;
+// Strip empty override objects so untouched entries don't pollute the saved config.
+function exportData() {
+  const clone = JSON.parse(JSON.stringify(state.data));
+  if (clone.Overrides) pruneEmpty(clone.Overrides);
+  return clone;
 }
-
-// Config sections grouped by role (mirrors the v2 producer/consumer model): data sources are Inputs,
-// data sinks are Outputs, shared transport/UI settings are General. Unlisted sections fall into General.
-const NAV_GROUPS = [
-  { title: 'Inputs', keys: ['Pdus'] },
-  { title: 'Outputs', keys: ['HomeAssistant', 'Prometheus', 'EmonCMS'] },
-  { title: 'General', keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
-];
-
-function navHeader(nav, title) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
-
-// Render one schema-driven config section (nav link + panel); returns the nav link.
-function renderConfigSection(node, nav, sections) {
-  const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
-  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
-  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
-  // Section-specific actions belong with the section they act on, not on every page.
-  const acts = sectionActions(node);
-  if (acts) sec.appendChild(acts);
-  if (node.key === 'Overrides') {
-    // Bespoke, live-data-driven editor instead of the blind dictionary form.
-    const tools = document.createElement('div'); tools.className = 'sec-actions';
-    const refresh = btn('Refresh live data');
-    const preview = btn('Preview generated paths (with unsaved edits)');
-    tools.appendChild(refresh); tools.appendChild(preview);
-    const pathsBox = document.createElement('div');
-    const container = document.createElement('div');
-    refresh.onclick = () => renderOverrides(container);
-    preview.onclick = () => previewOverridePaths(pathsBox);
-    sec.appendChild(tools); sec.appendChild(pathsBox); sec.appendChild(container);
-    link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
-  } else {
-    if (node.type === 'object') {
-      ensure(data, node.key, {});
-      renderObjectBody(node.properties, data[node.key], sec);
+function pruneEmpty(o     )      {
+  if (o && typeof o === 'object' && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      const v = pruneEmpty(o[k]);
+      if (v === undefined) delete o[k];
     }
-    else renderNode(node, data, sec);
-    if (node.key === 'Gui') wireGuiAuth(sec);
-    link.onclick = () => activate(link, sec);
+    if (Object.keys(o).length === 0) return undefined;
   }
-  return link;
+  return o;
 }
 
-function build() {
-  const nav = document.getElementById('nav'); const sections = document.getElementById('sections');
-  nav.innerHTML = ''; sections.innerHTML = '';
-
-  const byKey = new Map(schema.map(n => [n.key, n]));
-  // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
-  const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in General, so a new config section is never lost.
-  const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
-  const general = NAV_GROUPS.find(g => g.title === 'General');
-  schema.forEach(n => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
-
-  let first = null;
-  for (const g of NAV_GROUPS) {
-    const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
-    if (!nodes.length) continue;
-    navHeader(nav, g.title);
-    for (const node of nodes) {
-      const link = renderConfigSection(node, nav, sections);
-      if (!first) first = link;
-    }
-  }
-
-  // Tools: the functional (non-config) tabs.
-  navHeader(nav, 'Tools');
-  addControlSection(nav, sections);
-  addLiveDataSection(nav, sections);
-  addFlowSection(nav, sections);
-  addPathsSection(nav, sections);
-  addExportSection(nav, sections);
-  addDiagnosticsSection(nav, sections);
-
-  if (first) first.click();
-}
-
-// In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
-function wireGuiAuth(sec) {
-  const oidcFs = [...sec.querySelectorAll('fieldset')].find(fs => fs.querySelector('legend')?.textContent === 'Oidc');
-  // The AuthType dropdown is the only select in the Gui section (outside the Oidc fieldset).
-  const authSelect = [...sec.querySelectorAll('.field select')].find(s => !oidcFs || !oidcFs.contains(s));
-  if (!authSelect) return;
-  // Basic-auth fields = text/password inputs of the Gui section, outside the Oidc fieldset.
-  const basicInputs = [...sec.querySelectorAll('.field input')].filter(i => (!oidcFs || !oidcFs.contains(i)) && (i.type === 'text' || i.type === 'password'));
-  const oidcInputs = oidcFs ? [...oidcFs.querySelectorAll('input, select, textarea')] : [];
-  const setOff = (els, off) => els.forEach(e => { e.disabled = off; e.style.opacity = off ? '0.5' : '1'; });
-  const apply = () => {
-    const t = authSelect.value;
-    setOff(basicInputs, t !== 'Basic');
-    setOff(oidcInputs, t !== 'Oidc');
-  };
-  authSelect.addEventListener('change', apply);
-  apply();
-}
+// ── sections/paths.ts ───────────────────────────────────────────
+// Integration Paths section + the shared paths-table builders (also used by the overrides preview).
 
 // A click-to-copy monospace table cell (used by the path tables).
-function pathCopyCell(text) {
+function pathCopyCell(text        ) {
   const td = document.createElement('td');
   if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
   const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
@@ -301,7 +276,7 @@ function pathCopyCell(text) {
 }
 
 // Build a paths table (Device / Outlet / Measurement / MQTT [/ Prometheus] [/ EmonCMS]).
-function pathsTable(rows, promOn, emonOn) {
+function pathsTable(rows       , promOn         , emonOn         ) {
   const t = document.createElement('table'); t.className = 'ld';
   const cols = ['Device', 'Outlet / entity', 'Measurement', 'MQTT topic'];
   if (promOn) cols.push('Prometheus'); if (emonOn) cols.push('EmonCMS');
@@ -320,8 +295,7 @@ function pathsTable(rows, promOn, emonOn) {
 }
 
 // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key).
-// === GUI sections (Paths, Diagnostics, Control, Live Data) ===
-function addPathsSection(nav, sections) {
+function addPathsSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Paths'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
@@ -336,7 +310,7 @@ function addPathsSection(nav, sections) {
   bar.appendChild(refresh); bar.appendChild(filter); bar.appendChild(count); sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
-  let rows = [], promOn = false, emonOn = false;
+  let rows        = [], promOn = false, emonOn = false;
   const draw = () => {
     const f = filter.value.trim().toLowerCase();
     const shown = f ? rows.filter(r => (r.device + ' ' + r.source + ' ' + r.type + ' ' + r.mqtt + ' ' + (r.prometheus || '') + ' ' + (r.emoncms || '')).toLowerCase().includes(f)) : rows;
@@ -353,8 +327,10 @@ function addPathsSection(nav, sections) {
   link.onclick = () => { activate(link, sec); load(); };
 }
 
-// Status / diagnostics: versions, uptime, restart, and (in Kubernetes) logs + events.
-function addDiagnosticsSection(nav, sections) {
+// ── sections/diagnostics.ts ─────────────────────────────────────
+// Status / diagnostics: component health, versions, uptime, restart, and (in Kubernetes) logs + events.
+
+function addDiagnosticsSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Diagnostics'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Diagnostics'; sec.appendChild(h);
@@ -370,13 +346,13 @@ function addDiagnosticsSection(nav, sections) {
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
 
   // A "Components" panel: which roles this node runs, MQTT transport, and whether PDU data is flowing.
-  const compLine = (dotClass, label) => {
+  const compLine = (dotClass        , label        ) => {
     const ln = document.createElement('div'); ln.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;font-size:13px;';
     const dot = document.createElement('span'); dot.className = 'dot' + (dotClass ? ' ' + dotClass : '');
     const t = document.createElement('span'); t.textContent = label;
     ln.appendChild(dot); ln.appendChild(t); return ln;
   };
-  const renderComponents = (b) => {
+  const renderComponents = (b     ) => {
     comp.innerHTML = '';
     const head = document.createElement('div'); head.textContent = 'Components'; head.style.cssText = 'font-weight:600;color:var(--accent);margin-bottom:6px;'; comp.appendChild(head);
     const roles = b.roles || [];
@@ -384,13 +360,13 @@ function addDiagnosticsSection(nav, sections) {
     comp.appendChild(compLine(b.mqttConnected ? 'good' : 'bad', 'MQTT — ' + (b.mqttConnected ? 'connected' : 'disconnected') + ' (' + (b.mqttHost || '?') + ')'));
     const ds = b.dataSources || [];
     if (!ds.length) comp.appendChild(compLine('', 'PDU data — none yet' + (roles.length && !roles.includes('worker') ? ' (waiting on a worker)' : '')));
-    else ds.forEach(s => comp.appendChild(compLine(s.stale ? 'bad' : 'good', 'PDU data · ' + s.instance + ' — ' + (s.stale ? 'stale, ' : '') + 'updated ' + s.ageSeconds + 's ago')));
+    else ds.forEach((s     ) => comp.appendChild(compLine(s.stale ? 'bad' : 'good', 'PDU data · ' + s.instance + ' — ' + (s.stale ? 'stale, ' : '') + 'updated ' + s.ageSeconds + 's ago')));
     // Other role processes seen on the bus (split deployments only).
-    (b.processes || []).forEach(p => comp.appendChild(compLine(p.stale ? 'bad' : 'good', 'Process · ' + ((p.roles || []).join('+') || '?') + ' @ ' + (p.host || '?') + ' — ' + (p.stale ? 'last seen ' : 'alive, ') + p.ageSeconds + 's ago')));
+    (b.processes || []).forEach((p     ) => comp.appendChild(compLine(p.stale ? 'bad' : 'good', 'Process · ' + ((p.roles || []).join('+') || '?') + ' @ ' + (p.host || '?') + ' — ' + (p.stale ? 'last seen ' : 'alive, ') + p.ageSeconds + 's ago')));
   };
 
-  const fmtUptime = s => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
-  const row = (k, v) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
+  const fmtUptime = (s        ) => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  const row = (k        , v     ) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
 
   const load = async () => {
     const r = await api('/api/diagnostics'); const b = r.body;
@@ -427,7 +403,7 @@ function addDiagnosticsSection(nav, sections) {
 }
 
 // Kubernetes-only: on-demand pod logs + recent events.
-function buildK8sTools(container) {
+function buildK8sTools(container     ) {
   const tools = document.createElement('div'); tools.className = 'sec-actions';
   const logsBtn = btn('Load logs');
   const evBtn = btn('Load events');
@@ -449,14 +425,16 @@ function buildK8sTools(container) {
     const head = document.createElement('tr'); ['Time', 'Type', 'Reason', 'Message', 'Count'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    (r.body.events || []).forEach(e => { const tr = document.createElement('tr'); [e.time, e.type, e.reason, e.message, e.count].forEach(c => { const td = document.createElement('td'); td.textContent = c == null ? '' : c; tr.appendChild(td); }); tb.appendChild(tr); });
+    (r.body.events || []).forEach((e     ) => { const tr = document.createElement('tr'); [e.time, e.type, e.reason, e.message, e.count].forEach(c => { const td = document.createElement('td'); td.textContent = c == null ? '' : c; tr.appendChild(td); }); tb.appendChild(tr); });
     t.appendChild(tb); out.innerHTML = ''; out.appendChild(t);
     if (!(r.body.events || []).length) out.innerHTML = '<div class="desc">No recent events.</div>';
   };
 }
 
-// Direct outlet control (on/off/reboot). A convenient place to exercise write actions.
-function addControlSection(nav, sections) {
+// ── sections/control.ts ─────────────────────────────────────────
+// Direct outlet control (on/off/reboot) + group actions + label editing.
+
+function addControlSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'PDU Control'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
@@ -476,8 +454,8 @@ function addControlSection(nav, sections) {
   const devicesWrap = document.createElement('div'); sec.appendChild(devicesWrap);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
 
-  let rows = [], groups = [], devices = [], enabled = false;
-  const actGroup = async (g, action) => {
+  let rows        = [], groups        = [], devices        = [], enabled = false;
+  const actGroup = async (g     , action        ) => {
     const verb = action === 'on' ? 'turn ON' : action === 'off' ? 'turn OFF' : 'reboot';
     if (!confirm('Group "' + (g.name || g.key) + '": ' + verb + ' ALL member outlets?')) return;
     toast('Group ' + (g.name || g.key) + ': ' + action + '…', true);
@@ -485,7 +463,7 @@ function addControlSection(nav, sections) {
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 1000);
   };
-  const setGroupLabel = (g, value) => postLabel({ target: 'group', groupKey: g.key, label: (value || '').trim() }, 'Group ' + (g.name || g.key));
+  const setGroupLabel = (g     , value        ) => postLabel({ target: 'group', groupKey: g.key, label: (value || '').trim() }, 'Group ' + (g.name || g.key));
   const drawGroups = () => {
     groupsWrap.innerHTML = '';
     if (!groups.length) return;
@@ -507,8 +485,8 @@ function addControlSection(nav, sections) {
       // Aggregate member state: a dot per member outlet + an "n/m on" summary.
       const memTd = document.createElement('td');
       const members = g.members || [];
-      const onCount = members.filter(m => m.state === 'on').length;
-      members.forEach(m => {
+      const onCount = members.filter((m     ) => m.state === 'on').length;
+      members.forEach((m     ) => {
         const dot = document.createElement('span');
         dot.className = 'dot ' + (m.state === 'on' ? 'good' : m.state === 'off' ? 'bad' : 'muted');
         dot.style.marginRight = '3px'; dot.title = (m.name || ('#' + m.number)) + ': ' + (m.state || '?');
@@ -525,7 +503,7 @@ function addControlSection(nav, sections) {
     });
     t.appendChild(tb); groupsWrap.appendChild(t);
   };
-  const act = async (o, action) => {
+  const act = async (o     , action        ) => {
     if (action === 'off' && !confirm('Turn OFF outlet ' + o.number + ' (' + o.name + ')?')) return;
     if (action === 'reboot' && !confirm('Reboot outlet ' + o.number + ' (' + o.name + ')? Connected equipment will lose power briefly.')) return;
     if (action === 'resetstats' && !confirm('Reset statistics for outlet ' + o.number + ' (' + o.name + ')?')) return;
@@ -534,13 +512,13 @@ function addControlSection(nav, sections) {
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800); // let the PDU apply, then re-read state
   };
-  const postLabel = async (payload, desc) => {
+  const postLabel = async (payload     , desc        ) => {
     toast(desc + ': set label…', true);
     const r = await api('/api/control/label', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, instance: instSel.get() }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
     setTimeout(load, 800);
   };
-  const setLabel = (o, value) => postLabel({ deviceId: o.deviceId, target: 'outlet', index: o.index, label: (value || '').trim() }, 'Outlet ' + o.number);
+  const setLabel = (o     , value        ) => postLabel({ deviceId: o.deviceId, target: 'outlet', index: o.index, label: (value || '').trim() }, 'Outlet ' + o.number);
   const drawDevices = () => {
     devicesWrap.innerHTML = '';
     if (!devices.length) return;
@@ -551,7 +529,7 @@ function addControlSection(nav, sections) {
     ['Type', 'Name', 'Label (on PDU)'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    const labelRow = (kind, name, current, payload) => {
+    const labelRow = (kind        , name        , current        , payload     ) => {
       const tr = document.createElement('tr');
       const td0 = document.createElement('td'); td0.textContent = kind; tr.appendChild(td0);
       const td1 = document.createElement('td'); td1.textContent = name || ''; tr.appendChild(td1);
@@ -564,7 +542,7 @@ function addControlSection(nav, sections) {
     };
     devices.forEach(d => {
       labelRow('PDU', d.name, d.label, { deviceId: d.deviceId, target: 'device' });
-      (d.circuits || []).forEach(c => labelRow('Circuit', c.name, c.label, { deviceId: d.deviceId, target: 'entity', entityKey: c.key }));
+      (d.circuits || []).forEach((c     ) => labelRow('Circuit', c.name, c.label, { deviceId: d.deviceId, target: 'entity', entityKey: c.key }));
     });
     t.appendChild(tb); devicesWrap.appendChild(t);
   };
@@ -619,8 +597,10 @@ function addControlSection(nav, sections) {
   link.onclick = () => { activate(link, sec); load(); };
 }
 
+// ── sections/livedata.ts ────────────────────────────────────────
 // A read-only view of the current readings being pulled from the PDU(s).
-function addLiveDataSection(nav, sections) {
+
+function addLiveDataSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Live Data'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
@@ -640,21 +620,21 @@ function addLiveDataSection(nav, sections) {
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
   const groupsWrap = document.createElement('div'); sec.appendChild(groupsWrap);
 
-  let body = { entities: [], types: [], units: {}, readings: [], groups: [] }, timer = null;
+  let body      = { entities: [], types: [], units: {}, readings: [], groups: [] }, timer      = null;
 
   // Pivoted: one row per outlet/entity, a column per measurement type, grouped by device.
   const drawGrouped = () => {
     const f = filter.value.trim().toLowerCase();
     const types = body.types || [];
-    const ents = (body.entities || []).filter(e => !f || (e.device + ' ' + e.source + ' ' + types.join(' ')).toLowerCase().includes(f));
+    const ents = (body.entities || []).filter((e     ) => !f || (e.device + ' ' + e.source + ' ' + types.join(' ')).toLowerCase().includes(f));
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
-    const cols = ['Outlet / entity', 'State', ...types.map(ty => ty + (body.units[ty] ? ' (' + body.units[ty] + ')' : ''))];
-    cols.forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 2) th.className = 'num'; head.appendChild(th); });
+    const cols = ['Outlet / entity', 'State', ...types.map((ty        ) => ty + (body.units[ty] ? ' (' + body.units[ty] + ')' : ''))];
+    cols.forEach((x        , i        ) => { const th = document.createElement('th'); th.textContent = x; if (i >= 2) th.className = 'num'; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    let lastDevice = null;
-    ents.forEach(e => {
+    let lastDevice      = null;
+    ents.forEach((e     ) => {
       if (e.device !== lastDevice) {
         lastDevice = e.device;
         const dr = document.createElement('tr'); const dtd = document.createElement('td'); dtd.colSpan = cols.length;
@@ -667,7 +647,7 @@ function addLiveDataSection(nav, sections) {
       if (e.kind === 'outlet' && e.state) { const dot = document.createElement('span'); dot.className = 'dot ' + (e.state === 'on' ? 'good' : 'bad'); st.appendChild(dot); st.appendChild(document.createTextNode(e.state)); }
       else { st.textContent = '—'; st.style.color = 'var(--muted)'; }
       tr.appendChild(st);
-      types.forEach(ty => { const td = document.createElement('td'); td.className = 'num'; const v = (e.values || {})[ty]; td.textContent = (v == null) ? '' : formatNum(v); tr.appendChild(td); });
+      types.forEach((ty        ) => { const td = document.createElement('td'); td.className = 'num'; const v = (e.values || {})[ty]; td.textContent = (v == null) ? '' : formatNum(v); tr.appendChild(td); });
       tb.appendChild(tr);
     });
     t.appendChild(tb); tableWrap.innerHTML = ''; tableWrap.appendChild(t);
@@ -675,13 +655,13 @@ function addLiveDataSection(nav, sections) {
 
   const drawFlat = () => {
     const f = filter.value.trim().toLowerCase();
-    const rows = (body.readings || []).filter(r => !f || (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f));
+    const rows = (body.readings || []).filter((r     ) => !f || (r.device + ' ' + r.source + ' ' + r.type).toLowerCase().includes(f));
     const t = document.createElement('table'); t.className = 'ld';
     const head = document.createElement('tr');
     ['Device', 'Outlet / entity', 'Measurement', 'Value', 'Units'].forEach(x => { const th = document.createElement('th'); th.textContent = x; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    rows.forEach(r => {
+    rows.forEach((r     ) => {
       const tr = document.createElement('tr');
       [r.device, r.source, r.type, formatNum(r.value), r.units || ''].forEach((c, i) => { const td = document.createElement('td'); if (i === 3) td.className = 'num'; td.textContent = c; tr.appendChild(td); });
       tb.appendChild(tr);
@@ -696,19 +676,19 @@ function addLiveDataSection(nav, sections) {
     const gs = body.groups || [];
     if (!gs.length) return;
     const f = filter.value.trim().toLowerCase();
-    const shown = gs.filter(g => !f || (g.name || '').toLowerCase().includes(f));
+    const shown = gs.filter((g     ) => !f || (g.name || '').toLowerCase().includes(f));
     if (!shown.length) return;
     // Union of measurement types (+ units) across all groups, for stable columns. A type whose members
     // vary gets Min/Max columns flanking its total (e.g. Min | realPower (W) | Max).
-    const types = []; const units = {}; const spread = {};
-    gs.forEach(g => (g.measurements || []).forEach(m => {
+    const types           = []; const units      = {}; const spread      = {};
+    gs.forEach((g     ) => (g.measurements || []).forEach((m     ) => {
       if (!types.includes(m.type)) types.push(m.type);
       if (m.units && !units[m.type]) units[m.type] = m.units;
       if (m.min != null && m.max != null) spread[m.type] = true;
     }));
     types.sort();
     // Flatten types into ordered columns.
-    const cols = [];
+    const cols        = [];
     types.forEach(ty => {
       if (spread[ty]) cols.push({ ty, kind: 'min', label: 'Min' });
       cols.push({ ty, kind: 'val', label: ty + (units[ty] ? ' (' + units[ty] + ')' : '') });
@@ -719,8 +699,8 @@ function addLiveDataSection(nav, sections) {
     ['OneView group', ...cols.map(c => c.label)].forEach((x, i) => { const th = document.createElement('th'); th.textContent = x; if (i >= 1) th.className = 'num'; head.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(head); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    shown.forEach(g => {
-      const byType = {}; (g.measurements || []).forEach(m => byType[m.type] = m);
+    shown.forEach((g     ) => {
+      const byType      = {}; (g.measurements || []).forEach((m     ) => byType[m.type] = m);
       const tr = document.createElement('tr');
       const gtd = document.createElement('td'); gtd.textContent = g.name; gtd.style.fontWeight = '600'; tr.appendChild(gtd);
       cols.forEach(c => {
@@ -760,39 +740,10 @@ function addLiveDataSection(nav, sections) {
   link.onclick = () => { activate(link, sec); load(); };
 }
 
-function formatNum(v) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
+// ── sections/flow.ts ────────────────────────────────────────────
+// Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
 
-// SVG element helper (separate namespace from el()).
-function svgEl(tag, attrs) {
-  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
-  return e;
-}
-
-// Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
-// we scale by setting its width/height and keep the point under the cursor fixed. Returns a detach fn.
-function attachZoom(scroll, svg, baseW, baseH) {
-  let z = 1; const min = 0.25, max = 6;
-  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
-  apply();
-  const onWheel = e => {
-    e.preventDefault();
-    const r = scroll.getBoundingClientRect();
-    const cx = scroll.scrollLeft + (e.clientX - r.left), cy = scroll.scrollTop + (e.clientY - r.top);
-    const prev = z;
-    z = Math.min(max, Math.max(min, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-    if (z === prev) return;
-    apply();
-    const k = z / prev;
-    scroll.scrollLeft = cx * k - (e.clientX - r.left);
-    scroll.scrollTop = cy * k - (e.clientY - r.top);
-  };
-  scroll.addEventListener('wheel', onWheel, { passive: false });
-  return () => scroll.removeEventListener('wheel', onWheel);
-}
-
-// A read-only Sankey of power/energy flow (PDU -> outlets) from /api/flow.
-function addFlowSection(nav, sections) {
+function addFlowSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
@@ -806,66 +757,66 @@ function addFlowSection(nav, sections) {
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
-  const ed = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
-  let lastGraph = null;
+  const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
+  let lastGraph      = null;
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
-  const draw = (graph) => {
+  const draw = (graph     ) => {
     wrap.innerHTML = '';
     const links = (graph.links || []).slice();
     const nodes = graph.nodes || [];
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
-    const incoming = {}, outgoing = {};
-    nodes.forEach(n => { incoming[n.id] = []; outgoing[n.id] = []; });
-    links.forEach(l => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
-    const sumv = arr => (arr || []).reduce((s, l) => s + l.value, 0);
-    const nodeValue = id => Math.max(sumv(incoming[id]), sumv(outgoing[id]));
+    const incoming      = {}, outgoing      = {};
+    nodes.forEach((n     ) => { incoming[n.id] = []; outgoing[n.id] = []; });
+    links.forEach((l     ) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
+    const sumv = (arr       ) => (arr || []).reduce((s, l) => s + l.value, 0);
+    const nodeValue = (id        ) => Math.max(sumv(incoming[id]), sumv(outgoing[id]));
 
     // Column index = longest path from a root (a node with no incoming links).
-    const colMemo = {};
-    const col = (id, seen) => {
+    const colMemo      = {};
+    const col = (id        , seen              )         => {
       if (colMemo[id] != null) return colMemo[id];
       seen = seen || new Set();
       if (seen.has(id)) return 0;
       seen.add(id);
       const ins = incoming[id] || [];
-      const c = ins.length ? Math.max(...ins.map(l => col(l.source, seen) + 1)) : 0;
+      const c = ins.length ? Math.max(...ins.map((l     ) => col(l.source, seen) + 1)) : 0;
       seen.delete(id);
       return colMemo[id] = c;
     };
-    nodes.forEach(n => col(n.id));
-    const maxCol = Math.max(0, ...nodes.map(n => colMemo[n.id]));
+    nodes.forEach((n     ) => col(n.id));
+    const maxCol = Math.max(0, ...nodes.map((n     ) => colMemo[n.id]));
 
-    const cols = [];
-    nodes.forEach(n => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
+    const cols        = [];
+    nodes.forEach((n     ) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
-    const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s, n) => s + nodeValue(n.id), 0)));
+    const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s        , n     ) => s + nodeValue(n.id), 0)));
     const pxPerUnit = usableH / maxTotal;
-    const colX = c => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
+    const colX = (c        ) => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
-    const pos = {};
+    const pos      = {};
     // Barycenter: a node's preferred y is the value-weighted mean of its (already positioned) feeders.
-    const bary = id => { let w = 0, s = 0; (incoming[id] || []).forEach(l => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
+    const bary = (id        ) => { let w = 0, s = 0; (incoming[id] || []).forEach((l     ) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
     cols.forEach((cn, c) => {
       // Roots stack by size; downstream columns follow their feeder's order (groups children, avoids crossings).
-      if (c === 0) cn.sort((a, b) => nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a, b) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      if (c === 0) cn.sort((a     , b     ) => nodeValue(b.id) - nodeValue(a.id));
+      else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       let y = padTop;
-      cn.forEach(n => { const h = Math.max(2, nodeValue(n.id) * pxPerUnit); pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 }; y += h + gap; });
+      cn.forEach((n     ) => { const h = Math.max(2, nodeValue(n.id) * pxPerUnit); pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 }; y += h + gap; });
     });
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
-    const totalH = Math.ceil(Math.max(padTop + usableH, ...nodes.map(n => pos[n.id] ? pos[n.id].y + pos[n.id].h : 0))) + padTop;
+    const totalH = Math.ceil(Math.max(padTop + usableH, ...nodes.map((n     ) => pos[n.id] ? pos[n.id].y + pos[n.id].h : 0))) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
 
     // Ribbons (filled bezier bands), stacked on each node edge by target order.
-    links.sort((a, b) => pos[a.target].y - pos[b.target].y).forEach(l => {
+    links.sort((a     , b     ) => pos[a.target].y - pos[b.target].y).forEach((l     ) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
       const h = Math.max(1, l.value * pxPerUnit);
@@ -878,7 +829,7 @@ function addFlowSection(nav, sections) {
 
     // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
     // where they cross a ribbon).
-    nodes.forEach(n => {
+    nodes.forEach((n     ) => {
       const p = pos[n.id]; if (!p) return;
       svg.appendChild(svgEl('rect', { x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2, fill: colors[colMemo[n.id] % colors.length] }));
       const lab = svgEl('text', {
@@ -904,13 +855,13 @@ function addFlowSection(nav, sections) {
 
   const renderEditor = () => {
     if (ed._cleanup) ed._cleanup();
-    const flow = ensure(data, 'EnergyFlow', {});
+    const flow = ensure(state.data, 'EnergyFlow', {});
     const customNodes = ensure(flow, 'Nodes', []);
     const links = ensure(flow, 'Links', []);
     const legacy = ensure(flow, 'Parents', {});
     // One-time migration: fold any legacy single-feeder Parents (child→parent) into directed Links.
     if (Object.keys(legacy).length) {
-      Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some(l => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
+      Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l     ) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
       Object.keys(legacy).forEach(k => delete legacy[k]);
     }
     ed.innerHTML = '';
@@ -928,47 +879,47 @@ function addFlowSection(nav, sections) {
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = new Map();
-    (lastGraph?.nodes || []).forEach(n => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
-    customNodes.forEach(n => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
-    const nm = id => (cand.get(id) || {}).label || id;
-    const byLabel = (a, b) => (cand.get(a).label || a).localeCompare(cand.get(b).label || b);
+    (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+    customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
+    const nm = (id        )         => (cand.get(id) || {}).label || id;
+    const byLabel = (a        , b        ) => (cand.get(a).label || a).localeCompare(cand.get(b).label || b);
 
-    const autoParent = id => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
+    const autoParent = (id        ) => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
 
     // Edges: explicit directed Links, plus the auto PDU → outlet feed (suppressed once an outlet is
     // explicitly fed). `custom` edges are user links (deletable); auto edges are dashed and fixed.
-    const customTo = new Set(links.map(l => l.To));
-    const edges = [];
-    cand.forEach(c => { const ap = autoParent(c.id); if (ap && cand.has(ap) && !customTo.has(c.id)) edges.push({ from: ap, to: c.id, custom: false }); });
-    links.forEach(l => { if (cand.has(l.From) && cand.has(l.To)) edges.push({ from: l.From, to: l.To, custom: true, ref: l }); });
+    const customTo = new Set(links.map((l     ) => l.To));
+    const edges        = [];
+    cand.forEach((c     ) => { const ap = autoParent(c.id); if (ap && cand.has(ap) && !customTo.has(c.id)) edges.push({ from: ap, to: c.id, custom: false }); });
+    links.forEach((l     ) => { if (cand.has(l.From) && cand.has(l.To)) edges.push({ from: l.From, to: l.To, custom: true, ref: l }); });
 
     // Adjacency + column = longest path from a root (every edge therefore points strictly rightward).
-    const incoming = {}, outgoing = {};
-    cand.forEach((_, id) => { incoming[id] = []; outgoing[id] = []; });
+    const incoming      = {}, outgoing      = {};
+    cand.forEach((_     , id        ) => { incoming[id] = []; outgoing[id] = []; });
     edges.forEach(e => { outgoing[e.from].push(e); incoming[e.to].push(e); });
-    const colMemo = {};
-    const col = (id, seen) => {
+    const colMemo      = {};
+    const col = (id        , seen              )         => {
       if (colMemo[id] != null) return colMemo[id];
       seen = seen || new Set(); if (seen.has(id)) return 0; seen.add(id);
       const ins = incoming[id] || [];
-      const c = ins.length ? Math.max(...ins.map(e => col(e.from, seen) + 1)) : 0;
+      const c = ins.length ? Math.max(...ins.map((e     ) => col(e.from, seen) + 1)) : 0;
       seen.delete(id); return colMemo[id] = c;
     };
     [...cand.keys()].forEach(id => col(id));
     // Would adding from→to create a loop? (can `to` already reach `from`?)
-    const reaches = (a, b) => { const stack = [a], seen = new Set(); while (stack.length) { const x = stack.pop(); if (x === b) return true; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach(e => stack.push(e.to)); } return false; };
+    const reaches = (a        , b        ) => { const stack = [a], seen = new Set(); while (stack.length) { const x = stack.pop() ; if (x === b) return true; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach((e     ) => stack.push(e.to)); } return false; };
 
     // Layout: stack each column top-to-bottom; order downstream columns by feeder barycenter.
     const padX = 22, padY = 18, rowGap = 16, step = NW + 96;
-    const cols = [];
+    const cols        = [];
     [...cand.keys()].forEach(id => { const c = col(id); (cols[c] = cols[c] || []).push(id); });
-    const pos = {};
-    const bary = id => { const ins = incoming[id] || []; if (!ins.length) return 1e9; let s = 0, w = 0; ins.forEach(e => { const p = pos[e.from]; if (p) { s += p.y + NH / 2; w++; } }); return w ? s / w : 1e9; };
+    const pos      = {};
+    const bary = (id        ) => { const ins = incoming[id] || []; if (!ins.length) return 1e9; let s = 0, w = 0; ins.forEach((e     ) => { const p = pos[e.from]; if (p) { s += p.y + NH / 2; w++; } }); return w ? s / w : 1e9; };
     cols.forEach((ids, c) => {
-      if (c === 0) ids.sort((a, b) => (cand.get(a).kind === 'pdu' ? 0 : 1) - (cand.get(b).kind === 'pdu' ? 0 : 1) || byLabel(a, b));
-      else ids.sort((a, b) => (bary(a) - bary(b)) || byLabel(a, b));
+      if (c === 0) ids.sort((a        , b        ) => (cand.get(a).kind === 'pdu' ? 0 : 1) - (cand.get(b).kind === 'pdu' ? 0 : 1) || byLabel(a, b));
+      else ids.sort((a        , b        ) => (bary(a) - bary(b)) || byLabel(a, b));
       let y = padY;
-      ids.forEach(id => { pos[id] = { x: padX + c * step, y }; y += NH + rowGap; });
+      ids.forEach((id        ) => { pos[id] = { x: padX + c * step, y }; y += NH + rowGap; });
     });
 
     const W = Math.max(640, ...[...cand.keys()].map(id => pos[id].x + NW + padX));
@@ -985,7 +936,7 @@ function addFlowSection(nav, sections) {
     const edgeLayer = svgEl('g', {}); svg.appendChild(edgeLayer);
     const nodeLayer = svgEl('g', {}); svg.appendChild(nodeLayer);
 
-    const edgeD = (a, b) => { const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
+    const edgeD = (a     , b     ) => { const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
     edges.forEach(e => {
       const a = pos[e.from], b = pos[e.to];
       edgeLayer.appendChild(svgEl('path', { d: edgeD(a, b), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3', 'marker-end': `url(#${e.custom ? 'fh-arrow-c' : 'fh-arrow'})`, 'pointer-events': 'none' }));
@@ -999,8 +950,8 @@ function addFlowSection(nav, sections) {
       }
     });
 
-    const nodeG = {};
-    [...cand.values()].forEach(c => {
+    const nodeG      = {};
+    [...cand.values()].forEach((c     ) => {
       const p = pos[c.id], color = colors[col(c.id) % colors.length];
       const g = svgEl('g', { transform: `translate(${p.x},${p.y})`, style: 'cursor:default' }); g.dataset.id = c.id;
       g.appendChild(svgEl('rect', { width: NW, height: NH, rx: 7, fill: 'var(--panel)', stroke: color, 'stroke-width': 2 }));
@@ -1013,34 +964,34 @@ function addFlowSection(nav, sections) {
 
     // Interactions: drag a node's output port onto another node to add a directed feed. Map screen
     // coords through the SVG CTM so the drag line stays correct under zoom/scroll.
-    const toUser = (cx, cy) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
-    let linkFrom = null, tempLine = null, hovered = null;
-    const highlight = id => {
+    const toUser = (cx        , cy        ) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
+    let linkFrom      = null, tempLine      = null, hovered      = null;
+    const highlight = (id     ) => {
       if (id === hovered) return;
       if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', colors[col(hovered) % colors.length]); rc.setAttribute('stroke-width', '2'); }
       hovered = id;
       if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', '#46c46a'); rc.setAttribute('stroke-width', '3'); }
     };
-    const targetUnder = (cx, cy) => { const hit = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== linkFrom ? gn.dataset.id : null; };
-    const onDown = e => {
+    const targetUnder = (cx        , cy        ) => { const hit      = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== linkFrom ? gn.dataset.id : null; };
+    const onDown = (e     ) => {
       const portId = e.target.getAttribute && e.target.getAttribute('data-port');
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
-      if (rmId) { const i = customNodes.findIndex(n => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
+      if (rmId) { const i = customNodes.findIndex((n     ) => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
       if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); }
     };
-    const onMove = e => {
+    const onMove = (e     ) => {
       if (!linkFrom) return;
       const u = toUser(e.clientX, e.clientY), a = pos[linkFrom];
       tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${u.x},${u.y}`);
       highlight(targetUnder(e.clientX, e.clientY));
     };
-    const onUp = e => {
+    const onUp = (e     ) => {
       if (!linkFrom) return;
       const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
       if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
       if (!tgt || src === tgt) return;
       if (reaches(tgt, src)) { toast('That would create a feeder loop.', false); return; }
-      if (links.some(l => l.From === src && l.To === tgt)) { toast('That feed already exists.', false); return; }
+      if (links.some((l     ) => l.From === src && l.To === tgt)) { toast('That feed already exists.', false); return; }
       links.push({ From: src, To: tgt });
       toast(`${nm(src)} → ${nm(tgt)} added.`, true);
       renderEditor();
@@ -1053,7 +1004,7 @@ function addFlowSection(nav, sections) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (cand.has(id)) { toast('That id already exists.', false); return; }
-      const node = { Id: id, Label: (labIn.value || '').trim() || id };
+      const node      = { Id: id, Label: (labIn.value || '').trim() || id };
       if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
       customNodes.push(node); renderEditor();
     };
@@ -1075,197 +1026,10 @@ function addFlowSection(nav, sections) {
   link.onclick = () => { activate(link, sec); load(); };
 }
 
-function activate(link, sec) {
-  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  link.classList.add('active'); sec.classList.add('active');
-}
-
-// ---- Overrides editor (driven by live PDU data) ----
-// === Overrides editor ===
-function ovGet(path) { let o = data.Overrides; for (const p of path) { if (o == null) return undefined; o = o[p]; } return o; }
-function ovSet(path, val) {
-  let o = data.Overrides = data.Overrides || {};
-  for (let i = 0; i < path.length - 1; i++) { if (o[path[i]] == null) o[path[i]] = {}; o = o[path[i]]; }
-  const last = path[path.length - 1];
-  if (val === undefined || val === null || val === '') delete o[last]; else o[last] = val;
-}
-
-function ovText(label, path, placeholder) {
-  const f = document.createElement('label'); f.className = 'ov-field';
-  const s = document.createElement('span'); s.textContent = label; f.appendChild(s);
-  const inp = document.createElement('input'); inp.type = 'text';
-  const v = ovGet(path); if (v != null) inp.value = v;
-  if (placeholder) inp.placeholder = placeholder;
-  inp.onchange = () => ovSet(path, inp.value.trim());
-  f.appendChild(inp); return f;
-}
-function ovEnabled(path) {
-  const f = document.createElement('label'); f.className = 'ov-field ov-check';
-  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = ovGet(path) !== false;
-  // Checked == default (true) -> drop the key; unchecked -> persist Enabled:false.
-  inp.onchange = () => ovSet(path, inp.checked ? undefined : false);
-  const s = document.createElement('span'); s.textContent = 'Enabled';
-  f.appendChild(inp); f.appendChild(s); return f;
-}
-// ph: { name, id } placeholders showing the current (default) values.
-// makeModel: also render Manufacturer/Model overrides (devices/outlets/groups, not measurements).
-function overrideFields(objPath, ph, makeModel) {
-  ph = ph || {};
-  const wrap = document.createElement('div'); wrap.className = 'ov-fields';
-  wrap.appendChild(ovText('Name (display)', [...objPath, 'Name'], ph.name));
-  wrap.appendChild(ovText('ID (object_id)', [...objPath, 'ID'], ph.id));
-  if (makeModel) {
-    // Keep Make + Model together on one line.
-    const pair = document.createElement('div'); pair.className = 'ov-pair';
-    pair.appendChild(ovText('Make (manufacturer)', [...objPath, 'Make'], 'e.g. Dell'));
-    pair.appendChild(ovText('Model', [...objPath, 'Model'], 'e.g. PowerEdge R730xd'));
-    wrap.appendChild(pair);
-  }
-  wrap.appendChild(ovEnabled([...objPath, 'Enabled']));
-  if (makeModel) {
-    const note = document.createElement('div'); note.className = 'ov-note';
-    note.textContent = 'Make/Model: leave blank to use the PDU’s value (or the Remap Model/Manufacturer result, if those toggles are enabled).';
-    wrap.appendChild(note);
-  }
-  return wrap;
-}
-// A muted line of "label value" context bits; empty values are skipped.
-function ovContext(parts) {
-  const span = document.createElement('span'); span.className = 'ov-sub';
-  span.textContent = parts.filter(p => p[1]).map(p => (p[0] ? p[0] + ' ' : '') + p[1]).join('   ·   ');
-  return span;
-}
-function overrideCard(title, contextParts, objPath, ph, makeModel) {
-  const card = document.createElement('div'); card.className = 'ov-card';
-  const head = document.createElement('div'); head.className = 'ov-head';
-  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = title; head.appendChild(t);
-  if (contextParts && contextParts.some(p => p[1])) head.appendChild(ovContext(contextParts));
-  card.appendChild(head);
-  card.appendChild(overrideFields(objPath, ph, makeModel));
-  return card;
-}
-function groupHeader(title, sub) {
-  const w = document.createElement('div'); w.className = 'ov-group';
-  const h = document.createElement('h3'); h.textContent = title; w.appendChild(h);
-  if (sub) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = sub; w.appendChild(d); }
-  return w;
-}
-function outletRow(deviceKey, o) {
-  const row = document.createElement('div'); row.className = 'ov-outlet';
-  const lab = document.createElement('div'); lab.className = 'ov-outlet-label';
-  const strong = document.createElement('strong'); strong.textContent = 'Outlet ' + o.index; lab.appendChild(strong);
-  const friendly = o.label || o.name;
-  if (friendly) { const s = document.createElement('span'); s.textContent = ' — ' + friendly; lab.appendChild(s); }
-  row.appendChild(lab);
-  if (o.name || o.displayName) row.appendChild(ovContext([['PDU name:', o.name], ['discovered as:', o.displayName]]));
-  row.appendChild(overrideFields(['Devices', deviceKey, 'Outlets', String(o.index)], { name: o.displayName, id: o.objectId }, true));
-  return row;
-}
-function deviceCard(dev) {
-  const card = document.createElement('div'); card.className = 'ov-card';
-  const head = document.createElement('div'); head.className = 'ov-head';
-  const friendly = dev.label || dev.name || dev.key;
-  const t = document.createElement('div'); t.className = 'ov-title'; t.textContent = 'Device: ' + friendly; head.appendChild(t);
-  head.appendChild(ovContext([['key', dev.key], ['PDU name:', dev.name], ['discovered as:', dev.displayName]]));
-  card.appendChild(head);
-  card.appendChild(overrideFields(['Devices', dev.key], { name: dev.displayName, id: dev.objectId }, true));
-
-  // Merge live outlets with any override-only outlet keys (e.g. disabled ones not in live data).
-  const live = dev.outlets || [];
-  const ovOutlets = ovGet(['Devices', dev.key, 'Outlets']) || {};
-  const merged = [...live];
-  Object.keys(ovOutlets).forEach(idx => { if (!live.some(o => String(o.index) === String(idx))) merged.push({ index: Number(idx), displayName: '(not currently discovered)' }); });
-  if (merged.length) {
-    const ol = document.createElement('div'); ol.className = 'ov-outlets';
-    merged.sort((a, b) => a.index - b.index).forEach(o => ol.appendChild(outletRow(dev.key, o)));
-    card.appendChild(ol);
-  }
-  return card;
-}
-
-async function renderOverrides(container) {
-  container.dataset.loaded = '1';
-  container.innerHTML = '<div class="desc">Loading live PDU data…</div>';
-  const r = await api('/api/live');
-  ensure(data, 'Overrides', {}); ensure(data.Overrides, 'Devices', {}); ensure(data.Overrides, 'Measurements', {});
-  container.innerHTML = '';
-  if (!r.body.ok) {
-    const w = document.createElement('div'); w.className = 'desc'; w.style.color = 'var(--bad)';
-    w.textContent = (r.body.message || 'Could not load live data.') + ' Showing existing overrides only.';
-    container.appendChild(w);
-  }
-  const lv = r.body.ok ? r.body : { devices: [], measurements: [], groups: [] };
-  const ov = data.Overrides;
-
-  container.appendChild(overrideCard('Bridge (rPDU2MQTT)', [['', 'the top-level bridge device']], ['PDU'], {}, true));
-
-  container.appendChild(groupHeader('Devices', 'Each discovered device and its outlets. Leave a field blank to keep the value shown in the placeholder.'));
-  const liveKeys = new Set();
-  lv.devices.forEach(d => { liveKeys.add(d.key); container.appendChild(deviceCard(d)); });
-  Object.keys(ov.Devices || {}).filter(k => !liveKeys.has(k)).forEach(k => container.appendChild(deviceCard({ key: k, displayName: '(not currently discovered)', outlets: [] })));
-
-  container.appendChild(groupHeader('Measurements', 'Applied to every measurement of this type, across all outlets.'));
-  const units = {}; (lv.measurements || []).forEach(m => { units[m.type] = m.units; });
-  const types = [...new Set([...(lv.measurements || []).map(m => m.type), ...Object.keys(ov.Measurements || {})])];
-  types.forEach(tp => container.appendChild(overrideCard('measurement: ' + tp, [['units:', units[tp]]], ['Measurements', tp], {})));
-
-  if (lv.groups && lv.groups.length) {
-    container.appendChild(groupHeader('OneView Groups', null));
-    lv.groups.forEach(g => container.appendChild(overrideCard('Group: ' + (g.label || g.name || g.key), [['key', g.key], ['discovered as:', g.displayName]], ['OneviewGroups', 'Overrides', g.key], { name: g.displayName }, true)));
-  }
-}
-
-// Show the generated paths produced by the current (unsaved) overrides, computed server-side
-// against the real processing pipeline so it matches what would actually be published.
-async function previewOverridePaths(box) {
-  box.innerHTML = '<div class="desc">Computing paths with your unsaved edits…</div>';
-  const r = await fetch('/api/paths/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) })
-    .then(async res => ({ ok: res.ok, body: await res.json().catch(() => ({})) }));
-  box.innerHTML = '';
-  if (!r.body.ok) { box.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not compute paths.') + '</div>'; return; }
-  const note = document.createElement('div'); note.className = 'desc';
-  note.innerHTML = 'Paths with unsaved overrides applied. Note: overrides change the <b>HA name/object_id</b> and <b>Prometheus device/source labels</b>; the <b>MQTT topic</b> and <b>EmonCMS key</b> derive from the PDU’s raw keys and are not affected.';
-  box.appendChild(note);
-  box.appendChild(pathsTable(r.body.rows || [], !!r.body.prometheusEnabled, !!r.body.emonEnabled));
-}
-
-// Strip empty override objects so untouched entries don't pollute the saved config.
-function exportData() {
-  const clone = JSON.parse(JSON.stringify(data));
-  if (clone.Overrides) pruneEmpty(clone.Overrides);
-  return clone;
-}
-function pruneEmpty(o) {
-  if (o && typeof o === 'object' && !Array.isArray(o)) {
-    for (const k of Object.keys(o)) {
-      const v = pruneEmpty(o[k]);
-      if (v === undefined) delete o[k];
-    }
-    if (Object.keys(o).length === 0) return undefined;
-  }
-  return o;
-}
-
-// Section-specific action buttons (connection tests; Home Assistant discovery actions).
-function sectionActions(node) {
-  const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const add = (label, fn, cls) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
-
-  if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
-  else if (node.key === 'PDU') add('Test PDU connection', testPdu);
-  else if (node.key === 'EmonCMS') add('Test EmonCMS connection', testEmonCms);
-  else if (node.key === 'HomeAssistant') {
-    if ((data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
-    add('Republish discovery', rediscoverHa);
-    add('Clear discovery', clearHa, 'danger');
-  } else return null;
-
-  return bar;
-}
-
+// ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest.
-function addExportSection(nav, sections) {
+
+function addExportSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Export'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Export'; sec.appendChild(h);
@@ -1293,32 +1057,270 @@ function addExportSection(nav, sections) {
   link.onclick = () => { activate(link, sec); fill(); };
 }
 
-function toast(msg, good) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+// ── config-form.ts ──────────────────────────────────────────────
+// Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
+// nav, and the overall build() that wires every tab.
 
-// === Bootstrap & shared actions ===
-async function load() {
-  schema = (await api('/api/schema')).body;
-  data = (await api('/api/config')).body;
-  build();
-  refreshStatus();
+function scalarInput(node     , obj     )      {
+  let el     ;
+  if (node.type === 'bool') {
+    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
+    el.onchange = () => obj[node.key] = el.checked;
+  } else if (node.type === 'enum') {
+    el = document.createElement('select');
+    (node.enumValues || []).forEach((v        ) => { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); });
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value;
+  } else if (node.type === 'int' || node.type === 'double') {
+    el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
+    if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
+  } else {
+    el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
+    if (obj[node.key] != null) el.value = obj[node.key];
+    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
+  }
+  return el;
 }
 
-async function refreshStatus() {
-  const { body } = await api('/api/status');
-  document.getElementById('st-version').textContent = 'v' + (body.version || '?');
-  document.getElementById('st-mqtt-dot').className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
-  // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
-  const readOnly = body.configWritable === false;
-  const save = document.getElementById('btn-save');
-  save.disabled = readOnly;
-  save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
-  document.getElementById('ro-note').style.display = readOnly ? 'inline' : 'none';
-  // Show a logout link + signed-in user when OIDC is in use.
-  if (body.auth === 'oidc') {
-    document.getElementById('st-logout').style.display = 'inline';
-    if (body.user) document.getElementById('st-user').textContent = body.user;
+// Render an object's child properties into `container`: scalar fields flow into a multi-column grid
+// (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
+// and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
+function renderObjectBody(properties       , target     , container     ) {
+  const isComplex = (c     ) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
+  const scalars = (properties || []).filter(c => !isComplex(c));
+  const complex = (properties || []).filter(isComplex);
+  if (scalars.length) {
+    const grid = document.createElement('div'); grid.className = 'grid';
+    scalars.forEach(child => renderNode(child, target, grid));
+    container.appendChild(grid);
+  }
+  complex.forEach(child => renderNode(child, target, container));
+}
+
+// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+function renderNode(node     , obj     , container     ) {
+  if (node.type === 'object') {
+    const target = ensure(obj, node.key, {});
+    const fs = document.createElement('fieldset');
+    const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    renderObjectBody(node.properties, target, fs);
+    container.appendChild(fs);
+  } else if (node.type === 'dictionary') {
+    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
+  } else if (node.type === 'list') {
+    container.appendChild(renderList(node, ensure(obj, node.key, [])));
+  } else {
+    const f = document.createElement('div'); f.className = 'field';
+    const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
+    const input = scalarInput(node, obj);
+    f.appendChild(input);
+    if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
+    container.appendChild(f);
   }
 }
+
+// Click-to-insert / draggable chips for a templated field's available {variables}.
+function templateVarChips(vars          , input     , obj     , node     ) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+  const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
+  wrap.appendChild(label);
+  vars.forEach(v => {
+    const token = '{' + v + '}';
+    const chip = document.createElement('span'); chip.textContent = token; chip.draggable = true;
+    chip.style.cssText = 'cursor:grab;user-select:none;font:12px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;';
+    chip.title = 'Click to insert at the cursor, or drag into the field';
+    chip.onclick = () => {
+      const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
+      input.value = input.value.slice(0, s) + token + input.value.slice(e);
+      const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
+      obj[node.key] = input.value === '' ? null : input.value;
+    };
+    // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
+    chip.ondragstart = (ev     ) => ev.dataTransfer.setData('text/plain', token);
+    wrap.appendChild(chip);
+  });
+  return wrap;
+}
+
+// Render the value of a dictionary/list element (valueSchema has no key of its own).
+function renderValue(valueSchema     , holder     , keyName     , container     ) {
+  const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
+  if (node.type === 'object') {
+    const target = ensure(holder, keyName, {});
+    // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
+    renderObjectBody(node.properties, target, container);
+  } else {
+    renderNode(node, holder, container);
+  }
+}
+
+function renderMap(node     , mapObj     ) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+  const entries = document.createElement('div'); fs.appendChild(entries);
+
+  const drawEntry = (key        ) => {
+    const wrap = document.createElement('div'); wrap.className = 'map-entry';
+    const head = document.createElement('div'); head.className = 'head';
+    const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
+    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
+    head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
+    if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
+    renderValue(node.valueSchema, mapObj, key, wrap);
+    entries.appendChild(wrap);
+  };
+
+  Object.keys(mapObj).forEach(drawEntry);
+  const add = btn('+ Add');
+  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
+  fs.appendChild(add);
+  return fs;
+}
+
+function renderList(node     , arr       ) {
+  const fs = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+  const entries = document.createElement('div'); fs.appendChild(entries);
+  const draw = (idx        ) => {
+    const wrap = document.createElement('div'); wrap.className = 'list-entry';
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
+    wrap.appendChild(del);
+    renderValue(node.valueSchema, arr, idx, wrap);
+    entries.appendChild(wrap);
+  };
+  const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
+  rebuild();
+  const add = btn('+ Add');
+  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
+  fs.appendChild(add);
+  return fs;
+}
+
+// Config sections grouped by role (mirrors the v2 producer/consumer model): data sources are Inputs,
+// data sinks are Outputs, shared transport/UI settings are General. Unlisted sections fall into General.
+const NAV_GROUPS = [
+  { title: 'Inputs', keys: ['Pdus'] },
+  { title: 'Outputs', keys: ['HomeAssistant', 'Prometheus', 'EmonCMS'] },
+  { title: 'General', keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
+];
+
+function navHeader(nav     , title        ) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
+
+// Render one schema-driven config section (nav link + panel); returns the nav link.
+function renderConfigSection(node     , nav     , sections     ) {
+  const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
+  if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
+  // Section-specific actions belong with the section they act on, not on every page.
+  const acts = sectionActions(node);
+  if (acts) sec.appendChild(acts);
+  if (node.key === 'Overrides') {
+    // Bespoke, live-data-driven editor instead of the blind dictionary form.
+    const tools = document.createElement('div'); tools.className = 'sec-actions';
+    const refresh = btn('Refresh live data');
+    const preview = btn('Preview generated paths (with unsaved edits)');
+    tools.appendChild(refresh); tools.appendChild(preview);
+    const pathsBox = document.createElement('div');
+    const container      = document.createElement('div');
+    refresh.onclick = () => renderOverrides(container);
+    preview.onclick = () => previewOverridePaths(pathsBox);
+    sec.appendChild(tools); sec.appendChild(pathsBox); sec.appendChild(container);
+    link.onclick = () => { activate(link, sec); if (!container.dataset.loaded) renderOverrides(container); };
+  } else {
+    if (node.type === 'object') {
+      ensure(state.data, node.key, {});
+      renderObjectBody(node.properties, state.data[node.key], sec);
+    }
+    else renderNode(node, state.data, sec);
+    if (node.key === 'Gui') wireGuiAuth(sec);
+    link.onclick = () => activate(link, sec);
+  }
+  return link;
+}
+
+function build() {
+  const nav      = document.getElementById('nav'); const sections      = document.getElementById('sections');
+  nav.innerHTML = ''; sections.innerHTML = '';
+
+  const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
+  // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
+  const HIDDEN = new Set(['EnergyFlow']);
+  // Any schema section not explicitly grouped (and not hidden) lands in General, so a new config section is never lost.
+  const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
+  const general      = NAV_GROUPS.find(g => g.title === 'General');
+  state.schema.forEach((n     ) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
+
+  let first      = null;
+  for (const g of NAV_GROUPS) {
+    const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
+    if (!nodes.length) continue;
+    navHeader(nav, g.title);
+    for (const node of nodes) {
+      const link = renderConfigSection(node, nav, sections);
+      if (!first) first = link;
+    }
+  }
+
+  // Tools: the functional (non-config) tabs.
+  navHeader(nav, 'Tools');
+  addControlSection(nav, sections);
+  addLiveDataSection(nav, sections);
+  addFlowSection(nav, sections);
+  addPathsSection(nav, sections);
+  addExportSection(nav, sections);
+  addDiagnosticsSection(nav, sections);
+
+  if (first) first.click();
+}
+
+// In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
+function wireGuiAuth(sec     ) {
+  const oidcFs = [...sec.querySelectorAll('fieldset')].find((fs     ) => fs.querySelector('legend')?.textContent === 'Oidc')       ;
+  // The AuthType dropdown is the only select in the Gui section (outside the Oidc fieldset).
+  const authSelect = [...sec.querySelectorAll('.field select')].find((s     ) => !oidcFs || !oidcFs.contains(s))       ;
+  if (!authSelect) return;
+  // Basic-auth fields = text/password inputs of the Gui section, outside the Oidc fieldset.
+  const basicInputs = [...sec.querySelectorAll('.field input')].filter((i     ) => (!oidcFs || !oidcFs.contains(i)) && (i.type === 'text' || i.type === 'password'));
+  const oidcInputs = oidcFs ? [...oidcFs.querySelectorAll('input, select, textarea')] : [];
+  const setOff = (els       , off         ) => els.forEach((e     ) => { e.disabled = off; e.style.opacity = off ? '0.5' : '1'; });
+  const apply = () => {
+    const t = authSelect.value;
+    setOff(basicInputs, t !== 'Basic');
+    setOff(oidcInputs, t !== 'Oidc');
+  };
+  authSelect.addEventListener('change', apply);
+  apply();
+}
+
+// Section-specific action buttons (connection tests; Home Assistant discovery actions).
+function sectionActions(node     ) {
+  const bar = document.createElement('div'); bar.className = 'sec-actions';
+  const add = (label        , fn     , cls         ) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
+
+  if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'EmonCMS') add('Test EmonCMS connection', testEmonCms);
+  else if (node.key === 'HomeAssistant') {
+    if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
+    add('Republish discovery', rediscoverHa);
+    add('Clear discovery', clearHa, 'danger');
+  } else return null;
+
+  return bar;
+}
+
+// ── actions.ts ──────────────────────────────────────────────────
+// Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
@@ -1330,8 +1332,35 @@ async function clearHa() {
   toast(r.body.message, r.body.ok);
 }
 
-document.getElementById('btn-reload').onclick = load;
-document.getElementById('btn-save').onclick = async () => {
+// ── main.ts ─────────────────────────────────────────────────────
+// Bootstrap & shared status: load the schema + config, build the UI, and wire the global Save/Reload.
+
+async function load() {
+  state.schema = (await api('/api/schema')).body;
+  state.data = (await api('/api/config')).body;
+  build();
+  refreshStatus();
+}
+
+async function refreshStatus() {
+  const { body } = await api('/api/status');
+  (document.getElementById('st-version')       ).textContent = 'v' + (body.version || '?');
+  (document.getElementById('st-mqtt-dot')       ).className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+  // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
+  const readOnly = body.configWritable === false;
+  const save = document.getElementById('btn-save')       ;
+  save.disabled = readOnly;
+  save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
+  (document.getElementById('ro-note')       ).style.display = readOnly ? 'inline' : 'none';
+  // Show a logout link + signed-in user when OIDC is in use.
+  if (body.auth === 'oidc') {
+    (document.getElementById('st-logout')       ).style.display = 'inline';
+    if (body.user) (document.getElementById('st-user')       ).textContent = body.user;
+  }
+}
+
+(document.getElementById('btn-reload')       ).onclick = load;
+(document.getElementById('btn-save')       ).onclick = async () => {
   const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
   toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
 };
