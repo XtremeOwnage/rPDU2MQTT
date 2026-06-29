@@ -41,10 +41,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly PduInstanceRegistry registry;
     private readonly InstanceManager instances;
     private readonly EmonCmsStatus emonCmsStatus;
+    private readonly Core.ISnapshotCache snapshots;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -57,7 +58,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.registry = registry;
         this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
+        this.snapshots = snapshots;
     }
+
+    /// <summary>
+    /// Current data for an instance, preferring the shared snapshot cache (filled by the local poller, or
+    /// by the MQTT bus bridge on a consumer-only node) and falling back to a direct poll when the cache is
+    /// still cold. This is the read seam that lets a UI/API role serve a worker's data without polling.
+    /// </summary>
+    private async Task<Models.PDU.PduData> ResolveData(string id, PDU pdu, CancellationToken ct) =>
+        snapshots.Get(id)?.Data ?? await pdu.GetRootData_Public(ct);
 
     /// <summary>The instance id a request targets — a usable (registry) instance, else the primary's.</summary>
     private string ResolveInstanceId(string? requested) =>
@@ -545,8 +555,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
+                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
+                var data = await ResolveData(id, pdu, cts.Token);
 
                 // Expose the raw PDU label/name plus the currently-discovered display name and
                 // object_id, so the Overrides editor can show what each entity actually is.
@@ -600,8 +610,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
+                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
+                var data = await ResolveData(id, pdu, cts.Token);
                 var readingList = MetricsHelper.EnumerateReadings(data)
                     .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
                     .ToList();
@@ -660,8 +670,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
+                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
+                var data = await ResolveData(id, pdu, cts.Token);
                 return Results.Json(BuildPaths(data, config), ConfigSchema.Json);
             }
             catch (Exception ex)
@@ -677,8 +687,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
+                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
+                var data = await ResolveData(id, pdu, cts.Token);
                 var metric = ctx.Request.Query["metric"].ToString();
                 var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
                 return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
@@ -721,8 +731,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var (_, pdu, instanceCfg) = ResolveInstance(ctx.Request.Query["instance"]);
-                var data = await pdu.GetRootData_Public(cts.Token);
+                var (id, pdu, instanceCfg) = ResolveInstance(ctx.Request.Query["instance"]);
+                var data = await ResolveData(id, pdu, cts.Token);
                 var outlets = data.Devices.SelectMany(d => d.Outlets.OrderBy(o => o.Key).Select(o => new
                 {
                     deviceId = d.Key,

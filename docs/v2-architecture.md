@@ -126,6 +126,29 @@ InstanceManager ──manages──> PduPoller (×N)
 Later (separate issues, built on this): energy-flow mapping (#128/#129), Tigo producer (#130),
 Sankey (#97).
 
+## Distributed mode — running roles as separate processes (#127)
+
+The single executable can run a subset of the workloads, so the three components can scale out across
+processes (or stay one node by default). The project boundaries already enforce the producer/consumer/UI
+split; this is the *runtime* split, behind the same `IMessageBus` seam.
+
+- **Role selection** — `--role` / `RPDU2MQTT_ROLE` picks `worker` (data processing), `api`, `ui`, or a
+  comma list. Unset → `all` (one node, everything; the default — unchanged). Singletons are always
+  registered; only the *hosted services* (the work) are gated by role.
+- **Cross-process bus** — `MqttBusBridge` (loaded only when roles are split) carries snapshots over the
+  existing broker: a `worker` mirrors each snapshot to a retained `‹parent›/_bus/snapshot/‹id›` topic; a
+  consumer-only node ingests them back onto its own bus → its `SnapshotCache`.
+- **Wire contract** — `RawSnapshot` (a plain, round-trippable DTO) carries the *finished* poll: raw
+  source name/label plus the computed display identity (`Entity_Name`/`DisplayName`/`Make`/`Model`) and
+  measurements. The worker transforms once (as it already does for its own sinks); the consumer renders
+  without re-running the non-idempotent transform.
+- **Read path** — the GUI/API read PDU data through the `SnapshotCache` (filled by the local poller, or by
+  the bridge on a consumer), falling back to a direct poll while the cache is cold. So a `ui`/`api` node
+  serves a worker's data without reaching a PDU itself.
+
+Still worker-side (need the live connection): polling, control/actions, discovery. Cross-process operation
+needs end-to-end verification against a real broker + two processes.
+
 ## Risks / open questions
 
 - **Back-pressure / slow sinks** — per-consumer bounded channels isolate a slow/broken sink; decide the
@@ -139,4 +162,3 @@ Sankey (#97).
 ## Not in scope here
 
 - The actual energy-flow mapping / Sankey / Tigo features (separate v2.0 issues).
-- A distributed/multi-process runtime (the `IMessageBus` seam leaves the door open if it's ever needed).
