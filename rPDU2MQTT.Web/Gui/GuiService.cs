@@ -43,10 +43,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
+    private readonly HeartbeatService heartbeats;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -61,6 +62,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.emonCmsStatus = emonCmsStatus;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
+        this.heartbeats = heartbeats;
     }
 
     /// <summary>
@@ -424,6 +426,22 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             instance = s.InstanceId,
                             ageSeconds = (long)Math.Max(0, (DateTime.UtcNow - s.TimestampUtc).TotalSeconds),
                             stale = Core.SnapshotFreshness.IsStale(s.TimestampUtc, interval, DateTime.UtcNow),
+                        };
+                    })
+                    .ToArray(),
+                // Other role processes seen on the bus (split deployments). Empty for a single-node "all".
+                processes = heartbeats.Processes
+                    .OrderBy(p => string.Join(',', p.Roles)).ThenBy(p => p.Host)
+                    .Select(p =>
+                    {
+                        var age = (long)Math.Max(0, (DateTime.UtcNow - p.TimestampUtc).TotalSeconds);
+                        return new
+                        {
+                            id = p.Id,
+                            roles = p.Roles,
+                            host = p.Host,
+                            ageSeconds = age,
+                            stale = age > Core.Heartbeat.StaleAfterSeconds,
                         };
                     })
                     .ToArray(),

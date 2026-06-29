@@ -124,6 +124,12 @@ public static class ServiceConfiguration
                 sp.GetRequiredService<Config>(),
                 producer: worker));
 
+        // Per-process liveness beacons so the GUI can list every role process in a split deployment.
+        // Always resolvable (the GUI reads it); only runs the publish/subscribe loop when roles are split.
+        services.AddSingleton<Services.HeartbeatService>();
+        if (roles != HostRole.All)
+            services.AddHostedService(sp => sp.GetRequiredService<Services.HeartbeatService>());
+
         // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
         if (worker)
         {
