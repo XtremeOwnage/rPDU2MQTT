@@ -26,22 +26,18 @@ public sealed class HaEnergyDashboardSync
     }
 
     /// <summary>
-    /// The energy-dashboard devices the current hierarchy + sensors map to. When <paramref name="existing"/>
-    /// is supplied, a tier only counts as having a stat if that entity actually exists in HA — so tiers
-    /// whose energy sensor hasn't been created (e.g. a PDU-level total) are skipped and their children link
-    /// to the nearest ancestor that does exist, instead of producing an "entity not defined" in HA.
+    /// The energy-dashboard devices the current hierarchy + sensors map to. A tier's stat is resolved via
+    /// HA's authoritative <c>unique_id → entity_id</c> map (the discovery's unique_id is the measurement's
+    /// Entity_Identifier), so we never guess an entity_id that doesn't exist. Tiers whose energy sensor
+    /// isn't in HA are skipped and their children link to the nearest ancestor that is.
     /// </summary>
-    public List<HaDeviceConsumption> BuildDevices(string energyType, ISet<string>? existing = null)
+    public List<HaDeviceConsumption> BuildDevices(string energyType, IReadOnlyDictionary<string, string> entityByUniqueId)
     {
         var merged = new PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0) return new();
 
-        var baseResolver = BuildStatResolver(merged, energyType);
-        Func<string, string?> resolver = existing is null
-            ? baseResolver
-            : id => baseResolver(id) is { } s && existing.Contains(s) ? s : null;
-
+        var resolver = BuildStatResolver(merged, energyType, entityByUniqueId);
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric);
         return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
     }
@@ -52,12 +48,14 @@ public sealed class HaEnergyDashboardSync
         using var ws = await ConnectAuth(url, token, ct);
         var call = Caller(ws, ct);
 
-        var states = (await call("get_states", null))?["result"]?.AsArray() ?? new JsonArray();
-        var existing = new HashSet<string>(
-            states.Select(s => (string?)s?["entity_id"]).Where(e => !string.IsNullOrEmpty(e))!,
-            StringComparer.OrdinalIgnoreCase);
+        // HA's authoritative unique_id -> entity_id map, so we use real entity_ids (not guesses).
+        var registry = (await call("config/entity_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
+        var entityByUniqueId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in registry)
+            if ((string?)e?["unique_id"] is { Length: > 0 } uid && (string?)e?["entity_id"] is { Length: > 0 } eid)
+                entityByUniqueId[uid] = eid;
 
-        var devices = BuildDevices(energyType, existing);
+        var devices = BuildDevices(energyType, entityByUniqueId);
         var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
             ?? throw new Exception("Could not read HA energy preferences.");
 
@@ -98,14 +96,16 @@ public sealed class HaEnergyDashboardSync
             throw new Exception($"HA save_prefs failed: {result?["error"]?["message"] ?? result?.ToJsonString()}");
     }
 
-    // Map a flow tier id to its HA energy sensor entity_id (sensor.<object_id>) when the tier has a
-    // measurement of the configured energy type. Covers PDU tiers (device-level entities) and outlets.
-    private static Func<string, string?> BuildStatResolver(PduData data, string energyType)
+    // Map a flow tier id to its HA energy sensor entity_id, resolving each tier's energy measurement
+    // (the configured type) through HA's unique_id -> entity_id registry (the discovery's unique_id is the
+    // measurement's Entity_Identifier). Covers PDU tiers (device-level entities) and outlets.
+    private static Func<string, string?> BuildStatResolver(PduData data, string energyType, IReadOnlyDictionary<string, string> entityByUniqueId)
     {
         var byNode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string? EnergyEntity(IEnumerable<Measurement> measurements) =>
-            measurements.FirstOrDefault(m => string.Equals(m.Type, energyType, StringComparison.OrdinalIgnoreCase))?.Entity_Name is { Length: > 0 } name
-                ? "sensor." + name
+            measurements.FirstOrDefault(m => string.Equals(m.Type, energyType, StringComparison.OrdinalIgnoreCase))?.Entity_Identifier is { Length: > 0 } uid
+             && entityByUniqueId.TryGetValue(uid, out var entityId)
+                ? entityId
                 : null;
 
         foreach (var device in data.Devices)
