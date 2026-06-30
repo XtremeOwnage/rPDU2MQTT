@@ -351,6 +351,11 @@ public class FlowGraphTests
         Assert.Null(total.included_in_stat);                              // root: no upstream
         var outlet = devices.Single(d => d.stat_consumption == "sensor.outlet_energy");
         Assert.Equal("sensor.total_energy", outlet.included_in_stat);      // upstream walked past pdu/main_panel
+
+        // HA rejects included_in_stat:null — a root with no upstream must omit the key entirely.
+        var rootJson = System.Text.Json.JsonSerializer.Serialize(total);
+        Assert.DoesNotContain("included_in_stat", rootJson);
+        Assert.Contains("included_in_stat", System.Text.Json.JsonSerializer.Serialize(outlet));
     }
 
     [Fact]

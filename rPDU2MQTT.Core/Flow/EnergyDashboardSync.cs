@@ -1,7 +1,16 @@
+using System.Text.Json.Serialization;
+
 namespace rPDU2MQTT.Core.Flow;
 
-/// <summary>One Home Assistant Energy-Dashboard "individual device" entry (the <c>device_consumption</c> shape).</summary>
-public sealed record HaDeviceConsumption(string stat_consumption, string? included_in_stat, string? name);
+/// <summary>
+/// One Home Assistant Energy-Dashboard "individual device" entry (the <c>device_consumption</c> shape).
+/// HA's schema rejects a null <c>included_in_stat</c>/<c>name</c> — the keys must be omitted, not null —
+/// so both are dropped from the JSON when unset.
+/// </summary>
+public sealed record HaDeviceConsumption(
+    string stat_consumption,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? included_in_stat,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? name);
 
 /// <summary>
 /// Maps an energy-flow hierarchy onto Home Assistant's Energy-Dashboard device list (#128): one entry per
