@@ -58,4 +58,30 @@ public class HomeAssistantConfig
     [Description("Stable entity/object_id template for a group's mirrored member switches. Placeholders: {serial}, {number}, {device}, {group}.")]
     [TemplateVariables("serial", "number", "device", "group")]
     public string GroupMemberObjectIdTemplate { get; set; } = "{serial}_outlet_{number}";
+
+    /// <summary>Auto-configure HA's Energy Dashboard device hierarchy from the energy flow (#128).</summary>
+    [Description("Auto-configure Home Assistant's Energy Dashboard 'devices' (with upstream relationships) from the energy-flow hierarchy, via HA's WebSocket API.")]
+    public HomeAssistantEnergyDashboardConfig EnergyDashboard { get; set; } = new();
+}
+
+/// <summary>
+/// Pushes the energy-flow hierarchy into Home Assistant's Energy Dashboard "individual devices" — each
+/// tier's energy stat plus its upstream device (<c>included_in_stat</c>, which prevents double-counting) —
+/// via HA's WebSocket API (this can't be done over MQTT discovery). See #128.
+/// </summary>
+public class HomeAssistantEnergyDashboardConfig
+{
+    [DefaultValue(false)]
+    [Description("Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.")]
+    public bool Enabled { get; set; }
+
+    [Description("Home Assistant base URL, e.g. http://homeassistant.local:8123 .")]
+    public string? Url { get; set; }
+
+    [Description("Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).")]
+    public string? Token { get; set; }
+
+    [DefaultValue("energy")]
+    [Description("Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.")]
+    public string EnergyMeasurementType { get; set; } = "energy";
 }

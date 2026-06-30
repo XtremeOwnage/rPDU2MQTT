@@ -334,6 +334,26 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void EnergyDashboardSync_BuildsDevices_SkippingStatlessTiers_AndLinkingToNearestAncestorStat()
+    {
+        // total -> main_panel -> pdu -> outlet. Only total + outlet have energy stats; the middle tiers
+        // don't, so the outlet's upstream must skip them and point at total.
+        var graph = new FlowGraph(
+            new[] { new FlowNode("total", "Total", "node"), new FlowNode("main_panel", "Main Panel", "node"), new FlowNode("pdu", "PDU", "pdu"), new FlowNode("outlet", "Server", "outlet") },
+            new[] { new FlowLink("total", "main_panel", 100), new FlowLink("main_panel", "pdu", 100), new FlowLink("pdu", "outlet", 100) },
+            "realpower", "W");
+
+        string? statFor(string id) => id switch { "total" => "sensor.total_energy", "outlet" => "sensor.outlet_energy", _ => null };
+        var devices = EnergyDashboardSync.BuildDeviceConsumption(graph, statFor);
+
+        Assert.Equal(2, devices.Count);   // the stat-less middle tiers are skipped
+        var total = devices.Single(d => d.stat_consumption == "sensor.total_energy");
+        Assert.Null(total.included_in_stat);                              // root: no upstream
+        var outlet = devices.Single(d => d.stat_consumption == "sensor.outlet_energy");
+        Assert.Equal("sensor.total_energy", outlet.included_in_stat);      // upstream walked past pdu/main_panel
+    }
+
+    [Fact]
     public void FlowExport_Topic_FillsTemplate_SlugsIds_AndCollapsesEmptySegments()
     {
         var graph = new FlowGraph(new[] { new FlowNode("outlet:rack_pdu:10", "Dell MD1200", "outlet") }, Array.Empty<FlowLink>(), "realpower", "W");

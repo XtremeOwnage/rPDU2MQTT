@@ -159,6 +159,10 @@ public static class ServiceConfiguration
             else
                 Log.Warning($"Home Assistant Discovery Disabled.");
 
+            // Sync the energy-flow hierarchy into HA's Energy Dashboard via its WebSocket API (#128).
+            if (cfg.HASS.EnergyDashboard.Enabled)
+                services.AddHostedService<HaEnergyDashboardService>();
+
             // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
             if (cfg.Primary.ActionsEnabled)
             {
