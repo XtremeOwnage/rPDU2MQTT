@@ -94,6 +94,23 @@ public static class MetricsHelper
         return Sanitize(name);
     }
 
+    /// <summary>True when the EmonCMS MQTT topic template splits the export per PDU (it contains {device}).</summary>
+    public static bool EmonCmsSplitsByDevice(Config config)
+        => (config.EmonCMS.MqttTopicTemplate ?? string.Empty).Contains("{device}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The EmonCMS MQTT topic a payload is published to, with {base}/{node}/{device} filled in.</summary>
+    public static string EmonCmsMqttTopic(string device, Config config)
+    {
+        var c = config.EmonCMS;
+        var template = string.IsNullOrWhiteSpace(c.MqttTopicTemplate) ? "{base}/{node}" : c.MqttTopicTemplate;
+        var topic = template
+            .Replace("{base}", (c.MqttBaseTopic ?? "emon").Trim('/'))
+            .Replace("{node}", c.Node)
+            .Replace("{device}", device);
+        // Collapse any empty/duplicate slashes (e.g. a {device} that resolved to empty).
+        return string.Join('/', topic.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
     private static string Sanitize(string value)
         => new(value.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_').ToArray());
 }

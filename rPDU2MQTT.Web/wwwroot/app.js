@@ -1252,6 +1252,7 @@ function renderConfigSection(node     , nav     , sections     ) {
     }
     else renderNode(node, state.data, sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
+    else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     link.onclick = () => activate(link, sec);
   }
   return link;
@@ -1311,6 +1312,23 @@ function wireGuiAuth(sec     ) {
     setOff(oidcInputs, t !== 'Oidc');
   };
   authSelect.addEventListener('change', apply);
+  apply();
+}
+
+// In the EmonCMS section, hide the fields that don't apply to the selected Transport (Http vs Mqtt).
+function wireEmonCmsTransport(sec     ) {
+  const fields = [...sec.querySelectorAll('.field')]         ;
+  const field = (label        ) => fields.find(f => f.querySelector('label')?.textContent === label);
+  const transportSel = field('Transport')?.querySelector('select');
+  if (!transportSel) return;
+  const httpOnly = ['Url', 'ApiKey', 'Path'].map(field).filter(Boolean);
+  const mqttOnly = ['MqttBaseTopic', 'MqttTopicTemplate'].map(field).filter(Boolean);
+  const apply = () => {
+    const t = transportSel.value; // 'Http' | 'Mqtt'
+    httpOnly.forEach((f     ) => f.style.display = t === 'Http' ? '' : 'none');
+    mqttOnly.forEach((f     ) => f.style.display = t === 'Mqtt' ? '' : 'none');
+  };
+  transportSel.addEventListener('change', apply);
   apply();
 }
 

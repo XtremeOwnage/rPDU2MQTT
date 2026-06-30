@@ -149,6 +149,27 @@ public class MetricsHelperTests
     }
 
     [Fact]
+    public void EmonCmsMqttTopic_DefaultTemplate_IsBaseSlashNode_AndDoesNotSplit()
+    {
+        var cfg = new Config();
+        Assert.False(MetricsHelper.EmonCmsSplitsByDevice(cfg));
+        Assert.Equal("emon/rpdu2mqtt", MetricsHelper.EmonCmsMqttTopic("", cfg));
+    }
+
+    [Fact]
+    public void EmonCmsMqttTopic_DeviceTemplate_SplitsPerPdu()
+    {
+        var cfg = new Config();
+        cfg.EmonCMS.MqttBaseTopic = "emon";
+        cfg.EmonCMS.Node = "rpdu";
+        cfg.EmonCMS.MqttTopicTemplate = "{base}/{node}/{device}";
+        Assert.True(MetricsHelper.EmonCmsSplitsByDevice(cfg));
+        Assert.Equal("emon/rpdu/rack_pdu_1", MetricsHelper.EmonCmsMqttTopic("rack_pdu_1", cfg));
+        // Empty device resolves cleanly (no doubled/trailing slash).
+        Assert.Equal("emon/rpdu", MetricsHelper.EmonCmsMqttTopic("", cfg));
+    }
+
+    [Fact]
     public void PrometheusMetricName_SupportsDeviceSourceUnitsPlaceholders()
     {
         var cfg = new Config();
