@@ -32,6 +32,17 @@ public class EnergyFlowConfig
     /// </summary>
     [Description("Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.")]
     public Dictionary<string, string> Parents { get; set; } = new();
+
+    /// <summary>Publish each hierarchy tier's rolled-up value to MQTT every poll (#164).</summary>
+    [DefaultValue(false)]
+    [Description("Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.")]
+    public bool MqttExport { get; set; }
+
+    /// <summary>Template for the per-node MQTT topic. Placeholders: {parent} {id} {label} {kind} {metric} {units}.</summary>
+    [DefaultValue("{parent}/energyflow/{id}")]
+    [Description("Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'.")]
+    [TemplateVariables("parent", "id", "label", "kind", "metric", "units")]
+    public string MqttTopicTemplate { get; set; } = "{parent}/energyflow/{id}";
 }
 
 /// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>

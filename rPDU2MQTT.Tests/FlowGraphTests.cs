@@ -312,4 +312,41 @@ public class FlowGraphTests
         Assert.DoesNotContain(graph.Links, l => l.Source == "b" && l.Target == "a");    // the cycle-closing edge is gone
         Assert.Equal(100, graph.Links.Single(l => l.Source == "a" && l.Target == "pdu:pdu1").Value);
     }
+
+    [Fact]
+    public void FlowExport_NodeValue_IsMaxOfInflowAndOutflow()
+    {
+        // a -> b (50); b -> c (30), b -> d (20). b balances at 50; a is a 50W source; c/d are sinks.
+        var graph = new FlowGraph(
+            new[] { new FlowNode("a", "A", "node"), new FlowNode("b", "B", "node"), new FlowNode("c", "C", "outlet"), new FlowNode("d", "D", "outlet") },
+            new[] { new FlowLink("a", "b", 50), new FlowLink("b", "c", 30), new FlowLink("b", "d", 20) },
+            "realpower", "W");
+
+        Assert.Equal(50, FlowExport.NodeValue(graph, "a"));   // source: outflow only
+        Assert.Equal(50, FlowExport.NodeValue(graph, "b"));   // balanced: max(in 50, out 50)
+        Assert.Equal(30, FlowExport.NodeValue(graph, "c"));   // sink: inflow only
+        Assert.Equal(20, FlowExport.NodeValue(graph, "d"));
+
+        // Parents = the feeders pointing into a node (a root has none; a node can have several).
+        Assert.Empty(FlowExport.Parents(graph, "a"));
+        Assert.Equal(new[] { "a" }, FlowExport.Parents(graph, "b"));
+        Assert.Equal(new[] { "b" }, FlowExport.Parents(graph, "c"));
+    }
+
+    [Fact]
+    public void FlowExport_Topic_FillsTemplate_SlugsIds_AndCollapsesEmptySegments()
+    {
+        var graph = new FlowGraph(new[] { new FlowNode("outlet:rack_pdu:10", "Dell MD1200", "outlet") }, Array.Empty<FlowLink>(), "realpower", "W");
+        var node = graph.Nodes[0];
+
+        var cfg = new EnergyFlowConfig();   // default template "{parent}/energyflow/{id}"
+        Assert.Equal("rpdu2mqtt/energyflow/outlet_rack_pdu_10", FlowExport.Topic(node, graph, "rpdu2mqtt", cfg));
+
+        cfg.MqttTopicTemplate = "{parent}/{kind}/{label}/{metric}";
+        Assert.Equal("rpdu2mqtt/outlet/Dell_MD1200/realpower", FlowExport.Topic(node, graph, "rpdu2mqtt/", cfg));
+
+        // An empty parent must not leave a leading slash.
+        cfg.MqttTopicTemplate = "{parent}/energyflow/{id}";
+        Assert.Equal("energyflow/outlet_rack_pdu_10", FlowExport.Topic(node, graph, "", cfg));
+    }
 }
