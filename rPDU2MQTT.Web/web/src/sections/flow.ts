@@ -137,6 +137,18 @@ export function addFlowSection(nav: any, sections: any) {
     const save = btn('Save hierarchy', 'primary');
     addBar.append(idIn, labIn, valIn, addBtn, save); ed.appendChild(addBar);
 
+    // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll. Saved with
+    // the hierarchy (the Save button posts the whole config).
+    const exportRow = el('div', { class: 'ld-toolbar' });
+    const topicIn = el('input', { type: 'text', placeholder: '{parent}/energyflow/{id}', style: { width: '280px' } });
+    topicIn.value = flow.MqttTopicTemplate || '';
+    topicIn.disabled = !flow.MqttExport;
+    topicIn.onchange = () => { flow.MqttTopicTemplate = topicIn.value.trim() || undefined; };
+    const expChk = el('input', { type: 'checkbox' }); expChk.checked = !!flow.MqttExport;
+    expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; };
+    exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
+    ed.appendChild(exportRow);
+
     // Candidate nodes (from the built graph + custom defs).
     const cand = new Map();
     (lastGraph?.nodes || []).forEach((n: any) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));

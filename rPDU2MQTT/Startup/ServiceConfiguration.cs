@@ -135,6 +135,10 @@ public static class ServiceConfiguration
         {
             services.AddHostedService<MQTTPublishingService>();
 
+            // Energy-hierarchy MQTT export (#164) — a no-op until EnergyFlow.MqttExport is enabled, which
+            // the GUI can toggle at runtime, so register unconditionally rather than gating on the flag.
+            services.AddHostedService<EnergyFlowMqttExportService>();
+
             // Optional metric exporters.
             if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
                 services.AddHostedService<PrometheusExportService>();
