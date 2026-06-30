@@ -33,10 +33,12 @@ public class EnergyFlowMqttExportService : baseMQTTService
         {
             var payload = JsonSerializer.Serialize(new
             {
+                id = node.Id,
                 value = FlowExport.NodeValue(graph, node.Id),
                 units = graph.Units,
                 label = node.Label,
                 kind = node.Kind,
+                parents = FlowExport.Parents(graph, node.Id),   // the tiers that feed this one
             });
             await PublishString(FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow), payload, retain: true, cancellationToken);
         }

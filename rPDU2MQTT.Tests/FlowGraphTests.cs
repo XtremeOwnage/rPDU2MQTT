@@ -326,6 +326,11 @@ public class FlowGraphTests
         Assert.Equal(50, FlowExport.NodeValue(graph, "b"));   // balanced: max(in 50, out 50)
         Assert.Equal(30, FlowExport.NodeValue(graph, "c"));   // sink: inflow only
         Assert.Equal(20, FlowExport.NodeValue(graph, "d"));
+
+        // Parents = the feeders pointing into a node (a root has none; a node can have several).
+        Assert.Empty(FlowExport.Parents(graph, "a"));
+        Assert.Equal(new[] { "a" }, FlowExport.Parents(graph, "b"));
+        Assert.Equal(new[] { "b" }, FlowExport.Parents(graph, "c"));
     }
 
     [Fact]

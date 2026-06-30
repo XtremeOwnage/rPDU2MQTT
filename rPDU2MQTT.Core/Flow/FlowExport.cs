@@ -23,6 +23,14 @@ public static class FlowExport
         return Math.Max(inflow, outflow);
     }
 
+    /// <summary>The ids of a node's feeders (the sources of links pointing into it) — its upstream parents.</summary>
+    public static string[] Parents(FlowGraph graph, string id)
+        => graph.Links
+            .Where(l => string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Source)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
     /// <summary>The MQTT topic a tier publishes to, with {parent}/{id}/{label}/{kind}/{metric}/{units} filled in.</summary>
     public static string Topic(FlowNode node, FlowGraph graph, string parentTopic, EnergyFlowConfig cfg)
     {
