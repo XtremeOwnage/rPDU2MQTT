@@ -25,46 +25,77 @@ public sealed class HaEnergyDashboardSync
         this.snapshots = snapshots;
     }
 
-    /// <summary>The energy-dashboard devices the current hierarchy + sensors would map to.</summary>
-    public List<HaDeviceConsumption> BuildDevices(string energyType)
+    /// <summary>
+    /// The energy-dashboard devices the current hierarchy + sensors map to. When <paramref name="existing"/>
+    /// is supplied, a tier only counts as having a stat if that entity actually exists in HA — so tiers
+    /// whose energy sensor hasn't been created (e.g. a PDU-level total) are skipped and their children link
+    /// to the nearest ancestor that does exist, instead of producing an "entity not defined" in HA.
+    /// </summary>
+    public List<HaDeviceConsumption> BuildDevices(string energyType, ISet<string>? existing = null)
     {
         var merged = new PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0) return new();
 
-        var statFor = BuildStatResolver(merged, energyType);
+        var baseResolver = BuildStatResolver(merged, energyType);
+        Func<string, string?> resolver = existing is null
+            ? baseResolver
+            : id => baseResolver(id) is { } s && existing.Contains(s) ? s : null;
+
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric);
-        return EnergyDashboardSync.BuildDeviceConsumption(graph, statFor);
+        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
     }
 
     /// <summary>Merge our hierarchy devices into HA's energy prefs (preserving the user's own). Returns the count synced.</summary>
     public async Task<int> SyncAsync(string url, string token, string energyType, CancellationToken ct)
     {
-        var devices = BuildDevices(energyType);
-        await WithPrefs(url, token, ct, prefs =>
-        {
-            var ours = devices.Select(d => d.stat_consumption).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var keep = new JsonArray();
-            foreach (var existing in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
-                if (existing is JsonObject o && !ours.Contains((string?)o["stat_consumption"] ?? ""))
-                    keep.Add(JsonNode.Parse(o.ToJsonString())!);
-            foreach (var d in devices)
-                keep.Add(JsonSerializer.SerializeToNode(d, Json)!);
-            prefs["device_consumption"] = keep;
-        });
+        using var ws = await ConnectAuth(url, token, ct);
+        var call = Caller(ws, ct);
+
+        var states = (await call("get_states", null))?["result"]?.AsArray() ?? new JsonArray();
+        var existing = new HashSet<string>(
+            states.Select(s => (string?)s?["entity_id"]).Where(e => !string.IsNullOrEmpty(e))!,
+            StringComparer.OrdinalIgnoreCase);
+
+        var devices = BuildDevices(energyType, existing);
+        var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
+            ?? throw new Exception("Could not read HA energy preferences.");
+
+        var ours = devices.Select(d => d.stat_consumption).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keep = new JsonArray();
+        foreach (var existingDevice in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
+            if (existingDevice is JsonObject o && !ours.Contains((string?)o["stat_consumption"] ?? ""))
+                keep.Add(o.DeepClone());
+        foreach (var d in devices)
+            keep.Add(JsonSerializer.SerializeToNode(d, Json)!);
+        prefs["device_consumption"] = keep;
+
+        await SavePrefs(call, prefs);
         return devices.Count;
     }
 
     /// <summary>Remove every device from HA's Energy-Dashboard device list. Returns how many were cleared.</summary>
     public async Task<int> ClearAsync(string url, string token, CancellationToken ct)
     {
-        var cleared = 0;
-        await WithPrefs(url, token, ct, prefs =>
-        {
-            cleared = prefs["device_consumption"]?.AsArray()?.Count ?? 0;
-            prefs["device_consumption"] = new JsonArray();
-        });
+        using var ws = await ConnectAuth(url, token, ct);
+        var call = Caller(ws, ct);
+
+        var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
+            ?? throw new Exception("Could not read HA energy preferences.");
+        var cleared = prefs["device_consumption"]?.AsArray()?.Count ?? 0;
+        prefs["device_consumption"] = new JsonArray();
+
+        await SavePrefs(call, prefs);
         return cleared;
+    }
+
+    private static async Task SavePrefs(Func<string, JsonObject?, Task<JsonNode?>> call, JsonObject prefs)
+    {
+        var body = new JsonObject();
+        foreach (var kv in prefs) body[kv.Key] = kv.Value?.DeepClone();
+        var result = await call("energy/save_prefs", body);
+        if ((bool?)result?["success"] != true)
+            throw new Exception($"HA save_prefs failed: {result?["error"]?["message"] ?? result?.ToJsonString()}");
     }
 
     // Map a flow tier id to its HA energy sensor entity_id (sensor.<object_id>) when the tier has a
@@ -88,35 +119,37 @@ public sealed class HaEnergyDashboardSync
         return id => byNode.TryGetValue(id, out var s) ? s : null;
     }
 
-    // Connect + auth, read energy/get_prefs, let the caller mutate it, then energy/save_prefs.
-    private async Task WithPrefs(string url, string token, CancellationToken ct, Action<JsonObject> mutate)
+    private static async Task<ClientWebSocket> ConnectAuth(string url, string token, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(token))
             throw new Exception("Home Assistant URL and access token are required.");
 
         var wsUrl = url.TrimEnd('/').Replace("https://", "wss://").Replace("http://", "ws://") + "/api/websocket";
-        using var ws = new ClientWebSocket();
-        await ws.ConnectAsync(new Uri(wsUrl), ct);
+        var ws = new ClientWebSocket();
+        try
+        {
+            await ws.ConnectAsync(new Uri(wsUrl), ct);
+            await Receive(ws, ct);                                                  // auth_required
+            await Send(ws, new { type = "auth", access_token = token }, ct);
+            if ((string?)(await Receive(ws, ct))?["type"] != "auth_ok")
+                throw new Exception("Home Assistant rejected the access token.");
+            return ws;
+        }
+        catch { ws.Dispose(); throw; }
+    }
 
-        await Receive(ws, ct);                                                     // auth_required
-        await Send(ws, new { type = "auth", access_token = token }, ct);
-        if ((string?)(await Receive(ws, ct))?["type"] != "auth_ok")
-            throw new Exception("Home Assistant rejected the access token.");
-
-        await Send(ws, new { id = 1, type = "energy/get_prefs" }, ct);
-        var prefs = (await Receive(ws, ct))?["result"]?.AsObject()
-            ?? throw new Exception("Could not read HA energy preferences.");
-
-        mutate(prefs);
-
-        var save = JsonSerializer.SerializeToNode(new { id = 2, type = "energy/save_prefs" }, Json)!.AsObject();
-        foreach (var kv in prefs) save[kv.Key] = kv.Value is null ? null : JsonNode.Parse(kv.Value.ToJsonString());
-        await Send(ws, save, ct);
-        var result = await Receive(ws, ct);
-        if ((bool?)result?["success"] != true)
-            throw new Exception($"HA save_prefs failed: {result?["error"]?["message"] ?? result?.ToJsonString()}");
-
-        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, null, ct);
+    // A sequential command caller: {id, type, ...extra} -> the next message (its result). HA isn't
+    // subscribed to events here, so the reply to each command is the next frame.
+    private static Func<string, JsonObject?, Task<JsonNode?>> Caller(ClientWebSocket ws, CancellationToken ct)
+    {
+        var nextId = 1;
+        return async (type, extra) =>
+        {
+            var msg = new JsonObject { ["id"] = nextId++, ["type"] = type };
+            if (extra is not null) foreach (var kv in extra) msg[kv.Key] = kv.Value?.DeepClone();
+            await Send(ws, msg, ct);
+            return await Receive(ws, ct);
+        };
     }
 
     private static Task Send(ClientWebSocket ws, object message, CancellationToken ct)
