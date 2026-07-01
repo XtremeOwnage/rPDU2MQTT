@@ -374,4 +374,34 @@ public class FlowGraphTests
         cfg.MqttTopicTemplate = "{parent}/energyflow/{id}";
         Assert.Equal("energyflow/outlet_rack_pdu_10", FlowExport.Topic(node, graph, "", cfg));
     }
+
+    [Fact]
+    public void FlowExport_DiscoveryDocument_HasEnergyAndPowerSensors_LinkedToParentDevice()
+    {
+        var node = new FlowNode("outlet:rack_pdu:10", "Dell MD1200", "outlet");
+        var doc = FlowExport.DiscoveryDocument(node, "circuit_Servers", "rpdu2mqtt/energyflow/outlet_rack_pdu_10", "kWh", "W", "rpdu2mqtt/status");
+
+        // Device identity + registry-tree link back to its feeder.
+        Assert.Equal("energyflow_outlet_rack_pdu_10", (string?)doc["device"]!["identifiers"]!.AsArray()[0]);
+        Assert.Equal("Dell MD1200", (string?)doc["device"]!["name"]);
+        Assert.Equal("energyflow_circuit_Servers", (string?)doc["device"]!["via_device"]);
+        Assert.Equal("rpdu2mqtt/status", (string?)doc["availability_topic"]);
+
+        // An Energy sensor the dashboard can consume (total_increasing) + a Power sensor, both off the tier topic.
+        var energy = doc["components"]!["energyflow_outlet_rack_pdu_10_energy"]!;
+        Assert.Equal(FlowExport.EnergyUniqueId("outlet:rack_pdu:10"), (string?)energy["unique_id"]);
+        Assert.Equal("energy", (string?)energy["device_class"]);
+        Assert.Equal("total_increasing", (string?)energy["state_class"]);
+        Assert.Equal("kWh", (string?)energy["unit_of_measurement"]);
+        Assert.Equal("{{ value_json.energy }}", (string?)energy["value_template"]);
+
+        var power = doc["components"]!["energyflow_outlet_rack_pdu_10_power"]!;
+        Assert.Equal("power", (string?)power["device_class"]);
+        Assert.Equal("{{ value_json.power }}", (string?)power["value_template"]);
+
+        // A root tier (no feeder) omits via_device.
+        var root = FlowExport.DiscoveryDocument(new FlowNode("grid_power", "Grid", "node"), null, "t", "kWh", "W", null);
+        Assert.Null(root["device"]!["via_device"]);
+        Assert.Null(root["availability_topic"]);
+    }
 }

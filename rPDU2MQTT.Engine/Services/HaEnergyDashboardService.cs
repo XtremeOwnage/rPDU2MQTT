@@ -28,7 +28,7 @@ public sealed class HaEnergyDashboardService : BackgroundService
             var ed = config.HASS.EnergyDashboard;
             if (ed.Enabled && !string.IsNullOrWhiteSpace(ed.Url) && !string.IsNullOrWhiteSpace(ed.Token))
             {
-                try { await sync.SyncAsync(ed.Url!, ed.Token!, ed.EnergyMeasurementType, stoppingToken); }
+                try { await sync.SyncAsync(ed.Url!, ed.Token!, stoppingToken); }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex) { Log.Warning($"HA Energy Dashboard sync failed: {ex.Message}"); }
             }

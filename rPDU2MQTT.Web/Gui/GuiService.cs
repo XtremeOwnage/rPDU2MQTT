@@ -602,9 +602,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
                 var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
                 var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
-                var type = b.RootElement.TryGetProperty("energyMeasurementType", out var et) && !string.IsNullOrWhiteSpace(et.GetString()) ? et.GetString()! : config.HASS.EnergyDashboard.EnergyMeasurementType;
-                var count = await haEnergy.SyncAsync(url ?? "", token ?? "", type, cts.Token);
-                return Results.Json(new { ok = true, message = count == 0 ? "No tiers had an energy sensor to map (yet)." : $"Synced {count} device(s) into the Energy Dashboard." }, ConfigSchema.Json);
+                var count = await haEnergy.SyncAsync(url ?? "", token ?? "", cts.Token);
+                return Results.Json(new { ok = true, message = count == 0 ? "No tiers had an energy sensor in HA yet — enable “Export tiers to MQTT” + HA discovery and wait a poll." : $"Synced {count} device(s) into the Energy Dashboard." }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {

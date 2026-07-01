@@ -26,24 +26,25 @@ public sealed class HaEnergyDashboardSync
     }
 
     /// <summary>
-    /// The energy-dashboard devices the current hierarchy + sensors map to. A tier's stat is resolved via
-    /// HA's authoritative <c>unique_id → entity_id</c> map (the discovery's unique_id is the measurement's
-    /// Entity_Identifier), so we never guess an entity_id that doesn't exist. Tiers whose energy sensor
-    /// isn't in HA are skipped and their children link to the nearest ancestor that is.
+    /// The energy-dashboard devices the current hierarchy maps to. Each tier is resolved to its exported
+    /// energy sensor (published by the flow MQTT export as <c>energyflow_&lt;key&gt;_energy</c>) via HA's
+    /// authoritative <c>unique_id → entity_id</c> map, so we never guess an entity_id that doesn't exist.
+    /// Tiers whose energy sensor isn't in HA are skipped and their children link to the nearest ancestor
+    /// that is — giving HA the full Grid → Panel → Circuit → PDU → outlet chain, not just leaf outlets.
     /// </summary>
-    public List<HaDeviceConsumption> BuildDevices(string energyType, IReadOnlyDictionary<string, string> entityByUniqueId)
+    public List<HaDeviceConsumption> BuildDevices(IReadOnlyDictionary<string, string> entityByUniqueId)
     {
         var merged = new PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0) return new();
 
-        var resolver = BuildStatResolver(merged, energyType, entityByUniqueId);
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric);
+        Func<string, string?> resolver = id => entityByUniqueId.TryGetValue(FlowExport.EnergyUniqueId(id), out var e) ? e : null;
         return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
     }
 
     /// <summary>Merge our hierarchy devices into HA's energy prefs (preserving the user's own). Returns the count synced.</summary>
-    public async Task<int> SyncAsync(string url, string token, string energyType, CancellationToken ct)
+    public async Task<int> SyncAsync(string url, string token, CancellationToken ct)
     {
         using var ws = await ConnectAuth(url, token, ct);
         var call = Caller(ws, ct);
@@ -55,7 +56,7 @@ public sealed class HaEnergyDashboardSync
             if ((string?)e?["unique_id"] is { Length: > 0 } uid && (string?)e?["entity_id"] is { Length: > 0 } eid)
                 entityByUniqueId[uid] = eid;
 
-        var devices = BuildDevices(energyType, entityByUniqueId);
+        var devices = BuildDevices(entityByUniqueId);
         var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
             ?? throw new Exception("Could not read HA energy preferences.");
 
@@ -94,29 +95,6 @@ public sealed class HaEnergyDashboardSync
         var result = await call("energy/save_prefs", body);
         if ((bool?)result?["success"] != true)
             throw new Exception($"HA save_prefs failed: {result?["error"]?["message"] ?? result?.ToJsonString()}");
-    }
-
-    // Map a flow tier id to its HA energy sensor entity_id, resolving each tier's energy measurement
-    // (the configured type) through HA's unique_id -> entity_id registry (the discovery's unique_id is the
-    // measurement's Entity_Identifier). Covers PDU tiers (device-level entities) and outlets.
-    private static Func<string, string?> BuildStatResolver(PduData data, string energyType, IReadOnlyDictionary<string, string> entityByUniqueId)
-    {
-        var byNode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string? EnergyEntity(IEnumerable<Measurement> measurements) =>
-            measurements.FirstOrDefault(m => string.Equals(m.Type, energyType, StringComparison.OrdinalIgnoreCase))?.Entity_Identifier is { Length: > 0 } uid
-             && entityByUniqueId.TryGetValue(uid, out var entityId)
-                ? entityId
-                : null;
-
-        foreach (var device in data.Devices)
-        {
-            if (EnergyEntity(device.Entity.SelectMany(e => e.Measurements)) is { } pduStat)
-                byNode[$"pdu:{device.Entity_Name}"] = pduStat;
-            foreach (var outlet in device.Outlets)
-                if (EnergyEntity(outlet.Measurements) is { } outletStat)
-                    byNode[$"outlet:{device.Entity_Name}:{outlet.Key}"] = outletStat;
-        }
-        return id => byNode.TryGetValue(id, out var s) ? s : null;
     }
 
     private static async Task<ClientWebSocket> ConnectAuth(string url, string token, CancellationToken ct)
