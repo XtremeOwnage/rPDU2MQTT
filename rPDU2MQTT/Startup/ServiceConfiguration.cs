@@ -114,6 +114,10 @@ public static class ServiceConfiguration
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
 
+        // HA Energy-Dashboard sync (#128) — shared by the periodic worker service and the GUI's manual
+        // sync/clear buttons, so register the engine singleton regardless of role.
+        services.AddSingleton<Services.HaEnergyDashboardSync>();
+
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
         // Single-node "all" keeps the bus fully in-process and skips this (no extra broker traffic).
@@ -158,6 +162,10 @@ public static class ServiceConfiguration
             }
             else
                 Log.Warning($"Home Assistant Discovery Disabled.");
+
+            // Sync the energy-flow hierarchy into HA's Energy Dashboard via its WebSocket API (#128).
+            // Registered unconditionally; it honors the live HomeAssistant.EnergyDashboard.Enabled toggle.
+            services.AddHostedService<HaEnergyDashboardService>();
 
             // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
             if (cfg.Primary.ActionsEnabled)

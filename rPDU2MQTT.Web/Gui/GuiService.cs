@@ -44,10 +44,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
     private readonly HeartbeatService heartbeats;
+    private readonly HaEnergyDashboardSync haEnergy;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -63,6 +64,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
         this.heartbeats = heartbeats;
+        this.haEnergy = haEnergy;
     }
 
     /// <summary>
@@ -324,6 +326,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // The energy-flow hierarchy is read fresh on every /api/flow request, so applying it here
                 // makes Flow/Sankey edits show up on the next refresh (previously they needed a restart).
                 config.EnergyFlow = reloaded.EnergyFlow;
+                // Likewise the HA Energy-Dashboard settings (URL/token/enable), so the periodic sync toggle
+                // and the manual sync/clear buttons pick up edits without a restart.
+                config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
@@ -583,6 +588,44 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"Could not reach EmonCMS: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // HA Energy Mapping (#128): push the current hierarchy into HA's Energy Dashboard now, or clear it.
+        // Both take the connection settings in the body so they work with the page's (possibly unsaved) edits.
+        app.MapPost("/api/ha-energy/sync", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var count = await haEnergy.SyncAsync(url ?? "", token ?? "", cts.Token);
+                return Results.Json(new { ok = true, message = count == 0 ? "No tiers had an energy sensor in HA yet — enable “Export tiers to MQTT” + HA discovery and wait a poll." : $"Synced {count} device(s) into the Energy Dashboard." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Sync failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        app.MapPost("/api/ha-energy/clear", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var count = await haEnergy.ClearAsync(url ?? "", token ?? "", cts.Token);
+                return Results.Json(new { ok = true, message = $"Cleared {count} device(s) from the Energy Dashboard." }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Clear failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 
