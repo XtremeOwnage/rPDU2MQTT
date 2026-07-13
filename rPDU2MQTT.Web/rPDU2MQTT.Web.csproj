@@ -12,7 +12,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="HiveMQtt" Version="0.44.0" />
+		<PackageReference Include="HiveMQtt" Version="0.45.0" />
 		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
 	</ItemGroup>
 
