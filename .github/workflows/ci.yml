@@ -30,3 +30,23 @@ jobs:
         run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
+
+      - name: helm template (metrics via Exporter + ServiceMonitor)
+        run: |
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt \
+            --set config.Prometheus.Exporter=true --set serviceMonitor.enabled=true)
+          echo "$out" | grep -q 'kind: ServiceMonitor'      || { echo "ServiceMonitor not rendered"; exit 1; }
+          echo "$out" | grep -q 'rpdu2mqtt-metrics'         || { echo "metrics Service not rendered"; exit 1; }
+          echo "$out" | grep -q 'containerPort: 9184'       || { echo "metrics containerPort not rendered"; exit 1; }
+
+      - name: helm template (legacy Prometheus.Enabled alias still works)
+        run: |
+          helm template rpdu2mqtt charts/rpdu2mqtt --set config.Prometheus.Enabled=true \
+            | grep -q 'rpdu2mqtt-metrics' || { echo "legacy alias no longer renders the metrics Service"; exit 1; }
+
+      - name: helm template (ServiceMonitor without metrics must fail)
+        run: |
+          if helm template rpdu2mqtt charts/rpdu2mqtt --set serviceMonitor.enabled=true > /dev/null 2>&1; then
+            echo "expected a hard failure: a ServiceMonitor without the exporter scrapes nothing"
+            exit 1
+          fi
