@@ -334,6 +334,31 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void EnergyDashboardSync_BuildsDevices_SkippingStatlessTiers_AndLinkingToNearestAncestorStat()
+    {
+        // total -> main_panel -> pdu -> outlet. Only total + outlet have energy stats; the middle tiers
+        // don't, so the outlet's upstream must skip them and point at total.
+        var graph = new FlowGraph(
+            new[] { new FlowNode("total", "Total", "node"), new FlowNode("main_panel", "Main Panel", "node"), new FlowNode("pdu", "PDU", "pdu"), new FlowNode("outlet", "Server", "outlet") },
+            new[] { new FlowLink("total", "main_panel", 100), new FlowLink("main_panel", "pdu", 100), new FlowLink("pdu", "outlet", 100) },
+            "realpower", "W");
+
+        string? statFor(string id) => id switch { "total" => "sensor.total_energy", "outlet" => "sensor.outlet_energy", _ => null };
+        var devices = EnergyDashboardSync.BuildDeviceConsumption(graph, statFor);
+
+        Assert.Equal(2, devices.Count);   // the stat-less middle tiers are skipped
+        var total = devices.Single(d => d.stat_consumption == "sensor.total_energy");
+        Assert.Null(total.included_in_stat);                              // root: no upstream
+        var outlet = devices.Single(d => d.stat_consumption == "sensor.outlet_energy");
+        Assert.Equal("sensor.total_energy", outlet.included_in_stat);      // upstream walked past pdu/main_panel
+
+        // HA rejects included_in_stat:null — a root with no upstream must omit the key entirely.
+        var rootJson = System.Text.Json.JsonSerializer.Serialize(total);
+        Assert.DoesNotContain("included_in_stat", rootJson);
+        Assert.Contains("included_in_stat", System.Text.Json.JsonSerializer.Serialize(outlet));
+    }
+
+    [Fact]
     public void FlowExport_Topic_FillsTemplate_SlugsIds_AndCollapsesEmptySegments()
     {
         var graph = new FlowGraph(new[] { new FlowNode("outlet:rack_pdu:10", "Dell MD1200", "outlet") }, Array.Empty<FlowLink>(), "realpower", "W");
@@ -348,5 +373,35 @@ public class FlowGraphTests
         // An empty parent must not leave a leading slash.
         cfg.MqttTopicTemplate = "{parent}/energyflow/{id}";
         Assert.Equal("energyflow/outlet_rack_pdu_10", FlowExport.Topic(node, graph, "", cfg));
+    }
+
+    [Fact]
+    public void FlowExport_DiscoveryDocument_HasEnergyAndPowerSensors_LinkedToParentDevice()
+    {
+        var node = new FlowNode("outlet:rack_pdu:10", "Dell MD1200", "outlet");
+        var doc = FlowExport.DiscoveryDocument(node, "circuit_Servers", "rpdu2mqtt/energyflow/outlet_rack_pdu_10", "kWh", "W", "rpdu2mqtt/status");
+
+        // Device identity + registry-tree link back to its feeder.
+        Assert.Equal("energyflow_outlet_rack_pdu_10", (string?)doc["device"]!["identifiers"]!.AsArray()[0]);
+        Assert.Equal("Dell MD1200", (string?)doc["device"]!["name"]);
+        Assert.Equal("energyflow_circuit_Servers", (string?)doc["device"]!["via_device"]);
+        Assert.Equal("rpdu2mqtt/status", (string?)doc["availability_topic"]);
+
+        // An Energy sensor the dashboard can consume (total_increasing) + a Power sensor, both off the tier topic.
+        var energy = doc["components"]!["energyflow_outlet_rack_pdu_10_energy"]!;
+        Assert.Equal(FlowExport.EnergyUniqueId("outlet:rack_pdu:10"), (string?)energy["unique_id"]);
+        Assert.Equal("energy", (string?)energy["device_class"]);
+        Assert.Equal("total_increasing", (string?)energy["state_class"]);
+        Assert.Equal("kWh", (string?)energy["unit_of_measurement"]);
+        Assert.Equal("{{ value_json.energy }}", (string?)energy["value_template"]);
+
+        var power = doc["components"]!["energyflow_outlet_rack_pdu_10_power"]!;
+        Assert.Equal("power", (string?)power["device_class"]);
+        Assert.Equal("{{ value_json.power }}", (string?)power["value_template"]);
+
+        // A root tier (no feeder) omits via_device.
+        var root = FlowExport.DiscoveryDocument(new FlowNode("grid_power", "Grid", "node"), null, "t", "kWh", "W", null);
+        Assert.Null(root["device"]!["via_device"]);
+        Assert.Null(root["availability_topic"]);
     }
 }

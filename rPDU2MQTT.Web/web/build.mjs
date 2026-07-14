@@ -27,6 +27,7 @@ const MODULES = [
   'sections/livedata.ts',
   'sections/flow.ts',
   'sections/export.ts',
+  'sections/ha-energy.ts',
   'config-form.ts',
   'actions.ts',
   'main.ts',

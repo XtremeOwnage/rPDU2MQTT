@@ -10,6 +10,7 @@ import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
 import { addFlowSection } from './sections/flow.js';
 import { addExportSection } from './sections/export.js';
+import { addHaEnergySection } from './sections/ha-energy.js';
 
 function scalarInput(node: any, obj: any): any {
   let el: any;
@@ -189,7 +190,9 @@ function renderConfigSection(node: any, nav: any, sections: any) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      renderObjectBody(node.properties, state.data[node.key], sec);
+      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
+      const props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p: any) => p.key !== 'EnergyDashboard') : node.properties;
+      renderObjectBody(props, state.data[node.key], sec);
     }
     else renderNode(node, state.data, sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
@@ -228,6 +231,7 @@ export function build() {
   addLiveDataSection(nav, sections);
   addFlowSection(nav, sections);
   addPathsSection(nav, sections);
+  addHaEnergySection(nav, sections);
   addExportSection(nav, sections);
   addDiagnosticsSection(nav, sections);
 

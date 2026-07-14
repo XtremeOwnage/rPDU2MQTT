@@ -1,5 +1,6 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Services.baseTypes;
 using System.Text.Json;
@@ -7,9 +8,11 @@ using System.Text.Json;
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// Publishes each energy-hierarchy tier's rolled-up value to MQTT every poll (#164), when
+/// Publishes each energy-hierarchy tier's rolled-up power + energy to MQTT every poll (#164), when
 /// <c>EnergyFlow.MqttExport</c> is on. The topic per tier comes from <c>EnergyFlow.MqttTopicTemplate</c>.
-/// Registered in the Worker role; a no-op when the export is disabled.
+/// When HA discovery is enabled, each tier is also published as an HA device (Energy + Power sensors)
+/// so the whole hierarchy — not just leaf outlets — appears in Home Assistant and can feed the Energy
+/// Dashboard (#128). Registered in the Worker role; a no-op when the export is disabled.
 /// </summary>
 public class EnergyFlowMqttExportService : baseMQTTService
 {
@@ -28,19 +31,42 @@ public class EnergyFlowMqttExportService : baseMQTTService
         if (merged.Devices.Count == 0)
             return;
 
+        // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement, so
+        // each tier gets a total (kWh) it can contribute to the Energy Dashboard.
         var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric);
+        var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
+        var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric);
+
+        var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
+        var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
+
         foreach (var node in graph.Nodes)
         {
+            var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
+            var power = FlowExport.NodeValue(graph, node.Id);
+            var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
+            var parents = FlowExport.Parents(graph, node.Id);          // the tiers that feed this one
+
             var payload = JsonSerializer.Serialize(new
             {
                 id = node.Id,
-                value = FlowExport.NodeValue(graph, node.Id),
+                value = power,       // retained for #164 back-compat (== power)
+                power,
+                energy,
                 units = graph.Units,
+                energyUnits = energyGraph.Units,
                 label = node.Label,
                 kind = node.Kind,
-                parents = FlowExport.Parents(graph, node.Id),   // the tiers that feed this one
+                parents,
             });
-            await PublishString(FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow), payload, retain: true, cancellationToken);
+            await PublishString(topic, payload, retain: true, cancellationToken);
+
+            if (publishDiscovery)
+            {
+                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability);
+                var configTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
+                await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
+            }
         }
     }
 }
