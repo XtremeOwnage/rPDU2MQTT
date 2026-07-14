@@ -1,4 +1,4 @@
-{{- if and (dig "Prometheus" "Enabled" false .Values.config) .Values.service.metrics.enabled }}
+{{- if and ((include "rpdu2mqtt.metricsEnabled" .)) .Values.service.metrics.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,6 +16,6 @@ spec:
     {{- include "rpdu2mqtt.selectorLabels" . | nindent 4 }}
   ports:
     - name: metrics
-      port: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+      port: {{ include "rpdu2mqtt.metricsPort" . }}
       targetPort: metrics
 {{- end }}

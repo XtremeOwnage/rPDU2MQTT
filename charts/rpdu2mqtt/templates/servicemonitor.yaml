@@ -1,4 +1,10 @@
 {{- if .Values.serviceMonitor.enabled }}
+{{- if not (include "rpdu2mqtt.metricsEnabled" .) }}
+{{- fail "serviceMonitor.enabled=true requires config.Prometheus.Exporter=true — without it there is no metrics Service to scrape." }}
+{{- end }}
+{{- if not .Values.service.metrics.enabled }}
+{{- fail "serviceMonitor.enabled=true requires service.metrics.enabled=true — the ServiceMonitor selects the metrics Service." }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

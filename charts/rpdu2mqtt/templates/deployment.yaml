@@ -71,9 +71,9 @@ spec:
             - name: gui
               containerPort: {{ dig "Gui" "Port" 8080 .Values.config }}
             {{- end }}
-            {{- if dig "Prometheus" "Enabled" false .Values.config }}
+            {{- if (include "rpdu2mqtt.metricsEnabled" .) }}
             - name: metrics
-              containerPort: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+              containerPort: {{ include "rpdu2mqtt.metricsPort" . }}
             {{- end }}
             {{- if dig "Health" "Enabled" true .Values.config }}
             - name: health

@@ -49,6 +49,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default (include "rpdu2mqtt.fullname" .) .Values.kubernetesConfigSource.crName -}}
 {{- end -}}
 
+{{/* True when the app exposes /metrics. Enabled is the old name for Exporter; the app still honors it. */}}
+{{- define "rpdu2mqtt.metricsEnabled" -}}
+{{- if or (dig "Prometheus" "Exporter" false .Values.config) (dig "Prometheus" "Enabled" false .Values.config) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- define "rpdu2mqtt.metricsPort" -}}
+{{- dig "Prometheus" "Port" 9184 .Values.config -}}
+{{- end -}}
+
 {{/* True when a credentials Secret should be referenced (either managed here or external). */}}
 {{- define "rpdu2mqtt.hasSecret" -}}
 {{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret -}}
