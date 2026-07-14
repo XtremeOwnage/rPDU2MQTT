@@ -29,12 +29,12 @@ spec:
         - port: {{ dig "Gui" "Port" 8080 .Values.config }}
           protocol: TCP
     {{- end }}
-    {{- if and (dig "Prometheus" "Enabled" false .Values.config) .Values.networkPolicy.metricsIngressFrom }}
+    {{- if and ((include "rpdu2mqtt.metricsEnabled" .)) .Values.networkPolicy.metricsIngressFrom }}
     # Allow the metrics port only from the configured peers (e.g. Prometheus).
     - from:
         {{- toYaml .Values.networkPolicy.metricsIngressFrom | nindent 8 }}
       ports:
-        - port: {{ dig "Prometheus" "Port" 9184 .Values.config }}
+        - port: {{ include "rpdu2mqtt.metricsPort" . }}
           protocol: TCP
     {{- end }}
   {{- if .Values.networkPolicy.restrictEgress }}

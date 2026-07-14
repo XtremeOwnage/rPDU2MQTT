@@ -17,7 +17,7 @@ replicaCount: 1
 # Application configuration.
 # This whole block is rendered verbatim into config.yaml (mounted at /config).
 # It is the single source of truth for app behaviour, including Gui.Enabled and
-# Prometheus.Enabled (the Kubernetes Service/Ingress/ServiceMonitor toggles below
+# Prometheus.Exporter (the Kubernetes Service/Ingress/ServiceMonitor toggles below
 # only control whether those *resources* are created).
 # See docs/Configuration.md for every option.
 # ---------------------------------------------------------------------------
@@ -37,7 +37,8 @@ config:
     DiscoveryEnabled: true
     DiscoveryTopic: homeassistant
   Prometheus:
-    Enabled: false
+    # Expose /metrics. (Old name: `Enabled`, still accepted.)
+    Exporter: false
     Port: 9184
   Gui:
     Enabled: false
@@ -98,8 +99,8 @@ service:
     type: ClusterIP
     annotations: {}
 
-# Prometheus Operator ServiceMonitor for the /metrics Service. Requires the
-# Prometheus Operator CRDs to be installed.
+# Prometheus Operator ServiceMonitor for the /metrics Service. Requires the Prometheus
+# Operator CRDs, plus config.Prometheus.Exporter and service.metrics.enabled.
 serviceMonitor:
   enabled: false
   interval: 30s
