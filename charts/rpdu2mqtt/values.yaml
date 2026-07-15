@@ -13,6 +13,21 @@ fullnameOverride: ""
 # Single instance: the bridge holds per-PDU state and has no leader election.
 replicaCount: 1
 
+# Split the app's roles into separate Deployments so they scale independently (#179): worker (polls the
+# PDUs, publishes MQTT, serves /metrics), api (REST API), ui (config GUI). Off by default — one
+# Deployment runs every role. The worker owns the single PDU session, so keep it at one replica.
+split:
+  enabled: false
+  worker:
+    replicaCount: 1
+    resources: {}
+  api:
+    replicaCount: 1
+    resources: {}
+  ui:
+    replicaCount: 1
+    resources: {}
+
 # ---------------------------------------------------------------------------
 # Application configuration.
 # This whole block is rendered verbatim into config.yaml (mounted at /config).

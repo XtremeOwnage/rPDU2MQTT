@@ -31,6 +31,7 @@ public class Connection
     [YamlMember(Alias = "Scheme", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
     [Display(Name = "Connection Scheme", Description = "Connection scheme used")]
     [Description("Default connection scheme.")]
+    [AllowedValues("http", "https")]
     public string? Scheme { get; set; }
 
     [DefaultValue(true)]

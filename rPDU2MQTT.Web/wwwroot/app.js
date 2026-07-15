@@ -1145,9 +1145,10 @@ function scalarInput(node     , obj     )      {
     el.onchange = () => obj[node.key] = el.checked;
   } else if (node.type === 'enum') {
     el = document.createElement('select');
-    (node.enumValues || []).forEach((v        ) => { const o = document.createElement('option'); o.value = o.textContent = v; el.appendChild(o); });
+    // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
+    (node.enumValues || []).forEach((v        ) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value;
+    el.onchange = () => obj[node.key] = el.value === '' ? undefined : el.value;
   } else if (node.type === 'int' || node.type === 'double') {
     el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
     if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
