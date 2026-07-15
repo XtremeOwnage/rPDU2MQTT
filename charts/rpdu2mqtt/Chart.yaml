@@ -3,7 +3,7 @@ name: rpdu2mqtt
 description: Bridge a Vertiv/Geist rPDU to MQTT, with Home Assistant discovery and optional metrics exporters.
 type: application
 # Chart version (bump on chart changes); appVersion tracks the container image.
-version: 1.2.0
+version: 1.2.1
 appVersion: "1.0.0"
 home: https://github.com/XtremeOwnage/rPDU2MQTT
 sources:
