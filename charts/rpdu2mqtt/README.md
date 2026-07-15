@@ -55,7 +55,8 @@ credentials:
 | `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Enabled`). |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
 | `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
-| `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Under Argo CD, use an `ignoreDifferences` on the CR `spec` instead — see [KubernetesCRD.md](../../docs/KubernetesCRD.md#keeping-gui-edits-across-chart-upgrades--argo-syncs). |
+| `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, which is empty under Argo CD (`helm template`) — see `manageResource` below. |
+| `kubernetesConfigSource.manageResource` | `true` | Whether the chart renders the `RpduConfig` CR and the GUI-written credentials `Secret`. Set `false` to manage them out of band so GitOps (Argo/Flux) never syncs over GUI edits; RBAC + the config source stay on, but you must create the CR (and Secret, if used) once yourself. |
 | `ingress.enabled` | `false` | Expose the GUI via an Ingress. |
 | `httpRoute.enabled` | `false` | Expose the GUI via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
 | `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
