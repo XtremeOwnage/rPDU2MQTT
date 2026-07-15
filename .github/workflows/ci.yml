@@ -31,6 +31,16 @@ jobs:
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
 
+      - name: helm template (split roles)
+        run: |
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set split.enabled=true \
+            --set config.Gui.Enabled=true --set config.Prometheus.Exporter=true)
+          [ "$(echo "$out" | grep -c '^kind: Deployment')" = 3 ] || { echo "expected 3 role Deployments"; exit 1; }
+          for role in worker api ui; do
+            echo "$out" | grep -q "name: rpdu2mqtt-$role$" || { echo "missing $role Deployment"; exit 1; }
+            echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }
+          done
+
       - name: helm template (CRD config source, unmanaged resource)
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt \

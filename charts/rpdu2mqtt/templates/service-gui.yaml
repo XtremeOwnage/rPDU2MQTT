@@ -13,6 +13,9 @@ spec:
   type: {{ .Values.service.gui.type }}
   selector:
     {{- include "rpdu2mqtt.selectorLabels" . | nindent 4 }}
+    {{- if .Values.split.enabled }}
+    app.kubernetes.io/component: ui   # the GUI is served by the ui role
+    {{- end }}
   ports:
     - name: gui
       port: {{ dig "Gui" "Port" 8080 .Values.config }}

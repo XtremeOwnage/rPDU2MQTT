@@ -1,125 +1,154 @@
+{{- /*
+  One all-in-one Deployment by default. When split.enabled, render one Deployment per role
+  (worker/api/ui) so they scale independently (#179); the worker owns the single PDU session, so it
+  stays at one replica with a Recreate strategy while the stateless api/ui roles can scale.
+*/}}
+{{- $roles := list (dict "suffix" "" "role" "" "component" "" "replicas" .Values.replicaCount "strategy" "Recreate") }}
+{{- if .Values.split.enabled }}
+{{- $roles = list
+      (dict "suffix" "-worker" "role" "worker" "component" "worker" "replicas" (.Values.split.worker.replicaCount | int) "strategy" "Recreate")
+      (dict "suffix" "-api"    "role" "api"    "component" "api"    "replicas" (.Values.split.api.replicaCount    | int) "strategy" "RollingUpdate")
+      (dict "suffix" "-ui"     "role" "ui"     "component" "ui"     "replicas" (.Values.split.ui.replicaCount     | int) "strategy" "RollingUpdate") }}
+{{- end }}
+{{- range $r := $roles }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "rpdu2mqtt.fullname" . }}
+  name: {{ include "rpdu2mqtt.fullname" $ }}{{ $r.suffix }}
   labels:
-    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    {{- include "rpdu2mqtt.labels" $ | nindent 4 }}
+    {{- with $r.component }}
+    app.kubernetes.io/component: {{ . }}
+    {{- end }}
 spec:
-  replicas: {{ .Values.replicaCount }}
-  # Single instance owning the PDU session; avoid two running at once.
+  replicas: {{ $r.replicas }}
   strategy:
-    type: Recreate
+    type: {{ $r.strategy }}
   selector:
     matchLabels:
-      {{- include "rpdu2mqtt.selectorLabels" . | nindent 6 }}
+      {{- include "rpdu2mqtt.selectorLabels" $ | nindent 6 }}
+      {{- with $r.component }}
+      app.kubernetes.io/component: {{ . }}
+      {{- end }}
   template:
     metadata:
       annotations:
         # Roll the pod when the rendered config changes.
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.podAnnotations }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        {{- with $.Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "rpdu2mqtt.selectorLabels" . | nindent 8 }}
+        {{- include "rpdu2mqtt.selectorLabels" $ | nindent 8 }}
+        {{- with $r.component }}
+        app.kubernetes.io/component: {{ . }}
+        {{- end }}
     spec:
-      serviceAccountName: {{ include "rpdu2mqtt.serviceAccountName" . }}
-      {{- with .Values.imagePullSecrets }}
+      serviceAccountName: {{ include "rpdu2mqtt.serviceAccountName" $ }}
+      {{- with $.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.podSecurityContext }}
+      {{- with $.Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-        - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- with .Values.securityContext }}
+        - name: {{ $.Chart.Name }}
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- with $.Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (include "rpdu2mqtt.hasSecret" .) .Values.kubernetesConfigSource.enabled }}
+          {{- if or (include "rpdu2mqtt.hasSecret" $) $.Values.kubernetesConfigSource.enabled }}
           envFrom:
             - secretRef:
-                name: {{ include "rpdu2mqtt.secretName" . }}
+                name: {{ include "rpdu2mqtt.secretName" $ }}
                 optional: true
           {{- end }}
           env:
+            {{- with $r.role }}
+            - name: RPDU2MQTT_ROLE
+              value: {{ . | quote }}
+            {{- end }}
             - name: RPDU2MQTT_POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: RPDU2MQTT_IMAGE
-              value: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-            {{- if .Values.kubernetesConfigSource.enabled }}
+              value: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+            {{- if $.Values.kubernetesConfigSource.enabled }}
             - name: RPDU2MQTT_CONFIG_SOURCE
               value: k8s
             - name: RPDU2MQTT_CR_NAME
-              value: {{ include "rpdu2mqtt.crName" . | quote }}
+              value: {{ include "rpdu2mqtt.crName" $ | quote }}
             # Companion Secret the GUI writes credentials into (kept out of the CR spec).
             - name: RPDU2MQTT_SECRET_NAME
-              value: {{ include "rpdu2mqtt.secretName" . | quote }}
+              value: {{ include "rpdu2mqtt.secretName" $ | quote }}
             - name: RPDU2MQTT_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- end }}
           ports:
-            {{- if dig "Gui" "Enabled" false .Values.config }}
+            {{- if dig "Gui" "Enabled" false $.Values.config }}
             - name: gui
-              containerPort: {{ dig "Gui" "Port" 8080 .Values.config }}
+              containerPort: {{ dig "Gui" "Port" 8080 $.Values.config }}
             {{- end }}
-            {{- if (include "rpdu2mqtt.metricsEnabled" .) }}
+            {{- if (include "rpdu2mqtt.metricsEnabled" $) }}
             - name: metrics
-              containerPort: {{ include "rpdu2mqtt.metricsPort" . }}
+              containerPort: {{ include "rpdu2mqtt.metricsPort" $ }}
             {{- end }}
-            {{- if dig "Health" "Enabled" true .Values.config }}
+            {{- if dig "Health" "Enabled" true $.Values.config }}
             - name: health
-              containerPort: {{ dig "Health" "Port" 8081 .Values.config }}
+              containerPort: {{ dig "Health" "Port" 8081 $.Values.config }}
             {{- end }}
-          {{- if and .Values.healthProbes.enabled (dig "Health" "Enabled" true .Values.config) }}
+          {{- if and $.Values.healthProbes.enabled (dig "Health" "Enabled" true $.Values.config) }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: {{ dig "Health" "Port" 8081 .Values.config }}
-            {{- with .Values.healthProbes.liveness }}
+              port: {{ dig "Health" "Port" 8081 $.Values.config }}
+            {{- with $.Values.healthProbes.liveness }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz
-              port: {{ dig "Health" "Port" 8081 .Values.config }}
-            {{- with .Values.healthProbes.readiness }}
+              port: {{ dig "Health" "Port" 8081 $.Values.config }}
+            {{- with $.Values.healthProbes.readiness }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- if not .Values.kubernetesConfigSource.enabled }}
+          {{- if not $.Values.kubernetesConfigSource.enabled }}
           volumeMounts:
             - name: config
               mountPath: /config
               readOnly: true
           {{- end }}
-          {{- with .Values.resources }}
+          {{- $res := $.Values.resources }}
+          {{- if $r.component }}{{ $res = (index $.Values.split $r.component).resources | default $.Values.resources }}{{ end }}
+          {{- with $res }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if not .Values.kubernetesConfigSource.enabled }}
+      {{- if not $.Values.kubernetesConfigSource.enabled }}
       volumes:
         - name: config
           configMap:
-            name: {{ include "rpdu2mqtt.fullname" . }}
+            name: {{ include "rpdu2mqtt.fullname" $ }}
       {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with $.Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- with $.Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+{{- end }}
