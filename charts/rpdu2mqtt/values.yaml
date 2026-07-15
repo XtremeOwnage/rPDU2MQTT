@@ -125,7 +125,14 @@ serviceMonitor:
   enabled: false
   interval: 30s
   scrapeTimeout: ""
-  # Extra labels so your Prometheus's serviceMonitorSelector picks it up.
+  # Labels stamped on the ServiceMonitor so your Prometheus adopts it. A Prometheus only scrapes
+  # ServiceMonitors matching its spec.serviceMonitorSelector — most commonly the kube-prometheus-stack
+  # default of `release: <your-stack-release>`, so without this the ServiceMonitor is silently ignored.
+  # Find the value with:
+  #   kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
+  # e.g. for a release named "prometheus-stack":
+  #   labels:
+  #     release: prometheus-stack
   labels: {}
 
 # Ingress for the GUI Service.
