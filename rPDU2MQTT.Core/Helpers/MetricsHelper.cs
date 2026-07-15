@@ -94,6 +94,28 @@ public static class MetricsHelper
         return Sanitize(name);
     }
 
+    /// <summary>
+    /// The EmonCMS feed name for a reading, applying <c>EmonCMS.Feeds.FeedNameTemplate</c>. Unlike the input
+    /// key, this keeps a human-friendly form (spaces allowed) so renaming a source renames its feed (#163).
+    /// </summary>
+    public static string EmonCmsFeedName(MeasurementReading r, Config config)
+    {
+        var effectiveType = config.Overrides.Measurements.TryGetValue(r.Type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
+            ? ov!.ID!
+            : r.Type;
+
+        var template = string.IsNullOrWhiteSpace(config.EmonCMS.Feeds.FeedNameTemplate) ? "{name} {type}" : config.EmonCMS.Feeds.FeedNameTemplate;
+        return template
+            .Replace("{type}", effectiveType)
+            .Replace("{device}", r.Device)
+            .Replace("{source}", r.Source)
+            .Replace("{outlet}", r.Source)
+            .Replace("{name}", r.SourceName ?? r.Source)
+            .Replace("{number}", r.Number?.ToString() ?? string.Empty)
+            .Replace("{units}", r.Units)
+            .Trim();
+    }
+
     /// <summary>True when the EmonCMS MQTT topic template splits the export per PDU (it contains {device}).</summary>
     public static bool EmonCmsSplitsByDevice(Config config)
         => (config.EmonCMS.MqttTopicTemplate ?? string.Empty).Contains("{device}", StringComparison.OrdinalIgnoreCase);

@@ -267,14 +267,20 @@ function wireEmonCmsTransport(sec: any) {
   const field = (label: string) => fields.find(f => f.querySelector('label')?.textContent === label);
   const transportSel = field('Transport')?.querySelector('select');
   if (!transportSel) return;
-  const httpOnly = ['Url', 'ApiKey', 'Path'].map(field).filter(Boolean);
   const mqttOnly = ['MqttBaseTopic', 'MqttTopicTemplate'].map(field).filter(Boolean);
+  // Url/ApiKey are needed by the HTTP transport AND by feed auto-config (which drives the REST API
+  // regardless of the measurement transport); Path is HTTP-transport only.
+  const urlKey = ['Url', 'ApiKey'].map(field).filter(Boolean);
+  const pathField = field('Path');
+  const feedsAuto = field('AutoConfigure')?.querySelector('input[type=checkbox]');
   const apply = () => {
     const t = transportSel.value; // 'Http' | 'Mqtt'
-    httpOnly.forEach((f: any) => f.style.display = t === 'Http' ? '' : 'none');
+    urlKey.forEach((f: any) => f.style.display = (t === 'Http' || feedsAuto?.checked) ? '' : 'none');
+    if (pathField) pathField.style.display = t === 'Http' ? '' : 'none';
     mqttOnly.forEach((f: any) => f.style.display = t === 'Mqtt' ? '' : 'none');
   };
   transportSel.addEventListener('change', apply);
+  feedsAuto?.addEventListener('change', apply);
   apply();
 }
 
