@@ -16,6 +16,10 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class EnergyFlowMqttExportService : baseMQTTService
 {
+    // Discovery config topics we've already retired (once per process) — the duplicate energyflow sensors
+    // an earlier build published for outlets/PDU tiers (#177). Cleared by an empty retained message.
+    private readonly HashSet<string> clearedDuplicates = new();
+
     public EnergyFlowMqttExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.Primary.PollInterval) { }
 
     protected override async Task Execute(CancellationToken cancellationToken)
@@ -39,6 +43,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
+        // Outlets and PDU tiers already have native HA energy sensors from PDU discovery; publishing an
+        // energyflow sensor for them too would duplicate the record in HA (#177). Only the synthetic
+        // hierarchy tiers (panels/circuits/grid/etc.) get an energyflow discovery device.
+        var native = FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
         foreach (var node in graph.Nodes)
         {
@@ -61,10 +69,19 @@ public class EnergyFlowMqttExportService : baseMQTTService
             });
             await PublishString(topic, payload, retain: true, cancellationToken);
 
-            if (publishDiscovery)
+            if (!publishDiscovery)
+                continue;
+
+            var configTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
+            if (native.ContainsKey(node.Id))
+            {
+                // Native sensor exists — retire any duplicate an earlier build left retained (once).
+                if (clearedDuplicates.Add(configTopic))
+                    await PublishString(configTopic, string.Empty, retain: true, cancellationToken);
+            }
+            else
             {
                 var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability);
-                var configTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
                 await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
             }
         }
