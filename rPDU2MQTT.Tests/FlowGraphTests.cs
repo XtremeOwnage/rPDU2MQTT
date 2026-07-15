@@ -404,4 +404,32 @@ public class FlowGraphTests
         Assert.Null(root["device"]!["via_device"]);
         Assert.Null(root["availability_topic"]);
     }
+
+    [Fact]
+    public void FlowExport_NativeEnergyUniqueIds_MapsOnlyTiersWithANativeEnergySensor()
+    {
+        // An outlet with an energy measurement, and one without; a device-level energy entity too.
+        var withEnergy = new Outlet { Key = 0, Entity_Name = "o0", Entity_DisplayName = "Server" };
+        withEnergy.Measurements.Add(new Measurement { Type = "realpower", Value = "60", Units = "W" });
+        withEnergy.Measurements.Add(new Measurement { Type = "energy", Value = "12.5", Units = "kWh", Entity_Identifier = "rpdu_o0_energy" });
+        var noEnergy = new Outlet { Key = 1, Entity_Name = "o1", Entity_DisplayName = "Idle" };
+        noEnergy.Measurements.Add(new Measurement { Type = "realpower", Value = "0", Units = "W" });
+
+        var device = new Device { Key = "pdu1", Entity_Name = "pdu1", Entity_DisplayName = "PDU 1" };
+        device.Outlets.AddRange(new[] { withEnergy, noEnergy });
+        var pduEntity = new Entity { Entity_Name = "pdu1" };
+        pduEntity.Measurements.Add(new Measurement { Type = "energy", Value = "40", Units = "kWh", Entity_Identifier = "rpdu_pdu1_energy" });
+        device.Entity.Add(pduEntity);
+        var data = new PduData();
+        data.Devices.Add(device);
+
+        var map = FlowExport.NativeEnergyUniqueIds(data, "energy");
+
+        // Outlet + PDU tiers that carry an energy measurement map to that sensor's unique_id; the sensorless
+        // outlet does not — so the flow export won't publish a duplicate energyflow sensor for the first two.
+        Assert.Equal("rpdu_o0_energy", map["outlet:pdu1:0"]);
+        Assert.Equal("rpdu_pdu1_energy", map["pdu:pdu1"]);
+        Assert.False(map.ContainsKey("outlet:pdu1:1"));
+        Assert.Equal(2, map.Count);
+    }
 }

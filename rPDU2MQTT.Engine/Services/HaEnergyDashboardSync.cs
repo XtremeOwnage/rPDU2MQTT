@@ -26,11 +26,13 @@ public sealed class HaEnergyDashboardSync
     }
 
     /// <summary>
-    /// The energy-dashboard devices the current hierarchy maps to. Each tier is resolved to its exported
-    /// energy sensor (published by the flow MQTT export as <c>energyflow_&lt;key&gt;_energy</c>) via HA's
-    /// authoritative <c>unique_id → entity_id</c> map, so we never guess an entity_id that doesn't exist.
-    /// Tiers whose energy sensor isn't in HA are skipped and their children link to the nearest ancestor
-    /// that is — giving HA the full Grid → Panel → Circuit → PDU → outlet chain, not just leaf outlets.
+    /// The energy-dashboard devices the current hierarchy maps to. Outlets and PDU tiers resolve to their
+    /// native PDU-discovery energy sensor; the synthetic hierarchy tiers resolve to the energyflow sensor
+    /// the flow export publishes (<c>energyflow_&lt;key&gt;_energy</c>) — this matches which records actually
+    /// exist in HA (#177) and avoids the duplicates a uniform energyflow mapping caused. Everything is
+    /// resolved through HA's authoritative <c>unique_id → entity_id</c> map, so we never guess an entity_id;
+    /// tiers whose sensor isn't in HA are skipped and their children link to the nearest ancestor that is —
+    /// giving HA the full Grid → Panel → Circuit → PDU → outlet chain.
     /// </summary>
     public List<HaDeviceConsumption> BuildDevices(IReadOnlyDictionary<string, string> entityByUniqueId)
     {
@@ -38,8 +40,15 @@ public sealed class HaEnergyDashboardSync
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0) return new();
 
+        var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
+        var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
+
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric);
-        Func<string, string?> resolver = id => entityByUniqueId.TryGetValue(FlowExport.EnergyUniqueId(id), out var e) ? e : null;
+        Func<string, string?> resolver = id =>
+        {
+            var uid = native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id);
+            return entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
+        };
         return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
     }
 

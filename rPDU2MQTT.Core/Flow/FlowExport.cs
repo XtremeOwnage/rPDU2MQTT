@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using rPDU2MQTT.Models.Config;
+using rPDU2MQTT.Models.PDU;
 
 namespace rPDU2MQTT.Core.Flow;
 
@@ -56,6 +57,31 @@ public static class FlowExport
 
     /// <summary>The HA unique_id / entity object_id of a tier's energy sensor ("energyflow_&lt;key&gt;_energy").</summary>
     public static string EnergyUniqueId(string nodeId) => DeviceId(nodeId) + "_energy";
+
+    /// <summary>
+    /// Flow node id -> the unique_id of the native PDU-discovery energy sensor it already has (#177): PDU
+    /// tiers (<c>pdu:{name}</c>) and outlets (<c>outlet:{name}:{key}</c>) that carry an energy measurement.
+    /// These already exist in HA, so the flow export must not publish a duplicate energyflow sensor for
+    /// them — only the synthetic hierarchy tiers (panels/circuits/etc.) need one.
+    /// </summary>
+    public static Dictionary<string, string> NativeEnergyUniqueIds(PduData data, string energyType)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? UniqueId(IEnumerable<Measurement> measurements) =>
+            measurements.FirstOrDefault(m => string.Equals(m.Type, energyType, StringComparison.OrdinalIgnoreCase))?.Entity_Identifier is { Length: > 0 } uid
+                ? uid
+                : null;
+
+        foreach (var device in data.Devices)
+        {
+            if (UniqueId(device.Entity.SelectMany(e => e.Measurements)) is { } pduUid)
+                map[$"pdu:{device.Entity_Name}"] = pduUid;
+            foreach (var outlet in device.Outlets)
+                if (UniqueId(outlet.Measurements) is { } outletUid)
+                    map[$"outlet:{device.Entity_Name}:{outlet.Key}"] = outletUid;
+        }
+        return map;
+    }
 
     /// <summary>
     /// A Home Assistant device-discovery document for a tier (#128): one device with an Energy sensor
