@@ -22,6 +22,19 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void Build_ConnectionScheme_IsADropdownWithABlankChoice()
+    {
+        // Pdus (dictionary) -> PduConfig -> Connection -> Scheme should render as an enum (#176).
+        var pdus = ConfigSchema.Build().Single(n => n.Key == "Pdus");
+        var connection = pdus.ValueSchema!.Properties!.Single(n => n.Key == "Connection");
+        var scheme = connection.Properties!.Single(n => n.Key == "Scheme");
+
+        Assert.Equal("enum", scheme.Type);
+        // Optional field: a leading blank keeps "unset" (auto scheme from the port) selectable.
+        Assert.Equal(new[] { "", "http", "https" }, scheme.EnumValues);
+    }
+
+    [Fact]
     public void Build_OverrideDevicesAndOutletsExposeMakeAndModel()
     {
         var overrides = ConfigSchema.Build().Single(n => n.Key == "Overrides");

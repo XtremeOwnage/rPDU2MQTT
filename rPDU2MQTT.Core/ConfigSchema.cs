@@ -103,6 +103,16 @@ public static class ConfigSchema
         if (prop.GetCustomAttribute<TemplateVariablesAttribute>() is { } tv)
             node.TemplateVars = tv.Names;
 
+        // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
+        // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).
+        if (type == typeof(string) && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } allowed)
+        {
+            var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
+            node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
+            node.Type = "enum";
+            return node;
+        }
+
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
         return node;
     }
