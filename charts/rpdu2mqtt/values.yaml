@@ -86,6 +86,11 @@ kubernetesConfigSource:
   # NOTE: relies on Helm `lookup` — under Argo CD (helm template) it can't read the live CR, so use
   # an Argo ignoreDifferences on the RpduConfig spec instead (see the chart README).
   preserveExisting: true
+  # Whether the chart renders the mutable config resources (the RpduConfig CR and the GUI-written
+  # credentials Secret). Set false to let the app read/write ones you manage out of band, so GitOps
+  # (Argo/Flux) never syncs over GUI edits. RBAC + the k8s config source stay on; you create the CR
+  # (and Secret, if used) yourself once.
+  manageResource: true
 
 # Kubernetes Services for the GUI and /metrics endpoints. Created only when the
 # corresponding feature is enabled in `config` AND the toggle here is true.

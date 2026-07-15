@@ -30,3 +30,10 @@ jobs:
         run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
+
+      - name: helm template (CRD config source, unmanaged resource)
+        run: |
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt \
+            --set kubernetesConfigSource.enabled=true --set kubernetesConfigSource.manageResource=false)
+          echo "$out" | grep -q 'kind: RpduConfig' && { echo "RpduConfig should not be rendered"; exit 1; }
+          echo "$out" | grep -q 'RPDU2MQTT_CONFIG_SOURCE' || { echo "app should still read from the CR"; exit 1; }

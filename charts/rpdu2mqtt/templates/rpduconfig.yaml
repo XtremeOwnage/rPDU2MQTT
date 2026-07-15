@@ -1,4 +1,4 @@
-{{- if .Values.kubernetesConfigSource.enabled }}
+{{- if and .Values.kubernetesConfigSource.enabled .Values.kubernetesConfigSource.manageResource }}
 {{- $name := include "rpdu2mqtt.crName" . }}
 {{- /*
   Create-once: when preserveExisting (default), keep the live CR's spec on upgrade so config edited
