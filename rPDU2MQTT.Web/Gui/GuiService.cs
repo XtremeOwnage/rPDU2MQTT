@@ -642,7 +642,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(30));
             try
             {
-                var r = await emonCmsFeeds.ReconcileAsync(cts.Token);
+                // Gather data across every instance the same resilient way the GUI does (snapshot cache,
+                // else a direct poll) so this works on a UI-only node whose cache is cold.
+                var merged = new Models.PDU.PduData();
+                foreach (var id in registry.All.Keys)
+                    merged.Devices.AddRange((await ResolveData(id, registry.Get(id), cts.Token)).Devices);
+                var r = await emonCmsFeeds.ReconcileAsync(merged, cts.Token);
                 return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
             }
             catch (Exception ex)

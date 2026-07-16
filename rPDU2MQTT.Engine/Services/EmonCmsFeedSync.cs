@@ -27,16 +27,23 @@ public sealed class EmonCmsFeedSync
         this.snapshots = snapshots;
     }
 
-    public async Task<EmonFeedSyncResult> ReconcileAsync(CancellationToken ct)
+    /// <summary>Reconcile using the snapshot cache as the data source (the periodic Worker path).</summary>
+    public Task<EmonFeedSyncResult> ReconcileAsync(CancellationToken ct)
+    {
+        var merged = new PduData();
+        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
+        return ReconcileAsync(merged, ct);
+    }
+
+    /// <summary>Reconcile against EmonCMS using the supplied PDU data (lets the GUI button pass data it
+    /// resolved with a direct-poll fallback, so it works on a UI-only node with a cold cache).</summary>
+    public async Task<EmonFeedSyncResult> ReconcileAsync(PduData merged, CancellationToken ct)
     {
         var e = config.EmonCMS;
         if (string.IsNullOrWhiteSpace(e.Url) || string.IsNullOrWhiteSpace(e.ApiKey))
             return new(false, "EmonCMS Url and a read/write ApiKey are required for feed provisioning.");
         if (e.Feeds.Types is null || e.Feeds.Types.Count == 0)
             return new(false, "No feed Types configured — add at least one measurement type.");
-
-        var merged = new PduData();
-        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0)
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
