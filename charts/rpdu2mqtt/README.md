@@ -55,8 +55,9 @@ credentials:
 | `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role Deployment (only with `split.enabled`). Keep `worker` at `1` — it owns the single PDU session. |
 | `split.{worker,api,ui}.resources` | `{}` | Per-role resource requests/limits (falls back to `resources`). |
 | `service.gui.enabled` | `true` | Create a Service for the GUI (when `config.Gui.Enabled`). |
-| `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Enabled`). |
+| `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Exporter`). |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
+| `serviceMonitor.labels` | `{}` | Extra labels so your Prometheus adopts the ServiceMonitor (e.g. `release: <kube-prometheus-stack release>`); without a match it is silently ignored. |
 | `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
 | `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, which is empty under Argo CD (`helm template`) — see `manageResource` below. |
 | `kubernetesConfigSource.manageResource` | `true` | Whether the chart renders the `RpduConfig` CR and the GUI-written credentials `Secret`. Set `false` to manage them out of band so GitOps (Argo/Flux) never syncs over GUI edits; RBAC + the config source stay on, but you must create the CR (and Secret, if used) once yourself. |
@@ -73,7 +74,10 @@ credentials:
   *Save* is disabled — change config by editing values and running `helm upgrade`. To make the GUI
   *Save* work, set `kubernetesConfigSource.enabled=true` to store config in a writable `RpduConfig`
   custom resource (see [docs/KubernetesCRD.md](../../docs/KubernetesCRD.md)).
-- **Metrics scraping:** enable `config.Prometheus.Enabled` and `serviceMonitor.enabled` (requires the
-  Prometheus Operator) to have Prometheus auto-discover the `/metrics` endpoint.
+- **Metrics scraping:** enable `config.Prometheus.Exporter` and `serviceMonitor.enabled` (requires the
+  Prometheus Operator) to have Prometheus auto-discover the `/metrics` endpoint. A Prometheus only
+  adopts ServiceMonitors matching its `serviceMonitorSelector` — for kube-prometheus-stack that's
+  usually `release: <your-stack>`, so set `serviceMonitor.labels` to match or the ServiceMonitor is
+  silently ignored.
 - **Single replica:** the bridge owns a PDU session and has no leader election; keep `replicaCount: 1`
   (the Deployment uses the `Recreate` strategy).
