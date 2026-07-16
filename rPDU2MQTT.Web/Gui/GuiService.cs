@@ -45,10 +45,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.HostRole hostRoles;
     private readonly HeartbeatService heartbeats;
     private readonly HaEnergyDashboardSync haEnergy;
+    private readonly EmonCmsFeedSync emonCmsFeeds;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds)
     {
         this.config = config;
         this.mqtt = mqtt;
@@ -65,6 +66,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.hostRoles = hostRoles;
         this.heartbeats = heartbeats;
         this.haEnergy = haEnergy;
+        this.emonCmsFeeds = emonCmsFeeds;
     }
 
     /// <summary>
@@ -329,6 +331,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // Likewise the HA Energy-Dashboard settings (URL/token/enable), so the periodic sync toggle
                 // and the manual sync/clear buttons pick up edits without a restart.
                 config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
+                // And the EmonCMS feed-provisioning settings, so AutoConfigure + the per-type feed config
+                // take effect on the next provisioning pass without a restart (#163).
+                config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
@@ -626,6 +631,23 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"Clear failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
+        // Manually run EmonCMS feed provisioning now (#163) and report what it did — so you can see it work
+        // (or why it's a no-op) without waiting for the periodic pass.
+        app.MapPost("/api/emoncms/provision-feeds", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+            try
+            {
+                var r = await emonCmsFeeds.ReconcileAsync(cts.Token);
+                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Feed provisioning failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 
