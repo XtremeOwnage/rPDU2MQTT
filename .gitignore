@@ -365,3 +365,5 @@ FodyWeavers.xsd
 /rPDU2MQTT/config.yaml
 # Backup written by the GUI when saving config.
 *.yaml.bak
+ToDo
+image*.png
