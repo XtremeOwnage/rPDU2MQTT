@@ -656,6 +656,22 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Delete every EmonCMS feed rPDU2MQTT created (under its tag/node) — the "clean up" button.
+        app.MapPost("/api/emoncms/delete-feeds", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            try
+            {
+                var r = await emonCmsFeeds.DeleteAllAsync(cts.Token);
+                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = $"Delete feeds failed: {ex.Message}" }, ConfigSchema.Json);
+            }
+        });
+
         // Live discovered structure (keys + current names) so the Overrides editor can be driven by
         // the actual devices/outlets/measurements instead of blindly-typed dictionary keys.
         app.MapGet("/api/live", async (HttpContext ctx) =>

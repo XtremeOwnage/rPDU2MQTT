@@ -118,6 +118,30 @@ public sealed class EmonCmsFeedSync
         return new(errors.Count == 0, msg, created, processesSet, virtuals);
     }
 
+    /// <summary>Delete every feed filed under rPDU2MQTT's tag(s) — the storage tag and, if different, the
+    /// virtual-feed tag. Returns how many were deleted.</summary>
+    public async Task<EmonFeedSyncResult> DeleteAllAsync(CancellationToken ct)
+    {
+        var e = config.EmonCMS;
+        if (string.IsNullOrWhiteSpace(e.Url) || string.IsNullOrWhiteSpace(e.ApiKey))
+            return new(false, "EmonCMS Url and a read/write ApiKey are required.");
+
+        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag!,
+        };
+        if (!string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag)) tags.Add(e.Feeds.Virtual.Tag!);
+
+        int deleted = 0; var errors = new List<string>();
+        foreach (var f in (await GetFeeds(ct)).Where(f => tags.Contains(f.Tag ?? "")))
+            try { await PostForm("feed/delete.json", new() { ["id"] = f.Id.ToString() }, new(), ct); deleted++; }
+            catch (Exception ex) { errors.Add($"feed '{f.Name}': {ex.Message}"); }
+
+        var msg = $"Deleted {deleted} feed(s) under tag(s) {string.Join(", ", tags)}.";
+        if (errors.Count > 0) msg += $" {errors.Count} failed: {string.Join(" | ", errors.Take(3))}";
+        return new(errors.Count == 0, msg, deleted);
+    }
+
     private async Task<bool> EnsureFeed(Dictionary<string, EmonFeed> byName, string name, string tag, int engine, int interval, int dataType, CancellationToken ct)
     {
         if (byName.ContainsKey(name)) return false;
