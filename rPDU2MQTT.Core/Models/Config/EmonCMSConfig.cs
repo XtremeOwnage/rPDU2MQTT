@@ -147,6 +147,10 @@ public class EmonCmsVirtualFeedsConfig
     [Description("Template for the friendly virtual-feed name. {name} is the source's display name, so these can change freely without touching the stable storage feeds. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
     [TemplateVariables("device", "source", "name", "number", "type", "units")]
     public string NameTemplate { get; set; } = "{name} {type}";
+
+    /// <summary>The EmonCMS tag (group) virtual feeds are filed under. Blank uses the main Feeds tag.</summary>
+    [Description("The EmonCMS tag (group/node) virtual feeds are filed under — set this to keep the friendly virtual feeds separate from the storage feeds. Blank uses the main Feeds tag.")]
+    public string? Tag { get; set; }
 }
 
 /// <summary>

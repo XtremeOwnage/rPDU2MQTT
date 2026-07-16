@@ -74,9 +74,10 @@ public static class EmonCmsFeedPlanner
             if (f.Virtual.Enabled)
             {
                 var friendly = MetricsHelper.EmonCmsVirtualFeedName(r, config);
-                // Skip if the friendly name would collide with the storage feed (idempotent naming off).
-                if (!string.Equals(friendly, storageName, StringComparison.Ordinal))
-                    virtuals[friendly] = new DesiredVirtualFeed(friendly, tag, storageName);
+                var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                // Skip if the friendly feed would collide with the storage feed (same name AND tag).
+                if (!(string.Equals(friendly, storageName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
+                    virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, storageName);
             }
         }
 
