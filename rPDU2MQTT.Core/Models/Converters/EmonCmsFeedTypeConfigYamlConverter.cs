@@ -33,10 +33,8 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
         }
 
         var dto = (Dto?)rootDeserializer(typeof(Dto)) ?? new Dto();
-        var cfg = new EmonCmsFeedTypeConfig();
+        var cfg = new EmonCmsFeedTypeConfig { Engine = dto.Engine, IntervalSeconds = dto.IntervalSeconds };
         if (!string.IsNullOrWhiteSpace(dto.Type)) cfg.Type = dto.Type!;
-        if (dto.Engine is { } e) cfg.Engine = e;
-        if (dto.IntervalSeconds is { } i) cfg.IntervalSeconds = i;
         if (dto.Daily is { } d) cfg.Daily = d;
         if (dto.DailyIntervalSeconds is { } di) cfg.DailyIntervalSeconds = di;
         return cfg;

@@ -80,6 +80,15 @@ public class EmonCmsFeedsConfig
         new() { Type = "energy" },
     };
 
+    [DefaultValue(EmonCmsFeedEngine.PHPFina)]
+    [Description("Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).")]
+    public EmonCmsFeedEngine Engine { get; set; } = EmonCmsFeedEngine.PHPFina;
+
+    [DefaultValue(10)]
+    [Range(1, 86400, ErrorMessage = "Interval must be between 1 and 86400 seconds.")]
+    [Description("Default sample interval in seconds for a fixed-interval feed, for types that don't set their own.")]
+    public int IntervalSeconds { get; set; } = 10;
+
     [DefaultValue(true)]
     [Description("Name storage feeds idempotently from stable ids (device/source/type) so they DON'T change when a source is renamed. Turn off to name them from the display name instead (renaming a source renames its feed).")]
     public bool IdempotentNames { get; set; } = true;
@@ -110,14 +119,12 @@ public class EmonCmsFeedTypeConfig
     [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
     public string Type { get; set; } = "realpower";
 
-    [DefaultValue(EmonCmsFeedEngine.PHPFina)]
-    [Description("Feed storage engine. PHPFina = fixed-interval time series (default), PHPTimeSeries = variable interval, MySQL = MySQL storage.")]
-    public EmonCmsFeedEngine Engine { get; set; } = EmonCmsFeedEngine.PHPFina;
+    [Description("Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.")]
+    public EmonCmsFeedEngine? Engine { get; set; }
 
-    [DefaultValue(10)]
     [Range(1, 86400, ErrorMessage = "Interval must be between 1 and 86400 seconds.")]
-    [Description("Sample interval in seconds for a fixed-interval (PHPFina) feed.")]
-    public int IntervalSeconds { get; set; } = 10;
+    [Description("Sample interval in seconds for this type's feed. Blank inherits Feeds.IntervalSeconds.")]
+    public int? IntervalSeconds { get; set; }
 
     [DefaultValue(false)]
     [Description("Also create a daily kWh/d feed (an extra processlist step: kWh→kWh/d). Typically only for the energy type.")]

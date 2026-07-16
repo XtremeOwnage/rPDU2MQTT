@@ -56,14 +56,17 @@ public static class EmonCmsFeedPlanner
             if (!seenInputs.Add(inputName))
                 continue;
 
+            var engine = (int)(typeCfg.Engine ?? f.Engine);          // per-type override, else the Feeds default
+            var interval = typeCfg.IntervalSeconds ?? f.IntervalSeconds;
+
             var storageName = MetricsHelper.EmonCmsStorageFeedName(r, config);
-            feeds[storageName] = new DesiredFeed(storageName, tag, (int)typeCfg.Engine, typeCfg.IntervalSeconds, DataType: 1);
+            feeds[storageName] = new DesiredFeed(storageName, tag, engine, interval, DataType: 1);
 
             string? dailyName = null;
             if (typeCfg.Daily)
             {
                 dailyName = storageName + (f.IdempotentNames ? "_d" : " kWh/d");
-                feeds[dailyName] = new DesiredFeed(dailyName, tag, (int)typeCfg.Engine, typeCfg.DailyIntervalSeconds, DataType: 2);
+                feeds[dailyName] = new DesiredFeed(dailyName, tag, engine, typeCfg.DailyIntervalSeconds, DataType: 2);
             }
 
             inputs.Add(new DesiredInputLog(inputName, storageName, dailyName));

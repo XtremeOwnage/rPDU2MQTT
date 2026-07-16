@@ -27,7 +27,7 @@ public class ConfigSchemaTests
         // v1 stored Types as bare strings; existing persisted config must still load (#163 rework).
         var legacy = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":["realpower","energy"]}}}""");
         Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
-        Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Equal(10, t.IntervalSeconds));   // defaults applied
+        Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Null(t.Engine));   // inherit the Feeds-level default
 
         var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30}]}}}""");
         var only = Assert.Single(obj.EmonCMS.Feeds.Types);

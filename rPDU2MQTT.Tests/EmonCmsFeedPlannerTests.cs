@@ -54,6 +54,26 @@ public class EmonCmsFeedPlannerTests
     }
 
     [Fact]
+    public void BuildDesired_TypeEngineInheritsFeedsDefault_UnlessOverridden()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
+        var config = Base();
+        config.EmonCMS.Feeds.Engine = EmonCmsFeedEngine.MySQL;          // Feeds-level default
+        config.EmonCMS.Feeds.IntervalSeconds = 20;
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });   // inherits -> MySQL, 20
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", Engine = EmonCmsFeedEngine.PHPFina, IntervalSeconds = 5 });
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        var rp = d.Feeds.Single(x => x.Name.EndsWith("realpower"));
+        Assert.Equal((int)EmonCmsFeedEngine.MySQL, rp.Engine);
+        Assert.Equal(20, rp.IntervalSeconds);
+        var en = d.Feeds.Single(x => x.Name.EndsWith("energy"));
+        Assert.Equal((int)EmonCmsFeedEngine.PHPFina, en.Engine);
+        Assert.Equal(5, en.IntervalSeconds);
+    }
+
+    [Fact]
     public void BuildDesired_DailyEnergy_AddsADailyFeedAtItsOwnInterval()
     {
         var data = OnePdu("o0", "Server A", ("energy", "12"));
