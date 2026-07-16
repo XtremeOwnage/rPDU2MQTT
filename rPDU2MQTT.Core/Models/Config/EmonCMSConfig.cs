@@ -156,15 +156,15 @@ public class EmonCmsVirtualFeedsConfig
 /// </summary>
 public class EmonCmsProcessConfig
 {
-    [DefaultValue("log")]
-    [Description("Process key for 'Log to feed' (default: log).")]
-    public string LogToFeed { get; set; } = "log";
+    [DefaultValue("1")]
+    [Description("Process id_num for 'Log to feed' (EmonCMS stores processlists as id_num:feedid; default 1).")]
+    public string LogToFeed { get; set; } = "1";
 
-    [DefaultValue("kwhkwhd")]
-    [Description("Process key for 'kWh to kWh/d', used for daily energy feeds (default: kwhkwhd).")]
-    public string? KwhToKwhd { get; set; } = "kwhkwhd";
+    [DefaultValue("23")]
+    [Description("Process id_num for 'kWh to kWh/d', used for daily energy feeds (default 23).")]
+    public string? KwhToKwhd { get; set; } = "23";
 
-    [DefaultValue("sfeed")]
-    [Description("Process key for 'Source feed', used for virtual feeds (default: sfeed).")]
-    public string? SourceFeed { get; set; } = "sfeed";
+    [DefaultValue("53")]
+    [Description("Process id_num for 'Source feed', used for virtual feeds (default 53).")]
+    public string? SourceFeed { get; set; } = "53";
 }
