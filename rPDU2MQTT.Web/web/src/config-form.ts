@@ -3,7 +3,7 @@
 import { ensure, el, btn, activate, slug } from './helpers.js';
 import { state } from './state.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
-import { testMqtt, testPdu, testEmonCms, rediscoverHa, clearHa } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, rediscoverHa, clearHa } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -291,7 +291,7 @@ function sectionActions(node: any) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
-  else if (node.key === 'EmonCMS') add('Test EmonCMS connection', testEmonCms);
+  else if (node.key === 'EmonCMS') { add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); }
   else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
     add('Republish discovery', rediscoverHa);

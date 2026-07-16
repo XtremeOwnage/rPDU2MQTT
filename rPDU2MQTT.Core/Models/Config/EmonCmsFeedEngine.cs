@@ -9,4 +9,5 @@ public enum EmonCmsFeedEngine
     MySQL = 0,
     PHPTimeSeries = 2,
     PHPFina = 5,
+    VirtualFeed = 7,
 }

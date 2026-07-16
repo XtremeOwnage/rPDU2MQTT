@@ -69,6 +69,8 @@ internal class YamlConfigLoader
             .WithDuplicateKeyChecking()
             // Enforce required attributes
             .WithEnforceRequiredMembers()
+            // Accept the legacy string form of EmonCMS.Feeds.Types (#163) so old configs still load.
+            .WithTypeConverter(new Models.Config.EmonCmsFeedTypeConfigYamlConverter())
             .Build();
 
     public static Config GetConfig()

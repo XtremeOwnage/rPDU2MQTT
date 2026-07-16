@@ -8,97 +8,103 @@ namespace rPDU2MQTT.Core.EmonCms;
 public sealed record EmonInput(int Id, string Name, string ProcessList);
 
 /// <summary>An EmonCMS feed as returned by <c>feed/list</c>.</summary>
-public sealed record EmonFeed(int Id, string Name, string? Tag);
+public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessList = null);
 
-/// <summary>Create a new feed for <paramref name="InputName"/> and log that input into it.</summary>
-public sealed record CreateFeed(int InputId, string InputName, string FeedName, string Tag, int Engine, int IntervalSeconds);
+/// <summary>A feed we want to exist. DataType 1 = realtime, 2 = daily (kWh/d).</summary>
+public sealed record DesiredFeed(string Name, string Tag, int Engine, int IntervalSeconds, int DataType);
 
-/// <summary>Log an input into a feed that already exists under the wanted name.</summary>
-public sealed record LinkFeed(int InputId, int FeedId, string InputName, string FeedName);
+/// <summary>An input we want logged to its storage feed (and, when set, a daily kWh/d feed).</summary>
+public sealed record DesiredInputLog(string InputName, string StorageFeed, string? DailyFeed);
 
-/// <summary>Rename a feed whose source's display name changed (keeps the feed in sync — #163).</summary>
-public sealed record RenameFeed(int FeedId, string FromName, string ToName);
+/// <summary>A friendly virtual feed sourced from a storage feed.</summary>
+public sealed record DesiredVirtualFeed(string Name, string Tag, string SourceFeed);
 
-/// <summary>The reconciliation the provisioner should apply to bring EmonCMS in line with the config.</summary>
-public sealed record EmonFeedPlan(IReadOnlyList<CreateFeed> Creates, IReadOnlyList<LinkFeed> Links, IReadOnlyList<RenameFeed> Renames);
+/// <summary>The full set of EmonCMS objects the config wants, before reconciling against what exists.</summary>
+public sealed record EmonDesiredState(
+    IReadOnlyList<DesiredFeed> Feeds,
+    IReadOnlyList<DesiredInputLog> Inputs,
+    IReadOnlyList<DesiredVirtualFeed> Virtuals);
+
+/// <summary>The resolved process ids the planner/provisioner build processlists from.</summary>
+public sealed record EmonProcessIds(string LogToFeed, string? KwhToKwhd, string? SourceFeed);
 
 /// <summary>
-/// Decides, from the current readings + EmonCMS inputs/feeds, which feeds to create, which inputs to log
-/// into an existing feed, and which feeds to rename (#163). Pure and deterministic; the HTTP work lives in
-/// the provisioner. Correlation is via the canonical <c>log_to_feed</c> process (id 1) in an input's
-/// processlist, so an already-wired input is recognised and only its feed's name is kept in sync.
+/// Computes, purely from the readings + config, the EmonCMS feeds/processlists/virtual-feeds we want (#163).
+/// Storage feeds are named idempotently (stable ids) so they don't churn on a rename; a daily energy type
+/// adds a second daily feed; virtual feeds carry the friendly name and source from the storage feed. The
+/// provisioner diffs this against what exists and applies the difference (feed ids come from EmonCMS).
 /// </summary>
 public static class EmonCmsFeedPlanner
 {
-    /// <summary>The EmonCMS process id of <c>log_to_feed</c> — stable across EmonCMS versions.</summary>
-    public const string LogToFeedProcess = "1";
-
-    public static EmonFeedPlan Plan(PduData data, Config config, IEnumerable<EmonInput> inputs, IEnumerable<EmonFeed> feeds)
+    public static EmonDesiredState BuildDesired(PduData data, Config config)
     {
         var f = config.EmonCMS.Feeds;
-        var types = (f.Types ?? new()).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var tag = string.IsNullOrWhiteSpace(f.Tag) ? config.EmonCMS.Node : f.Tag!;
-        var engine = (int)f.Engine;
-        var interval = f.IntervalSeconds;
+        var byType = new Dictionary<string, Models.Config.EmonCmsFeedTypeConfig>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in f.Types) if (!string.IsNullOrWhiteSpace(t.Type)) byType[t.Type.Trim()] = t;
 
-        var inputByName = new Dictionary<string, EmonInput>(StringComparer.OrdinalIgnoreCase);
-        foreach (var i in inputs) inputByName[i.Name] = i;
-        var feedById = new Dictionary<int, EmonFeed>();
-        foreach (var fe in feeds) feedById[fe.Id] = fe;
-        var feedByName = new Dictionary<string, EmonFeed>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fe in feeds) feedByName[fe.Name] = fe;   // first wins; good enough for name lookup
-
-        var creates = new List<CreateFeed>();
-        var links = new List<LinkFeed>();
-        var renames = new List<RenameFeed>();
-        var handledInputs = new HashSet<int>();
+        var feeds = new Dictionary<string, DesiredFeed>(StringComparer.Ordinal);
+        var inputs = new List<DesiredInputLog>();
+        var virtuals = new Dictionary<string, DesiredVirtualFeed>(StringComparer.Ordinal);
+        var seenInputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var r in MetricsHelper.EnumerateReadings(data))
         {
-            if (types.Count > 0 && !types.Contains(r.Type))
+            if (!byType.TryGetValue(r.Type, out var typeCfg))
                 continue;
-
             var inputName = MetricsHelper.EmonCmsInputName(r, config);
-            if (!inputByName.TryGetValue(inputName, out var input) || !handledInputs.Add(input.Id))
-                continue;   // input not posted yet, or already planned for
-
-            var feedName = MetricsHelper.EmonCmsFeedName(r, config);
-
-            // Already logging to a feed? Keep that feed's name in sync with the (possibly renamed) source.
-            if (LinkedFeedId(input.ProcessList) is { } linkedId && feedById.TryGetValue(linkedId, out var linked))
-            {
-                if (!string.Equals(linked.Name, feedName, StringComparison.Ordinal))
-                    renames.Add(new RenameFeed(linkedId, linked.Name, feedName));
+            if (!seenInputs.Add(inputName))
                 continue;
+
+            var engine = (int)(typeCfg.Engine ?? f.Engine);          // per-type override, else the Feeds default
+            var interval = typeCfg.IntervalSeconds ?? f.IntervalSeconds;
+
+            var storageName = MetricsHelper.EmonCmsStorageFeedName(r, config);
+            feeds[storageName] = new DesiredFeed(storageName, tag, engine, interval, DataType: 1);
+
+            string? dailyName = null;
+            if (typeCfg.Daily)
+            {
+                dailyName = storageName + (f.IdempotentNames ? "_d" : " kWh/d");
+                feeds[dailyName] = new DesiredFeed(dailyName, tag, engine, typeCfg.DailyIntervalSeconds, DataType: 2);
             }
 
-            // Not linked yet: reuse a feed already named this, else create one.
-            if (feedByName.TryGetValue(feedName, out var existing))
-                links.Add(new LinkFeed(input.Id, existing.Id, inputName, feedName));
-            else
-                creates.Add(new CreateFeed(input.Id, inputName, feedName, tag, engine, interval));
+            inputs.Add(new DesiredInputLog(inputName, storageName, dailyName));
+
+            if (f.Virtual.Enabled)
+            {
+                var friendly = MetricsHelper.EmonCmsVirtualFeedName(r, config);
+                // Skip if the friendly name would collide with the storage feed (idempotent naming off).
+                if (!string.Equals(friendly, storageName, StringComparison.Ordinal))
+                    virtuals[friendly] = new DesiredVirtualFeed(friendly, tag, storageName);
+            }
         }
 
-        return new EmonFeedPlan(creates, links, renames);
+        return new EmonDesiredState(feeds.Values.ToList(), inputs, virtuals.Values.ToList());
     }
 
     /// <summary>The feed id an input's processlist logs to (its first <c>log_to_feed</c>), or null.</summary>
-    public static int? LinkedFeedId(string? processList)
+    public static int? LinkedFeedId(string? processList, string logToFeedProcess)
     {
         if (string.IsNullOrWhiteSpace(processList)) return null;
         foreach (var pair in processList.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var parts = pair.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length == 2 && parts[0] == LogToFeedProcess && int.TryParse(parts[1], out var id))
+            if (parts.Length == 2 && parts[0] == logToFeedProcess && int.TryParse(parts[1], out var id))
                 return id;
         }
         return null;
     }
 
-    /// <summary>Add a <c>log_to_feed:&lt;feedId&gt;</c> to an existing processlist without dropping other processes.</summary>
-    public static string WithLogToFeed(string? processList, int feedId)
+    /// <summary>
+    /// Build the processlist for an input: <c>log_to_feed:&lt;storage&gt;</c>, then <c>kwh_to_kwhd:&lt;daily&gt;</c>
+    /// when a daily feed + process id are configured. Matches the two-step energy pattern in EmonCMS.
+    /// </summary>
+    public static string BuildInputProcessList(int storageFeedId, int? dailyFeedId, EmonProcessIds processes)
     {
-        var entry = $"{LogToFeedProcess}:{feedId}";
-        return string.IsNullOrWhiteSpace(processList) ? entry : processList.Trim().TrimEnd(',') + "," + entry;
+        var list = $"{processes.LogToFeed}:{storageFeedId}";
+        if (dailyFeedId is { } daily && !string.IsNullOrWhiteSpace(processes.KwhToKwhd))
+            list += $",{processes.KwhToKwhd}:{daily}";
+        return list;
     }
 }

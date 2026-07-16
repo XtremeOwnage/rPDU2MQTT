@@ -22,6 +22,36 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void EmonCmsFeedTypes_Json_DeserializesLegacyStringForm_AndObjectForm()
+    {
+        // v1 stored Types as bare strings; existing persisted config must still load (#163 rework).
+        var legacy = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":["realpower","energy"]}}}""");
+        Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
+        Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Null(t.Engine));   // inherit the Feeds-level default
+
+        var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30}]}}}""");
+        var only = Assert.Single(obj.EmonCMS.Feeds.Types);
+        Assert.Equal("energy", only.Type);
+        Assert.True(only.Daily);
+        Assert.Equal(30, only.IntervalSeconds);
+    }
+
+    [Fact]
+    public void EmonCmsFeedTypes_Yaml_DeserializesLegacyStringForm_AndObjectForm()
+    {
+        var legacy = rPDU2MQTT.Startup.YamlConfigLoader.DeserializeString(
+            "EmonCMS:\n  Feeds:\n    Types:\n      - realpower\n      - energy\n");
+        Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
+
+        var obj = rPDU2MQTT.Startup.YamlConfigLoader.DeserializeString(
+            "EmonCMS:\n  Feeds:\n    Types:\n      - Type: energy\n        Daily: true\n        IntervalSeconds: 30\n");
+        var only = Assert.Single(obj.EmonCMS.Feeds.Types);
+        Assert.Equal("energy", only.Type);
+        Assert.True(only.Daily);
+        Assert.Equal(30, only.IntervalSeconds);
+    }
+
+    [Fact]
     public void Build_ConnectionScheme_IsADropdownWithABlankChoice()
     {
         // Pdus (dictionary) -> PduConfig -> Connection -> Scheme should render as an enum (#176).
