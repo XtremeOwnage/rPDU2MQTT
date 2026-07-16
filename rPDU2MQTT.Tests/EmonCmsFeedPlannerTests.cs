@@ -102,18 +102,19 @@ public class EmonCmsFeedPlannerTests
     [Fact]
     public void BuildInputProcessList_LogToFeed_ThenDailyStepWhenConfigured()
     {
-        var p = new EmonProcessIds("1", "44", "sfeed");
-        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, null, p));
-        Assert.Equal("1:16,44:17", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, p));
-        // Daily wanted but no kwh_to_kwhd id -> only the log step.
-        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, new EmonProcessIds("1", null, null)));
+        // EmonCMS identifies processes by key (log, kwhkwhd) and stores the list as key:feedid.
+        var p = new EmonProcessIds("log", "kwhkwhd", "sfeed");
+        Assert.Equal("log:16", EmonCmsFeedPlanner.BuildInputProcessList(16, null, p));
+        Assert.Equal("log:16,kwhkwhd:17", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, p));
+        // Daily wanted but no kwh_to_kwhd key -> only the log step.
+        Assert.Equal("log:16", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, new EmonProcessIds("log", null, null)));
     }
 
     [Theory]
-    [InlineData("1:42", "1", 42)]
-    [InlineData("1:42,44:9", "1", 42)]
-    [InlineData("44:9", "1", null)]
-    [InlineData("", "1", null)]
+    [InlineData("log:42", "log", 42)]
+    [InlineData("log:42,kwhkwhd:9", "log", 42)]
+    [InlineData("kwhacc:9", "log", null)]
+    [InlineData("", "log", null)]
     public void LinkedFeedId_FindsTheLogToFeedTarget(string processList, string logProc, int? expected)
         => Assert.Equal(expected, EmonCmsFeedPlanner.LinkedFeedId(processList, logProc));
 }

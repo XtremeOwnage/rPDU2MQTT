@@ -142,18 +142,21 @@ public class EmonCmsVirtualFeedsConfig
 }
 
 /// <summary>
-/// EmonCMS process ids used in generated processlists. These are instance-specific — set them from your
-/// EmonCMS (the number shown against each process in the Inputs → process editor).
+/// EmonCMS process keys used in generated processlists. Modern EmonCMS identifies processes by short key
+/// (the tag shown against each input, e.g. <c>log</c>, <c>kwhkwhd</c>, <c>sfeed</c>) and stores the
+/// processlist as <c>key:feedid</c>. Override if your EmonCMS uses different keys (or numeric ids).
 /// </summary>
 public class EmonCmsProcessConfig
 {
-    [DefaultValue("1")]
-    [Description("Process id for 'Log to feed'.")]
-    public string LogToFeed { get; set; } = "1";
+    [DefaultValue("log")]
+    [Description("Process key for 'Log to feed' (default: log).")]
+    public string LogToFeed { get; set; } = "log";
 
-    [Description("Process id for 'kWh to kWh/d' (used for daily energy feeds).")]
-    public string? KwhToKwhd { get; set; }
+    [DefaultValue("kwhkwhd")]
+    [Description("Process key for 'kWh to kWh/d', used for daily energy feeds (default: kwhkwhd).")]
+    public string? KwhToKwhd { get; set; } = "kwhkwhd";
 
-    [Description("Process id for 'Source feed' (used for virtual feeds).")]
-    public string? SourceFeed { get; set; }
+    [DefaultValue("sfeed")]
+    [Description("Process key for 'Source feed', used for virtual feeds (default: sfeed).")]
+    public string? SourceFeed { get; set; } = "sfeed";
 }

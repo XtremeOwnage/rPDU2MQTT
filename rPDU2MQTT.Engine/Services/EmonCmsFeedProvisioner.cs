@@ -51,7 +51,7 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
         if (merged.Devices.Count == 0) return;
 
         var p = config.EmonCMS.Feeds.Processes;
-        var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "1" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
+        var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "log" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
         var desired = EmonCmsFeedPlanner.BuildDesired(merged, config);
 
         var inputs = (await GetInputs(ct)).ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
