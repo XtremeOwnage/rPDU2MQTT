@@ -76,7 +76,7 @@ public sealed class EmonCmsFeedSync
             if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
                 try
                 {
-                    await Post("input/process/set.json", new() { ["inputid"] = input.Id.ToString(), ["processlist"] = wanted }, ct);
+                    await PostForm("input/process/set.json", new() { ["inputid"] = input.Id.ToString() }, new() { ["processlist"] = wanted }, ct);
                     Log.Information($"EmonCMS: set processlist for input '{link.InputName}' -> {wanted}.");
                     processesSet++;
                 }
@@ -103,7 +103,7 @@ public sealed class EmonCmsFeedSync
                     var wanted = $"{processes.SourceFeed}:{source.Id}";
                     if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
                     {
-                        await Post("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString(), ["processlist"] = wanted }, ct);
+                        await PostForm("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString() }, new() { ["processlist"] = wanted }, ct);
                         virtuals++;
                     }
                 }
@@ -167,23 +167,35 @@ public sealed class EmonCmsFeedSync
         return root.TryGetProperty("feedid", out var fid) ? AsInt(fid) : throw new Exception($"feed/create returned no feedid: {root.GetRawText()}");
     }
 
-    private async Task Post(string path, Dictionary<string, string> query, CancellationToken ct)
-    {
-        using var doc = await GetJson(path, query, ct);
-        var root = doc.RootElement;
-        // input/process/set answers 200 even when it rejects the list; the failure is only in the body
-        // ({"success":false,"message":...}). Surface it instead of silently counting it as done.
-        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)
-            throw new Exception(root.TryGetProperty("message", out var m) ? (m.GetString() ?? root.GetRawText()) : root.GetRawText());
-    }
-
-    private async Task<JsonDocument> GetJson(string path, Dictionary<string, string>? query, CancellationToken ct)
+    private string Url(string path, Dictionary<string, string>? query)
     {
         var url = $"{config.EmonCMS.Url!.TrimEnd('/')}/{path}?apikey={Uri.EscapeDataString(config.EmonCMS.ApiKey ?? string.Empty)}";
         if (query is not null)
             foreach (var (k, v) in query) url += $"&{k}={Uri.EscapeDataString(v)}";
+        return url;
+    }
 
-        using var resp = await http.GetAsync(url, ct);
+    /// <summary>
+    /// input/process/set and feed/process/set only take effect as a POST with the processlist in the body
+    /// (a GET silently no-ops, returning "processlist was not updated") — verified against a live EmonCMS.
+    /// Identifiers (inputid/id/apikey) go in the query; the mutated fields go in the form.
+    /// </summary>
+    private async Task PostForm(string path, Dictionary<string, string> query, Dictionary<string, string> form, CancellationToken ct)
+    {
+        using var content = new FormUrlEncodedContent(form);
+        using var resp = await http.PostAsync(Url(path, query), content, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new Exception($"HTTP {(int)resp.StatusCode} from {path}: {body}");
+        var doc = JsonDocument.Parse(body);
+        // Answers 200 even on rejection; the failure is in the body ({"success":false,"message":...}).
+        if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)
+            throw new Exception(doc.RootElement.TryGetProperty("message", out var m) ? (m.GetString() ?? body) : body);
+    }
+
+    private async Task<JsonDocument> GetJson(string path, Dictionary<string, string>? query, CancellationToken ct)
+    {
+        using var resp = await http.GetAsync(Url(path, query), ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
             throw new Exception($"HTTP {(int)resp.StatusCode} from {path}: {body}");
