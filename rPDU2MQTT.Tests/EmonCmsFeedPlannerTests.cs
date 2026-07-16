@@ -1,12 +1,12 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.EmonCms;
-using rPDU2MQTT.Helpers;
+using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>EmonCmsFeedPlanner: decide feed create/link/rename actions from readings + EmonCMS state (#163).</summary>
+/// <summary>EmonCmsFeedPlanner: the desired EmonCMS feed/processlist/virtual-feed set from readings + config (#163).</summary>
 public class EmonCmsFeedPlannerTests
 {
     private static PduData OnePdu(string outletName, string displayName, params (string type, string val)[] measurements)
@@ -21,119 +21,99 @@ public class EmonCmsFeedPlannerTests
         return data;
     }
 
-    private static Config WithFeeds(params string[] types)
+    private static Config Base()
     {
         var c = new Config();
         c.EmonCMS.Node = "rpdu2mqtt";
         c.EmonCMS.InputNameTemplate = "{device}_{source}_{type}";
         c.EmonCMS.Feeds.AutoConfigure = true;
-        c.EmonCMS.Feeds.Types = types.ToList();
-        c.EmonCMS.Feeds.FeedNameTemplate = "{name} {type}";
+        c.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}_{type}";
+        c.EmonCMS.Feeds.Virtual.NameTemplate = "{name} {type}";
+        c.EmonCMS.Feeds.Types = new();
         return c;
     }
 
     [Fact]
-    public void Plan_CreatesFeeds_OnlyForSelectedTypes_WhenTheInputExists()
+    public void BuildDesired_IdempotentStorageFeeds_ForConfiguredTypesOnly()
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"), ("voltage", "230"));
-        var config = WithFeeds("realpower", "energy");   // voltage excluded
+        var config = Base();
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower", IntervalSeconds = 10 });
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", IntervalSeconds = 10 });
 
-        var inputName = MetricsHelper.EmonCmsInputName(new MeasurementReading("rack_pdu_1", "o0", "realpower", 0, "", "", "", "Server A", 1), config);
-        // Inputs exist for realpower + energy but not voltage.
-        var inputs = new[]
-        {
-            new EmonInput(1, MetricsHelper.EmonCmsInputName(Reading("realpower"), config), ""),
-            new EmonInput(2, MetricsHelper.EmonCmsInputName(Reading("energy"), config), ""),
-        };
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
-        var plan = EmonCmsFeedPlanner.Plan(data, config, inputs, Array.Empty<EmonFeed>());
-
-        Assert.Equal(2, plan.Creates.Count);
-        Assert.Contains(plan.Creates, c => c.FeedName == "Server A realpower" && c.InputId == 1);
-        Assert.Contains(plan.Creates, c => c.FeedName == "Server A energy" && c.InputId == 2);
-        Assert.DoesNotContain(plan.Creates, c => c.FeedName.Contains("voltage"));
-        Assert.Empty(plan.Renames);
-
-        static MeasurementReading Reading(string type) => new("rack_pdu_1", "o0", type, 0, "", "", "", "Server A", 1);
+        // Stable, display-name-free storage names; voltage excluded.
+        Assert.Equal(2, d.Feeds.Count);
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_realpower" && x.DataType == 1 && x.IntervalSeconds == 10);
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_energy");
+        Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("voltage"));
+        Assert.Equal(2, d.Inputs.Count);
+        Assert.All(d.Inputs, i => Assert.Null(i.DailyFeed));
+        Assert.Empty(d.Virtuals);
     }
 
     [Fact]
-    public void Plan_LinksToExistingFeed_InsteadOfCreatingADuplicate()
+    public void BuildDesired_DailyEnergy_AddsADailyFeedAtItsOwnInterval()
+    {
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", IntervalSeconds = 10, Daily = true, DailyIntervalSeconds = 86400 });
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_energy" && x.DataType == 1 && x.IntervalSeconds == 10);
+        var daily = Assert.Single(d.Feeds.Where(x => x.DataType == 2));
+        Assert.Equal("rack_pdu_1_o0_energy_d", daily.Name);
+        Assert.Equal(86400, daily.IntervalSeconds);
+        Assert.Equal("rack_pdu_1_o0_energy_d", Assert.Single(d.Inputs).DailyFeed);
+    }
+
+    [Fact]
+    public void BuildDesired_VirtualFeeds_UseFriendlyNamesSourcedFromStorageFeeds()
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
-        var config = WithFeeds("realpower");
-        var inputName = MetricsHelper.EmonCmsInputName(new MeasurementReading("rack_pdu_1", "o0", "realpower", 0, "", "", "", "Server A", 1), config);
+        var config = Base();
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });
+        config.EmonCMS.Feeds.Virtual.Enabled = true;
 
-        var inputs = new[] { new EmonInput(7, inputName, "") };              // input exists, not linked
-        var feeds = new[] { new EmonFeed(42, "Server A realpower", "rpdu2mqtt") };  // feed already named this
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
-        var plan = EmonCmsFeedPlanner.Plan(data, config, inputs, feeds);
-
-        Assert.Empty(plan.Creates);
-        Assert.Single(plan.Links);
-        Assert.Equal((7, 42), (plan.Links[0].InputId, plan.Links[0].FeedId));
+        var v = Assert.Single(d.Virtuals);
+        Assert.Equal("Server A realpower", v.Name);
+        Assert.Equal("rack_pdu_1_o0_realpower", v.SourceFeed);
     }
 
     [Fact]
-    public void Plan_RenamesLinkedFeed_WhenTheSourceIsRenamed()
-    {
-        var data = OnePdu("o0", "Server RENAMED", ("realpower", "60"));
-        var config = WithFeeds("realpower");
-        var inputName = MetricsHelper.EmonCmsInputName(new MeasurementReading("rack_pdu_1", "o0", "realpower", 0, "", "", "", "x", 1), config);
-
-        var inputs = new[] { new EmonInput(7, inputName, "1:42") };          // already logging to feed 42
-        var feeds = new[] { new EmonFeed(42, "Server OLD realpower", "rpdu2mqtt") };
-
-        var plan = EmonCmsFeedPlanner.Plan(data, config, inputs, feeds);
-
-        Assert.Empty(plan.Creates);
-        Assert.Empty(plan.Links);
-        Assert.Single(plan.Renames);
-        Assert.Equal((42, "Server OLD realpower", "Server RENAMED realpower"), (plan.Renames[0].FeedId, plan.Renames[0].FromName, plan.Renames[0].ToName));
-    }
-
-    [Fact]
-    public void Plan_LeavesAlreadyLinkedAndCorrectlyNamedFeeds_Untouched()
+    public void BuildDesired_NonIdempotent_NamesStorageFeedsFromDisplayName_AndSkipsRedundantVirtuals()
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
-        var config = WithFeeds("realpower");
-        var inputName = MetricsHelper.EmonCmsInputName(new MeasurementReading("rack_pdu_1", "o0", "realpower", 0, "", "", "", "x", 1), config);
+        var config = Base();
+        config.EmonCMS.Feeds.IdempotentNames = false;
+        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });
+        config.EmonCMS.Feeds.Virtual.Enabled = true;   // would collide with the (now friendly) storage name
 
-        var inputs = new[] { new EmonInput(7, inputName, "1:42") };
-        var feeds = new[] { new EmonFeed(42, "Server A realpower", "rpdu2mqtt") };
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
-        var plan = EmonCmsFeedPlanner.Plan(data, config, inputs, feeds);
-
-        Assert.Empty(plan.Creates);
-        Assert.Empty(plan.Links);
-        Assert.Empty(plan.Renames);
+        Assert.Contains(d.Feeds, x => x.Name == "Server A realpower");
+        Assert.Empty(d.Virtuals);   // friendly == storage, so no separate virtual feed
     }
 
     [Fact]
-    public void Plan_SkipsInputsNotYetPostedToEmonCms()
+    public void BuildInputProcessList_LogToFeed_ThenDailyStepWhenConfigured()
     {
-        var data = OnePdu("o0", "Server A", ("realpower", "60"));
-        var config = WithFeeds("realpower");
-
-        var plan = EmonCmsFeedPlanner.Plan(data, config, Array.Empty<EmonInput>(), Array.Empty<EmonFeed>());
-
-        Assert.Empty(plan.Creates);
-        Assert.Empty(plan.Links);
+        var p = new EmonProcessIds("1", "44", "sfeed");
+        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, null, p));
+        Assert.Equal("1:16,44:17", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, p));
+        // Daily wanted but no kwh_to_kwhd id -> only the log step.
+        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, new EmonProcessIds("1", null, null)));
     }
 
     [Theory]
-    [InlineData("1:42", 42)]
-    [InlineData("1:42,5:9", 42)]
-    [InlineData("5:9,1:42", 42)]
-    [InlineData("5:9", null)]
-    [InlineData("", null)]
-    public void LinkedFeedId_FindsTheLogToFeedTarget(string processList, int? expected)
-        => Assert.Equal(expected, EmonCmsFeedPlanner.LinkedFeedId(processList));
-
-    [Fact]
-    public void WithLogToFeed_AppendsWithoutDroppingExistingProcesses()
-    {
-        Assert.Equal("1:9", EmonCmsFeedPlanner.WithLogToFeed("", 9));
-        Assert.Equal("5:3,1:9", EmonCmsFeedPlanner.WithLogToFeed("5:3", 9));
-    }
+    [InlineData("1:42", "1", 42)]
+    [InlineData("1:42,44:9", "1", 42)]
+    [InlineData("44:9", "1", null)]
+    [InlineData("", "1", null)]
+    public void LinkedFeedId_FindsTheLogToFeedTarget(string processList, string logProc, int? expected)
+        => Assert.Equal(expected, EmonCmsFeedPlanner.LinkedFeedId(processList, logProc));
 }

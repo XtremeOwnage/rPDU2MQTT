@@ -9,10 +9,10 @@ using rPDU2MQTT.Models.PDU;
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// Keeps EmonCMS feeds in step with the exported inputs (#163): creates a feed per selected measurement,
-/// logs the matching input into it, and renames a feed when its source is renamed. Runs periodically in the
-/// Worker role when <c>EmonCMS.Feeds.AutoConfigure</c> is on (HTTP transport — a read/write API key is
-/// required). Feed values themselves are still produced by the input export; this only manages the feeds.
+/// Reconciles EmonCMS feeds to match <c>EmonCMS.Feeds</c> (#163): per measurement type it ensures a storage
+/// feed exists and the input logs into it (log_to_feed), adds a daily kWh/d feed + step where configured, and
+/// optionally creates friendly virtual feeds sourced from the stable storage feeds. Always registered (Worker
+/// role) and gated at runtime, so enabling/editing takes effect on the next pass without a restart.
 /// </summary>
 public sealed class EmonCmsFeedProvisioner : BackgroundService
 {
@@ -29,11 +29,11 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Slower than the poll — feed topology changes rarely, and each pass is several API calls.
-        var period = TimeSpan.FromSeconds(Math.Max(60, config.Primary.PollInterval * 6));
+        var period = TimeSpan.FromSeconds(Math.Max(30, config.Primary.PollInterval * 6));
         using var timer = new PeriodicTimer(period);
         do
         {
-            var e = config.EmonCMS;
+            var e = config.EmonCMS;   // read fresh each tick — live-reload the toggle/settings.
             if (e.Enabled && e.Feeds.AutoConfigure && !string.IsNullOrWhiteSpace(e.Url) && !string.IsNullOrWhiteSpace(e.ApiKey))
             {
                 try { await ReconcileAsync(stoppingToken); }
@@ -50,30 +50,62 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
         if (merged.Devices.Count == 0) return;
 
-        var inputs = await GetInputs(ct);
-        var feeds = await GetFeeds(ct);
-        var plan = EmonCmsFeedPlanner.Plan(merged, config, inputs, feeds);
+        var p = config.EmonCMS.Feeds.Processes;
+        var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "1" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config);
 
-        foreach (var rename in plan.Renames)
+        var inputs = (await GetInputs(ct)).ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
+        var feedByName = (await GetFeeds(ct)).GroupBy(fe => fe.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        // 1) Storage + daily feeds.
+        foreach (var f in desired.Feeds)
+            await EnsureFeed(feedByName, f.Name, f.Tag, f.Engine, f.IntervalSeconds, f.DataType, ct);
+
+        // 2) Input processlists: log_to_feed (+ kwh_to_kwhd for daily).
+        foreach (var link in desired.Inputs)
         {
-            await SetFeedName(rename.FeedId, rename.ToName, ct);
-            Log.Information($"EmonCMS: renamed feed {rename.FeedId} '{rename.FromName}' -> '{rename.ToName}'.");
+            if (!inputs.TryGetValue(link.InputName, out var input)) continue;   // not posted yet
+            if (!feedByName.TryGetValue(link.StorageFeed, out var storage)) continue;
+            int? dailyId = link.DailyFeed is { } d && feedByName.TryGetValue(d, out var df) ? df.Id : null;
+            if (link.DailyFeed is not null && string.IsNullOrWhiteSpace(processes.KwhToKwhd))
+                Log.Warning("EmonCMS: daily feed requested but Feeds.Processes.KwhToKwhd is not set — skipping the kWh/d step.");
+
+            var wanted = EmonCmsFeedPlanner.BuildInputProcessList(storage.Id, dailyId, processes);
+            if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
+            {
+                await Post("input/process/set.json", new() { ["inputid"] = input.Id.ToString(), ["processlist"] = wanted }, ct);
+                Log.Information($"EmonCMS: set processlist for input '{link.InputName}' -> {wanted}.");
+            }
         }
-        foreach (var link in plan.Links)
+
+        // 3) Virtual feeds: friendly name, sourced from the storage feed.
+        foreach (var v in desired.Virtuals)
         {
-            await LogInputToFeed(link.InputId, link.FeedId, InputProcessList(inputs, link.InputId), ct);
-            Log.Information($"EmonCMS: logged input '{link.InputName}' into existing feed '{link.FeedName}'.");
-        }
-        foreach (var create in plan.Creates)
-        {
-            var feedId = await CreateFeed(create, ct);
-            await LogInputToFeed(create.InputId, feedId, InputProcessList(inputs, create.InputId), ct);
-            Log.Information($"EmonCMS: created feed '{create.FeedName}' (#{feedId}) and logged input '{create.InputName}'.");
+            if (!feedByName.TryGetValue(v.SourceFeed, out var source)) continue;
+            if (string.IsNullOrWhiteSpace(processes.SourceFeed))
+            {
+                Log.Warning("EmonCMS: virtual feeds enabled but Feeds.Processes.SourceFeed is not set — skipping virtual feeds.");
+                break;
+            }
+            var vfeed = await EnsureFeed(feedByName, v.Name, v.Tag, (int)EmonCmsFeedEngine.VirtualFeed, 0, dataType: 1, ct);
+            var wanted = $"{processes.SourceFeed}:{source.Id}";
+            if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
+            {
+                await Post("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString(), ["processlist"] = wanted }, ct);
+                Log.Information($"EmonCMS: virtual feed '{v.Name}' sourced from '{v.SourceFeed}'.");
+            }
         }
     }
 
-    private static string InputProcessList(IReadOnlyList<EmonInput> inputs, int inputId)
-        => inputs.FirstOrDefault(i => i.Id == inputId)?.ProcessList ?? string.Empty;
+    private async Task<EmonFeed> EnsureFeed(Dictionary<string, EmonFeed> byName, string name, string tag, int engine, int interval, int dataType, CancellationToken ct)
+    {
+        if (byName.TryGetValue(name, out var existing)) return existing;
+        var id = await CreateFeed(name, tag, engine, interval, dataType, ct);
+        var created = new EmonFeed(id, name, tag);
+        byName[name] = created;
+        Log.Information($"EmonCMS: created feed '{name}' (#{id}, engine {engine}).");
+        return created;
+    }
 
     // ---- EmonCMS API ---------------------------------------------------------------------------------
 
@@ -91,36 +123,33 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
         using var doc = await GetJson("feed/list.json", null, ct);
         var list = new List<EmonFeed>();
         foreach (var el in doc.RootElement.EnumerateArray())
-            list.Add(new EmonFeed(GetInt(el, "id"), GetString(el, "name"), el.TryGetProperty("tag", out var t) ? t.GetString() : null));
+            list.Add(new EmonFeed(GetInt(el, "id"), GetString(el, "name"),
+                el.TryGetProperty("tag", out var t) ? t.GetString() : null,
+                el.TryGetProperty("processList", out var pl) ? pl.GetString() : null));
         return list;
     }
 
-    private async Task<int> CreateFeed(CreateFeed create, CancellationToken ct)
+    private async Task<int> CreateFeed(string name, string tag, int engine, int interval, int dataType, CancellationToken ct)
     {
-        var options = JsonSerializer.Serialize(new { interval = create.IntervalSeconds });
-        using var doc = await GetJson("feed/create.json", new()
+        var query = new Dictionary<string, string>
         {
-            ["tag"] = create.Tag,
-            ["name"] = create.FeedName,
-            ["engine"] = create.Engine.ToString(),
-            ["options"] = options,
-        }, ct);
+            ["tag"] = tag,
+            ["name"] = name,
+            ["datatype"] = dataType.ToString(),
+            ["engine"] = engine.ToString(),
+        };
+        if (interval > 0)
+            query["options"] = JsonSerializer.Serialize(new { interval });
+        using var doc = await GetJson("feed/create.json", query, ct);
         var root = doc.RootElement;
         if (root.TryGetProperty("success", out var s) && !s.GetBoolean())
             throw new Exception($"feed/create rejected: {root.GetRawText()}");
         return root.TryGetProperty("feedid", out var fid) ? AsInt(fid) : throw new Exception($"feed/create returned no feedid: {root.GetRawText()}");
     }
 
-    private async Task SetFeedName(int feedId, string name, CancellationToken ct)
+    private async Task Post(string path, Dictionary<string, string> query, CancellationToken ct)
     {
-        var fields = JsonSerializer.Serialize(new { name });
-        using var _ = await GetJson("feed/set.json", new() { ["id"] = feedId.ToString(), ["fields"] = fields }, ct);
-    }
-
-    private async Task LogInputToFeed(int inputId, int feedId, string existingProcessList, CancellationToken ct)
-    {
-        var processlist = EmonCmsFeedPlanner.WithLogToFeed(existingProcessList, feedId);
-        using var _ = await GetJson("input/process/set.json", new() { ["inputid"] = inputId.ToString(), ["processlist"] = processlist }, ct);
+        using var _ = await GetJson(path, query, ct);
     }
 
     private async Task<JsonDocument> GetJson(string path, Dictionary<string, string>? query, CancellationToken ct)

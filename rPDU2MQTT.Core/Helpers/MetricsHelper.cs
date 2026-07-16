@@ -95,17 +95,16 @@ public static class MetricsHelper
     }
 
     /// <summary>
-    /// The EmonCMS feed name for a reading, applying <c>EmonCMS.Feeds.FeedNameTemplate</c>. Unlike the input
-    /// key, this keeps a human-friendly form (spaces allowed) so renaming a source renames its feed (#163).
+    /// Fill an EmonCMS feed-name template for a reading (#163). Keeps a human-friendly form (spaces allowed);
+    /// <c>{type}</c> honours the measurement's Overrides.Measurements ID.
     /// </summary>
-    public static string EmonCmsFeedName(MeasurementReading r, Config config)
+    public static string EmonCmsFeedName(MeasurementReading r, string template, Config config)
     {
         var effectiveType = config.Overrides.Measurements.TryGetValue(r.Type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
             ? ov!.ID!
             : r.Type;
 
-        var template = string.IsNullOrWhiteSpace(config.EmonCMS.Feeds.FeedNameTemplate) ? "{name} {type}" : config.EmonCMS.Feeds.FeedNameTemplate;
-        return template
+        return (string.IsNullOrWhiteSpace(template) ? "{name} {type}" : template)
             .Replace("{type}", effectiveType)
             .Replace("{device}", r.Device)
             .Replace("{source}", r.Source)
@@ -115,6 +114,20 @@ public static class MetricsHelper
             .Replace("{units}", r.Units)
             .Trim();
     }
+
+    /// <summary>The idempotent storage-feed name (from a stable id template — no display name), or the friendly
+    /// name when idempotent naming is off.</summary>
+    public static string EmonCmsStorageFeedName(MeasurementReading r, Config config)
+    {
+        var f = config.EmonCMS.Feeds;
+        return f.IdempotentNames
+            ? EmonCmsFeedName(r, f.StorageNameTemplate, config)
+            : EmonCmsFeedName(r, f.Virtual.NameTemplate, config);
+    }
+
+    /// <summary>The friendly (display-name based) feed name used for virtual feeds.</summary>
+    public static string EmonCmsVirtualFeedName(MeasurementReading r, Config config)
+        => EmonCmsFeedName(r, config.EmonCMS.Feeds.Virtual.NameTemplate, config);
 
     /// <summary>True when the EmonCMS MQTT topic template splits the export per PDU (it contains {device}).</summary>
     public static bool EmonCmsSplitsByDevice(Config config)

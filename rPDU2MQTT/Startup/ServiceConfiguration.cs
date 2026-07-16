@@ -153,15 +153,12 @@ public static class ServiceConfiguration
                 if (cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http)
                     ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
                 services.AddHostedService<EmonCmsExportService>();
-
-                // Feed auto-provisioning drives the EmonCMS REST API directly, so it always needs the HTTP
-                // Url + key even when measurements are delivered over MQTT.
-                if (cfg.EmonCMS.Feeds.AutoConfigure)
-                {
-                    ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
-                    services.AddHostedService<EmonCmsFeedProvisioner>();
-                }
             }
+
+            // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
+            // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in
+            // the GUI takes effect without a restart.
+            services.AddHostedService<EmonCmsFeedProvisioner>();
 
             if (cfg.HASS.DiscoveryEnabled)
             {

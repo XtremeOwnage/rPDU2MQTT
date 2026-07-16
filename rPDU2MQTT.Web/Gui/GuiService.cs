@@ -329,6 +329,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // Likewise the HA Energy-Dashboard settings (URL/token/enable), so the periodic sync toggle
                 // and the manual sync/clear buttons pick up edits without a restart.
                 config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
+                // And the EmonCMS feed-provisioning settings, so AutoConfigure + the per-type feed config
+                // take effect on the next provisioning pass without a restart (#163).
+                config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
