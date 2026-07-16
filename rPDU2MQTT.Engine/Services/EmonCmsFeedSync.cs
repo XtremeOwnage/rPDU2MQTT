@@ -56,26 +56,31 @@ public sealed class EmonCmsFeedSync
         var feedByName = (await GetFeeds(ct)).GroupBy(fe => fe.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
         int created = 0, processesSet = 0, virtuals = 0;
+        var errors = new List<string>();
 
-        // 1) Storage + daily feeds.
+        // 1) Storage + daily feeds. Keep going if one fails (e.g. a server-side engine/permission error)
+        //    so the rest still get provisioned and every failure is reported.
         foreach (var f in desired.Feeds)
-            if (await EnsureFeed(feedByName, f.Name, f.Tag, f.Engine, f.IntervalSeconds, f.DataType, ct)) created++;
+            try { if (await EnsureFeed(feedByName, f.Name, f.Tag, f.Engine, f.IntervalSeconds, f.DataType, ct)) created++; }
+            catch (Exception ex) { errors.Add($"feed '{f.Name}': {ex.Message}"); }
 
         // 2) Input processlists: log_to_feed (+ kwh_to_kwhd for daily).
         var missingInputs = 0;
         foreach (var link in desired.Inputs)
         {
             if (!inputs.TryGetValue(link.InputName, out var input)) { missingInputs++; continue; }
-            if (!feedByName.TryGetValue(link.StorageFeed, out var storage)) continue;
+            if (!feedByName.TryGetValue(link.StorageFeed, out var storage)) continue;   // its feed failed to create
             int? dailyId = link.DailyFeed is { } d && feedByName.TryGetValue(d, out var df) ? df.Id : null;
 
             var wanted = EmonCmsFeedPlanner.BuildInputProcessList(storage.Id, dailyId, processes);
             if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
-            {
-                await Post("input/process/set.json", new() { ["inputid"] = input.Id.ToString(), ["processlist"] = wanted }, ct);
-                Log.Information($"EmonCMS: set processlist for input '{link.InputName}' -> {wanted}.");
-                processesSet++;
-            }
+                try
+                {
+                    await Post("input/process/set.json", new() { ["inputid"] = input.Id.ToString(), ["processlist"] = wanted }, ct);
+                    Log.Information($"EmonCMS: set processlist for input '{link.InputName}' -> {wanted}.");
+                    processesSet++;
+                }
+                catch (Exception ex) { errors.Add($"processlist '{link.InputName}': {ex.Message}"); }
         }
 
         // 3) Virtual feeds: friendly name, sourced from the storage feed.
@@ -85,26 +90,32 @@ public sealed class EmonCmsFeedSync
             foreach (var v in desired.Virtuals)
             {
                 if (!feedByName.TryGetValue(v.SourceFeed, out var source)) continue;
-                if (!feedByName.TryGetValue(v.Name, out var vfeed))
+                try
                 {
-                    var id = await CreateFeed(v.Name, v.Tag, (int)EmonCmsFeedEngine.VirtualFeed, 0, 1, ct);
-                    vfeed = new EmonFeed(id, v.Name, v.Tag);
-                    feedByName[v.Name] = vfeed;
-                    created++;
-                    Log.Information($"EmonCMS: created virtual feed '{v.Name}' (#{id}).");
+                    if (!feedByName.TryGetValue(v.Name, out var vfeed))
+                    {
+                        var id = await CreateFeed(v.Name, v.Tag, (int)EmonCmsFeedEngine.VirtualFeed, 0, 1, ct);
+                        vfeed = new EmonFeed(id, v.Name, v.Tag);
+                        feedByName[v.Name] = vfeed;
+                        created++;
+                        Log.Information($"EmonCMS: created virtual feed '{v.Name}' (#{id}).");
+                    }
+                    var wanted = $"{processes.SourceFeed}:{source.Id}";
+                    if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
+                    {
+                        await Post("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString(), ["processlist"] = wanted }, ct);
+                        virtuals++;
+                    }
                 }
-                var wanted = $"{processes.SourceFeed}:{source.Id}";
-                if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
-                {
-                    await Post("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString(), ["processlist"] = wanted }, ct);
-                    virtuals++;
-                }
+                catch (Exception ex) { errors.Add($"virtual feed '{v.Name}': {ex.Message}"); }
             }
 
         var msg = $"Created {created} feed(s), set {processesSet} processlist(s), wired {virtuals} virtual feed(s).";
         if (missingInputs > 0)
-            msg += $" {missingInputs} input(s) not in EmonCMS yet — check EmonCMS export is enabled and posting.";
-        return new(true, msg, created, processesSet, virtuals);
+            msg += $" {missingInputs} input(s) not in EmonCMS yet — check the EmonCMS export is enabled and posting.";
+        if (errors.Count > 0)
+            msg += $" {errors.Count} failed: {string.Join(" | ", errors.Take(3))}{(errors.Count > 3 ? " …" : "")}";
+        return new(errors.Count == 0, msg, created, processesSet, virtuals);
     }
 
     private async Task<bool> EnsureFeed(Dictionary<string, EmonFeed> byName, string name, string tag, int engine, int interval, int dataType, CancellationToken ct)
