@@ -22,6 +22,21 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void EmonCmsFeedTypes_DeserializesLegacyStringForm_AndObjectForm()
+    {
+        // v1 stored Types as bare strings; existing persisted config must still load (#163 rework).
+        var legacy = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":["realpower","energy"]}}}""");
+        Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
+        Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Equal(10, t.IntervalSeconds));   // defaults applied
+
+        var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30}]}}}""");
+        var only = Assert.Single(obj.EmonCMS.Feeds.Types);
+        Assert.Equal("energy", only.Type);
+        Assert.True(only.Daily);
+        Assert.Equal(30, only.IntervalSeconds);
+    }
+
+    [Fact]
     public void Build_ConnectionScheme_IsADropdownWithABlankChoice()
     {
         // Pdus (dictionary) -> PduConfig -> Connection -> Scheme should render as an enum (#176).

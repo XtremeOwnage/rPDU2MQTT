@@ -102,7 +102,8 @@ public class EmonCmsFeedsConfig
     public EmonCmsProcessConfig Processes { get; set; } = new();
 }
 
-/// <summary>Per-measurement-type feed settings.</summary>
+/// <summary>Per-measurement-type feed settings. Also accepts a bare type string (the v1 form) on load.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(EmonCmsFeedTypeConfigConverter))]
 public class EmonCmsFeedTypeConfig
 {
     [Description("The measurement type this applies to (raw PDU type name).")]
