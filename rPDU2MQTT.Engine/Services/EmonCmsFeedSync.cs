@@ -169,7 +169,12 @@ public sealed class EmonCmsFeedSync
 
     private async Task Post(string path, Dictionary<string, string> query, CancellationToken ct)
     {
-        using var _ = await GetJson(path, query, ct);
+        using var doc = await GetJson(path, query, ct);
+        var root = doc.RootElement;
+        // input/process/set answers 200 even when it rejects the list; the failure is only in the body
+        // ({"success":false,"message":...}). Surface it instead of silently counting it as done.
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)
+            throw new Exception(root.TryGetProperty("message", out var m) ? (m.GetString() ?? root.GetRawText()) : root.GetRawText());
     }
 
     private async Task<JsonDocument> GetJson(string path, Dictionary<string, string>? query, CancellationToken ct)
