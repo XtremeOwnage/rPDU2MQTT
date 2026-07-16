@@ -118,6 +118,10 @@ public static class ServiceConfiguration
         // sync/clear buttons, so register the engine singleton regardless of role.
         services.AddSingleton<Services.HaEnergyDashboardSync>();
 
+        // EmonCMS feed provisioning (#163) — shared by the periodic provisioner and the GUI's "Provision
+        // now" button, so register the singleton regardless of role.
+        services.AddSingleton<Services.EmonCmsFeedSync>();
+
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
         // Single-node "all" keeps the bus fully in-process and skips this (no extra broker traffic).

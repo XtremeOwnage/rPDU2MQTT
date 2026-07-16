@@ -1417,7 +1417,7 @@ function sectionActions(node     ) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
-  else if (node.key === 'EmonCMS') add('Test EmonCMS connection', testEmonCms);
+  else if (node.key === 'EmonCMS') { add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); }
   else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
     add('Republish discovery', rediscoverHa);
@@ -1433,6 +1433,7 @@ function sectionActions(node     ) {
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function testEmonCms() { toast('Testing EmonCMS…', true); const r = await api('/api/test/emoncms', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
+async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function clearHa() {
   if (!confirm('Clear all Home Assistant discovery messages? The entities will disappear from Home Assistant until discovery runs again.')) return;
