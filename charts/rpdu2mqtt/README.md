@@ -50,21 +50,24 @@ credentials:
 | `config` | see `values.yaml` | The full app config (rendered to `config.yaml`). |
 | `credentials.{mqtt,pdu}.{username,password}` | `""` | Injected as `RPDU2MQTT_*`; chart creates a Secret. |
 | `credentials.emoncmsApiKey` | `""` | EmonCMS write key (`RPDU2MQTT_EMONCMS_APIKEY`). |
+| `credentials.apiKey` | `""` | REST API key enabling its write/control endpoints (`RPDU2MQTT_API_KEY`). Required to use control via the API when `kubernetesConfigSource.enabled`, since secrets are stripped from the CR. |
 | `existingSecret` | `""` | Use a Secret you manage instead of creating one. |
 | `split.enabled` | `false` | Deploy the app's roles as separate Deployments (`-worker`, `-api`, `-ui`) so they scale independently. Off = one Deployment runs every role. The gui Service targets the `ui` pods and the metrics Service the `worker` pods. |
 | `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role Deployment (only with `split.enabled`). Keep `worker` at `1` — it owns the single PDU session. |
 | `split.{worker,api,ui}.resources` | `{}` | Per-role resource requests/limits (falls back to `resources`). |
 | `service.gui.enabled` | `true` | Create a Service for the GUI (when `config.Gui.Enabled`). |
+| `service.api.enabled` | `true` | Create a Service for the REST API + its OpenAPI/Scalar docs (when `config.Api.Enabled`). |
 | `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Exporter`). |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
 | `serviceMonitor.labels` | `{}` | Extra labels so your Prometheus adopts the ServiceMonitor (e.g. `release: <kube-prometheus-stack release>`); without a match it is silently ignored. |
 | `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
 | `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, which is empty under Argo CD (`helm template`) — see `manageResource` below. |
 | `kubernetesConfigSource.manageResource` | `true` | Whether the chart renders the `RpduConfig` CR and the GUI-written credentials `Secret`. Set `false` to manage them out of band so GitOps (Argo/Flux) never syncs over GUI edits; RBAC + the config source stay on, but you must create the CR (and Secret, if used) once yourself. |
-| `ingress.enabled` | `false` | Expose the GUI via an Ingress. |
-| `httpRoute.enabled` | `false` | Expose the GUI via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
+| `ingress.enabled` | `false` | Expose the GUI and/or REST API via an Ingress. Each `ingress.hosts[].paths[]` entry takes an optional `service:` of `gui` (default) or `api`. |
+| `httpRoute.enabled` | `false` | Expose the GUI and/or REST API via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
+| `httpRoute.paths` | `[]` | Path-based rules mirroring `ingress`, each with an optional `service:` (`gui`/`api`). Empty routes everything to the GUI. `httpRoute.rules` overrides this with raw rules. |
 | `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
-| `networkPolicy.enabled` | `false` | Restrict pod access: GUI/metrics ingress only from `networkPolicy.guiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
+| `networkPolicy.enabled` | `false` | Restrict pod access: GUI/API/metrics ingress only from `networkPolicy.guiIngressFrom` / `apiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity` | `{}` / `[]` | Standard pod scheduling/limits. |
 
@@ -79,5 +82,31 @@ credentials:
   adopts ServiceMonitors matching its `serviceMonitorSelector` — for kube-prometheus-stack that's
   usually `release: <your-stack>`, so set `serviceMonitor.labels` to match or the ServiceMonitor is
   silently ignored.
+- **Exposing the REST API:** enable `config.Api.Enabled` (the chart then creates a `<release>-api`
+  Service on `config.Api.Port`), then route to it with `service: api` on an Ingress or HTTPRoute path:
+
+  ```yaml
+  config:
+    Api:
+      Enabled: true
+  ingress:
+    enabled: true
+    hosts:
+      - host: rpdu2mqtt.example.com
+        paths:
+          - path: /
+            pathType: Prefix          # -> GUI
+          - path: /api
+            pathType: Prefix
+            service: api              # -> REST API
+          - path: /scalar             # the docs UI; add /openapi too if you want the raw document
+            pathType: Prefix
+            service: api
+  ```
+
+  The API's docs live at `/scalar/v1` and `/openapi/v1.json` — routing only `/api` leaves them
+  unreachable, so give the API its own host or add those paths as above. Routing to `service: api`
+  while the API is disabled fails the render rather than emitting a dangling backend. The API is
+  unauthenticated for reads: put auth at your ingress, or restrict `networkPolicy.apiIngressFrom`.
 - **Single replica:** the bridge owns a PDU session and has no leader election; keep `replicaCount: 1`
   (the Deployment uses the `Recreate` strategy).

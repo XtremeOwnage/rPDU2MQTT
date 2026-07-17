@@ -97,6 +97,10 @@ spec:
             - name: gui
               containerPort: {{ dig "Gui" "Port" 8080 $.Values.config }}
             {{- end }}
+            {{- if (include "rpdu2mqtt.apiEnabled" $) }}
+            - name: api
+              containerPort: {{ include "rpdu2mqtt.apiPort" $ }}
+            {{- end }}
             {{- if (include "rpdu2mqtt.metricsEnabled" $) }}
             - name: metrics
               containerPort: {{ include "rpdu2mqtt.metricsPort" $ }}

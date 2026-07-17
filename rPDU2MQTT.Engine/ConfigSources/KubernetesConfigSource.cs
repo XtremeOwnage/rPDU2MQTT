@@ -37,6 +37,7 @@ public sealed class KubernetesConfigSource : IConfigSource
         ("RPDU2MQTT_PDU_PASSWORD",  c => c.Primary.Credentials?.Password,  (c, v) => (c.Primary.Credentials  ??= new()).Password = v),
         ("RPDU2MQTT_EMONCMS_APIKEY", c => c.EmonCMS.ApiKey, (c, v) => c.EmonCMS.ApiKey = v),
         ("RPDU2MQTT_GUI_PASSWORD",   c => c.Gui.Password,   (c, v) => c.Gui.Password = v),
+        ("RPDU2MQTT_API_KEY",        c => c.Api.ApiKey,     (c, v) => c.Api.ApiKey = v),
         ("RPDU2MQTT_OIDC_CLIENT_SECRET", c => c.Gui.Oidc?.ClientSecret, (c, v) => (c.Gui.Oidc ??= new()).ClientSecret = v),
     };
 

@@ -653,6 +653,11 @@ Api:
   ApiKey: ""            # optional; set to enable the write/control endpoints (see below)
 ```
 
+`ApiKey` can also be supplied out of band as **`RPDU2MQTT_API_KEY`** (or `RPDU2MQTT_API_KEY_FILE`
+pointing at a file, e.g. a Docker/Kubernetes secret), like the other credentials. With the Kubernetes
+config source this is **required** rather than optional: the API key is stripped from the `RpduConfig`
+CR along with every other secret, so it has to come from the environment.
+
 | Endpoint | Description |
 | --- | --- |
 | `GET /api/v1/instances` | Configured PDU instances (id, primary, host, poll interval, actions). |
@@ -660,6 +665,11 @@ Api:
 | `GET /api/v1/snapshots` | Latest snapshot timestamp/age per instance. |
 | `GET /api/v1/readings` | Flattened measurements from the latest snapshot(s); filter with `?instance=`. |
 | `GET /openapi/v1.json`, `/scalar/v1` | OpenAPI document + interactive docs UI. |
+
+Browsing to the API port's root (`/`) redirects to `/scalar/v1`. The GUI's **Api** page also links
+straight to these URLs. Because the API listens on its own port, those links only resolve if that port
+is reachable from your browser — in Kubernetes, expose it via the chart's `service: api` route (see
+[the chart README](../charts/rpdu2mqtt/README.md)).
 
 ### Control endpoints (opt-in)
 
