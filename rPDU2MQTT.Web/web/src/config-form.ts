@@ -11,6 +11,7 @@ import { addLiveDataSection } from './sections/livedata.js';
 import { addFlowSection } from './sections/flow.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
+import { addHomeSection } from './sections/home.js';
 
 function scalarInput(node: any, obj: any): any {
   let el: any;
@@ -215,15 +216,15 @@ export function build() {
   const general: any = NAV_GROUPS.find(g => g.title === 'General');
   state.schema.forEach((n: any) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
 
-  let first: any = null;
+  // The landing page: a status board, rendered first so it's the default tab (#186).
+  const home = addHomeSection(nav, sections);
+  let first: any = home.link;
+
   for (const g of NAV_GROUPS) {
     const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
     if (!nodes.length) continue;
     navHeader(nav, g.title);
-    for (const node of nodes) {
-      const link = renderConfigSection(node, nav, sections);
-      if (!first) first = link;
-    }
+    for (const node of nodes) renderConfigSection(node, nav, sections);
   }
 
   // Tools: the functional (non-config) tabs.
