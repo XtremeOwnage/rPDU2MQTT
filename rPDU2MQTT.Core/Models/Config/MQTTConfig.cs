@@ -32,7 +32,7 @@ public class MQTTConfig
     /// </summary>
     [Required(ErrorMessage = "Connection is required")]
     [Display(Description = "Connection details for MQTT Broker")]
-    public Connection Connection { get; set; } = new Connection();
+    public MqttConnection Connection { get; set; } = new MqttConnection();
 
     /// <summary>
     /// Gets or sets the keepalive interval for the MQTT connection in seconds.

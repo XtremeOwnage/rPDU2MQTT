@@ -28,11 +28,15 @@ public class Connection
     [Description("Default connection timeout.")]
     public int? TimeoutSecs { get; set; } = 15;
 
+    /// <summary>
+    /// The connection scheme. Virtual so a transport with a different scheme vocabulary
+    /// (e.g. <see cref="MqttConnection"/>: mqtt/mqtts/ws/wss) can narrow the allowed values.
+    /// </summary>
     [YamlMember(Alias = "Scheme", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
     [Display(Name = "Connection Scheme", Description = "Connection scheme used")]
     [Description("Default connection scheme.")]
     [AllowedValues("http", "https")]
-    public string? Scheme { get; set; }
+    public virtual string? Scheme { get; set; }
 
     [DefaultValue(true)]
     [Display(Name = "Validate Certificate", Description = "Enables certificate validation")]

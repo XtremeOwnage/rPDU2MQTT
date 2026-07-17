@@ -46,5 +46,9 @@ public class ConfigWatcherTests
 
         var gui = Sample(); gui.Gui.Port = 9090;
         Assert.True(KubernetesConfigWatcher.RequiresRestart(baseline, gui));
+
+        // The MQTT client is built once at startup, so switching transport must force a restart (#189).
+        var scheme = Sample(); scheme.MQTT.Connection.Scheme = "mqtts";
+        Assert.True(KubernetesConfigWatcher.RequiresRestart(baseline, scheme));
     }
 }

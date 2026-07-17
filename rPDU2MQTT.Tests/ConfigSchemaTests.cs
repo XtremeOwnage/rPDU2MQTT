@@ -65,6 +65,80 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void Build_MqttScheme_IsADropdownOfBrokerSchemes()
+    {
+        // MQTT -> Connection -> Scheme must offer the broker vocabulary, not http/https (#189).
+        var mqtt = ConfigSchema.Build().Single(n => n.Key == "MQTT");
+        var connection = mqtt.Properties!.Single(n => n.Key == "Connection");
+        var scheme = connection.Properties!.Single(n => n.Key == "Scheme");
+
+        Assert.Equal("enum", scheme.Type);
+        Assert.Equal(new[] { "", "mqtt", "mqtts", "ws", "wss" }, scheme.EnumValues);
+        // The override must not leave a second, http/https-flavoured Scheme node behind.
+        Assert.Single(connection.Properties!, n => n.Key == "Scheme");
+    }
+
+    [Theory]
+    [InlineData("mqtt", null, 1883, false, false)]
+    [InlineData("mqtts", null, 8883, true, false)]
+    [InlineData("ws", null, 8000, false, true)]
+    [InlineData("wss", null, 8884, true, true)]
+    [InlineData("mqtts", 9999, 9999, true, false)]   // an explicit port still wins over the scheme default
+    public void MqttConnection_ResolvesPortAndTransportFromScheme(string scheme, int? port, int expectedPort, bool tls, bool ws)
+    {
+        var conn = new MqttConnection { Host = "broker.example.com", Scheme = scheme, Port = port };
+
+        Assert.Equal(expectedPort, conn.ResolvedPort);
+        Assert.Equal(tls, conn.UsesTls);
+        Assert.Equal(ws, conn.UsesWebSockets);
+    }
+
+    [Theory]
+    [InlineData(1883, "mqtt", false)]
+    [InlineData(8883, "mqtts", true)]
+    [InlineData(8884, "wss", true)]
+    [InlineData(1234, "mqtt", false)]   // an unrecognized port stays plain, as it behaved before #189
+    public void MqttConnection_InfersSchemeFromPort_WhenUnset(int port, string expected, bool tls)
+    {
+        // Configs written before the Scheme field existed only set Host/Port; a broker on 8883 must
+        // still get TLS rather than silently connecting in plaintext.
+        var conn = new MqttConnection { Host = "broker.example.com", Port = port };
+
+        Assert.Equal(expected, conn.EffectiveScheme);
+        Assert.Equal(tls, conn.UsesTls);
+        Assert.Equal(port, conn.ResolvedPort);
+    }
+
+    [Fact]
+    public void MqttConnection_DerivedProperties_AreNotSerialized()
+    {
+        // EffectiveScheme/UsesTls/ResolvedPort are computed; they must not leak into the CR spec or YAML.
+        var cfg = new Config();
+        cfg.MQTT.Connection.Host = "broker.example.com";
+        cfg.MQTT.Connection.Scheme = "mqtts";
+
+        foreach (var derived in new[] { "EffectiveScheme", "UsesTls", "UsesWebSockets", "ResolvedPort" })
+        {
+            Assert.DoesNotContain(derived, ConfigSchema.ToJson(cfg));
+            Assert.DoesNotContain(derived, ConfigSchema.ToYaml(cfg));
+        }
+
+        // The scheme itself still round-trips.
+        Assert.Equal("mqtts", ConfigSchema.FromJson(ConfigSchema.ToJson(cfg)).MQTT.Connection.Scheme);
+    }
+
+    [Fact]
+    public void MqttScheme_RoundTripsThroughYaml()
+    {
+        var cfg = YamlConfigLoader.DeserializeString(
+            "MQTT:\n  Connection:\n    Host: broker.example.com\n    Scheme: wss\n");
+
+        Assert.Equal("wss", cfg.MQTT.Connection.Scheme);
+        Assert.Equal(8884, cfg.MQTT.Connection.ResolvedPort);
+        Assert.True(cfg.MQTT.Connection.UsesWebSockets);
+    }
+
+    [Fact]
     public void Build_OverrideDevicesAndOutletsExposeMakeAndModel()
     {
         var overrides = ConfigSchema.Build().Single(n => n.Key == "Overrides");

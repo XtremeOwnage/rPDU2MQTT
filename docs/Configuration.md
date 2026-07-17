@@ -19,6 +19,27 @@ Mqtt:
     Password: "password" # Replace with your MQTT password
 ```
 
+### Connection (Optional)
+
+`Scheme` selects how the broker is reached. When it is omitted, the scheme is inferred from `Port`
+(8883 → `mqtts`, 8000 → `ws`, 8884 → `wss`, anything else → `mqtt`), and when `Port` is omitted it
+defaults to the well-known port for the scheme.
+
+| Scheme  | Transport             | Default port |
+|---------|-----------------------|--------------|
+| `mqtt`  | Plain TCP             | 1883         |
+| `mqtts` | TLS                   | 8883         |
+| `ws`    | WebSocket             | 8000         |
+| `wss`   | WebSocket over TLS    | 8884         |
+
+```yaml
+Mqtt:
+  Connection:
+    Host: "broker.example.com"
+    Scheme: "mqtts"          # omit to infer from Port
+    ValidateCertificate: true # set false to accept a self-signed broker certificate (TLS schemes only)
+```
+
 ### Parent Topic (Optional)
 
 This defines the parent topic under which all MQTT keys will be published.
