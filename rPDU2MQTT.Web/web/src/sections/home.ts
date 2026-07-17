@@ -6,7 +6,7 @@ export function addHomeSection(nav: any, sections: any) {
   const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Status' }));
-  sec.appendChild(el('div', { class: 'desc', text: 'Health of the bridge and everything it talks to. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Every hop your energy data takes — the meters it comes from, the broker it moves over, and the stores it lands in. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');

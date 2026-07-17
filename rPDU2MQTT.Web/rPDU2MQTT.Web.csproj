@@ -34,6 +34,8 @@
 		<GuiSource Include="web\src\**\*.ts" />
 		<GuiSource Include="web\styles.css" />
 		<GuiSource Include="web\build.mjs" />
+		<GuiSource Include="web\smoke.mjs" />
+		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
 	<!-- Build the GUI bundle (TypeScript ES modules -> wwwroot/app.js + minified styles.css) using only the
@@ -44,6 +46,9 @@
 			<Output TaskParameter="ExitCode" PropertyName="_NodeExitCode" />
 		</Exec>
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/build.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- Run the bundle's smoke test against the real schema: it builds every section in a stubbed DOM,
+		     so a broken cross-module reference fails the build here instead of blanking a tab at runtime. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/smoke.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 
