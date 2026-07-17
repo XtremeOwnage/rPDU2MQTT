@@ -30,6 +30,15 @@ public class PrometheusConfig
     [TemplateVariables("type", "device", "source", "units")]
     public string MetricNameTemplate { get; set; } = "rpdu2mqtt_{type}";
 
+    /// <summary>
+    /// Which labels to attach to every exported metric (#188). Available: <c>device</c>, <c>source</c>
+    /// (object-id form), <c>name</c> (display name), <c>number</c> (outlet number), <c>type</c>,
+    /// <c>units</c>, <c>instance</c> (the PDU instance key), <c>hierarchy</c> (the energy-flow tier
+    /// feeding this reading). Prometheus requires a consistent label set, so this applies to all metrics.
+    /// </summary>
+    [Description("Labels attached to every exported metric. Available: device, source, name, number, type, units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set.")]
+    public List<string> Labels { get; set; } = new() { "device", "source", "units" };
+
     [Description("Push metrics to a Prometheus Pushgateway.")]
     public PrometheusPushgatewayConfig Pushgateway { get; set; } = new();
 

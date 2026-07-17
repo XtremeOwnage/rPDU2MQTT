@@ -62,19 +62,54 @@ public class PrometheusExportService : baseMQTTService
 
     protected override Task Execute(CancellationToken cancellationToken)
     {
-        foreach (var data in FreshSnapshots())
-            foreach (var r in MetricsHelper.EnumerateReadings(data))
-                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg)).WithLabels(r.Device, r.Source, r.Units).Set(r.Value);
+        var labelNames = PrometheusLabels.Names(cfg);
+        // The energy-flow tier feeding each reading — only built when the hierarchy label is wanted.
+        var hierarchy = labelNames.Contains("hierarchy") ? BuildHierarchy() : null;
+
+        foreach (var snapshot in FreshSnapshotsWithId())
+            foreach (var r in MetricsHelper.EnumerateReadings(snapshot.Data))
+            {
+                var tier = hierarchy is null ? string.Empty : HierarchyFor(hierarchy, r);
+                var values = PrometheusLabels.Values(labelNames, r, cfg, snapshot.InstanceId, tier);
+                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg), labelNames).WithLabels(values).Set(r.Value);
+            }
 
         return Task.CompletedTask;
     }
 
+    /// <summary>Flow-node id -> the label of the tier feeding it, from the configured energy hierarchy.</summary>
+    private Dictionary<string, string> BuildHierarchy()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var merged = new Models.PDU.PduData();
+            foreach (var data in FreshSnapshots()) merged.Devices.AddRange(data.Devices);
+            if (merged.Devices.Count == 0) return map;
+
+            var graph = Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric);
+            var labels = graph.Nodes.ToDictionary(n => n.Id, n => n.Label, StringComparer.OrdinalIgnoreCase);
+            foreach (var node in graph.Nodes)
+                if (Core.Flow.FlowExport.Parents(graph, node.Id).FirstOrDefault() is { } parent)
+                    map[node.Id] = labels.TryGetValue(parent, out var l) ? l : parent;
+        }
+        catch (Exception ex) { Log.Debug($"Prometheus hierarchy label unavailable: {ex.Message}"); }
+        return map;
+    }
+
+    private static string HierarchyFor(Dictionary<string, string> map, MeasurementReading r)
+    {
+        // Readings come from outlets (outlet:{device}:{key}) or device-level entities (pdu:{device}).
+        if (r.Number is { } n && map.TryGetValue($"outlet:{r.Device}:{n - 1}", out var outletTier)) return outletTier;
+        return map.TryGetValue($"pdu:{r.Device}", out var pduTier) ? pduTier : string.Empty;
+    }
+
     // Cached by the resolved metric name (the template may vary the name by device/source/units).
-    private Gauge GetGauge(string name)
+    private Gauge GetGauge(string name, string[] labelNames)
     {
         if (!gauges.TryGetValue(name, out var gauge))
         {
-            gauge = Metrics.CreateGauge(name, "rPDU2MQTT measurement", "device", "source", "units");
+            gauge = Metrics.CreateGauge(name, "rPDU2MQTT measurement", labelNames);
             gauges[name] = gauge;
         }
         return gauge;
