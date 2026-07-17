@@ -28,6 +28,19 @@ public sealed class PduInstanceFactory
         return new PDU(instanceConfig, configForOverrides, api);
     }
 
+    /// <summary>
+    /// Re-point an existing PDU at a new configuration, instead of building a replacement (#192). Used for
+    /// the primary instance, whose object identity is pinned by DI. Built through the same path as
+    /// <see cref="Create(PduConfig)"/>, so a re-pointed instance is configured identically to a fresh one.
+    /// </summary>
+    public void Repoint(PDU pdu, PduConfig instanceConfig)
+    {
+        ThrowError.TestRequiredConfigurationSection(instanceConfig.Connection, "Pdus[].Connection");
+        ThrowError.TestRequiredConfigurationSection(instanceConfig.Connection.Host, "Pdus[].Connection.Host");
+
+        pdu.Repoint(instanceConfig, BuildHttpClient(instanceConfig.Connection));
+    }
+
     private static HttpClient BuildHttpClient(Connection conn)
     {
         var uri = new UriBuilder { Host = conn.Host, Port = conn.Port ?? 80 };

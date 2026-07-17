@@ -27,8 +27,9 @@ public static class InstanceReconcile
     /// <summary>
     /// Plan the move from the currently-running instance signatures to the desired config. Returns the ids
     /// to stop (removed or changed) and to start (added or changed); a changed non-primary instance appears
-    /// in both (rebuild). The primary is never stopped — it's the fixed DI singleton — so a changed primary
-    /// is surfaced via <c>primaryChanged</c> instead (needs a restart). Hostless desired entries are ignored.
+    /// in both (rebuild). The primary's PDU is the fixed DI singleton, so it's never rebuilt that way — a
+    /// changed primary is surfaced via <c>primaryChanged</c>, and the manager re-points it in place (#192).
+    /// Hostless desired entries are ignored.
     /// </summary>
     public static (List<string> toStop, List<string> toStart, bool primaryChanged) Plan(
         IReadOnlyDictionary<string, string> running,

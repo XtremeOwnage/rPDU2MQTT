@@ -232,3 +232,68 @@ public class PduInstanceRegistryRuntimeTests
         Assert.False(registry.All.ContainsKey("b"));
     }
 }
+
+/// <summary>
+/// Re-pointing the primary instance in place (#192). Its PDU object is the DI singleton the GUI, control
+/// and discovery hold, so it must keep its identity while its connection changes underneath.
+/// </summary>
+public class PrimaryRepointTests
+{
+    private static Config Cfg(string host, int? port = null, string? scheme = null)
+    {
+        var c = new Config();
+        c.Pdus["default"] = new PduConfig { PollInterval = 5 };
+        c.Pdus["default"].Connection.Host = host;
+        c.Pdus["default"].Connection.Port = port;
+        c.Pdus["default"].Connection.Scheme = scheme;
+        return c;
+    }
+
+    [Fact]
+    public void RepointPrimary_KeepsTheSameObject_ButChangesTheTarget()
+    {
+        var cfg = Cfg("pdu-a.example.com");
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+        var before = registry.Primary;
+        Assert.Contains("pdu-a.example.com", before.BaseAddress);
+
+        var moved = Cfg("pdu-b.example.com", 443, "https");
+        Assert.True(registry.RepointPrimary(moved.Pdus["default"]));
+
+        // Same instance — every existing reference (GUI/control/discovery) must stay valid.
+        Assert.Same(before, registry.Primary);
+        Assert.Contains("pdu-b.example.com", registry.Primary.BaseAddress);
+        Assert.StartsWith("https://", registry.Primary.BaseAddress);
+    }
+
+    [Fact]
+    public void RepointPrimary_IsRefused_WhenTheNewConfigHasNoHost()
+    {
+        var cfg = Cfg("pdu-a.example.com");
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+
+        var hostless = new PduConfig { PollInterval = 5 };
+
+        Assert.False(registry.RepointPrimary(hostless));
+        // Left pointed at the previous device rather than broken.
+        Assert.Contains("pdu-a.example.com", registry.Primary.BaseAddress);
+    }
+
+    [Fact]
+    public void Repoint_IsIdempotentAndRepeatable()
+    {
+        var cfg = Cfg("pdu-a.example.com");
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+        var pdu = registry.Primary;
+
+        // Repeated re-points must not leave the PDU wedged (the old HttpClient is disposed each time;
+        // using a disposed client would throw here).
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(registry.RepointPrimary(Cfg($"pdu-{i}.example.com").Pdus["default"]));
+            Assert.Contains($"pdu-{i}.example.com", pdu.BaseAddress);
+        }
+
+        Assert.Same(pdu, registry.Primary);
+    }
+}

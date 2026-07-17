@@ -12,8 +12,8 @@ namespace rPDU2MQTT.Classes;
 /// </summary>
 public class PduApiHandler
 {
-    private readonly HttpClient http;
-    private readonly PduConfig instanceConfig;
+    private HttpClient http;
+    private PduConfig instanceConfig;
     // Session token per host web port (OneView cluster members are reached via the master's proxy port).
     private readonly Dictionary<long, string> tokensByPort = new();
     // deviceId -> owning host web port (0 = the directly-connected/base host).
@@ -23,6 +23,26 @@ public class PduApiHandler
     {
         this.http = http ?? throw new NullReferenceException("HttpClient in constructor was null");
         this.instanceConfig = instanceConfig;
+    }
+
+    /// <summary>
+    /// Point this handler at a different host/credentials, keeping the handler object so its owning
+    /// <see cref="PDU"/> (the DI singleton) stays valid (#192). Session tokens and the device→port map are
+    /// tied to the old host, so they're dropped: replaying them against a new PDU would fail auth or,
+    /// worse, address the wrong device.
+    /// </summary>
+    public void Repoint([DisallowNull, NotNull] HttpClient newHttp, PduConfig newConfig)
+    {
+        ArgumentNullException.ThrowIfNull(newHttp);
+
+        var old = http;
+        http = newHttp;
+        instanceConfig = newConfig;
+        tokensByPort.Clear();
+        deviceWebPorts = null;
+
+        // The old client owns a pooled connection to the previous host; don't leak it.
+        old?.Dispose();
     }
 
     public string BaseAddress => http.BaseAddress?.ToString() ?? string.Empty;
