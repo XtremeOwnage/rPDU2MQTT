@@ -83,7 +83,7 @@ public class EmonCmsFeedPlannerTests
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
         Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_energy" && x.DataType == 1 && x.IntervalSeconds == 10);
-        var daily = Assert.Single(d.Feeds.Where(x => x.DataType == 2));
+        var daily = Assert.Single(d.Feeds, x => x.DataType == 2);
         Assert.Equal("rack_pdu_1_o0_energy_d", daily.Name);
         Assert.Equal(86400, daily.IntervalSeconds);
         Assert.Equal("rack_pdu_1_o0_energy_d", Assert.Single(d.Inputs).DailyFeed);
