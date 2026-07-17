@@ -158,12 +158,16 @@ function renderList(node: any, arr: any[]) {
   return fs;
 }
 
-// Config sections grouped by role (mirrors the v2 producer/consumer model): data sources are Inputs,
-// data sinks are Outputs, shared transport/UI settings are General. Unlisted sections fall into General.
+// Config sections grouped along the energy pipeline the app exists to run: metering hardware supplies
+// readings (Data Sources), which are consolidated and shipped onward (Destinations); everything else is
+// plumbing (System). EmonCMS leads the destinations — long-term energy history is the primary use case,
+// with HA/Prometheus as secondary sinks. Unlisted sections fall into System, so nothing is ever lost.
 const NAV_GROUPS = [
-  { title: 'Inputs', keys: ['Pdus'] },
-  { title: 'Outputs', keys: ['HomeAssistant', 'Prometheus', 'EmonCMS'] },
-  { title: 'General', keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
+  { title: 'Data Sources', keys: ['Pdus'] },
+  { title: 'Destinations', keys: ['EmonCMS', 'HomeAssistant', 'Prometheus'] },
+  // catchAll: ungrouped schema sections land here. Flagged rather than looked up by title, so renaming
+  // the group can't silently drop them.
+  { title: 'System', catchAll: true, keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
 ];
 
 function navHeader(nav: any, title: string) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
@@ -212,9 +216,9 @@ export function build() {
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
   const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in General, so a new config section is never lost.
+  // Any schema section not explicitly grouped (and not hidden) lands in the catch-all, so a new config section is never lost.
   const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
-  const general: any = NAV_GROUPS.find(g => g.title === 'General');
+  const general: any = NAV_GROUPS.find((g: any) => g.catchAll);
   state.schema.forEach((n: any) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
