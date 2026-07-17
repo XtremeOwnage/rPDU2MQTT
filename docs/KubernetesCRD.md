@@ -177,10 +177,10 @@ Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` f
 
 - **Watch** the CR; on change, apply it live: the reloaded config is copied into the shared singleton,
   the MQTT client is re-pointed at the new broker/credentials, and the PDU pollers are reconciled
-  (#187/#192). Restarting the process is a last resort, because a clean exit leaves the pod in
-  `Completed` and the kubelet re-starts it under backoff. It remains only for things bound once when the
-  host is built: the listening sockets (GUI/API/health/metrics ports), GUI auth, and the primary PDU
-  instance (the fixed DI singleton the reconciler cannot rebuild).
+  (#187/#192) — the primary instance included, which is re-pointed in place because DI pins its object
+  identity. Restarting the process is a last resort, because a clean exit leaves the pod in `Completed`
+  and the kubelet re-starts it under backoff. It remains only for the listening sockets (GUI/API/health/
+  metrics ports) and GUI auth, which are bound once when the host is built.
 - **Status:** a lightweight hosted service patches `status` (connected from the MQTT client, device
   count + last poll from `PDU.GetRootData_Public`) on the poll interval, using the values already
   surfaced by `/api/status` and `/api/livedata`.
@@ -259,7 +259,7 @@ No phasing — the full feature ships at once:
 - **GUI write-back enabled by default** (`PATCH` the CR `spec`), with a GitOps-drift warning and a
   redacted CR-manifest export for re-importing into source control.
 - **`status` subresource** updated with `connected` / `deviceCount` / `lastPoll`.
-- **Watch** the CR and apply `spec` changes live (restarting only for listen ports / GUI auth / the primary PDU).
+- **Watch** the CR and apply `spec` changes live (restarting only for listen ports / GUI auth).
 - CRD OpenAPI `spec` schema **generated from the `Config` model** (reusing the GUI's `ConfigSchema`
   reflection).
 - CRD shipped both in the Helm chart's `crds/` directory **and** as a standalone manifest; the app does

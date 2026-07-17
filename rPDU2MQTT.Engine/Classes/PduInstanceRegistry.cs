@@ -9,9 +9,10 @@ namespace rPDU2MQTT.Classes;
 /// discovery use <see cref="Primary"/>.
 /// </summary>
 /// <remarks>
-/// <see cref="Primary"/> is fixed for the process lifetime — it's the DI-resolved <see cref="PDU"/> shared
-/// with the GUI / control / discovery, so runtime reconciliation never swaps it (a primary connection
-/// change still needs a restart). Reads/writes are guarded so reconciliation can run while the GUI reads.
+/// <see cref="Primary"/>'s PDU <i>object</i> is fixed for the process lifetime — it's the DI-resolved
+/// <see cref="PDU"/> shared with the GUI / control / discovery, so reconciliation never swaps it. A
+/// changed primary is applied by <see cref="RepointPrimary"/>, which mutates that object in place instead
+/// (#192). Reads/writes are guarded so reconciliation can run while the GUI reads.
 /// </remarks>
 public sealed class PduInstanceRegistry
 {
@@ -53,7 +54,7 @@ public sealed class PduInstanceRegistry
         get { lock (gate) return new Dictionary<string, PDU>(instances, StringComparer.OrdinalIgnoreCase); }
     }
 
-    /// <summary>The primary instance's PDU (fixed for the process lifetime).</summary>
+    /// <summary>The primary instance's PDU (the same object for the process lifetime; see RepointPrimary).</summary>
     public PDU Primary { get { lock (gate) return instances[PrimaryId]; } }
 
     public PDU Get(string instanceId)
@@ -65,6 +66,26 @@ public sealed class PduInstanceRegistry
     public PDU? TryCreate(string id, PduConfig pduCfg)
     {
         lock (gate) return TryCreateInternal(id, pduCfg);
+    }
+
+    /// <summary>
+    /// Re-point the primary at a new configuration (#192). The primary's PDU object can't be replaced —
+    /// it's the DI singleton — so it's mutated in place instead, which keeps every existing reference
+    /// valid. Returns false (leaving the instance untouched) when the new config has no Host to point at.
+    /// </summary>
+    public bool RepointPrimary(PduConfig pduCfg)
+    {
+        if (string.IsNullOrWhiteSpace(pduCfg.Connection?.Host))
+        {
+            Log.Warning($"Primary PDU instance '{PrimaryId}' has no Connection.Host; keeping the previous connection.");
+            return false;
+        }
+
+        lock (gate)
+        {
+            factory.Repoint(instances[PrimaryId], pduCfg);
+            return true;
+        }
     }
 
     /// <summary>Remove an instance at runtime. Never removes the primary. Returns true if it was removed.</summary>

@@ -94,23 +94,16 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// True when a setting that can only be applied at startup changed. MQTT settings are no longer here —
-    /// the client is re-pointed live (#192) — and neither are the non-primary PDU instances, which the
-    /// reconciler rebuilds. What remains needs the host rebuilt:
-    /// <list type="bullet">
-    /// <item>the listening sockets (GUI/API/health/metrics ports) and GUI auth, bound once at startup;</item>
-    /// <item>the primary PDU instance, which is the fixed DI singleton — <see cref="InstanceManager"/>
-    /// cannot rebuild it, so without a restart a change to it would be silently dropped. Note this covers
-    /// its full signature (credentials and poll interval too), not just the connection: those were
-    /// previously neither restarted for nor applied, so they were quietly ignored.</item>
-    /// </list>
+    /// True when a setting that can only be applied at startup changed. All that remains is the listening
+    /// sockets (GUI/API/health/metrics ports) and GUI auth, which are bound once when the host is built.
+    /// Everything else is applied live (#192): the MQTT client is re-pointed, and every PDU instance —
+    /// including the primary, which is re-pointed in place because DI pins its identity — is reconciled.
     /// </summary>
     public static bool RequiresRestart(Config live, Config reloaded)
         => Critical(live) != Critical(reloaded);
 
     private static string Critical(Config c) => JsonSerializer.Serialize(new
     {
-        Primary = PrimarySignature(c),
         c.Gui,
         c.Api,
         HealthPort = c.Health.Port,
@@ -118,18 +111,6 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
         PromPort = c.Prometheus.Port,
     });
 
-    /// <summary>
-    /// The primary instance's rebuild signature, or "" when there isn't one. Resolved the same way
-    /// <see cref="PduInstanceRegistry"/> picks the primary, so the two can't disagree about which
-    /// instance is pinned to the process lifetime.
-    /// </summary>
-    private static string PrimarySignature(Config c)
-    {
-        if (c.Pdus is null || c.Pdus.Count == 0)
-            return "";
-        var id = c.Pdus.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : c.Pdus.Keys.First();
-        return c.Pdus.TryGetValue(id, out var pdu) ? id + "=" + InstanceReconcile.Signature(pdu) : "";
-    }
 
     private async Task<bool> SafeWaitAsync(CancellationToken ct)
     {

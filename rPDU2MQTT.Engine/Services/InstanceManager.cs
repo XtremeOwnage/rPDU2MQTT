@@ -8,9 +8,9 @@ namespace rPDU2MQTT.Services;
 /// Owns the running PDU producers — one <see cref="PduPoller"/> per instance in the
 /// <see cref="PduInstanceRegistry"/>. Starts every instance at startup and, via <see cref="ReconcileAsync"/>,
 /// adds/removes/rebuilds pollers at runtime when <see cref="Config.Pdus"/> changes (phase 5) — so a PDU
-/// added or removed in the GUI takes effect without a restart. The primary instance is never torn down
-/// (its PDU is the DI singleton shared with the GUI/control/discovery); a primary connection change is
-/// logged as needing a restart.
+/// added or removed in the GUI takes effect without a restart. The primary's PDU object is never torn
+/// down (it's the DI singleton shared with the GUI/control/discovery) — a changed primary is re-pointed
+/// in place and its poller restarted, so it needs no restart either (#192).
 /// </summary>
 public sealed class InstanceManager : IHostedService
 {
@@ -64,7 +64,7 @@ public sealed class InstanceManager : IHostedService
             var (toStop, toStart, primaryChanged) = InstanceReconcile.Plan(runningSignatures, cfg.Pdus, registry.PrimaryId);
 
             if (primaryChanged)
-                Log.Warning($"Connection/credential changes to the primary PDU instance '{registry.PrimaryId}' need a restart to take effect.");
+                await RepointPrimaryAsync();
 
             foreach (var id in toStop)
             {
@@ -86,6 +86,44 @@ public sealed class InstanceManager : IHostedService
             }
         }
         finally { reconcileLock.Release(); }
+    }
+
+    /// <summary>
+    /// Apply a changed primary instance without restarting the process (#192). Its PDU is the DI singleton
+    /// so it can't be rebuilt — instead the poller is stopped, the PDU re-pointed in place, and a poller
+    /// restarted on the (possibly new) interval. Stopping first means no poll can observe the PDU
+    /// mid-swap, and the restart is what picks up a changed PollInterval.
+    /// </summary>
+    private async Task RepointPrimaryAsync()
+    {
+        var id = registry.PrimaryId;
+        if (!cfg.Pdus.TryGetValue(id, out var pduCfg))
+            return;
+
+        Log.Information($"Primary PDU instance '{id}' changed; re-pointing it without a restart.");
+
+        if (pollers.Remove(id, out var poller))
+            await poller.StopAsync();
+
+        try
+        {
+            if (!registry.RepointPrimary(pduCfg))
+            {
+                // Hostless: the PDU still points at the old device. Restart the poller against it so we
+                // don't silently stop polling entirely.
+                StartPoller(id, registry.Primary);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            // A bad new config must not leave the primary unpolled; keep the old connection running.
+            Log.Error(ex, $"Could not re-point primary PDU instance '{id}' ({ex.Message}); keeping the previous connection.");
+            StartPoller(id, registry.Primary);
+            return;
+        }
+
+        StartPoller(id, registry.Primary);
     }
 
     private void StartPoller(string id, PDU pdu)

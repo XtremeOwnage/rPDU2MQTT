@@ -7,8 +7,8 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// KubernetesConfigWatcher.RequiresRestart: only the listen ports/GUI auth and the primary PDU instance
-/// force a restart now; MQTT is re-pointed live and other instances are reconciled (#187/#192).
+/// KubernetesConfigWatcher.RequiresRestart: only the listen ports / GUI auth still force a restart —
+/// MQTT and every PDU instance (primary included) are applied live (#187/#192).
 /// </summary>
 public class ConfigWatcherTests
 {
@@ -77,34 +77,30 @@ public class ConfigWatcherTests
     }
 
     [Fact]
-    public void PrimaryPduChanges_RequireRestart_ButOtherInstancesDoNot()
+    public void PduChanges_NoLongerRequireRestart_IncludingThePrimary()
     {
+        // The primary is re-pointed in place now (its PDU object identity is pinned by DI, but its
+        // internals are swapped), so nothing about any instance needs the process to exit (#192).
         var baseline = Sample();
 
-        // The primary is the fixed DI singleton — InstanceManager cannot rebuild it, so a change to it
-        // must restart or it would be silently dropped. This covers its whole signature, not just the host.
-        var host = Sample(); host.Pdus["default"].Connection.Host = "moved.example.com";
-        Assert.True(KubernetesConfigWatcher.RequiresRestart(baseline, host));
+        foreach (var mutate in new Action<Config>[]
+        {
+            c => c.Pdus["default"].Connection.Host = "moved.example.com",
+            c => c.Pdus["default"].Connection.Port = 443,
+            c => c.Pdus["default"].Connection.Scheme = "https",
+            c => c.Pdus["default"].PollInterval = 60,
+            c => c.Pdus["default"].Credentials = new() { Username = "u", Password = "p" },
+        })
+        {
+            var changed = Sample(); mutate(changed);
+            Assert.False(KubernetesConfigWatcher.RequiresRestart(baseline, changed));
+        }
 
-        var poll = Sample(); poll.Pdus["default"].PollInterval = 60;
-        Assert.True(KubernetesConfigWatcher.RequiresRestart(baseline, poll));
-
-        var creds = Sample(); creds.Pdus["default"].Credentials = new() { Username = "u", Password = "p" };
-        Assert.True(KubernetesConfigWatcher.RequiresRestart(baseline, creds));
-
-        // A second (non-primary) instance is reconciled live — adding or retuning it must not restart.
+        // Adding a second instance stays live too.
         var added = Sample();
         added.Pdus["second"] = new PduConfig { PollInterval = 5 };
         added.Pdus["second"].Connection.Host = "pdu-2.example.com";
         Assert.False(KubernetesConfigWatcher.RequiresRestart(baseline, added));
-
-        var retuned = Sample();
-        retuned.Pdus["second"] = new PduConfig { PollInterval = 5 };
-        retuned.Pdus["second"].Connection.Host = "pdu-2.example.com";
-        var retuned2 = Sample();
-        retuned2.Pdus["second"] = new PduConfig { PollInterval = 30 };
-        retuned2.Pdus["second"].Connection.Host = "pdu-2-moved.example.com";
-        Assert.False(KubernetesConfigWatcher.RequiresRestart(retuned, retuned2));
     }
 }
 

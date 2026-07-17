@@ -10,7 +10,7 @@ namespace rPDU2MQTT.Classes;
 public partial class PDU
 {
     private readonly Config config;
-    private readonly Models.Config.PduConfig instanceConfig;
+    private Models.Config.PduConfig instanceConfig;
     private readonly PduApiHandler api;
 
     /// <summary>
@@ -26,6 +26,32 @@ public partial class PDU
         this.instanceConfig = instanceConfig;
         this.config = config;
         this.api = api;
+    }
+
+    /// <summary>The address this PDU is currently pointed at (changes when it is re-pointed).</summary>
+    public string BaseAddress => api.BaseAddress;
+
+    /// <summary>
+    /// Point this PDU at a different host/credentials/settings in place (#192).
+    /// <para>
+    /// The object itself is kept: the primary instance is the DI singleton the GUI, control and discovery
+    /// all hold a reference to, so it can never be swapped out — only re-pointed. Everything cached here
+    /// describes the OLD device, so it is all dropped: the OneView detection (a different host may not be
+    /// a OneView master), the poll cache, and the pending-state latches (they key off the old device's
+    /// outlets and would otherwise mask the new device's real state until they expire).
+    /// </para>
+    /// </summary>
+    public void Repoint(Models.Config.PduConfig newConfig, HttpClient newHttp)
+    {
+        instanceConfig = newConfig;
+        api.Repoint(newHttp, newConfig);
+        useOneView = null;
+        lock (pendingLock)
+        {
+            pendingOutletStates.Clear();
+            pendingConfig.Clear();
+        }
+        InvalidateCache();
     }
 
     // After a control command the PDU can sit in a "pending" state for up to ~a minute while it
