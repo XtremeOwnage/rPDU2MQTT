@@ -1134,6 +1134,88 @@ function addHaEnergySection(nav     , sections     ) {
   link.onclick = () => activate(link, sec);
 }
 
+// ── sections/home.ts ────────────────────────────────────────────
+// Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
+
+function addHomeSection(nav     , sections     ) {
+  const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Status' }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Health of the bridge and everything it talks to. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
+
+  const bar = el('div', { class: 'sec-actions' });
+  const refresh = btn('Refresh');
+  bar.appendChild(refresh); sec.appendChild(bar);
+  const grid = el('div', { class: 'status-grid' }); sec.appendChild(grid);
+
+  const card = (cls        , title        , stateText        , detail                ) => {
+    const c = el('div', { class: 'status-card' });
+    const head = el('div', { class: 'status-head' });
+    head.appendChild(el('span', { class: 'dot' + (cls ? ' ' + cls : '') }));
+    head.appendChild(el('b', { text: title }));
+    head.appendChild(el('span', { class: 'status-state' + (cls ? ' ' + cls : ''), text: stateText }));
+    c.appendChild(head);
+    c.appendChild(el('div', { class: 'desc', text: detail || '' }));
+    return c;
+  };
+
+  const age = (s        ) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
+  const uptime = (s        ) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+
+  const load = async () => {
+    const r = await api('/api/diagnostics');
+    const b      = r.body || {};
+    const cfg      = state.data || {};
+    grid.innerHTML = '';
+
+    grid.appendChild(card(b.mqttConnected ? 'good' : 'bad', 'MQTT', b.mqttConnected ? 'Connected' : 'Disconnected', b.mqttHost));
+
+    // One card per PDU: fresh data = green, stale = red, nothing yet = amber.
+    const sources = b.dataSources || [];
+    if (!sources.length) {
+      const worker = (b.roles || []).includes('worker');
+      grid.appendChild(card('warn', 'PDUs', 'No data yet', worker ? 'Waiting for the first poll' : 'Waiting on a worker node'));
+    } else {
+      sources.forEach((s     ) => grid.appendChild(card(s.stale ? 'bad' : 'good', 'PDU · ' + s.instance,
+        s.stale ? 'Stale' : 'Polling', 'Updated ' + age(s.ageSeconds))));
+    }
+
+    const e      = b.emoncms || {};
+    if (!e.enabled) grid.appendChild(card('', 'EmonCMS', 'Disabled'));
+    else {
+      const st      = e.status || {};
+      const transport = e.transport ? e.transport.toUpperCase() : '';
+      if (st.ok === false) grid.appendChild(card('bad', 'EmonCMS', 'Error', st.lastError || 'Last export failed'));
+      else if (st.ok === true) grid.appendChild(card('good', 'EmonCMS', 'Exporting', transport + (st.count ? ' · ' + st.count + ' values' : '')));
+      else grid.appendChild(card('warn', 'EmonCMS', 'Waiting', transport + ' · no export attempted yet'));
+    }
+
+    const ha      = cfg.HomeAssistant || {};
+    grid.appendChild(ha.DiscoveryEnabled
+      ? card('good', 'Home Assistant', 'Discovery on', 'Topic: ' + (ha.DiscoveryTopic || '—'))
+      : card('', 'Home Assistant', 'Discovery off'));
+
+    const prom      = cfg.Prometheus || {};
+    grid.appendChild(prom.Exporter
+      ? card('good', 'Prometheus', 'Exporter on', ':' + (prom.Port || 9184) + '/metrics')
+      : card('', 'Prometheus', 'Exporter off'));
+
+    // Other role processes on the bus (split deployments only).
+    (b.processes || []).forEach((p     ) => grid.appendChild(card(p.stale ? 'bad' : 'good',
+      'Process · ' + ((p.roles || []).join('+') || '?'), p.stale ? 'Stale' : 'Alive',
+      (p.host || '') + ' · seen ' + age(p.ageSeconds))));
+
+    grid.appendChild(card('good', 'This node', (b.roles || []).join(', ') || 'all',
+      'v' + (b.version || '?') + ' · up ' + uptime(b.uptimeSeconds)));
+  };
+
+  refresh.onclick = () => load();
+  // Refresh while the tab is on screen so the board stays live without polling in the background.
+  setInterval(() => { if (sec.classList.contains('active')) load(); }, 10000);
+  link.onclick = () => { activate(link, sec); load(); };
+  return { link, load };
+}
+
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
@@ -1341,15 +1423,15 @@ function build() {
   const general      = NAV_GROUPS.find(g => g.title === 'General');
   state.schema.forEach((n     ) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
 
-  let first      = null;
+  // The landing page: a status board, rendered first so it's the default tab (#186).
+  const home = addHomeSection(nav, sections);
+  let first      = home.link;
+
   for (const g of NAV_GROUPS) {
     const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
     if (!nodes.length) continue;
     navHeader(nav, g.title);
-    for (const node of nodes) {
-      const link = renderConfigSection(node, nav, sections);
-      if (!first) first = link;
-    }
+    for (const node of nodes) renderConfigSection(node, nav, sections);
   }
 
   // Tools: the functional (non-config) tabs.
