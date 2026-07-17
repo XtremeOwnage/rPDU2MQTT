@@ -126,8 +126,9 @@ Mechanics:
 - The chart **pre-creates** the Secret (create-once, like the CR) so GUI-written values survive `helm
   upgrade`, and grants the pod `get,patch,update` on **just that Secret**. Non-Helm/Argo deploys must
   create the Secret, mount it, and grant the same RBAC (and add an Argo `ignoreDifferences` on its data).
-- Credential **changes apply on restart** (use the Diagnostics **Restart bridge** button) — the same as
-  any other connection change, and required for OIDC which is wired up at startup.
+- MQTT **credential/broker changes apply live** — the watcher re-points the running client (#192). GUI
+  **OIDC** is the exception: it is wired up at startup, so it still needs a restart (use the Diagnostics
+  **Restart bridge** button).
 
 ### GitOps & exporting manifests (decided)
 
@@ -174,10 +175,12 @@ Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` f
 
 ### Reacting to changes & status (Phase 2)
 
-- **Watch** the CR; on change, the simplest correct behaviour is
-  `IHostApplicationLifetime.StopApplication()` so the container restarts and reloads (mirrors how the
-  existing "Restart" diagnostic works). True hot-reload without restart is a larger change and is out
-  of scope for Phase 1.
+- **Watch** the CR; on change, apply it live: the reloaded config is copied into the shared singleton,
+  the MQTT client is re-pointed at the new broker/credentials, and the PDU pollers are reconciled
+  (#187/#192). Restarting the process is a last resort, because a clean exit leaves the pod in
+  `Completed` and the kubelet re-starts it under backoff. It remains only for things bound once when the
+  host is built: the listening sockets (GUI/API/health/metrics ports), GUI auth, and the primary PDU
+  instance (the fixed DI singleton the reconciler cannot rebuild).
 - **Status:** a lightweight hosted service patches `status` (connected from the MQTT client, device
   count + last poll from `PDU.GetRootData_Public`) on the poll interval, using the values already
   surfaced by `/api/status` and `/api/livedata`.
@@ -256,7 +259,7 @@ No phasing — the full feature ships at once:
 - **GUI write-back enabled by default** (`PATCH` the CR `spec`), with a GitOps-drift warning and a
   redacted CR-manifest export for re-importing into source control.
 - **`status` subresource** updated with `connected` / `deviceCount` / `lastPoll`.
-- **Watch** the CR and restart on `spec` change.
+- **Watch** the CR and apply `spec` changes live (restarting only for listen ports / GUI auth / the primary PDU).
 - CRD OpenAPI `spec` schema **generated from the `Config` model** (reusing the GUI's `ConfigSchema`
   reflection).
 - CRD shipped both in the Helm chart's `crds/` directory **and** as a standalone manifest; the app does

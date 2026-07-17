@@ -7,10 +7,13 @@ using rPDU2MQTT.Startup.ConfigSources;
 namespace rPDU2MQTT.Services.Kubernetes;
 
 /// <summary>
-/// Watches the RpduConfig <c>spec</c> for changes. Most edits are applied live — the reloaded config is
-/// copied into the shared singleton and the PDU instances reconciled — so the API/UI don't restart on
-/// every save (#187) and pods stop bouncing through Completed (#192). The process is only restarted when a
-/// setting that can't be re-read at runtime changed (broker connection, listen ports, GUI auth).
+/// Watches the RpduConfig <c>spec</c> for changes and applies them live — the reloaded config is copied
+/// into the shared singleton, the MQTT client is re-pointed and the PDU instances reconciled — so the
+/// API/UI don't restart on every save (#187) and pods stop bouncing through Completed (#192).
+/// <para>
+/// The only remaining restart is a change to a listening socket (GUI/API/health/metrics ports) or GUI
+/// auth, which are bound once when the host is built.
+/// </para>
 /// </summary>
 public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
 {
@@ -18,18 +21,20 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
     private readonly IHostApplicationLifetime lifetime;
     private readonly Config config;
     private readonly InstanceManager instances;
+    private readonly MqttReconfigurator mqtt;
     private readonly HostRole roles;
     private readonly PeriodicTimer timer = new(TimeSpan.FromSeconds(30));
     private readonly CancellationTokenSource stoppingCts = new();
     private Task loop = Task.CompletedTask;
     private string? baselineSpec;
 
-    public KubernetesConfigWatcher(KubernetesConfigSource source, IHostApplicationLifetime lifetime, Config config, InstanceManager instances, HostRole roles)
+    public KubernetesConfigWatcher(KubernetesConfigSource source, IHostApplicationLifetime lifetime, Config config, InstanceManager instances, MqttReconfigurator mqtt, HostRole roles)
     {
         this.source = source;
         this.lifetime = lifetime;
         this.config = config;
         this.instances = instances;
+        this.mqtt = mqtt;
         this.roles = roles;
     }
 
@@ -77,30 +82,54 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
         config.Prometheus = reloaded.Prometheus;
         config.Debug = reloaded.Debug;
         config.Pdus = reloaded.Pdus;
+        config.MQTT = reloaded.MQTT;
+
+        // Re-point the broker connection in place rather than exiting to be restarted (#192).
+        await mqtt.ApplyAsync(stoppingCts.Token);
 
         // The poller lives on the worker; reconcile there so added/removed/retuned PDUs take effect live.
+        // This also covers a changed Connection on an existing instance — the factory rebuilds it.
         if (roles.HasFlag(HostRole.Worker))
             await instances.ReconcileAsync();
     }
 
-    /// <summary>True when a setting that can only be applied at startup changed (broker/ports/auth).</summary>
+    /// <summary>
+    /// True when a setting that can only be applied at startup changed. MQTT settings are no longer here —
+    /// the client is re-pointed live (#192) — and neither are the non-primary PDU instances, which the
+    /// reconciler rebuilds. What remains needs the host rebuilt:
+    /// <list type="bullet">
+    /// <item>the listening sockets (GUI/API/health/metrics ports) and GUI auth, bound once at startup;</item>
+    /// <item>the primary PDU instance, which is the fixed DI singleton — <see cref="InstanceManager"/>
+    /// cannot rebuild it, so without a restart a change to it would be silently dropped. Note this covers
+    /// its full signature (credentials and poll interval too), not just the connection: those were
+    /// previously neither restarted for nor applied, so they were quietly ignored.</item>
+    /// </list>
+    /// </summary>
     public static bool RequiresRestart(Config live, Config reloaded)
         => Critical(live) != Critical(reloaded);
 
     private static string Critical(Config c) => JsonSerializer.Serialize(new
     {
-        c.MQTT.Connection,
-        c.MQTT.ClientID,
-        c.MQTT.KeepAlive,
-        c.MQTT.LastWill,
-        c.MQTT.ParentTopic,
-        Pdu = c.Pdus.ToDictionary(p => p.Key, p => new { p.Value.Connection }),
+        Primary = PrimarySignature(c),
         c.Gui,
         c.Api,
         HealthPort = c.Health.Port,
         HealthEnabled = c.Health.Enabled,
         PromPort = c.Prometheus.Port,
     });
+
+    /// <summary>
+    /// The primary instance's rebuild signature, or "" when there isn't one. Resolved the same way
+    /// <see cref="PduInstanceRegistry"/> picks the primary, so the two can't disagree about which
+    /// instance is pinned to the process lifetime.
+    /// </summary>
+    private static string PrimarySignature(Config c)
+    {
+        if (c.Pdus is null || c.Pdus.Count == 0)
+            return "";
+        var id = c.Pdus.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : c.Pdus.Keys.First();
+        return c.Pdus.TryGetValue(id, out var pdu) ? id + "=" + InstanceReconcile.Signature(pdu) : "";
+    }
 
     private async Task<bool> SafeWaitAsync(CancellationToken ct)
     {

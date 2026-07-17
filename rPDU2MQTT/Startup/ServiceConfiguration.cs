@@ -48,43 +48,11 @@ public static class ServiceConfiguration
         services.ConfigureLogging(cfg);
 
         // Bind IHiveMQClient
-        services.AddSingleton<IHiveMQClient, HiveMQClient>((sp) =>
-        {
-            ThrowError.TestRequiredConfigurationSection(cfg.MQTT, "MQTT");
-            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection, "MQTT.Connection");
-            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Host");
+        // Options are built by the shared factory so startup and the live re-point can't drift (#192).
+        services.AddSingleton<IHiveMQClient, HiveMQClient>((sp) => new HiveMQClient(MqttOptionsFactory.Build(cfg)));
 
-            var conn = cfg.MQTT.Connection;
-            var mqttBuilder = new HiveMQClientOptionsBuilder()
-                .WithBroker(conn.Host)
-                .WithPort(conn.ResolvedPort)
-                .WithClientId((cfg.MQTT.ClientID ?? "rpdu2mqtt") + Guid.NewGuid().ToString())
-                .WithAutomaticReconnect(true)
-                .WithKeepAlive(cfg.MQTT.KeepAlive);
-
-            // Honour the configured scheme: mqtts/wss get TLS, ws/wss tunnel over WebSockets (#189).
-            mqttBuilder.WithUseTls(conn.UsesTls);
-            if (conn.UsesWebSockets)
-                mqttBuilder.WithWebSocketServer($"{conn.EffectiveScheme}://{conn.Host}:{conn.ResolvedPort}/mqtt");
-
-            // ValidateCertificate=false is the escape hatch for a broker with a self-signed cert.
-            if (conn.UsesTls && conn.ValidateCertificate == false)
-                mqttBuilder.WithAllowInvalidBrokerCertificates(true);
-
-            // Optional Last-Will so HA marks entities unavailable immediately on disconnect.
-            if (cfg.MQTT.LastWill)
-                mqttBuilder.WithLastWillAndTestament(new LastWillAndTestament(
-                    MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic), payload: "offline", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery, true));
-
-            if (cfg.MQTT.Credentials?.Username is not null)
-                mqttBuilder.WithUserName(cfg.MQTT.Credentials.Username);
-
-            if (cfg.MQTT.Credentials?.Password is not null)
-                mqttBuilder.WithPassword(ToSecureString(cfg.MQTT.Credentials.Password));
-
-            // Return new client, with options applied.
-            return new HiveMQClient(mqttBuilder.Build());
-        });
+        // Re-points the live client when the broker/credentials change, instead of exiting to be restarted.
+        services.AddSingleton<Services.MqttReconfigurator>();
 
         // Wires the client's connect/disconnect events and the online-status heartbeat.
         // Instantiated explicitly in Program.cs before the initial connect.
@@ -207,15 +175,5 @@ public static class ServiceConfiguration
         // ---- Ui role: the embedded configuration GUI. ----
         if (ui && cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
-    }
-
-    /// <summary>Wrap a plaintext secret as a read-only SecureString (for APIs that require one).</summary>
-    private static System.Security.SecureString ToSecureString(string value)
-    {
-        var secure = new System.Security.SecureString();
-        foreach (var c in value)
-            secure.AppendChar(c);
-        secure.MakeReadOnly();
-        return secure;
     }
 }

@@ -54,9 +54,16 @@ public class MqttEventHandler
 
     private async Task PublishStatusAsync()
     {
+        // The availability topic only exists when MQTT.LastWill is on; with it off there is nothing to
+        // publish to, so skip rather than throwing on every tick. Read once — the client can be re-pointed
+        // at a new broker (with different options) underneath us (#192).
+        var topic = client.Options?.LastWillAndTestament?.Topic;
+        if (string.IsNullOrEmpty(topic))
+            return;
+
         try
         {
-            await client.PublishAsync(client.Options!.LastWillAndTestament!.Topic, "online", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery);
+            await client.PublishAsync(topic, "online", HiveMQtt.MQTT5.Types.QualityOfService.AtLeastOnceDelivery);
         }
         catch (Exception ex)
         {
