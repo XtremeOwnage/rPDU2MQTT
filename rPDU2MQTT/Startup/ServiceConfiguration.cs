@@ -53,14 +53,23 @@ public static class ServiceConfiguration
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT, "MQTT");
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection, "MQTT.Connection");
             ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Host");
-            ThrowError.TestRequiredConfigurationSection(cfg.MQTT.Connection.Host, "MQTT.Connection.Port");
 
+            var conn = cfg.MQTT.Connection;
             var mqttBuilder = new HiveMQClientOptionsBuilder()
-                .WithBroker(cfg.MQTT.Connection.Host)
-                .WithPort(cfg.MQTT.Connection.Port!.Value)
+                .WithBroker(conn.Host)
+                .WithPort(conn.ResolvedPort)
                 .WithClientId((cfg.MQTT.ClientID ?? "rpdu2mqtt") + Guid.NewGuid().ToString())
                 .WithAutomaticReconnect(true)
                 .WithKeepAlive(cfg.MQTT.KeepAlive);
+
+            // Honour the configured scheme: mqtts/wss get TLS, ws/wss tunnel over WebSockets (#189).
+            mqttBuilder.WithUseTls(conn.UsesTls);
+            if (conn.UsesWebSockets)
+                mqttBuilder.WithWebSocketServer($"{conn.EffectiveScheme}://{conn.Host}:{conn.ResolvedPort}/mqtt");
+
+            // ValidateCertificate=false is the escape hatch for a broker with a self-signed cert.
+            if (conn.UsesTls && conn.ValidateCertificate == false)
+                mqttBuilder.WithAllowInvalidBrokerCertificates(true);
 
             // Optional Last-Will so HA marks entities unavailable immediately on disconnect.
             if (cfg.MQTT.LastWill)

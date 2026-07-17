@@ -60,6 +60,15 @@ spec:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                     properties:
+                      Scheme:
+                        type: string
+                        enum:
+                        - ''
+                        - mqtt
+                        - mqtts
+                        - ws
+                        - wss
+                        description: 'How to reach the broker: mqtt (plain TCP), mqtts (TLS), ws (WebSocket) or wss (WebSocket over TLS). Leave unset to infer from the port.'
                       Host:
                         type: string
                         description: Hostname or IP to connect to.
@@ -73,9 +82,6 @@ spec:
                         description: Default connection timeout.
                         minimum: 1
                         maximum: 3600
-                      Scheme:
-                        type: string
-                        description: Connection scheme used
                       ValidateCertificate:
                         type: boolean
                         description: Enables certificate validation
@@ -115,6 +121,10 @@ spec:
                           maximum: 3600
                         Scheme:
                           type: string
+                          enum:
+                          - ''
+                          - http
+                          - https
                           description: Connection scheme used
                         ValidateCertificate:
                           type: boolean
@@ -171,6 +181,23 @@ spec:
                   GroupMemberObjectIdTemplate:
                     type: string
                     description: "Stable entity/object_id template for a group's mirrored member switches. Placeholders: {serial}, {number}, {device}, {group}."
+                  EnergyDashboard:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Enabled:
+                        type: boolean
+                        description: Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.
+                      Url:
+                        type: string
+                        description: Home Assistant base URL, e.g. http://homeassistant.local:8123 .
+                      Token:
+                        type: string
+                        description: Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).
+                      EnergyMeasurementType:
+                        type: string
+                        description: Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.
+                    description: Auto-configure Home Assistant's Energy Dashboard 'devices' (with upstream relationships) from the energy-flow hierarchy, via HA's WebSocket API.
                 description: Home Assistant Configuration
               Overrides:
                 type: object
@@ -341,6 +368,11 @@ spec:
                   MetricNameTemplate:
                     type: string
                     description: "Template for Prometheus metric names. Placeholders: {type}, {device}, {source} (a.k.a. {outlet}), {units}. e.g. 'rpdu2mqtt_{type}' -> rpdu2mqtt_realpower; 'pdu_{device}_{type}' -> pdu_rack_pdu_1_realpower. (device/source/units are also emitted as labels.)"
+                  Labels:
+                    type: array
+                    items:
+                      type: string
+                    description: "Labels attached to every exported metric. Available: device, source, name, number, type, units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set."
                   Pushgateway:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
@@ -389,7 +421,108 @@ spec:
                     description: "Template for EmonCMS input keys. Placeholders: {device}, {source} (object-id form), {name} (formatted display name), {number} (outlet number), {type}, {units}. e.g. '{device}_{source}_{type}' -> rack_pdu_1_dell_md1200_realpower. Leave blank to use the full raw identifier."
                   MqttBaseTopic:
                     type: string
-                    description: Base MQTT topic for EmonCMS's MQTT input; values are published to <base>/<node> as JSON. (Mqtt transport.)
+                    description: Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate). (Mqtt transport.)
+                  MqttTopicTemplate:
+                    type: string
+                    description: "Template for the EmonCMS MQTT topic each JSON payload is published to. Placeholders: {base} (MqttBaseTopic), {node}, {device} (the PDU's name). Including {device} splits the export so each PDU publishes to its own topic instead of one combined payload, e.g. '{base}/{node}/{device}'. (Mqtt transport.)"
+                  Feeds:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      AutoConfigure:
+                        type: boolean
+                        description: Create and maintain EmonCMS feeds from the exported inputs (takes effect without a restart).
+                      Types:
+                        type: array
+                        items:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          properties:
+                            Type:
+                              type: string
+                              enum:
+                              - ''
+                              - realpower
+                              - apparentpower
+                              - energy
+                              - current
+                              - voltage
+                              - frequency
+                              - powerfactor
+                              description: The measurement type this applies to (raw PDU type name).
+                            Engine:
+                              type: string
+                              enum:
+                              - MySQL
+                              - PHPTimeSeries
+                              - PHPFina
+                              - VirtualFeed
+                              description: Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.
+                            IntervalSeconds:
+                              type: integer
+                              description: Sample interval in seconds for this type's feed. Blank inherits Feeds.IntervalSeconds.
+                              minimum: 1
+                              maximum: 86400
+                            Daily:
+                              type: boolean
+                              description: 'Also create a daily kWh/d feed (an extra processlist step: kWh→kWh/d). Typically only for the energy type.'
+                            DailyIntervalSeconds:
+                              type: integer
+                              description: Interval (seconds) for the daily kWh/d feed. Should be a day (86400), not the base interval.
+                              minimum: 1
+                              maximum: 86400
+                        description: The measurement types to build feeds for, each with its own engine, interval and processing.
+                      Engine:
+                        type: string
+                        enum:
+                        - MySQL
+                        - PHPTimeSeries
+                        - PHPFina
+                        - VirtualFeed
+                        description: Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).
+                      IntervalSeconds:
+                        type: integer
+                        description: Default sample interval in seconds for a fixed-interval feed, for types that don't set their own.
+                        minimum: 1
+                        maximum: 86400
+                      IdempotentNames:
+                        type: boolean
+                        description: Name storage feeds idempotently from stable ids (device/source/type) so they DON'T change when a source is renamed. Turn off to name them from the display name instead (renaming a source renames its feed).
+                      Tag:
+                        type: string
+                        description: The EmonCMS tag (group) new feeds are filed under. Blank uses the input node name.
+                      StorageNameTemplate:
+                        type: string
+                        description: 'Template for the idempotent storage-feed name. Use only stable placeholders ({device}, {source}, {type}, {number}) so it never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'
+                      Virtual:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          Enabled:
+                            type: boolean
+                            description: Create a friendly-named virtual feed for each storage feed, sourced from it (source_feed process).
+                          NameTemplate:
+                            type: string
+                            description: "Template for the friendly virtual-feed name. {name} is the source's display name, so these can change freely without touching the stable storage feeds. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}."
+                          Tag:
+                            type: string
+                            description: The EmonCMS tag (group/node) virtual feeds are filed under — set this to keep the friendly virtual feeds separate from the storage feeds. Blank uses the main Feeds tag.
+                        description: Optionally create friendly-named virtual feeds that source from the stable storage feeds — so dashboards get nice names while the underlying feeds stay idempotent.
+                      Processes:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          LogToFeed:
+                            type: string
+                            description: Process id_num for 'Log to feed' (EmonCMS stores processlists as id_num:feedid; default 1).
+                          KwhToKwhd:
+                            type: string
+                            description: Process id_num for 'kWh to kWh/d', used for daily energy feeds (default 23).
+                          SourceFeed:
+                            type: string
+                            description: Process id_num for 'Source feed', used for virtual feeds (default 53).
+                        description: EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs → process dropdown).
+                    description: Automatically create and maintain EmonCMS feeds from the exported inputs. (Http transport; needs a read/write API key.)
                 description: EmonCMS exporter
               Logging:
                 type: object
@@ -541,6 +674,52 @@ spec:
                     type: string
                     description: Optional API key enabling the write/control endpoints. When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).
                 description: Read-only REST API + OpenAPI/Scalar docs
+              EnergyFlow:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Nodes:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id used to wire parents/children.
+                        Label:
+                          type: string
+                          description: Human-readable label shown in the flow diagram.
+                        Value:
+                          type: number
+                          description: Optional directly-known value for a leaf node (used until a live sensor is bound).
+                    description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
+                  Links:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        From:
+                          type: string
+                          description: Source node id — energy flows out of here.
+                        To:
+                          type: string
+                          description: Target node id — energy flows into here.
+                    description: Directed energy-flow links (From feeds To). Allows multiple feeders per node and producer inputs.
+                  Parents:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    additionalProperties:
+                      type: string
+                    description: Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.
+                  MqttExport:
+                    type: boolean
+                    description: Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.
+                  MqttTopicTemplate:
+                    type: string
+                    description: "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'."
+                description: Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.
           status:
             type: object
             x-kubernetes-preserve-unknown-fields: true
