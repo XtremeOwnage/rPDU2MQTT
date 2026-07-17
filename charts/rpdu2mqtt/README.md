@@ -61,7 +61,7 @@ credentials:
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
 | `serviceMonitor.labels` | `{}` | Extra labels so your Prometheus adopts the ServiceMonitor (e.g. `release: <kube-prometheus-stack release>`); without a match it is silently ignored. |
 | `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD (in this chart's `crds/`). |
-| `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, which is empty under Argo CD (`helm template`) — see `manageResource` below. |
+| `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, so it is a **no-op under Argo CD** (`helm template`) — see *Argo CD and GUI edits* under [Notes](#notes). |
 | `kubernetesConfigSource.manageResource` | `true` | Whether the chart renders the `RpduConfig` CR and the GUI-written credentials `Secret`. Set `false` to manage them out of band so GitOps (Argo/Flux) never syncs over GUI edits; RBAC + the config source stay on, but you must create the CR (and Secret, if used) once yourself. |
 | `ingress.enabled` | `false` | Expose the GUI and/or REST API via an Ingress. Each `ingress.hosts[].paths[]` entry takes an optional `service:` of `gui` (default) or `api`. |
 | `httpRoute.enabled` | `false` | Expose the GUI and/or REST API via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
@@ -82,6 +82,35 @@ credentials:
   adopts ServiceMonitors matching its `serviceMonitorSelector` — for kube-prometheus-stack that's
   usually `release: <your-stack>`, so set `serviceMonitor.labels` to match or the ServiceMonitor is
   silently ignored.
+- **Argo CD and GUI edits:** if you let the GUI write config (`kubernetesConfigSource.enabled`), Argo
+  will sync `values.config` back over those edits — `preserveExisting` cannot help, because the Helm
+  `lookup` it relies on is always empty under `helm template`. Add this to your **Application**:
+
+  ```yaml
+  spec:
+    ignoreDifferences:
+      - group: rpdu2mqtt.xtremeownage.com
+        kind: RpduConfig
+        jsonPointers:
+          - /spec
+      - group: ""
+        kind: Secret
+        name: <release-name>   # only if the GUI manages credentials
+        jsonPointers:
+          - /data
+    syncPolicy:
+      syncOptions:
+        - RespectIgnoreDifferences=true
+  ```
+
+  **`ignoreDifferences` alone is not enough:** without `RespectIgnoreDifferences=true` it only hides the
+  OutOfSync status while the sync still reverts your config — a green "Synced" app that clobbers you
+  anyway. The first sync still seeds the CR from `values.config` (the option has no effect on resources
+  that don't exist yet), so this behaves exactly like `preserveExisting` does under plain Helm.
+
+  Prefer not to touch the Application? Set `kubernetesConfigSource.manageResource: false` and create the
+  CR yourself once — the chart then renders neither the CR nor the Secret, so Argo never manages them.
+  See [docs/KubernetesCRD.md](../../docs/KubernetesCRD.md).
 - **Exposing the REST API:** enable `config.Api.Enabled` (the chart then creates a `<release>-api`
   Service on `config.Api.Port`), then route to it with `service: api` on an Ingress or HTTPRoute path:
 

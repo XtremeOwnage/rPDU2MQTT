@@ -31,3 +31,27 @@ Namespace: {{ .Release.Namespace }}
 WARNING: no credentials were provided. If your MQTT broker or PDU require auth,
 set `credentials.*` (or `existingSecret`) so the RPDU2MQTT_* env vars are injected.
 {{- end }}
+
+{{- if and .Values.kubernetesConfigSource.enabled .Values.kubernetesConfigSource.manageResource .Values.kubernetesConfigSource.preserveExisting }}
+
+NOTE: config is stored in the RpduConfig CR and the GUI can write to it.
+`preserveExisting` keeps your GUI edits across `helm upgrade` — but it relies on
+Helm's `lookup`, which is ALWAYS EMPTY under Argo CD / `helm template`.
+
+If you deploy with Argo CD, add this to your Application or it will sync
+`values.config` back over anything you change in the GUI (#178):
+
+  spec:
+    ignoreDifferences:
+      - group: rpdu2mqtt.xtremeownage.com
+        kind: RpduConfig
+        jsonPointers: [/spec]
+    syncPolicy:
+      syncOptions:
+        - RespectIgnoreDifferences=true
+
+RespectIgnoreDifferences is required: ignoreDifferences on its own only hides the
+OutOfSync status, and the sync still reverts your config.
+Alternatively set `kubernetesConfigSource.manageResource: false` and create the CR
+yourself. See the chart README.
+{{- end }}
