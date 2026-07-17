@@ -182,6 +182,9 @@ internal class YamlConfigLoader
         var emonKey = ResolveSecret("RPDU2MQTT_EMONCMS_APIKEY");
         if (emonKey is not null) { config.EmonCMS.ApiKey = emonKey; Log.Information("Using EmonCMS API key from environment."); }
 
+        var apiKey = ResolveSecret("RPDU2MQTT_API_KEY");
+        if (apiKey is not null) { config.Api.ApiKey = apiKey; Log.Information("Using API key from environment."); }
+
         var guiPass = ResolveSecret("RPDU2MQTT_GUI_PASSWORD");
         if (guiPass is not null) { config.Gui.Password = guiPass; Log.Information("Using GUI password from environment."); }
 

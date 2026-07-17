@@ -33,7 +33,8 @@ const sandbox = {
     elementFromPoint: () => null,
   },
   window: { addEventListener() {}, removeEventListener() {} },
-  location: { hash: '' },
+  // protocol/hostname are read when building the API docs links (#190).
+  location: { hash: '', protocol: 'http:', hostname: 'localhost' },
   navigator: { clipboard: { writeText() {} } },
   DOMPoint: class { matrixTransform() { return { x: 0, y: 0 }; } },
   setTimeout: () => 0, setInterval: () => 0, clearInterval() {},

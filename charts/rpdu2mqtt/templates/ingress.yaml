@@ -1,6 +1,5 @@
 {{- if .Values.ingress.enabled }}
 {{- $fullName := include "rpdu2mqtt.fullname" . -}}
-{{- $svcPort := dig "Gui" "Port" 8080 .Values.config -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -25,13 +24,14 @@ spec:
       http:
         paths:
           {{- range .paths }}
+          {{- $backend := dict "root" $ "service" (default "gui" .service) }}
           - path: {{ .path }}
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ $fullName }}-gui
+                name: {{ include "rpdu2mqtt.backendService" $backend }}
                 port:
-                  number: {{ $svcPort }}
+                  number: {{ include "rpdu2mqtt.backendPort" $backend }}
           {{- end }}
     {{- end }}
 {{- end }}

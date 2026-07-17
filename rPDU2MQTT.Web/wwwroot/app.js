@@ -1406,6 +1406,7 @@ function renderConfigSection(node     , nav     , sections     ) {
     else renderNode(node, state.data, sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
+    else if (node.key === 'Api') wireApiDocs(sec);
     link.onclick = () => activate(link, sec);
   }
   return link;
@@ -1490,6 +1491,56 @@ function wireEmonCmsTransport(sec     ) {
   transportSel.addEventListener('change', apply);
   feedsAuto?.addEventListener('change', apply);
   apply();
+}
+
+// The API section advertises OpenAPI/Scalar docs but never said where they live (#190). Show the real
+// URLs, derived from the configured port. The API listens on its own port, so the links are built from
+// this page's hostname rather than its path — they are only reachable if that port is exposed to you.
+function wireApiDocs(sec     ) {
+  const fields = [...sec.querySelectorAll('.field')]         ;
+  const field = (label        ) => fields.find(f => f.querySelector('label')?.textContent === label);
+  const enabled = field('Enabled')?.querySelector('input[type=checkbox]');
+  const portIn = field('Port')?.querySelector('input');
+  if (!portIn) return;
+
+  const box = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = 'Documentation'; box.appendChild(lg);
+  const desc = document.createElement('div'); desc.className = 'desc'; box.appendChild(desc);
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+  box.appendChild(list);
+
+  const LINKS = [
+    ['Interactive docs (Scalar)', '/scalar/v1'],
+    ['OpenAPI document', '/openapi/v1.json'],
+    ['API root', '/api/v1'],
+  ];
+
+  const apply = () => {
+    const on = enabled ? enabled.checked : true;
+    const port = portIn.value || '8082';
+    const base = `${location.protocol}//${location.hostname}:${port}`;
+    desc.textContent = on
+      ? 'The API is served on its own port — these links work once that port is reachable from your browser.'
+      : 'The API is disabled. Enable it above, save, and restart; these links will work once it is listening.';
+    list.innerHTML = '';
+    for (const [label, path] of LINKS) {
+      const row = document.createElement('div');
+      const a = document.createElement('a');
+      a.href = base + path; a.textContent = base + path;
+      a.target = '_blank'; a.rel = 'noopener';
+      a.style.cssText = 'font:12px ui-monospace,Consolas,monospace;';
+      if (!on) { a.style.pointerEvents = 'none'; a.style.opacity = '0.5'; }
+      row.appendChild(document.createTextNode(label + ': '));
+      row.appendChild(a);
+      list.appendChild(row);
+    }
+  };
+
+  portIn.addEventListener('input', apply);
+  enabled?.addEventListener('change', apply);
+  apply();
+  sec.appendChild(box);
 }
 
 // Section-specific action buttons (connection tests; Home Assistant discovery actions).

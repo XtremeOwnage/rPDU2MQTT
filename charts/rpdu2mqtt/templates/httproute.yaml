@@ -1,6 +1,5 @@
 {{- if .Values.httpRoute.enabled }}
 {{- $fullName := include "rpdu2mqtt.fullname" . -}}
-{{- $svcPort := dig "Gui" "Port" 8080 .Values.config -}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -21,9 +20,20 @@ spec:
   rules:
     {{- if .Values.httpRoute.rules }}
     {{- toYaml .Values.httpRoute.rules | nindent 4 }}
+    {{- else if .Values.httpRoute.paths }}
+    {{- range .Values.httpRoute.paths }}
+    {{- $backend := dict "root" $ "service" (default "gui" .service) }}
+    - matches:
+        - path:
+            type: {{ default "PathPrefix" .type }}
+            value: {{ .path | quote }}
+      backendRefs:
+        - name: {{ include "rpdu2mqtt.backendService" $backend }}
+          port: {{ include "rpdu2mqtt.backendPort" $backend }}
+    {{- end }}
     {{- else }}
     - backendRefs:
         - name: {{ $fullName }}-gui
-          port: {{ $svcPort }}
+          port: {{ dig "Gui" "Port" 8080 .Values.config }}
     {{- end }}
 {{- end }}

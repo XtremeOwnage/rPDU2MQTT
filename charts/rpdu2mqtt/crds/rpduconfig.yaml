@@ -672,7 +672,7 @@ spec:
                     description: Port the REST API + docs listen on.
                   ApiKey:
                     type: string
-                    description: Optional API key enabling the write/control endpoints. When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).
+                    description: Optional API key enabling the write/control endpoints (or set RPDU2MQTT_API_KEY). When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).
                 description: Read-only REST API + OpenAPI/Scalar docs
               EnergyFlow:
                 type: object

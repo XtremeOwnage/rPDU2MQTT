@@ -139,6 +139,41 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void ApiKey_IsReadFromTheEnvironment()
+    {
+        // Api.ApiKey is stripped by RedactSecrets, so without an env path it could not be supplied at
+        // all under the Kubernetes config source (#190).
+        try
+        {
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY", "from-env");
+            Assert.Equal("from-env", YamlConfigLoader.Initialize(new Config()).Api.ApiKey);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY", null);
+        }
+    }
+
+    [Fact]
+    public void ApiKey_FileVariantTakesPrecedence_LikeOtherSecrets()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(path, "from-file\n");   // trailing newline must be trimmed
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY", "from-env");
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY_FILE", path);
+            Assert.Equal("from-file", YamlConfigLoader.Initialize(new Config()).Api.ApiKey);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY", null);
+            Environment.SetEnvironmentVariable("RPDU2MQTT_API_KEY_FILE", null);
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Build_OverrideDevicesAndOutletsExposeMakeAndModel()
     {
         var overrides = ConfigSchema.Build().Single(n => n.Key == "Overrides");

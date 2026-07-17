@@ -64,6 +64,15 @@ config:
   Health:
     Enabled: true
     Port: 8081
+  Api:
+    # Read-only REST API (/api/v1/*) plus its OpenAPI document (/openapi/v1.json) and
+    # interactive Scalar docs (/scalar/v1). Unauthenticated for reads — keep it on a
+    # trusted network, or front it with auth at your ingress.
+    Enabled: false
+    Port: 8082
+    # Set ApiKey to enable the write/control endpoints (sent as the X-Api-Key header).
+    # Prefer credentials.apiKey below (injected as RPDU2MQTT_API_KEY) over setting it here.
+    # ApiKey: ""
 
 # ---------------------------------------------------------------------------
 # Credentials, injected as RPDU2MQTT_* environment variables via a Secret so
@@ -82,6 +91,8 @@ credentials:
   emoncmsApiKey: ""
   # GUI OIDC client secret (RPDU2MQTT_OIDC_CLIENT_SECRET) when using Gui.Oidc.
   oidcClientSecret: ""
+  # REST API key (RPDU2MQTT_API_KEY) enabling the API's write/control endpoints (config.Api.ApiKey).
+  apiKey: ""
 
 serviceAccount:
   create: true
@@ -107,10 +118,15 @@ kubernetesConfigSource:
   # (and Secret, if used) yourself once.
   manageResource: true
 
-# Kubernetes Services for the GUI and /metrics endpoints. Created only when the
+# Kubernetes Services for the GUI, REST API and /metrics endpoints. Created only when the
 # corresponding feature is enabled in `config` AND the toggle here is true.
 service:
   gui:
+    enabled: true
+    type: ClusterIP
+    annotations: {}
+  # Requires config.Api.Enabled. Backs the `service: api` route option below.
+  api:
     enabled: true
     type: ClusterIP
     annotations: {}
@@ -135,7 +151,17 @@ serviceMonitor:
   #     release: prometheus-stack
   labels: {}
 
-# Ingress for the GUI Service.
+# Ingress for the GUI and/or REST API Services.
+# Each path routes to `service: gui` (default) or `service: api` — the latter requires
+# config.Api.Enabled and service.api.enabled. To expose the API too, add a path for it, e.g.
+#   paths:
+#     - path: /
+#       pathType: Prefix
+#     - path: /api
+#       pathType: Prefix
+#       service: api
+# The API serves its docs at /scalar/v1 and /openapi/v1.json, so routing only /api hides them;
+# give the API its own host (or add those paths) if you want the docs reachable too.
 ingress:
   enabled: false
   className: ""
@@ -145,6 +171,7 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+          # service: gui
   tls: []
 
 # Gateway API HTTPRoute for the GUI Service (alternative to Ingress). Requires the
@@ -158,7 +185,16 @@ httpRoute:
   hostnames:
     - rpdu2mqtt.example.com
   annotations: {}
-  # Override the default rule (route everything to the GUI Service) with custom matches if needed.
+  # Path-based routing, mirroring `ingress.hosts[].paths`. Each entry routes to `service: gui`
+  # (default) or `service: api`. Empty = route everything to the GUI Service. e.g.
+  #   paths:
+  #     - path: /
+  #       type: PathPrefix
+  #     - path: /api
+  #       type: PathPrefix
+  #       service: api
+  paths: []
+  # Full escape hatch: raw HTTPRoute rules, used verbatim and taking precedence over `paths`.
   rules: []
 
 # NetworkPolicy to restrict pod access. When enabled, ingress to the GUI/metrics ports is allowed
@@ -172,6 +208,9 @@ networkPolicy:
     # - namespaceSelector:
     #     matchLabels:
     #       kubernetes.io/metadata.name: ingress-nginx
+  # Peers allowed to reach the REST API port (e.g. your ingress controller/Gateway, or the
+  # automation that consumes it). Empty = no direct API ingress is permitted.
+  apiIngressFrom: []
   # Peers allowed to scrape the metrics port (e.g. your Prometheus). Empty = none.
   metricsIngressFrom: []
   # Restrict egress to DNS + the rules below. When false, egress is unrestricted.

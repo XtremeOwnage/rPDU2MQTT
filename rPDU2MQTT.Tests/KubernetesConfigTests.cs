@@ -50,6 +50,7 @@ public class KubernetesConfigTests
         cfg.Pdus[Config.DefaultInstanceKey] = new PduConfig { Credentials = new() { Username = "hass", Password = "pw" } };
         cfg.EmonCMS.ApiKey = "key";
         cfg.Gui.Password = "guipass";
+        cfg.Api.ApiKey = "apikey";
 
         var redacted = ConfigSchema.RedactSecrets(cfg);
 
@@ -57,6 +58,8 @@ public class KubernetesConfigTests
         Assert.Null(redacted.Primary.Credentials);
         Assert.Null(redacted.EmonCMS.ApiKey);
         Assert.Null(redacted.Gui.Password);
+        // Stripped from the CR, so it must come back via RPDU2MQTT_API_KEY (#190).
+        Assert.Null(redacted.Api.ApiKey);
         // Original is untouched.
         Assert.NotNull(cfg.MQTT.Credentials);
     }

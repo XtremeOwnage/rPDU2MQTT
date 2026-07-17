@@ -1,0 +1,24 @@
+{{- if and ((include "rpdu2mqtt.apiEnabled" .)) .Values.service.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-api
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.service.api.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.api.type }}
+  selector:
+    {{- include "rpdu2mqtt.selectorLabels" . | nindent 4 }}
+    {{- if .Values.split.enabled }}
+    app.kubernetes.io/component: api   # the REST API is served by the api role
+    {{- end }}
+  ports:
+    - name: api
+      port: {{ include "rpdu2mqtt.apiPort" . }}
+      targetPort: api
+{{- end }}

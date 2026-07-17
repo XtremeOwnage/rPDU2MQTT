@@ -60,9 +60,58 @@ true
 {{- dig "Prometheus" "Port" 9184 .Values.config -}}
 {{- end -}}
 
+{{/* True when the app exposes the read-only REST API + its OpenAPI/Scalar docs (#190). */}}
+{{- define "rpdu2mqtt.apiEnabled" -}}
+{{- if dig "Api" "Enabled" false .Values.config -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{- define "rpdu2mqtt.apiPort" -}}
+{{- dig "Api" "Port" 8082 .Values.config -}}
+{{- end -}}
+
+{{/*
+Resolve a route backend name to a Service. Routes name a logical target ("gui" / "api"); this maps it
+to the release's Service so ingress.yaml and httproute.yaml stay in agreement about the naming.
+Usage: include "rpdu2mqtt.backendService" (dict "root" $ "service" "api")
+*/}}
+{{- define "rpdu2mqtt.backendService" -}}
+{{- $svc := default "gui" .service -}}
+{{- if not (has $svc (list "gui" "api")) -}}
+{{- fail (printf "route backend service must be \"gui\" or \"api\", got %q" $svc) -}}
+{{- end -}}
+{{- /* Fail loudly rather than emit a route to a Service this chart never creates. */ -}}
+{{- if eq $svc "api" -}}
+{{- if not (include "rpdu2mqtt.apiEnabled" .root) -}}
+{{- fail "a route targets `service: api`, but config.Api.Enabled is false — the API Service is not created. Set config.Api.Enabled=true." -}}
+{{- end -}}
+{{- if not .root.Values.service.api.enabled -}}
+{{- fail "a route targets `service: api`, but service.api.enabled is false — the API Service is not created." -}}
+{{- end -}}
+{{- else -}}
+{{- if not (dig "Gui" "Enabled" false .root.Values.config) -}}
+{{- fail "a route targets `service: gui`, but config.Gui.Enabled is false — the GUI Service is not created. Set config.Gui.Enabled=true." -}}
+{{- end -}}
+{{- if not .root.Values.service.gui.enabled -}}
+{{- fail "a route targets `service: gui`, but service.gui.enabled is false — the GUI Service is not created." -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%s-%s" (include "rpdu2mqtt.fullname" .root) $svc -}}
+{{- end -}}
+
+{{- define "rpdu2mqtt.backendPort" -}}
+{{- $svc := default "gui" .service -}}
+{{- if eq $svc "api" -}}
+{{- include "rpdu2mqtt.apiPort" .root -}}
+{{- else -}}
+{{- dig "Gui" "Port" 8080 .root.Values.config -}}
+{{- end -}}
+{{- end -}}
+
 {{/* True when a credentials Secret should be referenced (either managed here or external). */}}
 {{- define "rpdu2mqtt.hasSecret" -}}
-{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret -}}
+{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret .Values.credentials.apiKey -}}
 true
 {{- end -}}
 {{- end -}}
