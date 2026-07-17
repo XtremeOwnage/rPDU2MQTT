@@ -1,0 +1,1550 @@
+[
+ {
+  "key": "_README",
+  "label": "fixture",
+  "description": "Real output of ConfigSchema.Build(), used by smoke.mjs so build() renders every section. Regenerate when config sections change: dump JsonSerializer.Serialize(ConfigSchema.Build(), ConfigSchema.Json) to this file. Drift only reduces coverage; it does not cause false failures.",
+  "type": "readme"
+ },
+ {
+  "key": "MQTT",
+  "label": "MQTT",
+  "description": "MQTT Configuration",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Credentials",
+    "label": "Credentials",
+    "description": "Optional credentials to connect to MQTT",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Username",
+      "label": "Username",
+      "description": "Username to log in as",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Password",
+      "label": "Password",
+      "description": "Password to login with",
+      "type": "password",
+      "required": false
+     }
+    ]
+   },
+   {
+    "key": "ClientID",
+    "label": "ClientID",
+    "description": "The client-id used when connecting to MQTT.",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "ParentTopic",
+    "label": "ParentTopic",
+    "description": "The parent topic for MQTT messages.",
+    "type": "string",
+    "required": true,
+    "default": "rPDU2MQTT"
+   },
+   {
+    "key": "Connection",
+    "label": "Connection",
+    "description": "Connection details for MQTT Broker",
+    "type": "object",
+    "required": true,
+    "properties": [
+     {
+      "key": "Scheme",
+      "label": "Connection Scheme",
+      "description": "How to reach the broker: mqtt (plain TCP), mqtts (TLS), ws (WebSocket) or wss (WebSocket over TLS). Leave unset to infer from the port.",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "",
+       "mqtt",
+       "mqtts",
+       "ws",
+       "wss"
+      ]
+     },
+     {
+      "key": "Host",
+      "label": "Host",
+      "description": "Hostname or IP to connect to.",
+      "type": "string",
+      "required": true
+     },
+     {
+      "key": "Port",
+      "label": "Port",
+      "description": "The port to connect to.",
+      "type": "int",
+      "required": false,
+      "min": 0,
+      "max": 65535
+     },
+     {
+      "key": "Timeout",
+      "label": "Connection Timeout",
+      "description": "Default connection timeout.",
+      "type": "int",
+      "required": false,
+      "min": 1,
+      "max": 3600
+     },
+     {
+      "key": "ValidateCertificate",
+      "label": "Validate Certificate",
+      "description": "Enables certificate validation",
+      "type": "bool",
+      "required": false,
+      "default": true
+     }
+    ]
+   },
+   {
+    "key": "KeepAlive",
+    "label": "KeepAlive",
+    "description": "The keepalive interval for the MQTT connection in seconds.",
+    "type": "int",
+    "required": false,
+    "min": 1,
+    "max": 2147483647
+   },
+   {
+    "key": "LastWill",
+    "label": "Last Will / Availability",
+    "description": "Publish a Last-Will message and set an availability topic on entities, so Home Assistant marks them unavailable immediately when the bridge disconnects. When off, entities instead rely on HomeAssistant.SensorExpireAfterSeconds (expire_after) to go unavailable.",
+    "type": "bool",
+    "required": false,
+    "default": true
+   }
+  ]
+ },
+ {
+  "key": "Pdus",
+  "label": "Pdus",
+  "description": "PDU instances to bridge, keyed by instance name.",
+  "type": "dictionary",
+  "required": false,
+  "valueSchema": {
+   "key": "",
+   "label": "",
+   "type": "object",
+   "required": false,
+   "properties": [
+    {
+     "key": "Connection",
+     "label": "Connection",
+     "description": "Connection details for PDU",
+     "type": "object",
+     "required": true,
+     "properties": [
+      {
+       "key": "Host",
+       "label": "Host",
+       "description": "Hostname or IP to connect to.",
+       "type": "string",
+       "required": true
+      },
+      {
+       "key": "Port",
+       "label": "Port",
+       "description": "The port to connect to.",
+       "type": "int",
+       "required": false,
+       "min": 0,
+       "max": 65535
+      },
+      {
+       "key": "Timeout",
+       "label": "Connection Timeout",
+       "description": "Default connection timeout.",
+       "type": "int",
+       "required": false,
+       "min": 1,
+       "max": 3600
+      },
+      {
+       "key": "Scheme",
+       "label": "Connection Scheme",
+       "description": "Connection scheme used",
+       "type": "enum",
+       "required": false,
+       "enumValues": [
+        "",
+        "http",
+        "https"
+       ]
+      },
+      {
+       "key": "ValidateCertificate",
+       "label": "Validate Certificate",
+       "description": "Enables certificate validation",
+       "type": "bool",
+       "required": false,
+       "default": true
+      }
+     ]
+    },
+    {
+     "key": "Credentials",
+     "label": "Credentials",
+     "description": "PDU login used for write actions (outlet control). Can also be supplied via RPDU2MQTT_PDU_USERNAME / RPDU2MQTT_PDU_PASSWORD.",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "Username",
+       "label": "Username",
+       "description": "Username to log in as",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Password",
+       "label": "Password",
+       "description": "Password to login with",
+       "type": "password",
+       "required": false
+      }
+     ]
+    },
+    {
+     "key": "PollInterval",
+     "label": "Poll Interval (seconds)",
+     "description": "How often (seconds) to poll the PDU and publish readings.",
+     "type": "int",
+     "required": false,
+     "default": 5,
+     "min": 1,
+     "max": 2147483647
+    },
+    {
+     "key": "ActionsEnabled",
+     "label": "Enable Write Actions",
+     "description": "Allow the bridge to make changes on the PDU (e.g. toggle outlets). When off, no switches or other write controls are exposed to Home Assistant. Requires PDU credentials.",
+     "type": "bool",
+     "required": false,
+     "default": false
+    },
+    {
+     "key": "RemapModel",
+     "label": "Remap Model column",
+     "description": "Replace each outlet/group's Model (shown in the Home Assistant device info) with contextual text (e.g. parent PDU + name) instead of the PDU's hardware model.",
+     "type": "bool",
+     "required": false,
+     "default": false
+    },
+    {
+     "key": "RemapManufacturer",
+     "label": "Remap Manufacturer column",
+     "description": "Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.",
+     "type": "bool",
+     "required": false,
+     "default": false
+    }
+   ]
+  },
+  "keyType": "string"
+ },
+ {
+  "key": "HomeAssistant",
+  "label": "HomeAssistant",
+  "description": "Home Assistant Configuration",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "DiscoveryEnabled",
+    "label": "DiscoveryEnabled",
+    "description": "Indicates whether Home Assistant discovery is enabled.",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "key": "DiscoveryTopic",
+    "label": "DiscoveryTopic",
+    "description": "The discovery topic for Home Assistant.",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "DiscoveryInterval",
+    "label": "DiscoveryInterval",
+    "description": "How often (seconds) to republish discovery. 0 = run once at startup until restarted.",
+    "type": "int",
+    "required": false
+   },
+   {
+    "key": "DiscoveryRetain",
+    "label": "DiscoveryRetain",
+    "description": "Whether discovery messages are retained on the broker.",
+    "type": "bool",
+    "required": false
+   },
+   {
+    "key": "SensorExpireAfterSeconds",
+    "label": "SensorExpireAfterSeconds",
+    "description": "expire_after (seconds) applied to sensors; after this long without an update Home Assistant marks them unavailable.",
+    "type": "int",
+    "required": false
+   },
+   {
+    "key": "GroupMemberNameTemplate",
+    "label": "GroupMemberNameTemplate",
+    "description": "Name template for a group's mirrored member switches. Placeholders: {device}, {outlet}, {number}, {group}.",
+    "type": "string",
+    "required": false,
+    "default": "{device} \u2014 Outlet {number} ({outlet})",
+    "templateVars": [
+     "device",
+     "outlet",
+     "number",
+     "group"
+    ]
+   },
+   {
+    "key": "GroupMemberObjectIdTemplate",
+    "label": "GroupMemberObjectIdTemplate",
+    "description": "Stable entity/object_id template for a group's mirrored member switches. Placeholders: {serial}, {number}, {device}, {group}.",
+    "type": "string",
+    "required": false,
+    "default": "{serial}_outlet_{number}",
+    "templateVars": [
+     "serial",
+     "number",
+     "device",
+     "group"
+    ]
+   },
+   {
+    "key": "EnergyDashboard",
+    "label": "EnergyDashboard",
+    "description": "Auto-configure Home Assistant's Energy Dashboard 'devices' (with upstream relationships) from the energy-flow hierarchy, via HA's WebSocket API.",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "description": "Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.",
+      "type": "bool",
+      "required": false,
+      "default": false
+     },
+     {
+      "key": "Url",
+      "label": "Url",
+      "description": "Home Assistant base URL, e.g. http://homeassistant.local:8123 .",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Token",
+      "label": "Token",
+      "description": "Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "EnergyMeasurementType",
+      "label": "EnergyMeasurementType",
+      "description": "Measurement type holding each entity's cumulative energy (kWh) \u2014 used to find the Energy Dashboard stat for each tier.",
+      "type": "string",
+      "required": false,
+      "default": "energy"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "Overrides",
+  "label": "Overrides",
+  "description": "Overrides",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "PDU",
+    "label": "PDU",
+    "description": "Allows overriding values for the rPDU2MQTT.",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "ID",
+      "label": "ID",
+      "description": "Overridden ID",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Name",
+      "label": "Name",
+      "description": "Overridden Name",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "description": "Is this entity enabled?",
+      "type": "bool",
+      "required": false
+     },
+     {
+      "key": "Make",
+      "label": "Make",
+      "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Model",
+      "label": "Model",
+      "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+      "type": "string",
+      "required": false
+     }
+    ]
+   },
+   {
+    "key": "Devices",
+    "label": "Devices",
+    "description": "Allows overriding configuration for individual devices.",
+    "type": "dictionary",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "Outlets",
+       "label": "Outlets",
+       "description": "Allows overriding values for individual outlets.",
+       "type": "dictionary",
+       "required": false,
+       "valueSchema": {
+        "key": "",
+        "label": "",
+        "type": "object",
+        "required": false,
+        "properties": [
+         {
+          "key": "ID",
+          "label": "ID",
+          "description": "Overridden ID",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Name",
+          "label": "Name",
+          "description": "Overridden Name",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Enabled",
+          "label": "Enabled",
+          "description": "Is this entity enabled?",
+          "type": "bool",
+          "required": false
+         },
+         {
+          "key": "Make",
+          "label": "Make",
+          "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Model",
+          "label": "Model",
+          "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+          "type": "string",
+          "required": false
+         }
+        ]
+       },
+       "keyType": "int"
+      },
+      {
+       "key": "ID",
+       "label": "ID",
+       "description": "Overridden ID",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Name",
+       "label": "Name",
+       "description": "Overridden Name",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Enabled",
+       "label": "Enabled",
+       "description": "Is this entity enabled?",
+       "type": "bool",
+       "required": false
+      },
+      {
+       "key": "Make",
+       "label": "Make",
+       "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Model",
+       "label": "Model",
+       "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+       "type": "string",
+       "required": false
+      }
+     ]
+    },
+    "keyType": "string"
+   },
+   {
+    "key": "Measurements",
+    "label": "Measurements",
+    "description": "Allows overriding individual measurements",
+    "type": "dictionary",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "ID",
+       "label": "ID",
+       "description": "Overridden ID",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Name",
+       "label": "Name",
+       "description": "Overridden Name",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Enabled",
+       "label": "Enabled",
+       "description": "Is this entity enabled?",
+       "type": "bool",
+       "required": false
+      },
+      {
+       "key": "Make",
+       "label": "Make",
+       "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Model",
+       "label": "Model",
+       "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+       "type": "string",
+       "required": false
+      }
+     ]
+    },
+    "keyType": "string"
+   },
+   {
+    "key": "OneviewGroups",
+    "label": "OneviewGroups",
+    "description": "Overrides specific to Oneview groups",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Measurements",
+      "label": "Measurements",
+      "description": "Allows overriding individual measurements for groups",
+      "type": "dictionary",
+      "required": false,
+      "valueSchema": {
+       "key": "",
+       "label": "",
+       "type": "object",
+       "required": false,
+       "properties": [
+        {
+         "key": "ID",
+         "label": "ID",
+         "description": "Overridden ID",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Name",
+         "label": "Name",
+         "description": "Overridden Name",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Enabled",
+         "label": "Enabled",
+         "description": "Is this entity enabled?",
+         "type": "bool",
+         "required": false
+        },
+        {
+         "key": "Make",
+         "label": "Make",
+         "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Model",
+         "label": "Model",
+         "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+         "type": "string",
+         "required": false
+        }
+       ]
+      },
+      "keyType": "string"
+     },
+     {
+      "key": "Overrides",
+      "label": "Overrides",
+      "description": "Allows overriding group ID, Name, and enabled state.",
+      "type": "dictionary",
+      "required": false,
+      "valueSchema": {
+       "key": "",
+       "label": "",
+       "type": "object",
+       "required": false,
+       "properties": [
+        {
+         "key": "ID",
+         "label": "ID",
+         "description": "Overridden ID",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Name",
+         "label": "Name",
+         "description": "Overridden Name",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Enabled",
+         "label": "Enabled",
+         "description": "Is this entity enabled?",
+         "type": "bool",
+         "required": false
+        },
+        {
+         "key": "Make",
+         "label": "Make",
+         "description": "Manufacturer shown in Home Assistant (e.g. 'Dell'). Applies to devices, outlets and groups.",
+         "type": "string",
+         "required": false
+        },
+        {
+         "key": "Model",
+         "label": "Model",
+         "description": "Model shown in Home Assistant (e.g. 'PowerEdge R730xd'). Applies to devices, outlets and groups.",
+         "type": "string",
+         "required": false
+        }
+       ]
+      },
+      "keyType": "string"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "Debug",
+  "label": "Debug",
+  "description": "Settings for debugging and diagnostics.",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "PublishMessages",
+    "label": "Publish to MQTT",
+    "description": "Actually publish messages to the broker. Turn off to dry-run the whole pipeline without sending anything.",
+    "type": "bool",
+    "required": false,
+    "default": true
+   },
+   {
+    "key": "PrintDiscovery",
+    "label": "Print Discovery Payloads",
+    "description": "Log the Home Assistant discovery JSON to the console (verbose; for troubleshooting discovery).",
+    "type": "bool",
+    "required": false,
+    "default": false
+   }
+  ]
+ },
+ {
+  "key": "Prometheus",
+  "label": "Prometheus",
+  "description": "Prometheus metrics exporter",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Exporter",
+    "label": "Exporter",
+    "description": "Expose a /metrics endpoint for Prometheus to scrape.",
+    "type": "bool",
+    "required": false,
+    "default": false
+   },
+   {
+    "key": "Port",
+    "label": "Port",
+    "description": "Port the /metrics endpoint listens on (Exporter).",
+    "type": "int",
+    "required": false,
+    "default": 9184
+   },
+   {
+    "key": "MetricNameTemplate",
+    "label": "MetricNameTemplate",
+    "description": "Template for Prometheus metric names. Placeholders: {type}, {device}, {source} (a.k.a. {outlet}), {units}. e.g. 'rpdu2mqtt_{type}' -> rpdu2mqtt_realpower; 'pdu_{device}_{type}' -> pdu_rack_pdu_1_realpower. (device/source/units are also emitted as labels.)",
+    "type": "string",
+    "required": false,
+    "default": "rpdu2mqtt_{type}",
+    "templateVars": [
+     "type",
+     "device",
+     "source",
+     "units"
+    ]
+   },
+   {
+    "key": "Labels",
+    "label": "Labels",
+    "description": "Labels attached to every exported metric. Available: device, source, name, number, type, units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set.",
+    "type": "list",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "string",
+     "required": false
+    }
+   },
+   {
+    "key": "Pushgateway",
+    "label": "Pushgateway",
+    "description": "Push metrics to a Prometheus Pushgateway.",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "description": "Push metrics to a Pushgateway.",
+      "type": "bool",
+      "required": false,
+      "default": false
+     },
+     {
+      "key": "Url",
+      "label": "Url",
+      "description": "Pushgateway endpoint, e.g. http://pushgateway:9091/metrics.",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Job",
+      "label": "Job",
+      "description": "The 'job' label applied to pushed metrics.",
+      "type": "string",
+      "required": false,
+      "default": "rpdu2mqtt"
+     },
+     {
+      "key": "IntervalSeconds",
+      "label": "IntervalSeconds",
+      "description": "How often to push, in seconds. Falls back to the PDU poll interval when 0.",
+      "type": "int",
+      "required": false,
+      "default": 0
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "EmonCMS",
+  "label": "EmonCMS",
+  "description": "EmonCMS exporter",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Enabled",
+    "label": "Enabled",
+    "description": "Push measurements to an EmonCMS server.",
+    "type": "bool",
+    "required": false,
+    "default": false
+   },
+   {
+    "key": "Transport",
+    "label": "Transport",
+    "description": "How to deliver measurements: Http (input/post API) or Mqtt (publish to EmonCMS's MQTT input on the same broker).",
+    "type": "enum",
+    "required": false,
+    "default": "Http",
+    "enumValues": [
+     "Http",
+     "Mqtt"
+    ]
+   },
+   {
+    "key": "Url",
+    "label": "Url",
+    "description": "Base URL of the EmonCMS server, e.g. http://emoncms.example.com. (Http transport.)",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "ApiKey",
+    "label": "ApiKey",
+    "description": "EmonCMS write API key (or set RPDU2MQTT_EMONCMS_APIKEY). (Http transport.)",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "Node",
+    "label": "Node",
+    "description": "EmonCMS input node name.",
+    "type": "string",
+    "required": false,
+    "default": "rpdu2mqtt"
+   },
+   {
+    "key": "Path",
+    "label": "Path",
+    "description": "API path (relative to Url) that measurements are posted to. (Http transport.)",
+    "type": "string",
+    "required": false,
+    "default": "input/post"
+   },
+   {
+    "key": "InputNameTemplate",
+    "label": "InputNameTemplate",
+    "description": "Template for EmonCMS input keys. Placeholders: {device}, {source} (object-id form), {name} (formatted display name), {number} (outlet number), {type}, {units}. e.g. '{device}_{source}_{type}' -> rack_pdu_1_dell_md1200_realpower. Leave blank to use the full raw identifier.",
+    "type": "string",
+    "required": false,
+    "default": "{device}_{source}_{type}",
+    "templateVars": [
+     "device",
+     "source",
+     "name",
+     "number",
+     "type",
+     "units"
+    ]
+   },
+   {
+    "key": "MqttBaseTopic",
+    "label": "MqttBaseTopic",
+    "description": "Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate). (Mqtt transport.)",
+    "type": "string",
+    "required": false,
+    "default": "emon"
+   },
+   {
+    "key": "MqttTopicTemplate",
+    "label": "MqttTopicTemplate",
+    "description": "Template for the EmonCMS MQTT topic each JSON payload is published to. Placeholders: {base} (MqttBaseTopic), {node}, {device} (the PDU's name). Including {device} splits the export so each PDU publishes to its own topic instead of one combined payload, e.g. '{base}/{node}/{device}'. (Mqtt transport.)",
+    "type": "string",
+    "required": false,
+    "default": "{base}/{node}",
+    "templateVars": [
+     "base",
+     "node",
+     "device"
+    ]
+   },
+   {
+    "key": "Feeds",
+    "label": "Feeds",
+    "description": "Automatically create and maintain EmonCMS feeds from the exported inputs. (Http transport; needs a read/write API key.)",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "AutoConfigure",
+      "label": "AutoConfigure",
+      "description": "Create and maintain EmonCMS feeds from the exported inputs (takes effect without a restart).",
+      "type": "bool",
+      "required": false,
+      "default": false
+     },
+     {
+      "key": "Types",
+      "label": "Types",
+      "description": "The measurement types to build feeds for, each with its own engine, interval and processing.",
+      "type": "list",
+      "required": false,
+      "valueSchema": {
+       "key": "",
+       "label": "",
+       "type": "object",
+       "required": false,
+       "properties": [
+        {
+         "key": "Type",
+         "label": "Type",
+         "description": "The measurement type this applies to (raw PDU type name).",
+         "type": "enum",
+         "required": false,
+         "enumValues": [
+          "",
+          "realpower",
+          "apparentpower",
+          "energy",
+          "current",
+          "voltage",
+          "frequency",
+          "powerfactor"
+         ]
+        },
+        {
+         "key": "Engine",
+         "label": "Engine",
+         "description": "Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.",
+         "type": "enum",
+         "required": false,
+         "enumValues": [
+          "MySQL",
+          "PHPTimeSeries",
+          "PHPFina",
+          "VirtualFeed"
+         ]
+        },
+        {
+         "key": "IntervalSeconds",
+         "label": "IntervalSeconds",
+         "description": "Sample interval in seconds for this type's feed. Blank inherits Feeds.IntervalSeconds.",
+         "type": "int",
+         "required": false,
+         "min": 1,
+         "max": 86400
+        },
+        {
+         "key": "Daily",
+         "label": "Daily",
+         "description": "Also create a daily kWh/d feed (an extra processlist step: kWh\u2192kWh/d). Typically only for the energy type.",
+         "type": "bool",
+         "required": false,
+         "default": false
+        },
+        {
+         "key": "DailyIntervalSeconds",
+         "label": "DailyIntervalSeconds",
+         "description": "Interval (seconds) for the daily kWh/d feed. Should be a day (86400), not the base interval.",
+         "type": "int",
+         "required": false,
+         "default": 86400,
+         "min": 1,
+         "max": 86400
+        }
+       ]
+      }
+     },
+     {
+      "key": "Engine",
+      "label": "Engine",
+      "description": "Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).",
+      "type": "enum",
+      "required": false,
+      "default": "PHPFina",
+      "enumValues": [
+       "MySQL",
+       "PHPTimeSeries",
+       "PHPFina",
+       "VirtualFeed"
+      ]
+     },
+     {
+      "key": "IntervalSeconds",
+      "label": "IntervalSeconds",
+      "description": "Default sample interval in seconds for a fixed-interval feed, for types that don't set their own.",
+      "type": "int",
+      "required": false,
+      "default": 10,
+      "min": 1,
+      "max": 86400
+     },
+     {
+      "key": "IdempotentNames",
+      "label": "IdempotentNames",
+      "description": "Name storage feeds idempotently from stable ids (device/source/type) so they DON'T change when a source is renamed. Turn off to name them from the display name instead (renaming a source renames its feed).",
+      "type": "bool",
+      "required": false,
+      "default": true
+     },
+     {
+      "key": "Tag",
+      "label": "Tag",
+      "description": "The EmonCMS tag (group) new feeds are filed under. Blank uses the input node name.",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "StorageNameTemplate",
+      "label": "StorageNameTemplate",
+      "description": "Template for the idempotent storage-feed name. Use only stable placeholders ({device}, {source}, {type}, {number}) so it never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.",
+      "type": "string",
+      "required": false,
+      "default": "{device}_{source}_{type}",
+      "templateVars": [
+       "device",
+       "source",
+       "name",
+       "number",
+       "type",
+       "units"
+      ]
+     },
+     {
+      "key": "Virtual",
+      "label": "Virtual",
+      "description": "Optionally create friendly-named virtual feeds that source from the stable storage feeds \u2014 so dashboards get nice names while the underlying feeds stay idempotent.",
+      "type": "object",
+      "required": false,
+      "properties": [
+       {
+        "key": "Enabled",
+        "label": "Enabled",
+        "description": "Create a friendly-named virtual feed for each storage feed, sourced from it (source_feed process).",
+        "type": "bool",
+        "required": false,
+        "default": false
+       },
+       {
+        "key": "NameTemplate",
+        "label": "NameTemplate",
+        "description": "Template for the friendly virtual-feed name. {name} is the source's display name, so these can change freely without touching the stable storage feeds. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.",
+        "type": "string",
+        "required": false,
+        "default": "{name} {type}",
+        "templateVars": [
+         "device",
+         "source",
+         "name",
+         "number",
+         "type",
+         "units"
+        ]
+       },
+       {
+        "key": "Tag",
+        "label": "Tag",
+        "description": "The EmonCMS tag (group/node) virtual feeds are filed under \u2014 set this to keep the friendly virtual feeds separate from the storage feeds. Blank uses the main Feeds tag.",
+        "type": "string",
+        "required": false
+       }
+      ]
+     },
+     {
+      "key": "Processes",
+      "label": "Processes",
+      "description": "EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs \u2192 process dropdown).",
+      "type": "object",
+      "required": false,
+      "properties": [
+       {
+        "key": "LogToFeed",
+        "label": "LogToFeed",
+        "description": "Process id_num for 'Log to feed' (EmonCMS stores processlists as id_num:feedid; default 1).",
+        "type": "string",
+        "required": false,
+        "default": "1"
+       },
+       {
+        "key": "KwhToKwhd",
+        "label": "KwhToKwhd",
+        "description": "Process id_num for 'kWh to kWh/d', used for daily energy feeds (default 23).",
+        "type": "string",
+        "required": false,
+        "default": "23"
+       },
+       {
+        "key": "SourceFeed",
+        "label": "SourceFeed",
+        "description": "Process id_num for 'Source feed', used for virtual feeds (default 53).",
+        "type": "string",
+        "required": false,
+        "default": "53"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "Logging",
+  "label": "Logging",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "LogFilePath",
+    "label": "LogFilePath",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "Console",
+    "label": "Console",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Severity",
+      "label": "Severity",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "Verbose",
+       "Debug",
+       "Information",
+       "Warning",
+       "Error",
+       "Fatal"
+      ]
+     },
+     {
+      "key": "Format",
+      "label": "Format",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "type": "bool",
+      "required": false
+     }
+    ]
+   },
+   {
+    "key": "File",
+    "label": "File",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Path",
+      "label": "Path",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "FileRollover",
+      "label": "FileRollover",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "Infinite",
+       "Year",
+       "Month",
+       "Day",
+       "Hour",
+       "Minute"
+      ]
+     },
+     {
+      "key": "FileRetention",
+      "label": "FileRetention",
+      "type": "int",
+      "required": false
+     },
+     {
+      "key": "Severity",
+      "label": "Severity",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "Verbose",
+       "Debug",
+       "Information",
+       "Warning",
+       "Error",
+       "Fatal"
+      ]
+     },
+     {
+      "key": "Format",
+      "label": "Format",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "type": "bool",
+      "required": false
+     }
+    ]
+   },
+   {
+    "key": "Syslog",
+    "label": "Syslog",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Host",
+      "label": "Host",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Port",
+      "label": "Port",
+      "type": "int",
+      "required": false
+     },
+     {
+      "key": "Protocol",
+      "label": "Protocol",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "UDP",
+       "TCP"
+      ]
+     },
+     {
+      "key": "AppName",
+      "label": "AppName",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Severity",
+      "label": "Severity",
+      "type": "enum",
+      "required": false,
+      "enumValues": [
+       "Verbose",
+       "Debug",
+       "Information",
+       "Warning",
+       "Error",
+       "Fatal"
+      ]
+     },
+     {
+      "key": "Format",
+      "label": "Format",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "Enabled",
+      "label": "Enabled",
+      "type": "bool",
+      "required": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "Gui",
+  "label": "Gui",
+  "description": "Embedded configuration web GUI",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Enabled",
+    "label": "Enabled",
+    "description": "Enable the embedded configuration web GUI.",
+    "type": "bool",
+    "required": false,
+    "default": false
+   },
+   {
+    "key": "AuthType",
+    "label": "Authentication",
+    "description": "How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).",
+    "type": "enum",
+    "required": false,
+    "default": "Basic",
+    "enumValues": [
+     "Basic",
+     "Oidc",
+     "None"
+    ]
+   },
+   {
+    "key": "Port",
+    "label": "Port",
+    "description": "Port the configuration GUI listens on.",
+    "type": "int",
+    "required": false,
+    "default": 8080
+   },
+   {
+    "key": "Username",
+    "label": "Username",
+    "description": "Username required to access the GUI (HTTP Basic auth).",
+    "type": "string",
+    "required": false
+   },
+   {
+    "key": "Password",
+    "label": "Password",
+    "description": "Password required to access the GUI (HTTP Basic auth). Required unless Oidc is enabled.",
+    "type": "password",
+    "required": false
+   },
+   {
+    "key": "Oidc",
+    "label": "Oidc",
+    "description": "OpenID Connect (SSO) settings (used when AuthType is Oidc).",
+    "type": "object",
+    "required": false,
+    "properties": [
+     {
+      "key": "Authority",
+      "label": "Authority",
+      "description": "OIDC authority / issuer URL (e.g. https://keycloak.example.com/realms/home).",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "ClientId",
+      "label": "ClientId",
+      "description": "OIDC client ID registered with your identity provider.",
+      "type": "string",
+      "required": false
+     },
+     {
+      "key": "ClientSecret",
+      "label": "ClientSecret",
+      "description": "OIDC client secret. Prefer the RPDU2MQTT_OIDC_CLIENT_SECRET env var (or *_FILE secret).",
+      "type": "password",
+      "required": false
+     },
+     {
+      "key": "Scopes",
+      "label": "Scopes",
+      "description": "Space-separated scopes to request.",
+      "type": "string",
+      "required": false,
+      "default": "openid profile email"
+     },
+     {
+      "key": "CallbackPath",
+      "label": "CallbackPath",
+      "description": "Redirect/callback path registered with the identity provider.",
+      "type": "string",
+      "required": false,
+      "default": "/signin-oidc"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "key": "Health",
+  "label": "Health",
+  "description": "HTTP health-check endpoints",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Enabled",
+    "label": "Enabled",
+    "description": "Expose HTTP health-check endpoints: /healthz (liveness) and /readyz (readiness).",
+    "type": "bool",
+    "required": false,
+    "default": true
+   },
+   {
+    "key": "Port",
+    "label": "Port",
+    "description": "Port the health-check endpoints listen on.",
+    "type": "int",
+    "required": false,
+    "default": 8081
+   }
+  ]
+ },
+ {
+  "key": "Api",
+  "label": "Api",
+  "description": "Read-only REST API + OpenAPI/Scalar docs",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Enabled",
+    "label": "Enabled",
+    "description": "Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network \u2014 it is unauthenticated, like the health endpoints.",
+    "type": "bool",
+    "required": false,
+    "default": false
+   },
+   {
+    "key": "Port",
+    "label": "Port",
+    "description": "Port the REST API + docs listen on.",
+    "type": "int",
+    "required": false,
+    "default": 8082
+   },
+   {
+    "key": "ApiKey",
+    "label": "ApiKey",
+    "description": "Optional API key enabling the write/control endpoints (or set RPDU2MQTT_API_KEY). When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).",
+    "type": "string",
+    "required": false
+   }
+  ]
+ },
+ {
+  "key": "EnergyFlow",
+  "label": "EnergyFlow",
+  "description": "Virtual upstream nodes (breakers, transfer switches, a \u201cTotal\u201d) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Nodes",
+    "label": "Nodes",
+    "description": "Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.",
+    "type": "list",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "Id",
+       "label": "Id",
+       "description": "Stable unique id used to wire parents/children.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Label",
+       "label": "Label",
+       "description": "Human-readable label shown in the flow diagram.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Value",
+       "label": "Value",
+       "description": "Optional directly-known value for a leaf node (used until a live sensor is bound).",
+       "type": "double",
+       "required": false
+      }
+     ]
+    }
+   },
+   {
+    "key": "Links",
+    "label": "Links",
+    "description": "Directed energy-flow links (From feeds To). Allows multiple feeders per node and producer inputs.",
+    "type": "list",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "From",
+       "label": "From",
+       "description": "Source node id \u2014 energy flows out of here.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "To",
+       "label": "To",
+       "description": "Target node id \u2014 energy flows into here.",
+       "type": "string",
+       "required": false
+      }
+     ]
+    }
+   },
+   {
+    "key": "Parents",
+    "label": "Parents",
+    "description": "Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.",
+    "type": "dictionary",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "string",
+     "required": false
+    },
+    "keyType": "string"
+   },
+   {
+    "key": "MqttExport",
+    "label": "MqttExport",
+    "description": "Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.",
+    "type": "bool",
+    "required": false,
+    "default": false
+   },
+   {
+    "key": "MqttTopicTemplate",
+    "label": "MqttTopicTemplate",
+    "description": "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'.",
+    "type": "string",
+    "required": false,
+    "default": "{parent}/energyflow/{id}",
+    "templateVars": [
+     "parent",
+     "id",
+     "label",
+     "kind",
+     "metric",
+     "units"
+    ]
+   }
+  ]
+ }
+]

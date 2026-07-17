@@ -1141,7 +1141,7 @@ function addHomeSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Status' }));
-  sec.appendChild(el('div', { class: 'desc', text: 'Health of the bridge and everything it talks to. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Every hop your energy data takes — the meters it comes from, the broker it moves over, and the stores it lands in. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');
@@ -1365,12 +1365,16 @@ function renderList(node     , arr       ) {
   return fs;
 }
 
-// Config sections grouped by role (mirrors the v2 producer/consumer model): data sources are Inputs,
-// data sinks are Outputs, shared transport/UI settings are General. Unlisted sections fall into General.
+// Config sections grouped along the energy pipeline the app exists to run: metering hardware supplies
+// readings (Data Sources), which are consolidated and shipped onward (Destinations); everything else is
+// plumbing (System). EmonCMS leads the destinations — long-term energy history is the primary use case,
+// with HA/Prometheus as secondary sinks. Unlisted sections fall into System, so nothing is ever lost.
 const NAV_GROUPS = [
-  { title: 'Inputs', keys: ['Pdus'] },
-  { title: 'Outputs', keys: ['HomeAssistant', 'Prometheus', 'EmonCMS'] },
-  { title: 'General', keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
+  { title: 'Data Sources', keys: ['Pdus'] },
+  { title: 'Destinations', keys: ['EmonCMS', 'HomeAssistant', 'Prometheus'] },
+  // catchAll: ungrouped schema sections land here. Flagged rather than looked up by title, so renaming
+  // the group can't silently drop them.
+  { title: 'System', catchAll: true, keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
 ];
 
 function navHeader(nav     , title        ) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
@@ -1419,9 +1423,9 @@ function build() {
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
   const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in General, so a new config section is never lost.
+  // Any schema section not explicitly grouped (and not hidden) lands in the catch-all, so a new config section is never lost.
   const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
-  const general      = NAV_GROUPS.find(g => g.title === 'General');
+  const general      = NAV_GROUPS.find((g     ) => g.catchAll);
   state.schema.forEach((n     ) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
