@@ -17,11 +17,11 @@ config from the `RpduConfig` CR when `RPDU2MQTT_CONFIG_SOURCE=k8s` (+ `RPDU2MQTT
 ## Motivation
 
 Today configuration is a single `config.yaml` loaded at startup (see
-[`YamlConfigLoader`](../rPDU2MQTT/Startup/YamlConfigLoader.cs)), optionally mounted from a ConfigMap.
+[`YamlConfigLoader`](../rPDU2MQTT.Engine/YamlConfigLoader.cs)), optionally mounted from a ConfigMap.
 That works, but in Kubernetes it has two rough edges:
 
 1. **A ConfigMap mount is read-only.** The configuration GUI detects this and disables *Save* (see the
-   `configWritable` handling in [`GuiService`](../rPDU2MQTT/Services/Gui/GuiService.cs) and
+   `configWritable` handling in [`GuiService`](../rPDU2MQTT.Web/Gui/GuiService.cs) and
    [Configuration.md](Configuration.md#gui-with-kubernetes--read-only-config)). So in k8s the GUI is
    view/test only.
 2. The config is "just a blob" to Kubernetes — no schema validation, no health/status surfaced to the
@@ -70,7 +70,7 @@ status:
 ```
 
 - **Group/Version/Kind:** `rpdu2mqtt.xtremeownage.com` / `v1alpha1` / `RpduConfig` (namespaced).
-- **`spec`** is the existing [`Config`](../rPDU2MQTT/Models/Config/Config.cs) shape, 1:1. Secrets
+- **`spec`** is the existing [`Config`](../rPDU2MQTT.Core/Models/Config/Config.cs) shape, 1:1. Secrets
   (MQTT/PDU passwords, EmonCMS key) should still be sourceable from env/Secret via the existing
   `RPDU2MQTT_*` overrides so they don't have to live in the CR.
 - **`status`** is a [status subresource](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#status-subresource)
@@ -79,7 +79,7 @@ status:
 ### Generating the CRD schema from the model (key reuse)
 
 We already reflect over the `Config` model to build the GUI's form schema
-([`ConfigSchema.Build()`](../rPDU2MQTT/Services/Gui/ConfigSchema.cs)). The same reflection can emit the
+([`ConfigSchema.Build()`](../rPDU2MQTT.Core/ConfigSchema.cs)). The same reflection can emit the
 CRD's **OpenAPI v3** `spec` schema, so the CRD validation stays in sync with the model automatically
 instead of being hand-maintained. (Phase 1 can ship with `x-kubernetes-preserve-unknown-fields: true`
 to avoid blocking on this, then tighten the schema once generation is wired up.)
@@ -106,7 +106,7 @@ IConfigSource
   consumes the resulting `Config` exactly as it does today — nothing downstream changes.
 - **Auth:** in-cluster ServiceAccount token; the official `KubernetesClient` NuGet handles in-cluster
   and kubeconfig contexts.
-- **GUI write-back:** the [`POST /api/config`](../rPDU2MQTT/Services/Gui/GuiService.cs) handler calls
+- **GUI write-back:** the [`POST /api/config`](../rPDU2MQTT.Web/Gui/GuiService.cs) handler calls
   `IConfigSource.Save`, which for k8s issues a `PATCH` to the CR `spec`. `configWritable` becomes true,
   re-enabling Save in-cluster.
 
@@ -136,7 +136,7 @@ The CR can be the GitOps source of truth, so:
 
 - After a GUI **Save** that writes to a CR, the UI shows a **notice to update the GitOps source** so the
   cluster's desired state doesn't silently drift from the repo.
-- The GUI's existing **Export** view ([`/api/config/yaml`](../rPDU2MQTT/Services/Gui/GuiService.cs))
+- The GUI's existing **Export** view ([`/api/config/yaml`](../rPDU2MQTT.Web/Gui/GuiService.cs))
   gains a **"RpduConfig manifest"** export that renders the current (edited) config as a ready-to-commit
   CR, **with secrets redacted to placeholders**. This lets users round-trip GUI edits back into source
   control.
@@ -157,21 +157,48 @@ Because the GUI writes the CR `spec` and a redeploy also renders the CR `spec` f
   (`kubernetesConfigSource.preserveExisting: true`) — it reads the live CR with Helm `lookup` and
   re-emits its current `spec`, so `values.config` only seeds the CR on first install. Set
   `preserveExisting: false` to manage the config declaratively (every upgrade applies `values.config`).
-- **Argo CD:** `lookup` returns nothing under `helm template`, so the rendered CR always carries
-  `values.config` and Argo would sync it. Tell Argo to ignore the CR `spec` so GUI edits stick:
+- **Argo CD:** `lookup` returns nothing under `helm template`, so `preserveExisting` is a **no-op under
+  Argo** — the rendered CR always carries `values.config`, and Argo syncs it over your GUI edits (#178).
+  The Argo-native equivalent is `ignoreDifferences` **plus `RespectIgnoreDifferences=true`**:
 
   ```yaml
   # Argo CD Application
   spec:
     ignoreDifferences:
+      # Config the GUI writes.
       - group: rpdu2mqtt.xtremeownage.com
         kind: RpduConfig
         jsonPointers:
           - /spec
+      # Credentials the GUI writes (only if you let it manage the Secret).
+      - group: ""
+        kind: Secret
+        name: <release-name>
+        jsonPointers:
+          - /data
+    syncPolicy:
+      syncOptions:
+        - RespectIgnoreDifferences=true
   ```
 
-  (Or keep config declarative in git and treat the GUI as view/test only — your choice of source of
-  truth. The GUI's Save already warns to update the GitOps source.)
+  > **`ignoreDifferences` on its own is not enough** — and this is the trap. Without
+  > `RespectIgnoreDifferences=true` it only suppresses the **OutOfSync status**; the sync stage still
+  > applies `values.config` and reverts the GUI. You get a green "Synced" app that quietly clobbers your
+  > config anyway. With the sync option set, Argo pre-patches the ignored paths out of the desired state
+  > before applying, so the live `spec` survives.
+
+  This gives exactly the create-once behaviour `preserveExisting` provides under plain Helm, because
+  `RespectIgnoreDifferences` [has no effect when the resource does not yet
+  exist](https://argo-cd.readthedocs.io/en/latest/user-guide/sync-options/): on the **first** sync the CR
+  is created from `values.config` (seeding it), and every sync after that leaves `/spec` alone.
+
+  Alternatives, if you'd rather not touch the Application:
+
+  - `kubernetesConfigSource.manageResource: false` — the chart stops rendering the CR and Secret
+    entirely, so Argo never manages (or prunes) them. You create the CR once yourself; RBAC and the
+    config source stay wired up.
+  - Keep config declarative in git and treat the GUI as view/test only — your choice of source of truth.
+    The GUI's Save already warns to update the GitOps source.
 
 ### Reacting to changes & status (Phase 2)
 
@@ -207,7 +234,7 @@ one-time step), documented alongside the manifests.
 ## Related: Prometheus Operator scraping (ServiceMonitor / PodMonitor)
 
 rPDU2MQTT already exposes a Prometheus `/metrics` endpoint (the
-[`PrometheusExportService`](../rPDU2MQTT/Services/PrometheusExportService.cs), gated by
+[`PrometheusExportService`](../rPDU2MQTT.Engine/Services/PrometheusExportService.cs), gated by
 `Prometheus.Enabled`). In a cluster running the **Prometheus Operator**, we can ship a
 `ServiceMonitor` (or `PodMonitor`) so Prometheus **auto-discovers and scrapes** the endpoint — no
 hand-written scrape config, and it tracks pod restarts/scaling automatically:
