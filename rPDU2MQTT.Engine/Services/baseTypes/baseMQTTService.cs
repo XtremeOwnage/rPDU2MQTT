@@ -172,11 +172,15 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     /// mark their entities unavailable instead of us republishing last-known values forever.
     /// </summary>
     protected IReadOnlyList<Models.PDU.PduData> FreshSnapshots()
+        => FreshSnapshotsWithId().Select(s => s.Data).ToList();
+
+    /// <summary>As <see cref="FreshSnapshots"/>, but keeps each snapshot's instance id (for per-instance
+    /// labelling/routing).</summary>
+    protected IReadOnlyList<Core.PduSnapshot> FreshSnapshotsWithId()
     {
         var now = DateTime.UtcNow;
         return snapshotCache.All
             .Where(s => !Core.SnapshotFreshness.IsStale(s.TimestampUtc, cfg.Primary.PollInterval, now))
-            .Select(s => s.Data)
             .ToList();
     }
 
