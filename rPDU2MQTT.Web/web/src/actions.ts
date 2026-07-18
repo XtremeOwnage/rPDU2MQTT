@@ -1,6 +1,19 @@
 // Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
 import { api, toast } from './helpers.js';
+import { state } from './state.js';
 import { refreshStatus } from './main.js';
+
+// Test every configured Modbus TCP connection by opening a throwaway connection to each.
+export async function testModbus() {
+  const conns = (state.data?.Modbus?.Connections) || [];
+  if (!conns.length) { toast('No Modbus connections configured — add one first.', false); return; }
+  toast(`Testing ${conns.length} Modbus connection(s)…`, true);
+  for (const c of conns) {
+    if (!c.Host) { toast(`${c.Name || c.Id || 'connection'}: no host set.`, false); continue; }
+    const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ Host: c.Host, Port: c.Port, UnitId: c.UnitId }) });
+    toast(`${c.Name || c.Id}: ${r.body.message || (r.body.ok ? 'OK' : 'failed')}`, r.body.ok);
+  }
+}
 
 export async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 export async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }

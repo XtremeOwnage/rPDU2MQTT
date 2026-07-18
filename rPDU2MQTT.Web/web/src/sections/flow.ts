@@ -116,9 +116,11 @@ function renderNodeEditor(node: any, rerender: () => void) {
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Current', ''].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
+    // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
+    const liveCells: { src: any, cell: any }[] = [];
     sources.forEach((src: any) => {
       const tr = el('tr');
 
@@ -192,6 +194,11 @@ function renderNodeEditor(node: any, rerender: () => void) {
       scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
       tr.appendChild(el('td', {}, scaleIn));
 
+      // Live value (Modbus only for now): filled by a probe so you can confirm a mapping reads correctly.
+      const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: (src.Type === 'modbus') ? '…' : '—' });
+      if (src.Type === 'modbus') liveCells.push({ src, cell: liveCell });
+      tr.appendChild(liveCell);
+
       const rm = btn('Remove', 'danger');
       rm.onclick = () => { sources.splice(sources.indexOf(src), 1); rerender(); };
       tr.appendChild(el('td', {}, rm));
@@ -199,6 +206,39 @@ function renderNodeEditor(node: any, rerender: () => void) {
     });
     tbl.appendChild(body);
     box.appendChild(tbl);
+
+    // Live values for Modbus mappings: probe the device(s) and fill the Current column, so you can confirm a
+    // register/type/scale reads what you expect before saving. Auto-refreshes while the editor is open.
+    if (liveCells.length) {
+      const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+      const refresh = async () => {
+        const conns: any[] = (state.data?.Modbus?.Connections) || [];
+        const byConn = new Map<string, { src: any, cell: any }[]>();
+        liveCells.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id)!).push(lc); });
+        for (const [connId, cells] of byConn) {
+          const conn = conns.find(c => c.Id === connId);
+          if (!conn) { cells.forEach(lc => { lc.cell.textContent = 'pick a connection'; lc.cell.style.color = 'var(--muted)'; }); continue; }
+          try {
+            const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Items: cells.map(lc => lc.src) }) });
+            if (!r.body.ok) { cells.forEach(lc => { lc.cell.textContent = 'err'; lc.cell.style.color = 'var(--bad)'; }); status.textContent = r.body.message || 'probe failed'; continue; }
+            const readings = r.body.readings || [];
+            cells.forEach((lc, i) => {
+              const rd = readings[i];
+              if (!rd || rd.value == null) { lc.cell.textContent = rd?.error ? 'err' : '—'; lc.cell.style.color = 'var(--bad)'; lc.cell.title = rd?.error || ''; }
+              else { const cu = metricMeta(lc.src.Metric)[2]; lc.cell.textContent = `${formatNum(rd.value)} ${cu}`.trim(); lc.cell.style.color = 'var(--good)'; lc.cell.title = ''; }
+            });
+            status.textContent = `updated ${new Date().toLocaleTimeString()}`;
+          } catch (e: any) { cells.forEach(lc => { lc.cell.textContent = 'err'; }); status.textContent = String(e?.message || e); }
+        }
+      };
+      const refreshBtn = btn('Refresh values');
+      refreshBtn.onclick = refresh;
+      box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
+      refresh();
+      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
+      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(); }, 5000);
+    }
   }
 
   const addBind = btn('Add binding', 'primary');

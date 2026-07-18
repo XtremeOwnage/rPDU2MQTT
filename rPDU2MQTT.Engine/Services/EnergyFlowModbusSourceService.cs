@@ -72,29 +72,84 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
 
     private void Poll(ModbusConnection conn, List<(string NodeId, EnergyFlowSource Source)> forConn, DateTime nowUtc)
     {
-        var endpoint = new IPEndPoint(ResolveHost(conn.Host), conn.Port);
-        using var client = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
-        client.Connect(endpoint, ModbusEndianness.BigEndian);
+        var nodeOf = new Dictionary<EnergyFlowSource, string>(ReferenceEqualityComparer.Instance);
+        foreach (var (nodeId, src) in forConn) nodeOf[src] = nodeId;
 
-        foreach (var (nodeId, src) in forConn)
+        ReadBatch(conn.Host, conn.Port, conn.UnitId, forConn.Select(f => f.Source).ToList(),
+            onValue: (src, value) => latest.Set(nodeOf[src], src.Metric, value, src.StaleAfterSeconds, nowUtc),
+            onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"));
+    }
+
+    /// <summary>Read + decode one source's register(s), then normalise the unit and apply Scale (same pipeline as MQTT).</summary>
+    private static double ReadValue(ModbusTcpClient client, int unitId, EnergyFlowSource src)
+    {
+        var count = ModbusDecode.RegisterCount(src.DataType);
+        var regs = string.Equals(src.RegisterType, "input", StringComparison.OrdinalIgnoreCase)
+            ? client.ReadInputRegisters<ushort>(unitId, src.Register, count).ToArray()
+            : client.ReadHoldingRegisters<ushort>(unitId, src.Register, count).ToArray();
+        return ModbusDecode.Decode(regs, src.DataType, src.WordOrder) * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
+    }
+
+    /// <summary>
+    /// Read a batch of sources on one connection, reconnecting on a read error before the next register. A
+    /// failed read (an exception response, or cross-talk on a serial gateway shared by another master) can
+    /// leave the TCP stream misaligned, so the following reads come back as *another* register's data — a
+    /// silent-corruption risk. Reconnecting after any error closes that window and retries the register once.
+    /// Throws only if the initial connect fails (so callers can report "unreachable").
+    /// </summary>
+    private static void ReadBatch(string host, int port, int unitId, IReadOnlyList<EnergyFlowSource> items,
+        Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null)
+    {
+        var endpoint = new IPEndPoint(ResolveHost(host), port);
+        ModbusTcpClient? client = null;
+        void Reconnect()
         {
-            try
-            {
-                var count = ModbusDecode.RegisterCount(src.DataType);
-                var regs = string.Equals(src.RegisterType, "input", StringComparison.OrdinalIgnoreCase)
-                    ? client.ReadInputRegisters<ushort>(conn.UnitId, src.Register, count).ToArray()
-                    : client.ReadHoldingRegisters<ushort>(conn.UnitId, src.Register, count).ToArray();
+            client?.Dispose();
+            client = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+            client.Connect(endpoint, ModbusEndianness.BigEndian);
+        }
 
-                var raw = ModbusDecode.Decode(regs, src.DataType, src.WordOrder);
-                // Normalise the declared unit, then apply the manual Scale — the same pipeline as MQTT.
-                var value = raw * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
-                latest.Set(nodeId, src.Metric, value, src.StaleAfterSeconds, nowUtc);
-            }
-            catch (Exception ex)
+        try
+        {
+            Reconnect();   // an initial-connect failure propagates to the caller
+            foreach (var src in items)
             {
-                Log.Debug($"Energy-flow Modbus: node '{nodeId}' register {src.Register} on {conn.Id} — {ex.Message}");
+                for (var attempt = 0; ; attempt++)
+                {
+                    try { onValue(src, ReadValue(client!, unitId, src)); break; }
+                    catch (Exception ex)
+                    {
+                        if (attempt >= 1) { onError?.Invoke(src, ex.Message); break; }
+                        try { Reconnect(); } catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
+                    }
+                }
             }
         }
+        finally { client?.Dispose(); }
+    }
+
+    /// <summary>One probed register value (or the error hit reading it), in the request's item order.</summary>
+    public sealed record ModbusReading(int Register, string Metric, double? Value, string? Error);
+
+    /// <summary>
+    /// Connect to a device once and (optionally) read a set of register specs — powers the GUI's "Test
+    /// connection" button and the live per-binding value display, so a mapping can be verified before it's
+    /// wired into the flow. Read-only; opens and closes a throwaway connection.
+    /// </summary>
+    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, IReadOnlyList<EnergyFlowSource>? items)
+    {
+        var readings = new List<ModbusReading>();
+        try
+        {
+            ReadBatch(host, port, unitId, items ?? Array.Empty<EnergyFlowSource>(),
+                onValue: (src, value) => readings.Add(new ModbusReading(src.Register, src.Metric, value, null)),
+                onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)));
+        }
+        catch (Exception ex) { return (false, $"Could not connect to {host}:{port} — {ex.Message}", readings); }
+
+        var okCount = readings.Count(r => r.Error is null);
+        var suffix = readings.Count > 0 ? $" Read {okCount}/{readings.Count} register(s)." : "";
+        return (true, $"Connected to {host}:{port}.{suffix}", readings);
     }
 
     private static IPAddress ResolveHost(string host)

@@ -559,6 +559,28 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Probe a Modbus TCP device: connect, and optionally read a set of register specs, returning the
+        // decoded values. Powers the "Test connection" button and the live per-binding value display in the
+        // Flow editor. Read-only; uses a throwaway connection so it works before the config is saved.
+        app.MapPost("/api/modbus/probe", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            try
+            {
+                var req = await System.Text.Json.JsonSerializer.DeserializeAsync<ModbusProbeRequest>(
+                    ctx.Request.Body, ProbeJson, cts.Token);
+                if (req is null || string.IsNullOrWhiteSpace(req.Host))
+                    return Results.Json(new { ok = false, message = "A host is required." }, ConfigSchema.Json);
+
+                var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
+                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Items), cts.Token);
+                return Results.Json(new { ok, message, readings }, ConfigSchema.Json);
+            }
+            catch (OperationCanceledException) { return Results.Json(new { ok = false, message = "Modbus probe timed out." }, ConfigSchema.Json); }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Validate the EmonCMS configuration (HTTP: reach the server + check the API key; MQTT: broker up).
         app.MapPost("/api/test/emoncms", async (HttpContext ctx) =>
         {
@@ -1144,4 +1166,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
+
+    // Case-insensitive so the GUI can post {host,...} or {Host,...}; Items map onto EnergyFlowSource's fields.
+    private static readonly System.Text.Json.JsonSerializerOptions ProbeJson = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
+    private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, List<EnergyFlowSource>? Items);
 }
