@@ -32,9 +32,12 @@ const NODE_KINDS: [string, string, string[]][] = [
 ];
 const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
-// Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Only MQTT today; the editor is
-// shaped so another ingest is just another entry here plus its own fields.
-const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic']];
+// Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Each type renders its own fields
+// in the two source columns; adding an ingest is another entry here plus a branch in the row renderer.
+const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+const MODBUS_REGISTER_TYPES = ['holding', 'input'];
+const MODBUS_DATATYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32'];
+const MODBUS_WORDORDERS = ['big', 'little'];
 
 // How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
 // always wins; this only governs nodes the graph would otherwise infer.
@@ -107,13 +110,13 @@ function renderNodeEditor(node: any, rerender: () => void) {
 
   // --- Live value bindings ---
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a source already on your broker. One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
 
   const sources: any[] = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Unit', 'Topic', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     sources.forEach((src: any) => {
@@ -122,7 +125,7 @@ function renderNodeEditor(node: any, rerender: () => void) {
       const typeSel = el('select', { style: { width: 'auto' } });
       SOURCE_TYPES.forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
       typeSel.value = src.Type || 'mqtt';
-      typeSel.onchange = () => { src.Type = typeSel.value; };
+      typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
       tr.appendChild(el('td', {}, typeSel));
 
       // Offer this kind's metrics (friendly labels), but keep an already-chosen one even if the kind wouldn't
@@ -144,13 +147,46 @@ function renderNodeEditor(node: any, rerender: () => void) {
       unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
       tr.appendChild(el('td', {}, unitSel));
 
-      const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
-      topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
-      tr.appendChild(el('td', {}, topicIn));
+      // The Source + Details columns are type-specific.
+      if ((src.Type || 'mqtt') === 'modbus') {
+        // Source = which configured Modbus connection; Details = the register spec.
+        const connections: any[] = (state.data?.Modbus?.Connections) || [];
+        const connSel = el('select', { style: { width: '160px' } });
+        connSel.appendChild(el('option', { value: '', text: connections.length ? '— pick a connection —' : 'none — add one in Modbus' }));
+        connections.forEach((c: any) => connSel.appendChild(el('option', { value: c.Id, text: c.Name || c.Id })));
+        connSel.value = src.Connection || '';
+        connSel.onchange = () => { src.Connection = connSel.value || undefined; };
+        tr.appendChild(el('td', {}, connSel));
 
-      const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: '(optional)', style: { width: '120px' } });
-      fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
-      tr.appendChild(el('td', {}, fieldIn));
+        const details = el('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } });
+        const regIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'Register address', style: { width: '80px' } });
+        regIn.onchange = () => { const v = +regIn.value; src.Register = !isNaN(v) ? v : 0; };
+        const regTypeSel = el('select', { title: 'Register bank', style: { width: 'auto' } });
+        MODBUS_REGISTER_TYPES.forEach(t => regTypeSel.appendChild(el('option', { value: t, text: t })));
+        regTypeSel.value = src.RegisterType || 'holding';
+        regTypeSel.onchange = () => { src.RegisterType = regTypeSel.value === 'holding' ? undefined : regTypeSel.value; };
+        const dtSel = el('select', { title: 'Data type', style: { width: 'auto' } });
+        MODBUS_DATATYPES.forEach(t => dtSel.appendChild(el('option', { value: t, text: t })));
+        dtSel.value = src.DataType || 'uint16';
+        const woSel = el('select', { title: 'Word order (32-bit)', style: { width: 'auto' } });
+        MODBUS_WORDORDERS.forEach(t => woSel.appendChild(el('option', { value: t, text: t })));
+        woSel.value = src.WordOrder || 'big';
+        woSel.onchange = () => { src.WordOrder = woSel.value === 'big' ? undefined : woSel.value; };
+        // Word order only matters for 32-bit types; keep it enabled only then.
+        const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
+        woSel.disabled = !is32();
+        dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
+        details.append(regIn, regTypeSel, dtSel, woSel);
+        tr.appendChild(el('td', {}, details));
+      } else {
+        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
+        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
+        tr.appendChild(el('td', {}, topicIn));
+
+        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } });
+        fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
+        tr.appendChild(el('td', {}, fieldIn));
+      }
 
       const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
       scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };

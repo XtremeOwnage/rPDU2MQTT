@@ -104,8 +104,17 @@ public static class ServiceConfiguration
         // the live values, and it self-gates — with no Mqtt bindings configured it subscribes to nothing.
         // It reconciles subscriptions on a timer, so binding a topic in the GUI needs no restart.
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
-        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
         services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+
+        // Modbus TCP is a second live-value ingest (#129): poll inverters/meters/PLCs into the same seam.
+        // Self-gating too — with no connections/bindings configured it opens no sockets.
+        services.AddSingleton<Services.EnergyFlowModbusSourceService>();
+        services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
+
+        // The graph/exporters see one IFlowValueSource; the composite merges every ingest (MQTT + Modbus).
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
+            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+            sp.GetRequiredService<Services.EnergyFlowModbusSourceService>()));
 
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.

@@ -12,6 +12,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="FluentModbus" Version="5.3.2" />
 		<PackageReference Include="HiveMQtt" Version="0.45.0" />
 		<PackageReference Include="KubernetesClient" Version="19.0.2" />
 		<PackageReference Include="prometheus-net" Version="8.2.1" />

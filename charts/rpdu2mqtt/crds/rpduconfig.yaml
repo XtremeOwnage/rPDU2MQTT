@@ -729,7 +729,8 @@ spec:
                                 enum:
                                 - ''
                                 - mqtt
-                                description: Where this value comes from. Currently only 'mqtt' (subscribe to a broker topic); more ingest types can be added later.
+                                - modbus
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
                               Metric:
                                 type: string
                                 enum:
@@ -759,6 +760,36 @@ spec:
                                 description: Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).
                                 minimum: 0
                                 maximum: 86400
+                              Connection:
+                                type: string
+                                description: "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from."
+                              Register:
+                                type: integer
+                                description: "For Type 'modbus': the register address to read (0-based)."
+                              RegisterType:
+                                type: string
+                                enum:
+                                - ''
+                                - holding
+                                - input
+                                description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
+                              DataType:
+                                type: string
+                                enum:
+                                - ''
+                                - uint16
+                                - int16
+                                - uint32
+                                - int32
+                                - float32
+                                description: "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32."
+                              WordOrder:
+                                type: string
+                                enum:
+                                - ''
+                                - big
+                                - little
+                                description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
                           description: Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.
                         Mqtt:
                           type: array
@@ -771,7 +802,8 @@ spec:
                                 enum:
                                 - ''
                                 - mqtt
-                                description: Where this value comes from. Currently only 'mqtt' (subscribe to a broker topic); more ingest types can be added later.
+                                - modbus
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
                               Metric:
                                 type: string
                                 enum:
@@ -801,6 +833,36 @@ spec:
                                 description: Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).
                                 minimum: 0
                                 maximum: 86400
+                              Connection:
+                                type: string
+                                description: "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from."
+                              Register:
+                                type: integer
+                                description: "For Type 'modbus': the register address to read (0-based)."
+                              RegisterType:
+                                type: string
+                                enum:
+                                - ''
+                                - holding
+                                - input
+                                description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
+                              DataType:
+                                type: string
+                                enum:
+                                - ''
+                                - uint16
+                                - int16
+                                - uint32
+                                - int32
+                                - float32
+                                description: "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32."
+                              WordOrder:
+                                type: string
+                                enum:
+                                - ''
+                                - big
+                                - little
+                                description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
                           description: "Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat."
                     description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
                   Links:
@@ -829,6 +891,41 @@ spec:
                     type: string
                     description: "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'."
                 description: Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.
+              Modbus:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Connections:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable id used to reference this connection from a source binding.
+                        Name:
+                          type: string
+                          description: Friendly name for the device (shown in the editor).
+                        Host:
+                          type: string
+                          description: Hostname or IP address of the Modbus TCP device.
+                        Port:
+                          type: integer
+                          description: TCP port the device listens on (Modbus default 502).
+                        UnitId:
+                          type: integer
+                          description: Modbus unit / slave id.
+                        PollIntervalSeconds:
+                          type: integer
+                          description: How often to poll this device, in seconds.
+                          minimum: 1
+                          maximum: 86400
+                        Enabled:
+                          type: boolean
+                          description: Poll this device. Turn off to disable it without deleting the connection.
+                    description: Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.
+                description: Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).
           status:
             type: object
             x-kubernetes-preserve-unknown-fields: true

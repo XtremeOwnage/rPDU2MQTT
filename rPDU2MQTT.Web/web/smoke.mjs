@@ -94,12 +94,17 @@ root.appendChild(getEl('sections'));
 const config = {
   EnergyFlow: {
     Nodes: [
-      { Id: 'solar', Label: 'Solar', Mqtt: [{ Topic: 'solar_assistant/inverter_1/pv_power/state', Metric: 'realpower' }] },
+      // A legacy MQTT binding (migrates to Sources) plus a Modbus binding, so the editor exercises both
+      // source-type branches of the binding row.
+      { Id: 'solar', Label: 'Solar',
+        Mqtt: [{ Topic: 'solar_assistant/inverter_1/pv_power/state', Metric: 'realpower' }],
+        Sources: [{ Type: 'modbus', Connection: 'inv1', Register: 100, Metric: 'energy', DataType: 'float32' }] },
       { Id: 'panel', Label: 'Panel', Value: 100 },
     ],
     Links: [{ From: 'solar', To: 'panel' }],
     MqttExport: true,
   },
+  Modbus: { Connections: [{ Id: 'inv1', Name: 'Inverter', Host: '10.0.0.5', Port: 502, UnitId: 1 }] },
 };
 const flowGraph = {
   ok: true,
@@ -186,5 +191,7 @@ const editorText = query(getEl('sections'), '.section', true).map(s => s.textCon
 if (!editorText.includes('Live value bindings')) fail('opening a node did not render its bindings editor');
 if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_assistant/inverter_1/pv_power/state'))
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
+// The Modbus binding row must render its connection picker, listing the configured connection.
+if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
 
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; Flow editor + virtual-node editor OK`);

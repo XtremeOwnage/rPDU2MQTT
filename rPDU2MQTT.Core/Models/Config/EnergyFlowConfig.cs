@@ -144,8 +144,8 @@ public class EnergyFlowNode
 public class EnergyFlowSource
 {
     [DefaultValue("mqtt")]
-    [Description("Where this value comes from. Currently only 'mqtt' (subscribe to a broker topic); more ingest types can be added later.")]
-    [AllowedValues("mqtt")]
+    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection).")]
+    [AllowedValues("mqtt", "modbus")]
     public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
@@ -179,4 +179,27 @@ public class EnergyFlowSource
     [Range(0, 86400, ErrorMessage = "StaleAfterSeconds must be between 0 and 86400.")]
     [Description("Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).")]
     public int StaleAfterSeconds { get; set; } = 900;
+
+    // --- Type 'modbus' -----------------------------------------------------------------------------
+
+    [Description("For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from.")]
+    public string? Connection { get; set; }
+
+    [Description("For Type 'modbus': the register address to read (0-based).")]
+    public int Register { get; set; }
+
+    [DefaultValue("holding")]
+    [Description("For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4).")]
+    [AllowedValues("holding", "input")]
+    public string RegisterType { get; set; } = "holding";
+
+    [DefaultValue("uint16")]
+    [Description("For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32.")]
+    [AllowedValues("uint16", "int16", "uint32", "int32", "float32")]
+    public string DataType { get; set; } = "uint16";
+
+    [DefaultValue("big")]
+    [Description("For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).")]
+    [AllowedValues("big", "little")]
+    public string WordOrder { get; set; } = "big";
 }
