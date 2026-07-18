@@ -741,7 +741,10 @@ spec:
                                 - voltage
                                 - frequency
                                 - powerfactor
-                                description: Which measurement this source supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Unit:
+                                type: string
+                                description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
                               Topic:
                                 type: string
                                 description: "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker."
@@ -780,7 +783,10 @@ spec:
                                 - voltage
                                 - frequency
                                 - powerfactor
-                                description: Which measurement this source supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Unit:
+                                type: string
+                                description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
                               Topic:
                                 type: string
                                 description: "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker."

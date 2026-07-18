@@ -3,8 +3,21 @@ import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, in
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 
-// Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowSource.Metric.
-const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'frequency', 'powerfactor'];
+// Metrics a live source can supply: [stored key (matches PDU Measurement.Type), friendly label, canonical
+// unit, selectable input units]. The key stays the PDU vocabulary so live values roll up with outlets; the
+// UI shows the friendly name and a unit picker. Mirrors EnergyFlowSource.Metric + FlowUnits (Core).
+const METRICS: [string, string, string, string[]][] = [
+  ['realpower', 'Power', 'W', ['W', 'kW', 'MW']],
+  ['apparentpower', 'Apparent power', 'VA', ['VA', 'kVA']],
+  ['energy', 'Energy', 'kWh', ['Wh', 'kWh', 'MWh']],
+  ['current', 'Current', 'A', ['A', 'mA']],
+  ['voltage', 'Voltage', 'V', ['mV', 'V', 'kV']],
+  ['frequency', 'Frequency', 'Hz', ['Hz']],
+  ['powerfactor', 'Power factor', '', ['']],
+];
+const SOURCE_METRICS = METRICS.map(m => m[0]);
+const metricMeta = (key?: string) => METRICS.find(m => m[0] === key) || METRICS[0];
+const metricLabel = (key?: string) => metricMeta(key)[1];
 
 // What a virtual node represents — mirrors [AllowedValues] on EnergyFlowNode.Kind. Each kind offers only
 // the metrics that make sense for it (a battery has no frequency); 'battery' also gets a storage field.
@@ -100,7 +113,7 @@ function renderNodeEditor(node: any, rerender: () => void) {
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Topic', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    ['Type', 'Metric', 'Unit', 'Topic', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     sources.forEach((src: any) => {
@@ -112,13 +125,24 @@ function renderNodeEditor(node: any, rerender: () => void) {
       typeSel.onchange = () => { src.Type = typeSel.value; };
       tr.appendChild(el('td', {}, typeSel));
 
-      // Offer this kind's metrics, but keep an already-chosen metric even if the kind wouldn't list it.
+      // Offer this kind's metrics (friendly labels), but keep an already-chosen one even if the kind wouldn't
+      // list it. Changing the metric resets the unit (units differ per metric) and re-renders the row.
       const metricSel = el('select', { style: { width: 'auto' } });
-      const opts = allowed.includes(src.Metric || 'realpower') ? allowed : [src.Metric, ...allowed];
-      opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: m })));
-      metricSel.value = src.Metric || 'realpower';
-      metricSel.onchange = () => { src.Metric = metricSel.value; };
+      const metric = src.Metric || 'realpower';
+      const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
+      opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
+      metricSel.value = metric;
+      metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
       tr.appendChild(el('td', {}, metricSel));
+
+      // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.
+      const [, , canonical, units] = metricMeta(metric);
+      const unitSel = el('select', { style: { width: 'auto' } });
+      units.forEach((u: string) => unitSel.appendChild(el('option', { value: u, text: u || '—' })));
+      unitSel.value = src.Unit || canonical;
+      unitSel.disabled = units.length <= 1;
+      unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
+      tr.appendChild(el('td', {}, unitSel));
 
       const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
       topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };

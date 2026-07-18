@@ -155,7 +155,10 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
                 Log.Debug($"Energy-flow: could not read a number from {topic} for node '{nodeId}' (payload: {Truncate(payload)}).");
                 continue;
             }
-            cache.Set(nodeId, src.Metric, raw * src.Scale, src.StaleAfterSeconds, nowUtc);
+            // Normalise to the metric's canonical unit (kW -> W, Wh -> kWh, …) so the roll-up and exports are
+            // consistent, then apply the manual Scale (sign flips / oddball adjustments) on top.
+            var value = raw * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
+            cache.Set(nodeId, src.Metric, value, src.StaleAfterSeconds, nowUtc);
         }
     }
 

@@ -149,9 +149,17 @@ public class EnergyFlowSource
     public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
-    [Description("Which measurement this source supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.")]
+    [Description("Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.")]
     [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
     public string Metric { get; set; } = "realpower";
+
+    /// <summary>
+    /// The unit the source publishes this value in (e.g. <c>kW</c>, <c>Wh</c>). The reading is converted to
+    /// the metric's canonical unit (W, kWh, V, …) on ingest so every export stays consistent. Blank assumes
+    /// the value is already canonical. See <see cref="rPDU2MQTT.Core.Flow.FlowUnits"/>.
+    /// </summary>
+    [Description("Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.")]
+    public string? Unit { get; set; }
 
     [Description("For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
     public string Topic { get; set; } = "";
