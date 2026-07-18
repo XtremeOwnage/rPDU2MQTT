@@ -8,7 +8,7 @@ import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
-import { addFlowSection } from './sections/flow.js';
+import { addFlowSection, addNodesSection } from './sections/flow.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
@@ -236,6 +236,7 @@ export function build() {
   navHeader(nav, 'Tools');
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
+  addNodesSection(nav, sections);
   addFlowSection(nav, sections);
   addPathsSection(nav, sections);
   addHaEnergySection(nav, sections);

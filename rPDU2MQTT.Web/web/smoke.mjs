@@ -170,18 +170,24 @@ if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
 
 // Tabs build their body lazily on first click, so build() alone never touches the bespoke editors. Open
-// the Flow tab to exercise the hierarchy editor + the virtual-node manager (#129/#205).
+// the Flow tab to exercise the Sankey + hierarchy drag-graph (#129).
 const flowLink = query(nav, 'a', true).find(a => a.textContent === 'Flow');
 if (!flowLink) fail('no Flow tab');
 flowLink.click();
 await new Promise(r => setTimeout(r, 50));
+if (!query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ').includes('Hierarchy'))
+  fail('the Flow tab did not render the hierarchy editor');
+
+// Node configuration now lives on its own Nodes tab. Open it, open the 'solar' node's editor, and confirm
+// it surfaces the migrated MQTT topic, the Modbus connection picker, and the feeders/children wiring.
+const nodesLink = query(nav, 'a', true).find(a => a.textContent === 'Nodes');
+if (!nodesLink) fail('no Nodes tab');
+nodesLink.click();
+await new Promise(r => setTimeout(r, 50));
 
 const sectionsText = query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ');
-if (!sectionsText.includes('Virtual nodes')) fail('the Flow tab did not render the virtual-node manager');
+if (!sectionsText.includes('Virtual nodes')) fail('the Nodes tab did not render the virtual-node manager');
 
-// The live value bindings now live inside a node's editor — open it. Clicking Edit for the 'solar' node
-// must surface its bound topic, which proves both the legacy Nodes[].Mqtt → Sources migration and that the
-// per-node editor renders the (now editable) binding rows.
 const editBtn = query(getEl('sections'), 'button', true).find(b => b.textContent === 'Edit');
 if (!editBtn) fail('the virtual-node manager rendered no Edit button');
 editBtn.click();
@@ -189,9 +195,10 @@ await new Promise(r => setTimeout(r, 20));
 
 const editorText = query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ');
 if (!editorText.includes('Live value bindings')) fail('opening a node did not render its bindings editor');
+if (!editorText.includes('Feeders & children')) fail('the node editor did not render the feeders/children wiring');
 if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_assistant/inverter_1/pv_power/state'))
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
 
-console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; Flow editor + virtual-node editor OK`);
+console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; Flow + Nodes editors OK`);

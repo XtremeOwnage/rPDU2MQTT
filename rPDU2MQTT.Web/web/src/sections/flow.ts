@@ -61,7 +61,7 @@ function field(labelText: string, control: HTMLElement, hint?: string) {
 // Per-node editor (#129): name, kind, mode, fixed value, a battery's storage, and the live value bindings —
 // one row per metric, each carrying a Type (MQTT today) and its transport fields, all editable in place
 // (including the topic, which the old flat table couldn't change).
-function renderNodeEditor(node: any, rerender: () => void) {
+function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, rerender: (close?: boolean) => void) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
   const box = el('div', { style: { margin: '10px 0 4px', padding: '14px', border: '1px solid var(--accent, #4f8cff)', borderRadius: '8px', background: 'var(--panel2)' } });
@@ -250,13 +250,82 @@ function renderNodeEditor(node: any, rerender: () => void) {
     rerender();
   };
   box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '8px' } }, addBind));
+
+  // --- Feeders & children (wiring) — the parent/child specification, alongside the visual Flow tab. ---
+  box.appendChild(el('h5', { text: 'Feeders & children', style: { margin: '12px 0 2px', fontSize: '12px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab.', style: { margin: '0 0 6px' } }));
+
+  const nm = (id: string) => (cand.get(id) || {}).label || id;
+  const wouldLoop = (from: string, to: string) => {
+    const adj: any = {}; links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
+    const stack = [to]; const seen = new Set<string>();
+    while (stack.length) { const x = stack.pop()!; if (x === from) return true; if (seen.has(x)) continue; seen.add(x); (adj[x] || []).forEach((t: string) => stack.push(t)); }
+    return false;
+  };
+  const addLink = (from: string, to: string) => {
+    if (from === to || links.some(l => l.From === from && l.To === to)) return;
+    if (wouldLoop(from, to)) { toast('That would create a feeder loop.', false); return; }
+    links.push({ From: from, To: to });
+  };
+  const removeLink = (from: string, to: string) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
+  const wireRow = (title: string, current: string[], onAdd: (o: string) => void, onRemove: (o: string) => void) => {
+    const row = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '3px 0' } });
+    row.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: title }));
+    current.forEach(other => {
+      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
+      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
+      x.onclick = () => { onRemove(other); rerender(); };
+      chip.append(nm(other), x); row.appendChild(chip);
+    });
+    const sel = el('select', { style: { width: 'auto' } });
+    sel.appendChild(el('option', { value: '', text: '+ add…' }));
+    [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
+    row.appendChild(sel);
+    return row;
+  };
+  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
+  box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+
   return box;
 }
 
-// Virtual-node manager (#129): the "page to manage those" the graph editor alone didn't cover. Each row is
-// a node; Edit opens the full editor (name, kind, mode, value, bindings) below the table. Deleting a node
-// takes its bound sources with it (they live on the node).
-function renderNodeManager(customNodes: any[], links: any[], editing: { id: string | null }, rerender: (close?: boolean) => void) {
+// Bring an EnergyFlow config up to the current shape in place (idempotent) — run on load by both the Flow
+// and Nodes tabs since either can be opened first: legacy single-feeder Parents → directed Links, per-node
+// Mqtt → the general Sources list, and a bare Value → the explicit 'static' mode.
+function migrateEnergyFlow(flow: any) {
+  const links = ensure(flow, 'Links', []);
+  const legacy = ensure(flow, 'Parents', {});
+  if (Object.keys(legacy).length) {
+    Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l: any) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
+    Object.keys(legacy).forEach(k => delete legacy[k]);
+  }
+  ensure(flow, 'Nodes', []).forEach((n: any) => {
+    if (n.Mqtt && n.Mqtt.length) { n.Sources = (n.Sources || []).concat(n.Mqtt.map((s: any) => ({ Type: 'mqtt', ...s }))); delete n.Mqtt; }
+    if (n.Value != null && (!n.Mode || n.Mode === 'auto')) n.Mode = 'static';
+  });
+}
+
+// Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
+async function saveConfig(onSaved: () => void) {
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
+  if (r.ok && r.body.ok) onSaved();
+}
+
+// The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+function flowCandidates(lastGraph: any, customNodes: any[]) {
+  const cand = new Map<string, any>();
+  (lastGraph?.nodes || []).forEach((n: any) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+  customNodes.forEach((n: any) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
+  return cand;
+}
+
+// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
+// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
+// Deleting a node takes its bound sources with it (they live on the node).
+function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -301,7 +370,7 @@ function renderNodeManager(customNodes: any[], links: any[], editing: { id: stri
   box.appendChild(tbl);
 
   const editingNode = editing.id ? customNodes.find((n: any) => n.Id === editing.id) : null;
-  if (editingNode) box.appendChild(renderNodeEditor(editingNode, (close?: boolean) => { if (close) editing.id = null; rerender(); }));
+  if (editingNode) box.appendChild(renderNodeEditor(editingNode, links, cand, (close?: boolean) => { if (close) editing.id = null; rerender(); }));
   return box;
 }
 
@@ -321,7 +390,6 @@ export function addFlowSection(nav: any, sections: any) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph: any = null;
-  const editing: { id: string | null } = { id: null };  // which virtual node's editor is open (persists across rerenders)
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph: any) => {
@@ -419,37 +487,18 @@ export function addFlowSection(nav: any, sections: any) {
   const renderEditor = () => {
     if (ed._cleanup) ed._cleanup();
     const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
     const customNodes = ensure(flow, 'Nodes', []);
     const links = ensure(flow, 'Links', []);
-    const legacy = ensure(flow, 'Parents', {});
-    // One-time migration: fold any legacy single-feeder Parents (child→parent) into directed Links.
-    if (Object.keys(legacy).length) {
-      Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l: any) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
-      Object.keys(legacy).forEach(k => delete legacy[k]);
-    }
-    // Fold legacy per-node Mqtt bindings into the general Sources list (each was implicitly Type: mqtt), so
-    // the new editor manages them in one place. The engine still reads both, so this is safe on save.
-    customNodes.forEach((n: any) => {
-      if (n.Mqtt && n.Mqtt.length) {
-        n.Sources = (n.Sources || []).concat(n.Mqtt.map((s: any) => ({ Type: 'mqtt', ...s })));
-        delete n.Mqtt;
-      }
-      // A fixed value now belongs to the 'static' mode — adopt it for older nodes that carried a value under
-      // the default mode, so the editor shows their value field and the roll-up is unchanged.
-      if (n.Value != null && (!n.Mode || n.Mode === 'auto')) n.Mode = 'static';
-    });
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target). A node can have several feeders, and a producer is just a feed into what it powers — e.g. drag from Solar onto your inverter. The target highlights green when in range; click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
 
-    const addBar = el('div', { class: 'ld-toolbar' });
-    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
-    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
-    const valIn = el('input', { type: 'number', placeholder: 'known value (optional)', style: { width: '150px' } });
-    const addBtn = btn('Add node', 'primary');
-    const save = btn('Save hierarchy', 'primary');
-    addBar.append(idIn, labIn, valIn, addBtn, save); ed.appendChild(addBar);
+    const bar2 = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(load);
+    bar2.append(save); ed.appendChild(bar2);
 
     // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll. Saved with
     // the hierarchy (the Save button posts the whole config).
@@ -463,12 +512,8 @@ export function addFlowSection(nav: any, sections: any) {
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
 
-    ed.appendChild(renderNodeManager(customNodes, links, editing, renderEditor));
-
     // Candidate nodes (from the built graph + custom defs).
-    const cand = new Map();
-    (lastGraph?.nodes || []).forEach((n: any) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
-    customNodes.forEach((n: any) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
+    const cand = flowCandidates(lastGraph, customNodes);
     const nm = (id: string): string => (cand.get(id) || {}).label || id;
     const byLabel = (a: string, b: string) => (cand.get(a).label || a).localeCompare(cand.get(b).label || b);
 
@@ -602,19 +647,6 @@ export function addFlowSection(nav: any, sections: any) {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     ed._cleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); detachZoom(); };
-
-    addBtn.onclick = () => {
-      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
-      if (cand.has(id)) { toast('That id already exists.', false); return; }
-      const node: any = { Id: id, Label: (labIn.value || '').trim() || id };
-      if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
-      customNodes.push(node); editing.id = id; renderEditor();  // open the new node's editor straight away
-    };
-    save.onclick = async () => {
-      const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-      toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-      if (r.ok && r.body.ok) load();
-    };
   };
 
   const load = async () => {
@@ -625,5 +657,62 @@ export function addFlowSection(nav: any, sections: any) {
     renderEditor();
   };
   refresh.onclick = load;
+  link.onclick = () => { activate(link, sec); load(); };
+}
+
+// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
+// bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+export function addNodesSection(nav: any, sections: any) {
+  const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const instSel = instanceSelector(() => load());
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  const ed: any = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
+  let lastGraph: any = null;
+  const editing: { id: string | null } = { id: null };
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const customNodes = ensure(flow, 'Nodes', []);
+    const links = ensure(flow, 'Links', []);
+    count.textContent = `${customNodes.length} node(s)`;
+    ed.innerHTML = '';
+
+    const addBar = el('div', { class: 'ld-toolbar' });
+    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
+    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
+    const kindSel = el('select', { style: { width: 'auto' } });
+    NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+    const addBtn = btn('Add node', 'primary');
+    const save = btn('Save', 'primary');
+    addBtn.onclick = () => {
+      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
+      if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
+      const node: any = { Id: id, Label: (labIn.value || '').trim() || id };
+      if (kindSel.value !== 'node') node.Kind = kindSel.value;
+      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
+    };
+    save.onclick = () => saveConfig(load);
+    addBar.append(idIn, labIn, kindSel, addBtn, save); ed.appendChild(addBar);
+
+    const cand = flowCandidates(lastGraph, customNodes);
+    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
+  };
+
+  const load = async () => {
+    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
+    // is global, so a failed/empty graph just means fewer wiring candidates, not an error.
+    const r = await api(withInstance('/api/flow', instSel));
+    lastGraph = r.body?.ok ? r.body : null;
+    render();
+  };
   link.onclick = () => { activate(link, sec); load(); };
 }
