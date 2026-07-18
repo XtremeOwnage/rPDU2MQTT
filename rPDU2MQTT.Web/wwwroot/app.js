@@ -943,9 +943,10 @@ function renderNodeEditor(node     , links       , cand                  , reren
       scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
       tr.appendChild(el('td', {}, scaleIn));
 
-      // Live value (Modbus only for now): filled by a probe so you can confirm a mapping reads correctly.
-      const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: (src.Type === 'modbus') ? '…' : '—' });
-      if (src.Type === 'modbus') liveCells.push({ src, cell: liveCell });
+      // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
+      // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
+      const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: '…' });
+      liveCells.push({ src, cell: liveCell });
       tr.appendChild(liveCell);
 
       const rm = btn('Remove', 'danger');
@@ -956,30 +957,43 @@ function renderNodeEditor(node     , links       , cand                  , reren
     tbl.appendChild(body);
     box.appendChild(tbl);
 
-    // Live values for Modbus mappings: probe the device(s) and fill the Current column, so you can confirm a
-    // register/type/scale reads what you expect before saving. Auto-refreshes while the editor is open.
+    // Live "Current" value for every binding: Modbus is read straight from the device (works before saving);
+    // MQTT and any future type come from the shared live cache the running ingests fill. Auto-refreshes.
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+      const setCell = (cell     , value               , err         , metric         ) => {
+        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
+        else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
+      };
       const refresh = async () => {
+        // Modbus: probe the device(s), grouped by connection so each is read once.
+        const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
         const conns        = (state.data?.Modbus?.Connections) || [];
         const byConn = new Map                                   ();
-        liveCells.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id) ).push(lc); });
+        modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id) ).push(lc); });
         for (const [connId, cells] of byConn) {
           const conn = conns.find(c => c.Id === connId);
-          if (!conn) { cells.forEach(lc => { lc.cell.textContent = 'pick a connection'; lc.cell.style.color = 'var(--muted)'; }); continue; }
+          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); continue; }
           try {
             const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Items: cells.map(lc => lc.src) }) });
-            if (!r.body.ok) { cells.forEach(lc => { lc.cell.textContent = 'err'; lc.cell.style.color = 'var(--bad)'; }); status.textContent = r.body.message || 'probe failed'; continue; }
+            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = r.body.message || 'probe failed'; continue; }
             const readings = r.body.readings || [];
-            cells.forEach((lc, i) => {
-              const rd = readings[i];
-              if (!rd || rd.value == null) { lc.cell.textContent = rd?.error ? 'err' : '—'; lc.cell.style.color = 'var(--bad)'; lc.cell.title = rd?.error || ''; }
-              else { const cu = metricMeta(lc.src.Metric)[2]; lc.cell.textContent = `${formatNum(rd.value)} ${cu}`.trim(); lc.cell.style.color = 'var(--good)'; lc.cell.title = ''; }
-            });
-            status.textContent = `updated ${new Date().toLocaleTimeString()}`;
-          } catch (e     ) { cells.forEach(lc => { lc.cell.textContent = 'err'; }); status.textContent = String(e?.message || e); }
+            cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
+          } catch (e     ) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = String(e?.message || e); }
         }
+
+        // MQTT + future types: whatever the running ingest currently holds in the shared cache.
+        const others = liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus');
+        if (others.length) {
+          try {
+            const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(others.map(lc => ({ Node: node.Id, Metric: lc.src.Metric || 'realpower' }))) });
+            const vals = (r.body && r.body.values) || [];
+            others.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
+          } catch (e     ) { others.forEach(lc => setCell(lc.cell, null, 'err')); }
+        }
+        status.textContent = `updated ${new Date().toLocaleTimeString()}`;
       };
       const refreshBtn = btn('Refresh values');
       refreshBtn.onclick = refresh;
