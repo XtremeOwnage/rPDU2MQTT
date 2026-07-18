@@ -3,7 +3,9 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using HiveMQtt.Client;
+using HiveMQtt.MQTT5.Types;
 using k8s;
+using k8s.Models;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -474,13 +476,75 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
-        // Stop the app so the container/host restarts it (same mechanism as the HA Restart button).
-        app.MapPost("/api/restart", () =>
+        // Restart a tier — or everything. In Kubernetes this is a rollout restart of the matching
+        // Deployment(s), which also rolls to the latest image; elsewhere it's a bus request every matching
+        // process obeys; "local" just stops this process (the classic behaviour).
+        app.MapPost("/api/restart", async (HttpContext ctx) =>
         {
-            Log.Information("Restart requested via GUI; stopping application.");
-            // Let the HTTP response flush before the host shuts down.
-            _ = Task.Run(async () => { await Task.Delay(300); lifetime.StopApplication(); });
-            return Results.Json(new { ok = true, message = "Restarting…" }, ConfigSchema.Json);
+            var target = (ctx.Request.Query["target"].FirstOrDefault() ?? "local").Trim().ToLowerInvariant();
+
+            if (target is "" or "local")
+            {
+                Log.Information("Restart requested via GUI; stopping this process.");
+                _ = Task.Run(async () => { await Task.Delay(300); lifetime.StopApplication(); });
+                return Results.Json(new { ok = true, message = "Restarting this process…" }, ConfigSchema.Json);
+            }
+
+            if (configSource is KubernetesConfigSource kube)
+            {
+                try
+                {
+                    var restarted = await RolloutRestartAsync(kube, target, ctx.RequestAborted);
+                    return restarted.Count == 0
+                        ? Results.Json(new { ok = false, message = $"No deployment matched '{target}'." }, ConfigSchema.Json)
+                        : Results.Json(new { ok = true, message = $"Rollout restart: {string.Join(", ", restarted)}." }, ConfigSchema.Json);
+                }
+                catch (Exception ex) { return Results.Json(new { ok = false, message = $"Rollout restart failed: {ex.Message}" }, ConfigSchema.Json); }
+            }
+
+            // Non-Kubernetes: ask the matching process(es) to restart over the bus.
+            try
+            {
+                var cmd = new Core.RestartCommand(target, DateTime.UtcNow);
+                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.RestartCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
+                {
+                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
+                    Retain = false,
+                });
+                return Results.Json(new { ok = true, message = $"Restart requested for '{target}'." }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not publish restart: {ex.Message}" }, ConfigSchema.Json); }
+        });
+
+        // What can be restarted, and how, so the Diagnostics page renders the right buttons.
+        app.MapGet("/api/restart/targets", async (HttpContext ctx) =>
+        {
+            if (configSource is KubernetesConfigSource kube)
+            {
+                var targets = new List<object> { new { id = "all", label = "Everything" } };
+                try
+                {
+                    // Only the tiers of a split deployment need their own button; an all-in-one Deployment
+                    // (no component label) is covered by "Everything".
+                    foreach (var d in (await AppDeploymentsAsync(kube, ctx.RequestAborted)).OrderBy(d => d.Metadata?.Name))
+                    {
+                        var comp = ComponentOf(d);
+                        if (!string.IsNullOrEmpty(comp)) targets.Add(new { id = comp, label = $"{comp} ({d.Metadata?.Name})" });
+                    }
+                }
+                catch { /* fall back to just "Everything" */ }
+                return Results.Json(new { ok = true, method = "rollout", targets }, ConfigSchema.Json);
+            }
+
+            // Non-Kubernetes: offer whole roles seen on the bus (split deployment), else just this process.
+            var roles = heartbeats.Processes.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
+            if (heartbeats.Processes.Count > 1 && roles.Count > 0)
+            {
+                var targets = new List<object> { new { id = "all", label = "Everything" } };
+                targets.AddRange(roles.Select(r => (object)new { id = r, label = r }));
+                return Results.Json(new { ok = true, method = "signal", targets }, ConfigSchema.Json);
+            }
+            return Results.Json(new { ok = true, method = "local", targets = new[] { new { id = "local", label = "This process" } } }, ConfigSchema.Json);
         });
 
         // Tail of this pod's container logs (Kubernetes config source only).
@@ -1192,6 +1256,62 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
+    }
+
+    // --- Kubernetes rollout restart ------------------------------------------------------------
+
+    /// <summary>Deployment's component (tier) label, or "" — Metadata.Labels is IDictionary (no GetValueOrDefault).</summary>
+    private static string ComponentOf(V1Deployment d)
+        => d.Metadata?.Labels is { } l && l.TryGetValue("app.kubernetes.io/component", out var c) ? c : "";
+
+    /// <summary>This app's Deployments, found via the running pod's own labels so we only touch our own.</summary>
+    private async Task<IList<V1Deployment>> AppDeploymentsAsync(KubernetesConfigSource kube, CancellationToken ct)
+    {
+        var list = await kube.Client.AppsV1.ListNamespacedDeploymentAsync(kube.Namespace, labelSelector: await AppSelectorAsync(kube, ct), cancellationToken: ct);
+        return list.Items;
+    }
+
+    /// <summary>Label selector scoping to this release — read off this pod, else a sensible default.</summary>
+    private static async Task<string> AppSelectorAsync(KubernetesConfigSource kube, CancellationToken ct)
+    {
+        var podName = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
+        if (!string.IsNullOrEmpty(podName))
+        {
+            try
+            {
+                var labels = (await kube.Client.CoreV1.ReadNamespacedPodAsync(podName, kube.Namespace, cancellationToken: ct)).Metadata?.Labels;
+                if (labels is not null)
+                {
+                    if (labels.TryGetValue("app.kubernetes.io/instance", out var inst) && !string.IsNullOrEmpty(inst)) return $"app.kubernetes.io/instance={inst}";
+                    if (labels.TryGetValue("app.kubernetes.io/name", out var nm) && !string.IsNullOrEmpty(nm)) return $"app.kubernetes.io/name={nm}";
+                }
+            }
+            catch { /* fall through to the default */ }
+        }
+        return "app.kubernetes.io/name=rpdu2mqtt";
+    }
+
+    /// <summary>
+    /// Roll restart the Deployment(s) matching <paramref name="target"/> ("all" or a component/role) by
+    /// stamping the pod template's <c>restartedAt</c> annotation — exactly what <c>kubectl rollout restart</c>
+    /// does, so pods cycle gracefully and re-pull the image. Returns the names actually patched.
+    /// </summary>
+    private async Task<List<string>> RolloutRestartAsync(KubernetesConfigSource kube, string target, CancellationToken ct)
+    {
+        var restarted = new List<string>();
+        var annotations = new Dictionary<string, string> { ["kubectl.kubernetes.io/restartedAt"] = DateTime.UtcNow.ToString("o") };
+        var body = new V1Patch(
+            System.Text.Json.JsonSerializer.Serialize(new { spec = new { template = new { metadata = new { annotations } } } }),
+            V1Patch.PatchType.MergePatch);
+        foreach (var d in await AppDeploymentsAsync(kube, ct))
+        {
+            var comp = ComponentOf(d);
+            if (d.Metadata?.Name is null) continue;
+            if (!string.Equals(target, "all", StringComparison.OrdinalIgnoreCase) && !string.Equals(comp, target, StringComparison.OrdinalIgnoreCase)) continue;
+            await kube.Client.AppsV1.PatchNamespacedDeploymentAsync(body, d.Metadata.Name, kube.Namespace, cancellationToken: ct);
+            restarted.Add(d.Metadata.Name);
+        }
+        return restarted;
     }
 
     // Case-insensitive so the GUI can post {host,...} or {Host,...}; Items map onto EnergyFlowSource's fields.

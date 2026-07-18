@@ -16,6 +16,10 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events"]
     verbs: ["get", "list"]
+  # Lets the GUI Diagnostics page roll-restart this release's Deployment(s) (restart a tier / update image).
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
   # Lets the GUI persist credentials (incl. OIDC client secret) into the companion Secret,
   # instead of the CR spec. Scoped to just that Secret (the chart pre-creates it).
   - apiGroups: [""]

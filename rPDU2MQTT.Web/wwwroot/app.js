@@ -347,8 +347,31 @@ function addDiagnosticsSection(nav     , sections     ) {
 
   const bar = document.createElement('div'); bar.className = 'sec-actions';
   const refresh = btn('Refresh');
-  const restart = btn('Restart bridge', 'danger');
-  bar.appendChild(refresh); bar.appendChild(restart); sec.appendChild(bar);
+  bar.appendChild(refresh); sec.appendChild(bar);
+
+  // Restart panel: one button per restartable target. In Kubernetes these roll-restart the matching
+  // Deployment(s) (which also pulls the latest image); in a split non-k8s deployment they signal the tier
+  // over the bus; otherwise it's just this process. Populated from /api/restart/targets.
+  const restartBar = document.createElement('div'); restartBar.className = 'sec-actions'; sec.appendChild(restartBar);
+  const loadRestartTargets = async () => {
+    restartBar.innerHTML = '';
+    const r = await api('/api/restart/targets');
+    const method = r.body.method || 'local';
+    const targets = r.body.targets || [];
+    const verb = method === 'rollout' ? 'Rollout restart' : method === 'signal' ? 'Restart' : 'Restart';
+    const label = document.createElement('span'); label.className = 'desc'; label.style.cssText = 'margin:0 6px 0 0;align-self:center;';
+    label.textContent = method === 'rollout' ? 'Rollout restart (also updates the image):' : method === 'signal' ? 'Restart a tier:' : 'Restart:';
+    restartBar.appendChild(label);
+    targets.forEach((t     ) => {
+      const b = btn(`${verb} — ${t.label}`, t.id === 'all' ? 'danger' : '');
+      b.onclick = async () => {
+        if (!confirm(`${verb} ${t.label}? It will disconnect briefly while it restarts.`)) return;
+        const rr = await api('/api/restart?target=' + encodeURIComponent(t.id), { method: 'POST' });
+        toast(rr.body.message || 'Restarting…', rr.ok && rr.body.ok);
+      };
+      restartBar.appendChild(b);
+    });
+  };
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
@@ -403,12 +426,7 @@ function addDiagnosticsSection(nav     , sections     ) {
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
   refresh.onclick = load;
-  restart.onclick = async () => {
-    if (!confirm('Restart the bridge? It will disconnect briefly while the container restarts.')) return;
-    const r = await api('/api/restart', { method: 'POST' });
-    toast(r.body.message || 'Restarting…', r.ok && r.body.ok);
-  };
-  link.onclick = () => { activate(link, sec); load(); };
+  link.onclick = () => { activate(link, sec); load(); loadRestartTargets(); };
 }
 
 // Kubernetes-only: on-demand pod logs + recent events.
