@@ -198,15 +198,18 @@ public static class FlowGraphBuilder
                 return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
             }
 
-            if (Mode(from) == "none") return 0;   // explicitly contributes nothing ("leave unset")
+            // A 'none' node never infers a value, and a 'static' node with no value here (a valued one is
+            // already a leaf above) has nothing to give — both contribute zero rather than absorbing demand.
+            static bool Inert(string m) => m is "none" or "static";
+            if (Inert(Mode(from))) return 0;
 
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
             var measured = feeders.Where(leaf.ContainsKey).Sum(f => EdgeFlow(f, to, path));
             var remainder = Math.Max(0, Need(to, path) - measured);
 
-            // Unmeasured, non-'none' feeders that may absorb the remainder. If any is 'residual', only those
-            // share it; otherwise the 'auto' feeders split it (back-compat when nothing is measured).
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && Mode(f) != "none").ToList();
+            // Unmeasured feeders that may absorb the remainder. If any is 'residual', only those share it;
+            // otherwise the 'auto' feeders split it (back-compat when nothing is measured).
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
             var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
             var absorbers = residual.Count > 0 ? residual : unmeasured;
             if (absorbers.Count == 0 || !absorbers.Contains(from, StringComparer.OrdinalIgnoreCase)) return 0;

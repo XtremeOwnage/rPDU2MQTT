@@ -27,6 +27,7 @@ const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic']];
 // always wins; this only governs nodes the graph would otherwise infer.
 const NODE_MODES: [string, string, string][] = [
   ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
   ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
   ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
@@ -70,12 +71,19 @@ function renderNodeEditor(node: any, rerender: () => void) {
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
   modeSel.value = node.Mode || 'auto';
-  modeSel.onchange = () => { node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value; };
+  modeSel.onchange = () => {
+    node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
+    if (node.Mode !== 'static') node.Value = undefined;  // a fixed value only belongs to a static node
+    rerender();  // toggle the Fixed value field
+  };
   grid.appendChild(field('Mode', modeSel, 'How it’s valued with no measurement.'));
 
-  const valIn = el('input', { type: 'number', step: 'any', value: node.Value ?? '', placeholder: '—' });
-  valIn.onchange = () => { const v = +valIn.value; node.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
-  grid.appendChild(field('Fixed value', valIn, 'Used only if nothing live reports.'));
+  // The fixed value only makes sense for a static leaf — show it only in that mode.
+  if ((node.Mode || 'auto') === 'static') {
+    const valIn = el('input', { type: 'number', step: 'any', value: node.Value ?? '', placeholder: '—' });
+    valIn.onchange = () => { const v = +valIn.value; node.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
+    grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
+  }
 
   if ((node.Kind || 'node') === 'battery') {
     const stoIn = el('input', { type: 'number', step: 'any', value: node.StorageKwh ?? '', placeholder: 'kWh' });
@@ -326,6 +334,9 @@ export function addFlowSection(nav: any, sections: any) {
         n.Sources = (n.Sources || []).concat(n.Mqtt.map((s: any) => ({ Type: 'mqtt', ...s })));
         delete n.Mqtt;
       }
+      // A fixed value now belongs to the 'static' mode — adopt it for older nodes that carried a value under
+      // the default mode, so the editor shows their value field and the roll-up is unchanged.
+      if (n.Value != null && (!n.Mode || n.Mode === 'auto')) n.Mode = 'static';
     });
     ed.innerHTML = '';
 

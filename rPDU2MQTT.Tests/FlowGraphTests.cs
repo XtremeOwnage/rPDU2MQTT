@@ -378,6 +378,38 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void Build_StaticNode_WithAValue_IsAFixedLeaf()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "solar", Label = "Solar", Mode = "static", Value = 500 } },
+            Links = { new EnergyFlowLink { From = "solar", To = "pdu:pdu1" } },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(500, graph.Links.Single(l => l.Source == "solar").Value);
+    }
+
+    [Fact]
+    public void Build_StaticNode_WithNoValue_ContributesNothing()
+    {
+        // 'static' means "valued at the fixed number"; with none set there's nothing to give, so it drops
+        // out rather than absorbing its target's demand the way an 'auto' feeder would.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "solar", Label = "Solar", Mode = "static" } },
+            Links = { new EnergyFlowLink { From = "solar", To = "pdu:pdu1" } },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Source == "solar");
+    }
+
+    [Fact]
     public void Build_UsesTheNodesDeclaredKindForStyling()
     {
         // A custom node's Kind (battery, inverter, …) flows through to the graph node so the diagram can

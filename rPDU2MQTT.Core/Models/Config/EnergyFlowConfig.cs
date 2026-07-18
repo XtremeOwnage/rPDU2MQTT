@@ -95,6 +95,8 @@ public class EnergyFlowNode
     /// <list type="bullet">
     /// <item><c>auto</c> (default): aggregate children, and as an upstream feeder take a share of what's
     /// left after measured siblings — the historical behaviour.</item>
+    /// <item><c>static</c>: a fixed leaf valued at <see cref="Value"/> (still superseded by a live source).
+    /// This is the mode that gives the fixed value meaning; with no value set it contributes nothing.</item>
     /// <item><c>residual</c>: the designated "untracked" absorber on the <em>feeder</em> side — takes the
     /// demand a node still needs after every measured feeder has supplied its bit (e.g. house load not
     /// behind a PDU or CT clamp).</item>
@@ -108,8 +110,8 @@ public class EnergyFlowNode
     /// </list>
     /// </summary>
     [DefaultValue("auto")]
-    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live/static Value always wins.")]
-    [AllowedValues("auto", "residual", "untracked", "none")]
+    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.")]
+    [AllowedValues("auto", "static", "residual", "untracked", "none")]
     public string Mode { get; set; } = "auto";
 
     /// <summary>

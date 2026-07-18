@@ -713,10 +713,11 @@ spec:
                           enum:
                           - ''
                           - auto
+                          - static
                           - residual
                           - untracked
                           - none
-                          description: "How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live/static Value always wins."
+                          description: "How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins."
                         Sources:
                           type: array
                           items:
