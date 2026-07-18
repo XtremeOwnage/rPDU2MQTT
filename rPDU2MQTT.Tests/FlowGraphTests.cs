@@ -378,6 +378,32 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void Build_UsesTheNodesDeclaredKindForStyling()
+    {
+        // A custom node's Kind (battery, inverter, …) flows through to the graph node so the diagram can
+        // style it; unset stays the generic "node".
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "batt", Label = "Battery", Kind = "battery", Value = 40 },
+                new EnergyFlowNode { Id = "plain", Label = "Plain", Value = 10 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "batt", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "plain", To = "pdu:pdu1" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal("battery", graph.Nodes.Single(n => n.Id == "batt").Kind);
+        Assert.Equal("node", graph.Nodes.Single(n => n.Id == "plain").Kind);
+    }
+
+    [Fact]
     public void Build_UntrackedChild_ShowsTheMeasuredParentsUnaccountedConsumption()
     {
         // A panel with a measured total (CT clamp = 250W) feeds a PDU that only accounts for 100W of it.

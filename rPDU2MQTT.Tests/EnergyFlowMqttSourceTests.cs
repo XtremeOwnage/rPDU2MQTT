@@ -177,17 +177,17 @@ public class EnergyFlowMqttSourceTests
 
     // --- Subscribe → parse → cache glue (BuildBindings + Apply) ------------------------------------
 
-    private static EnergyFlowNode NodeWith(string id, params EnergyFlowMqttSource[] sources)
+    private static EnergyFlowNode NodeWith(string id, params EnergyFlowSource[] sources)
     {
         var n = new EnergyFlowNode { Id = id, Label = id };
-        n.Mqtt.AddRange(sources);
+        n.Sources.AddRange(sources);
         return n;
     }
 
     [Fact]
     public void Apply_RoutesAPayloadToTheBoundNodeAndMetric()
     {
-        var nodes = new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) };
+        var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
 
@@ -200,7 +200,7 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Apply_AppliesScaleAndReadsAJsonField()
     {
-        var nodes = new[] { NodeWith("meter", new EnergyFlowMqttSource { Topic = "sa/energy", Metric = "energy", JsonField = "wh", Scale = 0.001 }) };
+        var nodes = new[] { NodeWith("meter", new EnergyFlowSource { Topic = "sa/energy", Metric = "energy", JsonField = "wh", Scale = 0.001 }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
 
@@ -214,7 +214,7 @@ public class EnergyFlowMqttSourceTests
     public void Apply_IgnoresAnUnboundTopic()
     {
         var bindings = EnergyFlowMqttSourceService.BuildBindings(
-            new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) });
+            new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) });
         var cache = new FlowValueCache();
 
         EnergyFlowMqttSourceService.Apply(bindings, cache, "some/other/topic", "999", DateTime.UtcNow);
@@ -226,7 +226,7 @@ public class EnergyFlowMqttSourceTests
     public void Apply_LeavesTheCacheUntouchedForAnUnparseablePayload()
     {
         var bindings = EnergyFlowMqttSourceService.BuildBindings(
-            new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) });
+            new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) });
         var cache = new FlowValueCache();
 
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_power", "unavailable", DateTime.UtcNow);
@@ -240,8 +240,8 @@ public class EnergyFlowMqttSourceTests
         // A shared bus topic can legitimately feed more than one node.
         var nodes = new[]
         {
-            NodeWith("a", new EnergyFlowMqttSource { Topic = "shared/power", Metric = "realpower" }),
-            NodeWith("b", new EnergyFlowMqttSource { Topic = "shared/power", Metric = "realpower", Scale = 2 }),
+            NodeWith("a", new EnergyFlowSource { Topic = "shared/power", Metric = "realpower" }),
+            NodeWith("b", new EnergyFlowSource { Topic = "shared/power", Metric = "realpower", Scale = 2 }),
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
@@ -257,9 +257,9 @@ public class EnergyFlowMqttSourceTests
     {
         var nodes = new[]
         {
-            NodeWith("", new EnergyFlowMqttSource { Topic = "t1", Metric = "realpower" }),         // no id
-            NodeWith("ok", new EnergyFlowMqttSource { Topic = "", Metric = "realpower" }),          // no topic
-            NodeWith("solar", new EnergyFlowMqttSource { Topic = "  sa/pv  ", Metric = "realpower" }), // trimmed
+            NodeWith("", new EnergyFlowSource { Topic = "t1", Metric = "realpower" }),         // no id
+            NodeWith("ok", new EnergyFlowSource { Topic = "", Metric = "realpower" }),          // no topic
+            NodeWith("solar", new EnergyFlowSource { Topic = "  sa/pv  ", Metric = "realpower" }), // trimmed
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
 

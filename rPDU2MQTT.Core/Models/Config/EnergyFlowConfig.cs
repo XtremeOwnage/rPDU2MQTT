@@ -65,12 +65,28 @@ public class EnergyFlowNode
     public string Label { get; set; } = "";
 
     /// <summary>
-    /// A directly-known value for this node, used when it has no children (a leaf) and no <see cref="Mqtt"/>
-    /// source has reported. A manual/known figure — e.g. an untracked load, or a panel you're modelling
-    /// before its CT clamp is ingested. Ignored when the node aggregates children.
+    /// What this node represents (#129). Purely descriptive today — it drives the diagram's styling and
+    /// which fields/metrics the editor offers (a battery has storage but no frequency, etc.) — but leaves
+    /// room for kind-specific behaviour (battery charge/discharge, inverter efficiency) later. <c>node</c>
+    /// is the plain virtual node it has always been.
     /// </summary>
-    [Description("Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.")]
+    [DefaultValue("node")]
+    [Description("What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers.")]
+    [AllowedValues("node", "panel", "inverter", "battery", "solar", "grid", "load")]
+    public string Kind { get; set; } = "node";
+
+    /// <summary>
+    /// A directly-known value for this node, used when it has no children (a leaf) and no live
+    /// <see cref="Sources"/> reading has arrived. A manual/known figure — e.g. an untracked load, or a
+    /// panel you're modelling before its CT clamp is ingested. Ignored when the node aggregates children.
+    /// </summary>
+    [Description("Optional fixed value for a leaf node. Used only when no live source has reported for it.")]
     public double? Value { get; set; }
+
+    /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
+    /// diagram/state-of-charge display; does not affect the power roll-up.</summary>
+    [Description("For a battery node: usable storage capacity in kWh (display metadata; optional).")]
+    public double? StorageKwh { get; set; }
 
     /// <summary>
     /// How this node's value is decided when it has no direct measurement (#129). A live source or static
@@ -97,29 +113,46 @@ public class EnergyFlowNode
     public string Mode { get; set; } = "auto";
 
     /// <summary>
-    /// Live measurements for this leaf node, read straight off the broker (#205) — the seam
-    /// <see cref="Value"/> always described. One entry per metric, so the same node can feed both the
-    /// power and the energy roll-up (e.g. Solar Assistant's <c>pv_power</c> and <c>pv_energy</c> topics).
-    /// A live reading supersedes <see cref="Value"/>; ignored when the node aggregates children.
+    /// Live value bindings for this node (#205), one per metric — the seam <see cref="Value"/> always
+    /// described. Each binds a metric (realpower, energy, …) to an external source; a fresh reading
+    /// supersedes <see cref="Value"/>, and binding several metrics lets the same node drive the power, the
+    /// energy roll-up, voltage, etc. Every binding carries a <see cref="EnergyFlowSource.Type"/> (only
+    /// <c>mqtt</c> today) so more ingest kinds can be added without reshaping the model.
     /// </summary>
-    [Description("Live values for this node read from MQTT topics (e.g. Solar Assistant). One entry per metric; supersedes Value.")]
-    public List<EnergyFlowMqttSource> Mqtt { get; set; } = new();
+    [Description("Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.")]
+    public List<EnergyFlowSource> Sources { get; set; } = new();
+
+    /// <summary>
+    /// Legacy pre-<see cref="Sources"/> MQTT bindings (#205). Still honored on load so older configs keep
+    /// working; the GUI migrates these into <see cref="Sources"/> (each was implicitly <c>Type: mqtt</c>).
+    /// </summary>
+    [Description("Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat.")]
+    public List<EnergyFlowSource> Mqtt { get; set; } = new();
+
+    /// <summary>Every effective binding — the new <see cref="Sources"/> plus any legacy <see cref="Mqtt"/>.</summary>
+    public IEnumerable<EnergyFlowSource> AllSources() => Sources.Concat(Mqtt);
 }
 
 /// <summary>
-/// Binds one MQTT topic to one metric of a flow node (#205). Built for producers that already publish to
-/// the broker — Solar Assistant, CT clamps, an inverter bridge — so their data joins the same hierarchy,
-/// roll-ups and exports as the PDU outlets.
+/// Binds one external source to one metric of a flow node (#205). Built for producers that already publish
+/// their data — Solar Assistant, CT clamps, an inverter bridge — so it joins the same hierarchy, roll-ups
+/// and exports as the PDU outlets. <see cref="Type"/> selects the ingest; the transport-specific fields
+/// (today just the MQTT ones) apply per type.
 /// </summary>
-public class EnergyFlowMqttSource
+public class EnergyFlowSource
 {
-    [Description("MQTT topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
-    public string Topic { get; set; } = "";
+    [DefaultValue("mqtt")]
+    [Description("Where this value comes from. Currently only 'mqtt' (subscribe to a broker topic); more ingest types can be added later.")]
+    [AllowedValues("mqtt")]
+    public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
-    [Description("Which measurement this topic supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.")]
+    [Description("Which measurement this source supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.")]
     [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
     public string Metric { get; set; } = "realpower";
+
+    [Description("For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
+    public string Topic { get; set; } = "";
 
     /// <summary>
     /// For JSON payloads: the field to read, dotted for nesting (<c>battery.power</c>). Blank treats the

@@ -27,7 +27,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     // The staleness rules live in the cache (Core) so they're testable without a broker.
     private readonly FlowValueCache latest = new();
     // Topic -> the bindings fed by it. One topic may drive several nodes/metrics.
-    private volatile Dictionary<string, List<(string NodeId, EnergyFlowMqttSource Source)>> bindings = new(StringComparer.Ordinal);
+    private volatile Dictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings = new(StringComparer.Ordinal);
     private readonly HashSet<string> subscribed = new(StringComparer.Ordinal);
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps)
@@ -113,15 +113,20 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
         => Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, DateTime.UtcNow);
 
-    /// <summary>Flatten the nodes' MQTT bindings into a topic → (node, source) lookup for the subscriber.</summary>
-    internal static Dictionary<string, List<(string NodeId, EnergyFlowMqttSource Source)>> BuildBindings(IEnumerable<EnergyFlowNode> nodes)
+    /// <summary>
+    /// Flatten the nodes' MQTT-type bindings into a topic → (node, source) lookup for the subscriber. Reads
+    /// the new <see cref="EnergyFlowNode.Sources"/> and the legacy <see cref="EnergyFlowNode.Mqtt"/> together,
+    /// and skips any binding whose <see cref="EnergyFlowSource.Type"/> this ingest doesn't handle.
+    /// </summary>
+    internal static Dictionary<string, List<(string NodeId, EnergyFlowSource Source)>> BuildBindings(IEnumerable<EnergyFlowNode> nodes)
     {
-        var desired = new Dictionary<string, List<(string, EnergyFlowMqttSource)>>(StringComparer.Ordinal);
+        var desired = new Dictionary<string, List<(string, EnergyFlowSource)>>(StringComparer.Ordinal);
         foreach (var node in nodes)
         {
-            if (string.IsNullOrWhiteSpace(node.Id) || node.Mqtt is null) continue;
-            foreach (var src in node.Mqtt)
+            if (string.IsNullOrWhiteSpace(node.Id)) continue;
+            foreach (var src in node.AllSources())
             {
+                if (!string.Equals(src.Type, "mqtt", StringComparison.OrdinalIgnoreCase)) continue;   // this ingest only
                 if (string.IsNullOrWhiteSpace(src.Topic) || string.IsNullOrWhiteSpace(src.Metric)) continue;
                 var topic = src.Topic.Trim();
                 if (!desired.TryGetValue(topic, out var list)) desired[topic] = list = new();
@@ -137,7 +142,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     /// subscribe → parse → cache glue is exercised without a live broker.
     /// </summary>
     internal static void Apply(
-        IReadOnlyDictionary<string, List<(string NodeId, EnergyFlowMqttSource Source)>> bindings,
+        IReadOnlyDictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings,
         FlowValueCache cache, string? topic, string? payload, DateTime nowUtc)
     {
         if (topic is null || !bindings.TryGetValue(topic, out var list) || string.IsNullOrWhiteSpace(payload))

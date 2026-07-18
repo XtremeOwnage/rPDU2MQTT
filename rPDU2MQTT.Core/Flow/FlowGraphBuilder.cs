@@ -100,7 +100,9 @@ public static class FlowGraphBuilder
             if (!string.IsNullOrEmpty(n.Id))
             {
                 label[n.Id] = string.IsNullOrEmpty(n.Label) ? n.Id : n.Label;
-                if (!kind.ContainsKey(n.Id)) kind[n.Id] = "node";
+                // The node's declared kind (battery, inverter, panel, …) styles the diagram; fall back to
+                // the generic "node" when unset. Don't override an auto id that already resolved to pdu/outlet.
+                if (!kind.ContainsKey(n.Id)) kind[n.Id] = string.IsNullOrWhiteSpace(n.Kind) ? "node" : n.Kind.Trim().ToLowerInvariant();
                 if (live is not null && live.TryGetValue(n.Id, metric, out var liveValue))
                 {
                     // A live reading is authoritative even at 0: solar at night generates nothing, and the

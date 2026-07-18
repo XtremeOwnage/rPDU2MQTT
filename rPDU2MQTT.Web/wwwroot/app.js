@@ -752,8 +752,25 @@ function addLiveDataSection(nav     , sections     ) {
 // ── sections/flow.ts ────────────────────────────────────────────
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
 
-// Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowMqttSource.Metric.
+// Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowSource.Metric.
 const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'frequency', 'powerfactor'];
+
+// What a virtual node represents — mirrors [AllowedValues] on EnergyFlowNode.Kind. Each kind offers only
+// the metrics that make sense for it (a battery has no frequency); 'battery' also gets a storage field.
+const NODE_KINDS                               = [
+  ['node', 'Virtual node', SOURCE_METRICS],
+  ['panel', 'Electrical panel', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
+  ['inverter', 'Inverter', SOURCE_METRICS],
+  ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage']],
+  ['solar', 'Solar / PV', ['realpower', 'energy', 'current', 'voltage']],
+  ['grid', 'Grid', SOURCE_METRICS],
+  ['load', 'Load', ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'powerfactor']],
+];
+const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
+
+// Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Only MQTT today; the editor is
+// shaped so another ingest is just another entry here plus its own fields.
+const SOURCE_TYPES                     = [['mqtt', 'MQTT topic']];
 
 // How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
 // always wins; this only governs nodes the graph would otherwise infer.
@@ -764,14 +781,126 @@ const NODE_MODES                             = [
   ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
 ];
 
-// Virtual-node manager (#129): rename, retype, set a fixed value or mode, and delete the custom nodes — the
-// "page to manage those" that the graph editor alone didn't cover. Value population is source-agnostic: a
-// node's number can come from a fixed value, or a bound live source (MQTT today, other ingests later) shown
-// in the Sources column; the Mode governs only what happens when neither is present.
-function renderNodeManager(customNodes       , links       , rerender            ) {
+// A labelled field (label above a control) for the node editor's form grid.
+function field(labelText        , control             , hint         ) {
+  const f = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
+  f.appendChild(el('label', { text: labelText, style: { fontSize: '11px', color: 'var(--muted)' } }));
+  f.appendChild(control);
+  if (hint) f.appendChild(el('div', { class: 'desc', text: hint, style: { margin: '0', fontSize: '11px' } }));
+  return f;
+}
+
+// Per-node editor (#129): name, kind, mode, fixed value, a battery's storage, and the live value bindings —
+// one row per metric, each carrying a Type (MQTT today) and its transport fields, all editable in place
+// (including the topic, which the old flat table couldn't change).
+function renderNodeEditor(node     , rerender            ) {
+  const meta = kindMeta(node.Kind);
+  const allowed = meta[2];
+  const box = el('div', { style: { margin: '10px 0 4px', padding: '14px', border: '1px solid var(--accent, #4f8cff)', borderRadius: '8px', background: 'var(--panel2)' } });
+
+  const header = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' } });
+  header.appendChild(el('h4', { text: `Editing ${node.Label || node.Id}`, style: { margin: '0', fontSize: '14px' } }));
+  const close = btn('Close'); close.onclick = () => rerender(true);
+  header.appendChild(close);
+  box.appendChild(header);
+
+  const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
+
+  const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
+  labIn.onchange = () => { node.Label = labIn.value.trim() || undefined; };
+  grid.appendChild(field('Name', labIn));
+
+  const kindSel = el('select');
+  NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+  kindSel.value = node.Kind || 'node';
+  kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
+  grid.appendChild(field('Kind', kindSel));
+
+  const modeSel = el('select');
+  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  modeSel.value = node.Mode || 'auto';
+  modeSel.onchange = () => { node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value; };
+  grid.appendChild(field('Mode', modeSel, 'How it’s valued with no measurement.'));
+
+  const valIn = el('input', { type: 'number', step: 'any', value: node.Value ?? '', placeholder: '—' });
+  valIn.onchange = () => { const v = +valIn.value; node.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
+  grid.appendChild(field('Fixed value', valIn, 'Used only if nothing live reports.'));
+
+  if ((node.Kind || 'node') === 'battery') {
+    const stoIn = el('input', { type: 'number', step: 'any', value: node.StorageKwh ?? '', placeholder: 'kWh' });
+    stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
+    grid.appendChild(field('Storage (kWh)', stoIn));
+  }
+  box.appendChild(grid);
+
+  // --- Live value bindings ---
+  box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a source already on your broker. One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+
+  const sources        = ensure(node, 'Sources', []);
+  if (sources.length) {
+    const tbl = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['Type', 'Metric', 'Topic', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    tbl.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    sources.forEach((src     ) => {
+      const tr = el('tr');
+
+      const typeSel = el('select', { style: { width: 'auto' } });
+      SOURCE_TYPES.forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
+      typeSel.value = src.Type || 'mqtt';
+      typeSel.onchange = () => { src.Type = typeSel.value; };
+      tr.appendChild(el('td', {}, typeSel));
+
+      // Offer this kind's metrics, but keep an already-chosen metric even if the kind wouldn't list it.
+      const metricSel = el('select', { style: { width: 'auto' } });
+      const opts = allowed.includes(src.Metric || 'realpower') ? allowed : [src.Metric, ...allowed];
+      opts.forEach((m        ) => metricSel.appendChild(el('option', { value: m, text: m })));
+      metricSel.value = src.Metric || 'realpower';
+      metricSel.onchange = () => { src.Metric = metricSel.value; };
+      tr.appendChild(el('td', {}, metricSel));
+
+      const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
+      topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
+      tr.appendChild(el('td', {}, topicIn));
+
+      const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: '(optional)', style: { width: '120px' } });
+      fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
+      tr.appendChild(el('td', {}, fieldIn));
+
+      const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
+      scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
+      tr.appendChild(el('td', {}, scaleIn));
+
+      const rm = btn('Remove', 'danger');
+      rm.onclick = () => { sources.splice(sources.indexOf(src), 1); rerender(); };
+      tr.appendChild(el('td', {}, rm));
+      body.appendChild(tr);
+    });
+    tbl.appendChild(body);
+    box.appendChild(tbl);
+  }
+
+  const addBind = btn('Add binding', 'primary');
+  addBind.onclick = () => {
+    // Default to the first metric this kind offers that isn't bound yet, so a click rarely needs a re-pick.
+    const used = new Set(sources.map((s     ) => s.Metric || 'realpower'));
+    const metric = allowed.find((m        ) => !used.has(m)) || allowed[0];
+    sources.push({ Type: 'mqtt', Metric: metric, Topic: '' });
+    rerender();
+  };
+  box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '8px' } }, addBind));
+  return box;
+}
+
+// Virtual-node manager (#129): the "page to manage those" the graph editor alone didn't cover. Each row is
+// a node; Edit opens the full editor (name, kind, mode, value, bindings) below the table. Deleting a node
+// takes its bound sources with it (they live on the node).
+function renderNodeManager(customNodes       , links       , editing                       , rerender                           ) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, a “Total”, producers). Rename them, give a leaf a fixed value, or set how an unmeasured node is valued. A fixed value or a bound live source always wins over the mode; the mode only decides what an otherwise-unknown node does.' }));
+  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
   if (!customNodes.length) {
     box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
@@ -780,112 +909,40 @@ function renderNodeManager(customNodes       , links       , rerender           
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Fixed value', 'Mode', 'Sources', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Bindings', ''].forEach(h => head.appendChild(el('th', { text: h })));
   tbl.appendChild(el('thead', {}, head));
   const body = el('tbody');
   customNodes.forEach((n     ) => {
     const tr = el('tr');
+    if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
     tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
+    tr.appendChild(el('td', { text: n.Label || n.Id }));
+    tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
+    tr.appendChild(el('td', { text: n.Mode || 'auto' }));
+    tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
+    const nb = (n.Sources || []).length;
+    tr.appendChild(el('td', { text: nb ? String(nb) : '—', class: nb ? '' : 'num' }));
 
-    const labIn = el('input', { type: 'text', value: n.Label || '', placeholder: n.Id, style: { width: '180px' } });
-    labIn.onchange = () => { n.Label = labIn.value.trim() || undefined; };
-    tr.appendChild(el('td', {}, labIn));
-
-    const valIn = el('input', { type: 'number', step: 'any', value: n.Value ?? '', placeholder: '—', style: { width: '110px' } });
-    valIn.onchange = () => { const v = +valIn.value; n.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
-    tr.appendChild(el('td', {}, valIn));
-
-    const modeSel = el('select', { style: { width: 'auto' } });
-    NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
-    modeSel.value = n.Mode || 'auto';
-    modeSel.onchange = () => { n.Mode = modeSel.value === 'auto' ? undefined : modeSel.value; };
-    tr.appendChild(el('td', {}, modeSel));
-
-    // Bound live sources (MQTT today) — the seam other ingests plug into. Detail/editing lives below.
-    const srcMetrics = (n.Mqtt || []).map((s     ) => s.Metric || 'realpower');
-    tr.appendChild(el('td', { text: srcMetrics.length ? srcMetrics.join(', ') : '—', class: srcMetrics.length ? '' : 'num' }));
-
+    const actions = el('td', { style: { whiteSpace: 'nowrap' } });
+    const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
+    edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
     const rm = btn('Delete', 'danger');
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
       for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      if (editing.id === n.Id) editing.id = null;
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    tr.appendChild(el('td', {}, rm));
+    actions.append(edit, ' ', rm);
+    tr.appendChild(actions);
     body.appendChild(tr);
   });
   tbl.appendChild(body);
   box.appendChild(tbl);
-  return box;
-}
 
-// Binds custom nodes to live MQTT topics (#205): the values a producer (Solar Assistant, a CT clamp)
-// already publishes become this node's reading, so it rolls up and exports like a PDU outlet. Only custom
-// nodes appear — PDU/outlet nodes get their values from the poll.
-function renderMqttSources(customNodes       , rerender            ) {
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Live sources (MQTT)', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Feed a node from a topic already on your broker — e.g. Solar Assistant’s solar_assistant/inverter_1/pv_power/state. A live reading replaces the node’s fixed value; bind one topic per metric to drive both the power and the energy roll-up. Takes effect without a restart once saved.' }));
-
-  if (!customNodes.length) {
-    box.appendChild(el('div', { class: 'desc', text: 'Add a node above first — live sources attach to custom nodes.' }));
-    return box;
-  }
-
-  // Existing bindings, flattened across nodes.
-  const rows = customNodes.flatMap((n     ) => (n.Mqtt || []).map((s     ) => ({ node: n, src: s })));
-  if (rows.length) {
-    const tbl = el('table', { class: 'ld' });
-    const head = el('tr');
-    ['Node', 'Topic', 'Metric', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
-    tbl.appendChild(el('thead', {}, head));
-    const body = el('tbody');
-    rows.forEach(({ node, src }     ) => {
-      const tr = el('tr');
-      tr.appendChild(el('td', { text: node.Label || node.Id }));
-      tr.appendChild(el('td', {}, el('code', { text: src.Topic })));
-      tr.appendChild(el('td', { text: src.Metric || 'realpower' }));
-      tr.appendChild(el('td', { text: src.JsonField || '—' }));
-      tr.appendChild(el('td', { class: 'num', text: String(src.Scale ?? 1) }));
-      const rm = btn('Remove', 'danger');
-      rm.onclick = () => { node.Mqtt.splice(node.Mqtt.indexOf(src), 1); rerender(); };
-      tr.appendChild(el('td', {}, rm));
-      body.appendChild(tr);
-    });
-    tbl.appendChild(body);
-    box.appendChild(tbl);
-  }
-
-  const bar = el('div', { class: 'ld-toolbar' });
-  const nodeSel = el('select', { style: { width: 'auto' } });
-  customNodes.forEach((n     ) => nodeSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
-  const topicIn = el('input', { type: 'text', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '320px' } });
-  const metricSel = el('select', { style: { width: 'auto' } });
-  SOURCE_METRICS.forEach(m => metricSel.appendChild(el('option', { value: m, text: m })));
-  const fieldIn = el('input', { type: 'text', placeholder: 'JSON field (optional)', style: { width: '150px' } });
-  const scaleIn = el('input', { type: 'number', step: 'any', placeholder: 'scale', value: '1', style: { width: '90px' } });
-  const add = btn('Bind topic', 'primary');
-  add.onclick = () => {
-    const topic = (topicIn.value || '').trim();
-    if (!topic) { toast('A topic is required.', false); return; }
-    const node = customNodes.find((n     ) => n.Id === nodeSel.value);
-    if (!node) { toast('Pick a node to bind.', false); return; }
-    const metric = metricSel.value;
-    const mqtt = ensure(node, 'Mqtt', []);
-    // One reading per metric per node — a second binding would just race the first.
-    if (mqtt.some((s     ) => (s.Metric || 'realpower') === metric)) {
-      toast(`${node.Label || node.Id} already has a ${metric} source.`, false); return;
-    }
-    const src      = { Topic: topic, Metric: metric };
-    const field = (fieldIn.value || '').trim(); if (field) src.JsonField = field;
-    const scale = +scaleIn.value; if (scaleIn.value !== '' && !isNaN(scale) && scale !== 1) src.Scale = scale;
-    mqtt.push(src);
-    toast(`${topic} → ${node.Label || node.Id} (${metric}).`, true);
-    rerender();
-  };
-  bar.append(nodeSel, topicIn, metricSel, fieldIn, scaleIn, add);
-  box.appendChild(bar);
+  const editingNode = editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null;
+  if (editingNode) box.appendChild(renderNodeEditor(editingNode, (close          ) => { if (close) editing.id = null; rerender(); }));
   return box;
 }
 
@@ -905,6 +962,7 @@ function addFlowSection(nav     , sections     ) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph      = null;
+  const editing                        = { id: null };  // which virtual node's editor is open (persists across rerenders)
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph     ) => {
@@ -1010,6 +1068,14 @@ function addFlowSection(nav     , sections     ) {
       Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l     ) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
       Object.keys(legacy).forEach(k => delete legacy[k]);
     }
+    // Fold legacy per-node Mqtt bindings into the general Sources list (each was implicitly Type: mqtt), so
+    // the new editor manages them in one place. The engine still reads both, so this is safe on save.
+    customNodes.forEach((n     ) => {
+      if (n.Mqtt && n.Mqtt.length) {
+        n.Sources = (n.Sources || []).concat(n.Mqtt.map((s     ) => ({ Type: 'mqtt', ...s })));
+        delete n.Mqtt;
+      }
+    });
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
@@ -1035,8 +1101,7 @@ function addFlowSection(nav     , sections     ) {
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
 
-    ed.appendChild(renderNodeManager(customNodes, links, renderEditor));
-    ed.appendChild(renderMqttSources(customNodes, renderEditor));
+    ed.appendChild(renderNodeManager(customNodes, links, editing, renderEditor));
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = new Map();
@@ -1181,7 +1246,7 @@ function addFlowSection(nav     , sections     ) {
       if (cand.has(id)) { toast('That id already exists.', false); return; }
       const node      = { Id: id, Label: (labIn.value || '').trim() || id };
       if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
-      customNodes.push(node); renderEditor();
+      customNodes.push(node); editing.id = id; renderEditor();  // open the new node's editor straight away
     };
     save.onclick = async () => {
       const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
