@@ -291,7 +291,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
             });
 
-        app.MapGet("/api/schema", () => Results.Json(ConfigSchema.Build(), ConfigSchema.Json));
+        app.MapGet("/api/schema", () =>
+        {
+            var schema = ConfigSchema.Build();
+            // Under Kubernetes, logging is driven by the platform (stdout + the pod spec), so the Logging
+            // config section doesn't apply — drop it from the GUI schema (#209).
+            if (configSource is KubernetesConfigSource)
+                schema = schema.Where(n => n.Key != "Logging").ToList();
+            return Results.Json(schema, ConfigSchema.Json);
+        });
 
         // Reflect the current source (file on disk or the CR), which may have been edited.
         app.MapGet("/api/config", () =>

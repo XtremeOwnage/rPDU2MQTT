@@ -158,25 +158,40 @@ function renderList(node: any, arr: any[]) {
   return fs;
 }
 
-// Config sections grouped along the energy pipeline the app exists to run: metering hardware supplies
-// readings (Data Sources), which are consolidated and shipped onward (Destinations); everything else is
-// plumbing (System). EmonCMS leads the destinations — long-term energy history is the primary use case,
-// with HA/Prometheus as secondary sinks. Unlisted sections fall into System, so nothing is ever lost.
-const NAV_GROUPS = [
-  { title: 'Data Sources', keys: ['Pdus'] },
-  { title: 'Destinations', keys: ['EmonCMS', 'HomeAssistant', 'Prometheus'] },
-  // catchAll: ungrouped schema sections land here. Flagged rather than looked up by title, so renaming
-  // the group can't silently drop them.
-  { title: 'System', catchAll: true, keys: ['MQTT', 'Overrides', 'Gui', 'Health', 'Logging', 'Debug'] },
+// Nav grouped by function (#209): the PDU group only does anything with Vertiv rPDUs configured; live
+// value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
+// plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
+// (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
+type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections: any) => any, child?: boolean };
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
+  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  { title: 'Energy Flow', items: [{ tool: addNodesSection }, { tool: addFlowSection }] },
+  { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
+  { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
+  { title: 'System', items: [{ schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
-function navHeader(nav: any, title: string) { nav.appendChild(el('div', { class: 'nav-group', text: title })); }
+// Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
+const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
+
+// A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
+// (schema sections or tool tabs) are appended into.
+function navGroup(nav: any, title: string) {
+  const wrap = el('div', { class: 'nav-group-wrap' });
+  const header = el('div', { class: 'nav-group', text: title });
+  const items = el('div', { class: 'nav-group-items' });
+  header.onclick = () => wrap.classList.toggle('collapsed');
+  wrap.append(header, items); nav.appendChild(wrap);
+  return items;
+}
 
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node: any, nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = node.label; nav.appendChild(link);
+  const label = LABEL_OVERRIDES[node.key] || node.label;
+  const link = document.createElement('a'); link.textContent = label; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = node.label; sec.appendChild(h);
+  const h = document.createElement('h2'); h.textContent = label; sec.appendChild(h);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
   // Section-specific actions belong with the section they act on, not on every page.
   const acts = sectionActions(node);
@@ -214,34 +229,33 @@ export function build() {
   nav.innerHTML = ''; sections.innerHTML = '';
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
-  // EnergyFlow has a dedicated visual editor on the Flow tab, so its raw schema form is hidden here.
+  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
   const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in the catch-all, so a new config section is never lost.
-  const known = new Set(NAV_GROUPS.flatMap(g => g.keys));
-  const general: any = NAV_GROUPS.find((g: any) => g.catchAll);
-  state.schema.forEach((n: any) => { if (!known.has(n.key) && !HIDDEN.has(n.key)) general.keys.push(n.key); });
+  // Any schema section not explicitly grouped (and not hidden) lands in System, so a new one is never lost.
+  const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i: any) => i.schema)));
+  const system = NAV_GROUPS.find(g => g.title === 'System')!;
+  state.schema.forEach((n: any) => { if (!knownSchema.has(n.key) && !HIDDEN.has(n.key)) system.items.push({ schema: n.key }); });
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);
-  let first: any = home.link;
+  const first: any = home.link;
 
   for (const g of NAV_GROUPS) {
-    const nodes = g.keys.map(k => byKey.get(k)).filter(Boolean);
-    if (!nodes.length) continue;
-    navHeader(nav, g.title);
-    for (const node of nodes) renderConfigSection(node, nav, sections);
+    // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
+    const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
+    if (!items.length) continue;
+    const container = navGroup(nav, g.title);
+    for (const it of items) {
+      if ('schema' in it) {
+        const l = renderConfigSection(byKey.get(it.schema), container, sections);
+        if (it.child && l) l.classList.add('nav-child');
+      } else {
+        const before = container.children.length;
+        it.tool(container, sections);
+        if (it.child && container.children[before]) container.children[before].classList.add('nav-child');
+      }
+    }
   }
-
-  // Tools: the functional (non-config) tabs.
-  navHeader(nav, 'Tools');
-  addControlSection(nav, sections);
-  addLiveDataSection(nav, sections);
-  addNodesSection(nav, sections);
-  addFlowSection(nav, sections);
-  addPathsSection(nav, sections);
-  addHaEnergySection(nav, sections);
-  addExportSection(nav, sections);
-  addDiagnosticsSection(nav, sections);
 
   // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
