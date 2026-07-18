@@ -3,12 +3,12 @@
 import { ensure, el, btn, activate, slug } from './helpers.js';
 import { state } from './state.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
-import { addFlowSection } from './sections/flow.js';
+import { addFlowSection, addNodesSection } from './sections/flow.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
@@ -236,6 +236,7 @@ export function build() {
   navHeader(nav, 'Tools');
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
+  addNodesSection(nav, sections);
   addFlowSection(nav, sections);
   addPathsSection(nav, sections);
   addHaEnergySection(nav, sections);
@@ -347,6 +348,7 @@ function sectionActions(node: any) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') { add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger'); }
   else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;

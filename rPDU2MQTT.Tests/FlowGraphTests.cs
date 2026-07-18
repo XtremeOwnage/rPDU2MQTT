@@ -266,6 +266,229 @@ public class FlowGraphTests
         Assert.Equal(100, graph.Links.Where(l => l.Source == "boss").Sum(l => l.Value));
     }
 
+    [Fact]
+    public void Build_MeasuredFeeder_AbsorbsDemand_UnmeasuredSiblingIsNotFabricated()
+    {
+        // The reported bug: Grid + Solar both feed the Grid Boss, Solar is measured (6000W) and comfortably
+        // covers the 100W of real load. Grid must NOT be handed a fabricated ~half-the-load figure; the
+        // measured feeder supplies it all and Grid drops out.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "gridboss", Label = "Grid Boss" },
+                new EnergyFlowNode { Id = "solar", Label = "Solar", Value = 6000 },
+                new EnergyFlowNode { Id = "grid", Label = "Grid" }, // unmeasured, default 'auto'
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "gridboss", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "solar", To = "gridboss" },
+                new EnergyFlowLink { From = "grid", To = "gridboss" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(6000, graph.Links.Single(l => l.Source == "solar").Value); // measured generation shown as-is
+        Assert.DoesNotContain(graph.Links, l => l.Source == "grid");            // no fabricated grid draw
+        Assert.DoesNotContain(graph.Nodes, n => n.Id == "grid");
+    }
+
+    [Fact]
+    public void Build_ResidualNode_AbsorbsTheUntrackedRemainderAfterMeasuredFeeders()
+    {
+        // Solar supplies 40 of the 100W load; the rest (60) is untracked. A node marked 'residual' is the
+        // designated absorber and carries exactly that remainder.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "gridboss", Label = "Grid Boss" },
+                new EnergyFlowNode { Id = "solar", Label = "Solar", Value = 40 },
+                new EnergyFlowNode { Id = "grid", Label = "Grid (untracked)", Mode = "residual" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "gridboss", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "solar", To = "gridboss" },
+                new EnergyFlowLink { From = "grid", To = "gridboss" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(40, graph.Links.Single(l => l.Source == "solar").Value);
+        Assert.Equal(60, graph.Links.Single(l => l.Source == "grid").Value);   // absorbs the untracked remainder
+    }
+
+    [Fact]
+    public void Build_NoneNode_ContributesNothing_EvenWhenNothingElseIsMeasured()
+    {
+        // 'none' opts a node out of inference entirely: with no measured feeder to cover the load, the node
+        // still supplies nothing (rather than the historical equal split), so it never invents a number.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "gridboss", Label = "Grid Boss" },
+                new EnergyFlowNode { Id = "grid", Label = "Grid", Mode = "none" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "gridboss", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "grid", To = "gridboss" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Source == "grid");
+    }
+
+    [Fact]
+    public void Build_ResidualTakesPrecedenceOverAutoSiblings_ForTheRemainder()
+    {
+        // When a 'residual' node is present, plain 'auto' unmeasured siblings do not also split the
+        // remainder — the residual node is the sole absorber, so the untracked load isn't double-assigned.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "gridboss", Label = "Grid Boss" },
+                new EnergyFlowNode { Id = "untracked", Label = "Untracked", Mode = "residual" },
+                new EnergyFlowNode { Id = "spare", Label = "Spare" }, // 'auto', but a residual sibling exists
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "gridboss", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "untracked", To = "gridboss" },
+                new EnergyFlowLink { From = "spare", To = "gridboss" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "untracked").Value);
+        Assert.DoesNotContain(graph.Links, l => l.Source == "spare");
+    }
+
+    [Fact]
+    public void Build_StaticNode_WithAValue_IsAFixedLeaf()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "solar", Label = "Solar", Mode = "static", Value = 500 } },
+            Links = { new EnergyFlowLink { From = "solar", To = "pdu:pdu1" } },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(500, graph.Links.Single(l => l.Source == "solar").Value);
+    }
+
+    [Fact]
+    public void Build_StaticNode_WithNoValue_ContributesNothing()
+    {
+        // 'static' means "valued at the fixed number"; with none set there's nothing to give, so it drops
+        // out rather than absorbing its target's demand the way an 'auto' feeder would.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes = { new EnergyFlowNode { Id = "solar", Label = "Solar", Mode = "static" } },
+            Links = { new EnergyFlowLink { From = "solar", To = "pdu:pdu1" } },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Source == "solar");
+    }
+
+    [Fact]
+    public void Build_UsesTheNodesDeclaredKindForStyling()
+    {
+        // A custom node's Kind (battery, inverter, …) flows through to the graph node so the diagram can
+        // style it; unset stays the generic "node".
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "batt", Label = "Battery", Kind = "battery", Value = 40 },
+                new EnergyFlowNode { Id = "plain", Label = "Plain", Value = 10 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "batt", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "plain", To = "pdu:pdu1" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal("battery", graph.Nodes.Single(n => n.Id == "batt").Kind);
+        Assert.Equal("node", graph.Nodes.Single(n => n.Id == "plain").Kind);
+    }
+
+    [Fact]
+    public void Build_UntrackedChild_ShowsTheMeasuredParentsUnaccountedConsumption()
+    {
+        // A panel with a measured total (CT clamp = 250W) feeds a PDU that only accounts for 100W of it.
+        // An 'untracked' child surfaces the missing 150W instead of the PDU being scaled up to fill 250.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Main Panel", Value = 250 }, // measured total
+                new EnergyFlowNode { Id = "rest", Label = "Untracked", Mode = "untracked" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "pdu:pdu1" }, // tracked child (100W)
+                new EnergyFlowLink { From = "panel", To = "rest" },     // untracked child
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(100, graph.Links.Single(l => l.Target == "pdu:pdu1").Value); // tracked child keeps its real draw
+        Assert.Equal(150, graph.Links.Single(l => l.Target == "rest").Value);     // untracked child = 250 - 100
+        // The parent's measured total is conserved across its children.
+        Assert.Equal(250, graph.Links.Where(l => l.Source == "panel").Sum(l => l.Value));
+    }
+
+    [Fact]
+    public void Build_UntrackedChild_ContributesNothing_WhenParentHasNoMeasuredTotal()
+    {
+        // Without a measured total on the parent there's no known figure to take a remainder from, so the
+        // untracked child stays at zero (and drops out) rather than inventing a number.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Main Panel" }, // aggregator, no measured total
+                new EnergyFlowNode { Id = "rest", Label = "Untracked", Mode = "untracked" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "panel", To = "rest" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "rest");
+        Assert.Equal(100, graph.Links.Single(l => l.Target == "pdu:pdu1").Value); // panel still carries its tracked load
+    }
+
     // Walk the emitted links; true if they contain a directed cycle.
     private static bool HasCycle(FlowGraph graph)
     {

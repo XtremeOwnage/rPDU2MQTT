@@ -690,18 +690,47 @@ spec:
                         Label:
                           type: string
                           description: Human-readable label shown in the flow diagram.
+                        Kind:
+                          type: string
+                          enum:
+                          - ''
+                          - node
+                          - panel
+                          - inverter
+                          - battery
+                          - solar
+                          - grid
+                          - load
+                          description: "What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers."
                         Value:
                           type: number
-                          description: Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.
-                        Mqtt:
+                          description: Optional fixed value for a leaf node. Used only when no live source has reported for it.
+                        StorageKwh:
+                          type: number
+                          description: 'For a battery node: usable storage capacity in kWh (display metadata; optional).'
+                        Mode:
+                          type: string
+                          enum:
+                          - ''
+                          - auto
+                          - static
+                          - residual
+                          - untracked
+                          - none
+                          description: "How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins."
+                        Sources:
                           type: array
                           items:
                             type: object
                             x-kubernetes-preserve-unknown-fields: true
                             properties:
-                              Topic:
+                              Type:
                                 type: string
-                                description: MQTT topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.
+                                enum:
+                                - ''
+                                - mqtt
+                                - modbus
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
                               Metric:
                                 type: string
                                 enum:
@@ -713,7 +742,13 @@ spec:
                                 - voltage
                                 - frequency
                                 - powerfactor
-                                description: Which measurement this topic supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Unit:
+                                type: string
+                                description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
+                              Topic:
+                                type: string
+                                description: "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker."
                               JsonField:
                                 type: string
                                 description: For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.
@@ -725,7 +760,110 @@ spec:
                                 description: Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).
                                 minimum: 0
                                 maximum: 86400
-                          description: Live values for this node read from MQTT topics (e.g. Solar Assistant). One entry per metric; supersedes Value.
+                              Connection:
+                                type: string
+                                description: "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from."
+                              Register:
+                                type: integer
+                                description: "For Type 'modbus': the register address to read (0-based)."
+                              RegisterType:
+                                type: string
+                                enum:
+                                - ''
+                                - holding
+                                - input
+                                description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
+                              DataType:
+                                type: string
+                                enum:
+                                - ''
+                                - uint16
+                                - int16
+                                - uint32
+                                - int32
+                                - float32
+                                description: "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32."
+                              WordOrder:
+                                type: string
+                                enum:
+                                - ''
+                                - big
+                                - little
+                                description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
+                          description: Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.
+                        Mqtt:
+                          type: array
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              Type:
+                                type: string
+                                enum:
+                                - ''
+                                - mqtt
+                                - modbus
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
+                              Metric:
+                                type: string
+                                enum:
+                                - ''
+                                - realpower
+                                - apparentpower
+                                - energy
+                                - current
+                                - voltage
+                                - frequency
+                                - powerfactor
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Unit:
+                                type: string
+                                description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
+                              Topic:
+                                type: string
+                                description: "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker."
+                              JsonField:
+                                type: string
+                                description: For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.
+                              Scale:
+                                type: number
+                                description: Multiplier applied to the received value — for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.
+                              StaleAfterSeconds:
+                                type: integer
+                                description: Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).
+                                minimum: 0
+                                maximum: 86400
+                              Connection:
+                                type: string
+                                description: "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from."
+                              Register:
+                                type: integer
+                                description: "For Type 'modbus': the register address to read (0-based)."
+                              RegisterType:
+                                type: string
+                                enum:
+                                - ''
+                                - holding
+                                - input
+                                description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
+                              DataType:
+                                type: string
+                                enum:
+                                - ''
+                                - uint16
+                                - int16
+                                - uint32
+                                - int32
+                                - float32
+                                description: "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32."
+                              WordOrder:
+                                type: string
+                                enum:
+                                - ''
+                                - big
+                                - little
+                                description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
+                          description: "Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat."
                     description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
                   Links:
                     type: array
@@ -753,6 +891,41 @@ spec:
                     type: string
                     description: "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'."
                 description: Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.
+              Modbus:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Connections:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable id used to reference this connection from a source binding.
+                        Name:
+                          type: string
+                          description: Friendly name for the device (shown in the editor).
+                        Host:
+                          type: string
+                          description: Hostname or IP address of the Modbus TCP device.
+                        Port:
+                          type: integer
+                          description: TCP port the device listens on (Modbus default 502).
+                        UnitId:
+                          type: integer
+                          description: Modbus unit / slave id.
+                        PollIntervalSeconds:
+                          type: integer
+                          description: How often to poll this device, in seconds.
+                          minimum: 1
+                          maximum: 86400
+                        Enabled:
+                          type: boolean
+                          description: Poll this device. Turn off to disable it without deleting the connection.
+                    description: Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.
+                description: Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).
           status:
             type: object
             x-kubernetes-preserve-unknown-fields: true

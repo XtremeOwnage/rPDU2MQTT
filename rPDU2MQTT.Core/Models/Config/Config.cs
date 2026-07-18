@@ -72,6 +72,9 @@ public class Config
     [YamlMember(Alias = "EnergyFlow", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.")]
     public EnergyFlowConfig EnergyFlow { get; set; } = new EnergyFlowConfig();
 
+    [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
+    public ModbusConfig Modbus { get; set; } = new ModbusConfig();
+
     /// <summary>
     /// Replace this instance's settings with another's. Used to hot-reload the shared singleton on
     /// rediscovery (services read these sections live). Connection-level settings (MQTT/PDU host/port,
@@ -91,5 +94,6 @@ public class Config
         Health = other.Health;
         Api = other.Api;
         EnergyFlow = other.EnergyFlow;
+        Modbus = other.Modbus;
     }
 }

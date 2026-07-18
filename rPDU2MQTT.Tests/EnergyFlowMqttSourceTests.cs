@@ -177,17 +177,17 @@ public class EnergyFlowMqttSourceTests
 
     // --- Subscribe → parse → cache glue (BuildBindings + Apply) ------------------------------------
 
-    private static EnergyFlowNode NodeWith(string id, params EnergyFlowMqttSource[] sources)
+    private static EnergyFlowNode NodeWith(string id, params EnergyFlowSource[] sources)
     {
         var n = new EnergyFlowNode { Id = id, Label = id };
-        n.Mqtt.AddRange(sources);
+        n.Sources.AddRange(sources);
         return n;
     }
 
     [Fact]
     public void Apply_RoutesAPayloadToTheBoundNodeAndMetric()
     {
-        var nodes = new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) };
+        var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
 
@@ -197,10 +197,56 @@ public class EnergyFlowMqttSourceTests
         Assert.Equal(812.5, v);
     }
 
+    [Theory]
+    [InlineData("realpower", "kW", 1000)]        // 1 kW -> 1000 W
+    [InlineData("energy", "Wh", 0.001)]          // 1 Wh -> 0.001 kWh
+    [InlineData("voltage", "mV", 0.001)]         // 1 mV -> 0.001 V
+    [InlineData("realpower", "W", 1)]            // already canonical
+    [InlineData("realpower", null, 1)]           // no unit -> assumed canonical
+    [InlineData("realpower", "bogus", 1)]        // unknown unit -> no-op, never scales wildly
+    public void FlowUnits_ConvertsToTheCanonicalUnit(string metric, string? unit, double factor)
+        => Assert.Equal(factor, FlowUnits.ToCanonicalFactor(metric, unit));
+
+    [Fact]
+    public void FlowUnits_ExposesTheCanonicalUnitPerMetric()
+    {
+        Assert.Equal("W", FlowUnits.Canonical("realpower"));
+        Assert.Equal("kWh", FlowUnits.Canonical("energy"));
+        Assert.Contains("kW", FlowUnits.UnitsFor("realpower"));
+    }
+
+    [Fact]
+    public void Apply_ConvertsTheSourceUnitToCanonicalBeforeCaching()
+    {
+        // Solar Assistant publishing kW must land in the cache as W, so it lines up with the PDU's watts.
+        var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower", Unit = "kW" }) };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_power", "6", DateTime.UtcNow);
+
+        Assert.True(cache.TryGetValue("solar", "realpower", out var v));
+        Assert.Equal(6000, v);   // 6 kW -> 6000 W
+    }
+
+    [Fact]
+    public void Apply_UnitConversionAndScaleCompose()
+    {
+        // Unit normalises (kW -> W), then Scale flips the sign convention on top.
+        var nodes = new[] { NodeWith("batt", new EnergyFlowSource { Topic = "sa/batt", Metric = "realpower", Unit = "kW", Scale = -1 }) };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt", "2", DateTime.UtcNow);
+
+        Assert.True(cache.TryGetValue("batt", "realpower", out var v));
+        Assert.Equal(-2000, v);   // 2 kW -> 2000 W, then * -1
+    }
+
     [Fact]
     public void Apply_AppliesScaleAndReadsAJsonField()
     {
-        var nodes = new[] { NodeWith("meter", new EnergyFlowMqttSource { Topic = "sa/energy", Metric = "energy", JsonField = "wh", Scale = 0.001 }) };
+        var nodes = new[] { NodeWith("meter", new EnergyFlowSource { Topic = "sa/energy", Metric = "energy", JsonField = "wh", Scale = 0.001 }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
 
@@ -214,7 +260,7 @@ public class EnergyFlowMqttSourceTests
     public void Apply_IgnoresAnUnboundTopic()
     {
         var bindings = EnergyFlowMqttSourceService.BuildBindings(
-            new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) });
+            new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) });
         var cache = new FlowValueCache();
 
         EnergyFlowMqttSourceService.Apply(bindings, cache, "some/other/topic", "999", DateTime.UtcNow);
@@ -226,7 +272,7 @@ public class EnergyFlowMqttSourceTests
     public void Apply_LeavesTheCacheUntouchedForAnUnparseablePayload()
     {
         var bindings = EnergyFlowMqttSourceService.BuildBindings(
-            new[] { NodeWith("solar", new EnergyFlowMqttSource { Topic = "sa/pv_power", Metric = "realpower" }) });
+            new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower" }) });
         var cache = new FlowValueCache();
 
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_power", "unavailable", DateTime.UtcNow);
@@ -240,8 +286,8 @@ public class EnergyFlowMqttSourceTests
         // A shared bus topic can legitimately feed more than one node.
         var nodes = new[]
         {
-            NodeWith("a", new EnergyFlowMqttSource { Topic = "shared/power", Metric = "realpower" }),
-            NodeWith("b", new EnergyFlowMqttSource { Topic = "shared/power", Metric = "realpower", Scale = 2 }),
+            NodeWith("a", new EnergyFlowSource { Topic = "shared/power", Metric = "realpower" }),
+            NodeWith("b", new EnergyFlowSource { Topic = "shared/power", Metric = "realpower", Scale = 2 }),
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
@@ -257,9 +303,9 @@ public class EnergyFlowMqttSourceTests
     {
         var nodes = new[]
         {
-            NodeWith("", new EnergyFlowMqttSource { Topic = "t1", Metric = "realpower" }),         // no id
-            NodeWith("ok", new EnergyFlowMqttSource { Topic = "", Metric = "realpower" }),          // no topic
-            NodeWith("solar", new EnergyFlowMqttSource { Topic = "  sa/pv  ", Metric = "realpower" }), // trimmed
+            NodeWith("", new EnergyFlowSource { Topic = "t1", Metric = "realpower" }),         // no id
+            NodeWith("ok", new EnergyFlowSource { Topic = "", Metric = "realpower" }),          // no topic
+            NodeWith("solar", new EnergyFlowSource { Topic = "  sa/pv  ", Metric = "realpower" }), // trimmed
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
 

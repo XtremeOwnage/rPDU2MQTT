@@ -238,19 +238,19 @@ public class ConfigSchemaTests
     }
 
     [Fact]
-    public void EnergyFlowMqttSources_SurviveTheSaveThenReloadRoundTrip()
+    public void EnergyFlowSources_SurviveTheSaveThenReloadRoundTrip()
     {
-        // Same path as above, for the live MQTT bindings (#205). The GUI is the only way to set these, so
+        // Same path as above, for the live value bindings (#205). The GUI is the only way to set these, so
         // if they don't survive JSON -> YAML -> load, a bound topic silently disappears on save.
         var posted = new Config();
         posted.EnergyFlow.Nodes.Add(new EnergyFlowNode
         {
             Id = "solar",
             Label = "Solar",
-            Mqtt =
+            Sources =
             {
-                new EnergyFlowMqttSource { Topic = "solar_assistant/inverter_1/pv_power/state", Metric = "realpower" },
-                new EnergyFlowMqttSource { Topic = "solar_assistant/inverter_1/pv_energy/state", Metric = "energy", JsonField = "value", Scale = 0.001, StaleAfterSeconds = 0 },
+                new EnergyFlowSource { Type = "mqtt", Topic = "solar_assistant/inverter_1/pv_power/state", Metric = "realpower" },
+                new EnergyFlowSource { Type = "mqtt", Topic = "solar_assistant/inverter_1/pv_energy/state", Metric = "energy", JsonField = "value", Scale = 0.001, StaleAfterSeconds = 0 },
             },
         });
 
@@ -259,17 +259,41 @@ public class ConfigSchemaTests
         var reloaded = YamlConfigLoader.DeserializeString(yaml);
 
         var node = Assert.Single(reloaded.EnergyFlow.Nodes);
-        Assert.Equal(2, node.Mqtt.Count);
+        Assert.Equal(2, node.Sources.Count);
 
-        var power = Assert.Single(node.Mqtt, s => s.Metric == "realpower");
+        var power = Assert.Single(node.Sources, s => s.Metric == "realpower");
+        Assert.Equal("mqtt", power.Type);
         Assert.Equal("solar_assistant/inverter_1/pv_power/state", power.Topic);
         Assert.Equal(1.0, power.Scale);                 // default survives
         Assert.Equal(900, power.StaleAfterSeconds);     // default survives
 
-        var energy = Assert.Single(node.Mqtt, s => s.Metric == "energy");
+        var energy = Assert.Single(node.Sources, s => s.Metric == "energy");
         Assert.Equal("value", energy.JsonField);
         Assert.Equal(0.001, energy.Scale);
         Assert.Equal(0, energy.StaleAfterSeconds);      // an explicit 0 must not be lost to the default
+    }
+
+    [Fact]
+    public void EnergyFlow_LegacyMqttBindings_StillDeserializeAndCountAsSources()
+    {
+        // Pre-Sources configs wrote the bindings under 'Mqtt:'. They must still load and be visible via
+        // AllSources() so a topic bound before the rename keeps feeding the graph.
+        var yaml = """
+        EnergyFlow:
+          Nodes:
+          - Id: solar
+            Label: Solar
+            Mqtt:
+            - Topic: solar_assistant/inverter_1/pv_power/state
+              Metric: realpower
+        """;
+
+        var reloaded = YamlConfigLoader.DeserializeString(yaml);
+        var node = Assert.Single(reloaded.EnergyFlow.Nodes);
+
+        var src = Assert.Single(node.AllSources());
+        Assert.Equal("mqtt", src.Type);   // legacy entries are implicitly Type 'mqtt'
+        Assert.Equal("solar_assistant/inverter_1/pv_power/state", src.Topic);
     }
 
     [Fact]

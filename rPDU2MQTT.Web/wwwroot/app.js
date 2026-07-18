@@ -752,75 +752,388 @@ function addLiveDataSection(nav     , sections     ) {
 // ── sections/flow.ts ────────────────────────────────────────────
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
 
-// Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowMqttSource.Metric.
-const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'frequency', 'powerfactor'];
+// Metrics a live source can supply: [stored key (matches PDU Measurement.Type), friendly label, canonical
+// unit, selectable input units]. The key stays the PDU vocabulary so live values roll up with outlets; the
+// UI shows the friendly name and a unit picker. Mirrors EnergyFlowSource.Metric + FlowUnits (Core).
+const METRICS                                       = [
+  ['realpower', 'Power', 'W', ['W', 'kW', 'MW']],
+  ['apparentpower', 'Apparent power', 'VA', ['VA', 'kVA']],
+  ['energy', 'Energy', 'kWh', ['Wh', 'kWh', 'MWh']],
+  ['current', 'Current', 'A', ['A', 'mA']],
+  ['voltage', 'Voltage', 'V', ['mV', 'V', 'kV']],
+  ['frequency', 'Frequency', 'Hz', ['Hz']],
+  ['powerfactor', 'Power factor', '', ['']],
+];
+const SOURCE_METRICS = METRICS.map(m => m[0]);
+const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
+const metricLabel = (key         ) => metricMeta(key)[1];
 
-// Binds custom nodes to live MQTT topics (#205): the values a producer (Solar Assistant, a CT clamp)
-// already publishes become this node's reading, so it rolls up and exports like a PDU outlet. Only custom
-// nodes appear — PDU/outlet nodes get their values from the poll.
-function renderMqttSources(customNodes       , rerender            ) {
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Live sources (MQTT)', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Feed a node from a topic already on your broker — e.g. Solar Assistant’s solar_assistant/inverter_1/pv_power/state. A live reading replaces the node’s fixed value; bind one topic per metric to drive both the power and the energy roll-up. Takes effect without a restart once saved.' }));
+// What a virtual node represents — mirrors [AllowedValues] on EnergyFlowNode.Kind. Each kind offers only
+// the metrics that make sense for it (a battery has no frequency); 'battery' also gets a storage field.
+const NODE_KINDS                               = [
+  ['node', 'Virtual node', SOURCE_METRICS],
+  ['panel', 'Electrical panel', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
+  ['inverter', 'Inverter', SOURCE_METRICS],
+  ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage']],
+  ['solar', 'Solar / PV', ['realpower', 'energy', 'current', 'voltage']],
+  ['grid', 'Grid', SOURCE_METRICS],
+  ['load', 'Load', ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'powerfactor']],
+];
+const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
-  if (!customNodes.length) {
-    box.appendChild(el('div', { class: 'desc', text: 'Add a node above first — live sources attach to custom nodes.' }));
-    return box;
+// Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Each type renders its own fields
+// in the two source columns; adding an ingest is another entry here plus a branch in the row renderer.
+const SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+const MODBUS_REGISTER_TYPES = ['holding', 'input'];
+const MODBUS_DATATYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32'];
+const MODBUS_WORDORDERS = ['big', 'little'];
+
+// How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
+// always wins; this only governs nodes the graph would otherwise infer.
+const NODE_MODES                             = [
+  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
+  ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
+  ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
+  ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
+];
+
+// A labelled field (label above a control) for the node editor's form grid.
+function field(labelText        , control             , hint         ) {
+  const f = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
+  f.appendChild(el('label', { text: labelText, style: { fontSize: '11px', color: 'var(--muted)' } }));
+  f.appendChild(control);
+  if (hint) f.appendChild(el('div', { class: 'desc', text: hint, style: { margin: '0', fontSize: '11px' } }));
+  return f;
+}
+
+// Per-node editor (#129): name, kind, mode, fixed value, a battery's storage, and the live value bindings —
+// one row per metric, each carrying a Type (MQTT today) and its transport fields, all editable in place
+// (including the topic, which the old flat table couldn't change).
+function renderNodeEditor(node     , links       , cand                  , rerender                           ) {
+  const meta = kindMeta(node.Kind);
+  const allowed = meta[2];
+  const box = el('div', { style: { margin: '10px 0 4px', padding: '14px', border: '1px solid var(--accent, #4f8cff)', borderRadius: '8px', background: 'var(--panel2)' } });
+
+  const header = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' } });
+  header.appendChild(el('h4', { text: `Editing ${node.Label || node.Id}`, style: { margin: '0', fontSize: '14px' } }));
+  const close = btn('Close'); close.onclick = () => rerender(true);
+  header.appendChild(close);
+  box.appendChild(header);
+
+  const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
+
+  const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
+  labIn.onchange = () => { node.Label = labIn.value.trim() || undefined; };
+  grid.appendChild(field('Name', labIn));
+
+  const kindSel = el('select');
+  NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+  kindSel.value = node.Kind || 'node';
+  kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
+  grid.appendChild(field('Kind', kindSel));
+
+  const modeSel = el('select');
+  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  modeSel.value = node.Mode || 'auto';
+  modeSel.onchange = () => {
+    node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
+    if (node.Mode !== 'static') node.Value = undefined;  // a fixed value only belongs to a static node
+    rerender();  // toggle the Fixed value field
+  };
+  grid.appendChild(field('Mode', modeSel, 'How it’s valued with no measurement.'));
+
+  // The fixed value only makes sense for a static leaf — show it only in that mode.
+  if ((node.Mode || 'auto') === 'static') {
+    const valIn = el('input', { type: 'number', step: 'any', value: node.Value ?? '', placeholder: '—' });
+    valIn.onchange = () => { const v = +valIn.value; node.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
+    grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
   }
 
-  // Existing bindings, flattened across nodes.
-  const rows = customNodes.flatMap((n     ) => (n.Mqtt || []).map((s     ) => ({ node: n, src: s })));
-  if (rows.length) {
+  if ((node.Kind || 'node') === 'battery') {
+    const stoIn = el('input', { type: 'number', step: 'any', value: node.StorageKwh ?? '', placeholder: 'kWh' });
+    stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
+    grid.appendChild(field('Storage (kWh)', stoIn));
+  }
+  box.appendChild(grid);
+
+  // --- Live value bindings ---
+  box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+
+  const sources        = ensure(node, 'Sources', []);
+  if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Node', 'Topic', 'Metric', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Current', ''].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
-    rows.forEach(({ node, src }     ) => {
+    // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
+    const liveCells                            = [];
+    sources.forEach((src     ) => {
       const tr = el('tr');
-      tr.appendChild(el('td', { text: node.Label || node.Id }));
-      tr.appendChild(el('td', {}, el('code', { text: src.Topic })));
-      tr.appendChild(el('td', { text: src.Metric || 'realpower' }));
-      tr.appendChild(el('td', { text: src.JsonField || '—' }));
-      tr.appendChild(el('td', { class: 'num', text: String(src.Scale ?? 1) }));
+
+      const typeSel = el('select', { style: { width: 'auto' } });
+      SOURCE_TYPES.forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
+      typeSel.value = src.Type || 'mqtt';
+      typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
+      tr.appendChild(el('td', {}, typeSel));
+
+      // Offer this kind's metrics (friendly labels), but keep an already-chosen one even if the kind wouldn't
+      // list it. Changing the metric resets the unit (units differ per metric) and re-renders the row.
+      const metricSel = el('select', { style: { width: 'auto' } });
+      const metric = src.Metric || 'realpower';
+      const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
+      opts.forEach((m        ) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
+      metricSel.value = metric;
+      metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
+      tr.appendChild(el('td', {}, metricSel));
+
+      // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.
+      const [, , canonical, units] = metricMeta(metric);
+      const unitSel = el('select', { style: { width: 'auto' } });
+      units.forEach((u        ) => unitSel.appendChild(el('option', { value: u, text: u || '—' })));
+      unitSel.value = src.Unit || canonical;
+      unitSel.disabled = units.length <= 1;
+      unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
+      tr.appendChild(el('td', {}, unitSel));
+
+      // The Source + Details columns are type-specific.
+      if ((src.Type || 'mqtt') === 'modbus') {
+        // Source = which configured Modbus connection; Details = the register spec.
+        const connections        = (state.data?.Modbus?.Connections) || [];
+        const connSel = el('select', { style: { width: '160px' } });
+        connSel.appendChild(el('option', { value: '', text: connections.length ? '— pick a connection —' : 'none — add one in Modbus' }));
+        connections.forEach((c     ) => connSel.appendChild(el('option', { value: c.Id, text: c.Name || c.Id })));
+        connSel.value = src.Connection || '';
+        connSel.onchange = () => { src.Connection = connSel.value || undefined; };
+        tr.appendChild(el('td', {}, connSel));
+
+        const details = el('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } });
+        const regIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'Register address', style: { width: '80px' } });
+        regIn.onchange = () => { const v = +regIn.value; src.Register = !isNaN(v) ? v : 0; };
+        const regTypeSel = el('select', { title: 'Register bank', style: { width: 'auto' } });
+        MODBUS_REGISTER_TYPES.forEach(t => regTypeSel.appendChild(el('option', { value: t, text: t })));
+        regTypeSel.value = src.RegisterType || 'holding';
+        regTypeSel.onchange = () => { src.RegisterType = regTypeSel.value === 'holding' ? undefined : regTypeSel.value; };
+        const dtSel = el('select', { title: 'Data type', style: { width: 'auto' } });
+        MODBUS_DATATYPES.forEach(t => dtSel.appendChild(el('option', { value: t, text: t })));
+        dtSel.value = src.DataType || 'uint16';
+        const woSel = el('select', { title: 'Word order (32-bit)', style: { width: 'auto' } });
+        MODBUS_WORDORDERS.forEach(t => woSel.appendChild(el('option', { value: t, text: t })));
+        woSel.value = src.WordOrder || 'big';
+        woSel.onchange = () => { src.WordOrder = woSel.value === 'big' ? undefined : woSel.value; };
+        // Word order only matters for 32-bit types; keep it enabled only then.
+        const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
+        woSel.disabled = !is32();
+        dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
+        details.append(regIn, regTypeSel, dtSel, woSel);
+        tr.appendChild(el('td', {}, details));
+      } else {
+        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
+        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
+        tr.appendChild(el('td', {}, topicIn));
+
+        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } });
+        fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
+        tr.appendChild(el('td', {}, fieldIn));
+      }
+
+      const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
+      scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
+      tr.appendChild(el('td', {}, scaleIn));
+
+      // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
+      // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
+      const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: '…' });
+      liveCells.push({ src, cell: liveCell });
+      tr.appendChild(liveCell);
+
       const rm = btn('Remove', 'danger');
-      rm.onclick = () => { node.Mqtt.splice(node.Mqtt.indexOf(src), 1); rerender(); };
+      rm.onclick = () => { sources.splice(sources.indexOf(src), 1); rerender(); };
       tr.appendChild(el('td', {}, rm));
       body.appendChild(tr);
     });
     tbl.appendChild(body);
     box.appendChild(tbl);
+
+    // Live "Current" value for every binding: Modbus is read straight from the device (works before saving);
+    // MQTT and any future type come from the shared live cache the running ingests fill. Auto-refreshes.
+    if (liveCells.length) {
+      const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+      const setCell = (cell     , value               , err         , metric         ) => {
+        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
+        else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
+      };
+      const refresh = async () => {
+        // Modbus: probe the device(s), grouped by connection so each is read once.
+        const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
+        const conns        = (state.data?.Modbus?.Connections) || [];
+        const byConn = new Map                                   ();
+        modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id) ).push(lc); });
+        for (const [connId, cells] of byConn) {
+          const conn = conns.find(c => c.Id === connId);
+          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); continue; }
+          try {
+            const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Items: cells.map(lc => lc.src) }) });
+            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = r.body.message || 'probe failed'; continue; }
+            const readings = r.body.readings || [];
+            cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
+          } catch (e     ) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = String(e?.message || e); }
+        }
+
+        // MQTT + future types: whatever the running ingest currently holds in the shared cache.
+        const others = liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus');
+        if (others.length) {
+          try {
+            const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(others.map(lc => ({ Node: node.Id, Metric: lc.src.Metric || 'realpower' }))) });
+            const vals = (r.body && r.body.values) || [];
+            others.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
+          } catch (e     ) { others.forEach(lc => setCell(lc.cell, null, 'err')); }
+        }
+        status.textContent = `updated ${new Date().toLocaleTimeString()}`;
+      };
+      const refreshBtn = btn('Refresh values');
+      refreshBtn.onclick = refresh;
+      box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
+      refresh();
+      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
+      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(); }, 5000);
+    }
   }
 
-  const bar = el('div', { class: 'ld-toolbar' });
-  const nodeSel = el('select', { style: { width: 'auto' } });
-  customNodes.forEach((n     ) => nodeSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
-  const topicIn = el('input', { type: 'text', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '320px' } });
-  const metricSel = el('select', { style: { width: 'auto' } });
-  SOURCE_METRICS.forEach(m => metricSel.appendChild(el('option', { value: m, text: m })));
-  const fieldIn = el('input', { type: 'text', placeholder: 'JSON field (optional)', style: { width: '150px' } });
-  const scaleIn = el('input', { type: 'number', step: 'any', placeholder: 'scale', value: '1', style: { width: '90px' } });
-  const add = btn('Bind topic', 'primary');
-  add.onclick = () => {
-    const topic = (topicIn.value || '').trim();
-    if (!topic) { toast('A topic is required.', false); return; }
-    const node = customNodes.find((n     ) => n.Id === nodeSel.value);
-    if (!node) { toast('Pick a node to bind.', false); return; }
-    const metric = metricSel.value;
-    const mqtt = ensure(node, 'Mqtt', []);
-    // One reading per metric per node — a second binding would just race the first.
-    if (mqtt.some((s     ) => (s.Metric || 'realpower') === metric)) {
-      toast(`${node.Label || node.Id} already has a ${metric} source.`, false); return;
-    }
-    const src      = { Topic: topic, Metric: metric };
-    const field = (fieldIn.value || '').trim(); if (field) src.JsonField = field;
-    const scale = +scaleIn.value; if (scaleIn.value !== '' && !isNaN(scale) && scale !== 1) src.Scale = scale;
-    mqtt.push(src);
-    toast(`${topic} → ${node.Label || node.Id} (${metric}).`, true);
+  const addBind = btn('Add binding', 'primary');
+  addBind.onclick = () => {
+    // Default to the first metric this kind offers that isn't bound yet, so a click rarely needs a re-pick.
+    const used = new Set(sources.map((s     ) => s.Metric || 'realpower'));
+    const metric = allowed.find((m        ) => !used.has(m)) || allowed[0];
+    sources.push({ Type: 'mqtt', Metric: metric, Topic: '' });
     rerender();
   };
-  bar.append(nodeSel, topicIn, metricSel, fieldIn, scaleIn, add);
-  box.appendChild(bar);
+  box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '8px' } }, addBind));
+
+  // --- Feeders & children (wiring) — the parent/child specification, alongside the visual Flow tab. ---
+  box.appendChild(el('h5', { text: 'Feeders & children', style: { margin: '12px 0 2px', fontSize: '12px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab.', style: { margin: '0 0 6px' } }));
+
+  const nm = (id        ) => (cand.get(id) || {}).label || id;
+  const wouldLoop = (from        , to        ) => {
+    const adj      = {}; links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
+    const stack = [to]; const seen = new Set        ();
+    while (stack.length) { const x = stack.pop() ; if (x === from) return true; if (seen.has(x)) continue; seen.add(x); (adj[x] || []).forEach((t        ) => stack.push(t)); }
+    return false;
+  };
+  const addLink = (from        , to        ) => {
+    if (from === to || links.some(l => l.From === from && l.To === to)) return;
+    if (wouldLoop(from, to)) { toast('That would create a feeder loop.', false); return; }
+    links.push({ From: from, To: to });
+  };
+  const removeLink = (from        , to        ) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
+  const wireRow = (title        , current          , onAdd                     , onRemove                     ) => {
+    const row = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '3px 0' } });
+    row.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: title }));
+    current.forEach(other => {
+      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
+      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
+      x.onclick = () => { onRemove(other); rerender(); };
+      chip.append(nm(other), x); row.appendChild(chip);
+    });
+    const sel = el('select', { style: { width: 'auto' } });
+    sel.appendChild(el('option', { value: '', text: '+ add…' }));
+    [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
+    row.appendChild(sel);
+    return row;
+  };
+  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
+  box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+
+  return box;
+}
+
+// Bring an EnergyFlow config up to the current shape in place (idempotent) — run on load by both the Flow
+// and Nodes tabs since either can be opened first: legacy single-feeder Parents → directed Links, per-node
+// Mqtt → the general Sources list, and a bare Value → the explicit 'static' mode.
+function migrateEnergyFlow(flow     ) {
+  const links = ensure(flow, 'Links', []);
+  const legacy = ensure(flow, 'Parents', {});
+  if (Object.keys(legacy).length) {
+    Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l     ) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
+    Object.keys(legacy).forEach(k => delete legacy[k]);
+  }
+  ensure(flow, 'Nodes', []).forEach((n     ) => {
+    if (n.Mqtt && n.Mqtt.length) { n.Sources = (n.Sources || []).concat(n.Mqtt.map((s     ) => ({ Type: 'mqtt', ...s }))); delete n.Mqtt; }
+    if (n.Value != null && (!n.Mode || n.Mode === 'auto')) n.Mode = 'static';
+  });
+}
+
+// Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
+async function saveConfig(onSaved            ) {
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
+  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
+  if (r.ok && r.body.ok) onSaved();
+}
+
+// The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+function flowCandidates(lastGraph     , customNodes       ) {
+  const cand = new Map             ();
+  (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+  customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
+  return cand;
+}
+
+// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
+// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
+// Deleting a node takes its bound sources with it (they live on the node).
+function renderNodeManager(customNodes       , links       , cand                  , editing                       , rerender                           ) {
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
+
+  if (!customNodes.length) {
+    box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
+    return box;
+  }
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Bindings', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const body = el('tbody');
+  customNodes.forEach((n     ) => {
+    const tr = el('tr');
+    if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
+    tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
+    tr.appendChild(el('td', { text: n.Label || n.Id }));
+    tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
+    tr.appendChild(el('td', { text: n.Mode || 'auto' }));
+    tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
+    const nb = (n.Sources || []).length;
+    tr.appendChild(el('td', { text: nb ? String(nb) : '—', class: nb ? '' : 'num' }));
+
+    const actions = el('td', { style: { whiteSpace: 'nowrap' } });
+    const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
+    edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rm = btn('Delete', 'danger');
+    rm.onclick = () => {
+      customNodes.splice(customNodes.indexOf(n), 1);
+      for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      if (editing.id === n.Id) editing.id = null;
+      toast(`${n.Label || n.Id} deleted.`, true);
+      rerender();
+    };
+    actions.append(edit, ' ', rm);
+    tr.appendChild(actions);
+    body.appendChild(tr);
+  });
+  tbl.appendChild(body);
+  box.appendChild(tbl);
+
+  const editingNode = editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null;
+  if (editingNode) box.appendChild(renderNodeEditor(editingNode, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
   return box;
 }
 
@@ -937,26 +1250,18 @@ function addFlowSection(nav     , sections     ) {
   const renderEditor = () => {
     if (ed._cleanup) ed._cleanup();
     const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
     const customNodes = ensure(flow, 'Nodes', []);
     const links = ensure(flow, 'Links', []);
-    const legacy = ensure(flow, 'Parents', {});
-    // One-time migration: fold any legacy single-feeder Parents (child→parent) into directed Links.
-    if (Object.keys(legacy).length) {
-      Object.entries(legacy).forEach(([child, parent]) => { if (parent && child && !links.some((l     ) => l.From === parent && l.To === child)) links.push({ From: parent, To: child }); });
-      Object.keys(legacy).forEach(k => delete legacy[k]);
-    }
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target). A node can have several feeders, and a producer is just a feed into what it powers — e.g. drag from Solar onto your inverter. The target highlights green when in range; click ✕ on a link to remove it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
 
-    const addBar = el('div', { class: 'ld-toolbar' });
-    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
-    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
-    const valIn = el('input', { type: 'number', placeholder: 'known value (optional)', style: { width: '150px' } });
-    const addBtn = btn('Add node', 'primary');
-    const save = btn('Save hierarchy', 'primary');
-    addBar.append(idIn, labIn, valIn, addBtn, save); ed.appendChild(addBar);
+    const bar2 = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(load);
+    bar2.append(save); ed.appendChild(bar2);
 
     // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll. Saved with
     // the hierarchy (the Save button posts the whole config).
@@ -970,12 +1275,8 @@ function addFlowSection(nav     , sections     ) {
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
 
-    ed.appendChild(renderMqttSources(customNodes, renderEditor));
-
     // Candidate nodes (from the built graph + custom defs).
-    const cand = new Map();
-    (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
-    customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: 'node', custom: true }));
+    const cand = flowCandidates(lastGraph, customNodes);
     const nm = (id        )         => (cand.get(id) || {}).label || id;
     const byLabel = (a        , b        ) => (cand.get(a).label || a).localeCompare(cand.get(b).label || b);
 
@@ -1053,7 +1354,21 @@ function addFlowSection(nav     , sections     ) {
       const t1 = svgEl('text', { x: 11, y: 19, fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' }); t1.textContent = c.label.length > 26 ? c.label.slice(0, 25) + '…' : c.label; g.appendChild(t1);
       const t2 = svgEl('text', { x: 11, y: 35, fill: 'var(--muted)', 'font-size': '10' }); t2.textContent = c.id; g.appendChild(t2);
       g.appendChild(svgEl('circle', { cx: NW, cy: NH / 2, r: 7, fill: color, style: 'cursor:crosshair', 'data-port': c.id }));
-      if (c.custom) { const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm); }
+      if (c.custom) {
+        const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
+        // Rename in place: double-click the node to relabel it. Only the Label changes — Id stays fixed, so
+        // every link/source keyed off it survives. (Ids aren't editable here for exactly that reason.)
+        t1.setAttribute('title', 'Double-click to rename'); g.style.cursor = 'pointer';
+        g.addEventListener('dblclick', (e     ) => {
+          e.preventDefault();
+          const node = customNodes.find((n     ) => n.Id === c.id); if (!node) return;
+          const next = window.prompt(`Rename “${node.Label || node.Id}” (id ${node.Id} is unchanged)`, node.Label || node.Id);
+          if (next == null) return; // cancelled
+          node.Label = next.trim() || node.Id;
+          toast(`Renamed to ${node.Label}. Save the hierarchy to keep it.`, true);
+          renderEditor();
+        });
+      }
       nodeLayer.appendChild(g); nodeG[c.id] = g;
     });
 
@@ -1095,19 +1410,6 @@ function addFlowSection(nav     , sections     ) {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     ed._cleanup = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); detachZoom(); };
-
-    addBtn.onclick = () => {
-      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
-      if (cand.has(id)) { toast('That id already exists.', false); return; }
-      const node      = { Id: id, Label: (labIn.value || '').trim() || id };
-      if (valIn.value !== '' && !isNaN(+valIn.value)) node.Value = +valIn.value;
-      customNodes.push(node); renderEditor();
-    };
-    save.onclick = async () => {
-      const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-      toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-      if (r.ok && r.body.ok) load();
-    };
   };
 
   const load = async () => {
@@ -1118,6 +1420,63 @@ function addFlowSection(nav     , sections     ) {
     renderEditor();
   };
   refresh.onclick = load;
+  link.onclick = () => { activate(link, sec); load(); };
+}
+
+// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
+// bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+function addNodesSection(nav     , sections     ) {
+  const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const instSel = instanceSelector(() => load());
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
+  let lastGraph      = null;
+  const editing                        = { id: null };
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const customNodes = ensure(flow, 'Nodes', []);
+    const links = ensure(flow, 'Links', []);
+    count.textContent = `${customNodes.length} node(s)`;
+    ed.innerHTML = '';
+
+    const addBar = el('div', { class: 'ld-toolbar' });
+    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
+    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
+    const kindSel = el('select', { style: { width: 'auto' } });
+    NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+    const addBtn = btn('Add node', 'primary');
+    const save = btn('Save', 'primary');
+    addBtn.onclick = () => {
+      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
+      if (customNodes.some((n     ) => n.Id === id) || (lastGraph?.nodes || []).some((n     ) => n.id === id)) { toast('That id already exists.', false); return; }
+      const node      = { Id: id, Label: (labIn.value || '').trim() || id };
+      if (kindSel.value !== 'node') node.Kind = kindSel.value;
+      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
+    };
+    save.onclick = () => saveConfig(load);
+    addBar.append(idIn, labIn, kindSel, addBtn, save); ed.appendChild(addBar);
+
+    const cand = flowCandidates(lastGraph, customNodes);
+    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+  };
+
+  const load = async () => {
+    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
+    // is global, so a failed/empty graph just means fewer wiring candidates, not an error.
+    const r = await api(withInstance('/api/flow', instSel));
+    lastGraph = r.body?.ok ? r.body : null;
+    render();
+  };
   link.onclick = () => { activate(link, sec); load(); };
 }
 
@@ -1517,6 +1876,7 @@ function build() {
   navHeader(nav, 'Tools');
   addControlSection(nav, sections);
   addLiveDataSection(nav, sections);
+  addNodesSection(nav, sections);
   addFlowSection(nav, sections);
   addPathsSection(nav, sections);
   addHaEnergySection(nav, sections);
@@ -1628,6 +1988,7 @@ function sectionActions(node     ) {
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
+  else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') { add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger'); }
   else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
@@ -1640,6 +2001,18 @@ function sectionActions(node     ) {
 
 // ── actions.ts ──────────────────────────────────────────────────
 // Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
+
+// Test every configured Modbus TCP connection by opening a throwaway connection to each.
+async function testModbus() {
+  const conns = (state.data?.Modbus?.Connections) || [];
+  if (!conns.length) { toast('No Modbus connections configured — add one first.', false); return; }
+  toast(`Testing ${conns.length} Modbus connection(s)…`, true);
+  for (const c of conns) {
+    if (!c.Host) { toast(`${c.Name || c.Id || 'connection'}: no host set.`, false); continue; }
+    const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ Host: c.Host, Port: c.Port, UnitId: c.UnitId }) });
+    toast(`${c.Name || c.Id}: ${r.body.message || (r.body.ok ? 'OK' : 'failed')}`, r.body.ok);
+  }
+}
 
 async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
 async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }

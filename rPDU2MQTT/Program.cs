@@ -14,6 +14,14 @@ if (args.Contains("--emit-crd"))
     return 0;
 }
 
+// Emit the config schema JSON the GUI renders from (used to regenerate web/schema.fixture.json for smoke).
+if (args.Contains("--emit-schema"))
+{
+    Console.Write(System.Text.Json.JsonSerializer.Serialize(
+        rPDU2MQTT.Services.Gui.ConfigSchema.Build(), rPDU2MQTT.Services.Gui.ConfigSchema.Json));
+    return 0;
+}
+
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .WriteTo.Console()

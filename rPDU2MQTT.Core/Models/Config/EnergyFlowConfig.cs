@@ -65,37 +65,104 @@ public class EnergyFlowNode
     public string Label { get; set; } = "";
 
     /// <summary>
-    /// A directly-known value for this node, used when it has no children (a leaf) and no <see cref="Mqtt"/>
-    /// source has reported. A manual/known figure — e.g. an untracked load, or a panel you're modelling
-    /// before its CT clamp is ingested. Ignored when the node aggregates children.
+    /// What this node represents (#129). Purely descriptive today — it drives the diagram's styling and
+    /// which fields/metrics the editor offers (a battery has storage but no frequency, etc.) — but leaves
+    /// room for kind-specific behaviour (battery charge/discharge, inverter efficiency) later. <c>node</c>
+    /// is the plain virtual node it has always been.
     /// </summary>
-    [Description("Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.")]
-    public double? Value { get; set; }
+    [DefaultValue("node")]
+    [Description("What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers.")]
+    [AllowedValues("node", "panel", "inverter", "battery", "solar", "grid", "load")]
+    public string Kind { get; set; } = "node";
 
     /// <summary>
-    /// Live measurements for this leaf node, read straight off the broker (#205) — the seam
-    /// <see cref="Value"/> always described. One entry per metric, so the same node can feed both the
-    /// power and the energy roll-up (e.g. Solar Assistant's <c>pv_power</c> and <c>pv_energy</c> topics).
-    /// A live reading supersedes <see cref="Value"/>; ignored when the node aggregates children.
+    /// A directly-known value for this node, used when it has no children (a leaf) and no live
+    /// <see cref="Sources"/> reading has arrived. A manual/known figure — e.g. an untracked load, or a
+    /// panel you're modelling before its CT clamp is ingested. Ignored when the node aggregates children.
     /// </summary>
-    [Description("Live values for this node read from MQTT topics (e.g. Solar Assistant). One entry per metric; supersedes Value.")]
-    public List<EnergyFlowMqttSource> Mqtt { get; set; } = new();
+    [Description("Optional fixed value for a leaf node. Used only when no live source has reported for it.")]
+    public double? Value { get; set; }
+
+    /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
+    /// diagram/state-of-charge display; does not affect the power roll-up.</summary>
+    [Description("For a battery node: usable storage capacity in kWh (display metadata; optional).")]
+    public double? StorageKwh { get; set; }
+
+    /// <summary>
+    /// How this node's value is decided when it has no direct measurement (#129). A live source or static
+    /// <see cref="Value"/> always wins regardless — this only governs nodes the graph would otherwise have
+    /// to infer:
+    /// <list type="bullet">
+    /// <item><c>auto</c> (default): aggregate children, and as an upstream feeder take a share of what's
+    /// left after measured siblings — the historical behaviour.</item>
+    /// <item><c>static</c>: a fixed leaf valued at <see cref="Value"/> (still superseded by a live source).
+    /// This is the mode that gives the fixed value meaning; with no value set it contributes nothing.</item>
+    /// <item><c>residual</c>: the designated "untracked" absorber on the <em>feeder</em> side — takes the
+    /// demand a node still needs after every measured feeder has supplied its bit (e.g. house load not
+    /// behind a PDU or CT clamp).</item>
+    /// <item><c>untracked</c>: the mirror on the <em>child</em> side — placed under a parent that has a
+    /// measured total (a bound source / fixed value), it shows the slice of that total the parent's tracked
+    /// children don't account for (HA-style untracked consumption). Contributes nothing if the parent has no
+    /// measured total.</item>
+    /// <item><c>none</c>: never inferred — contributes nothing unless it has a real value/children, so an
+    /// unmeasured source (e.g. Grid, when solar already covers the load) simply drops out instead of being
+    /// assigned a fabricated figure.</item>
+    /// </list>
+    /// </summary>
+    [DefaultValue("auto")]
+    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.")]
+    [AllowedValues("auto", "static", "residual", "untracked", "none")]
+    public string Mode { get; set; } = "auto";
+
+    /// <summary>
+    /// Live value bindings for this node (#205), one per metric — the seam <see cref="Value"/> always
+    /// described. Each binds a metric (realpower, energy, …) to an external source; a fresh reading
+    /// supersedes <see cref="Value"/>, and binding several metrics lets the same node drive the power, the
+    /// energy roll-up, voltage, etc. Every binding carries a <see cref="EnergyFlowSource.Type"/> (only
+    /// <c>mqtt</c> today) so more ingest kinds can be added without reshaping the model.
+    /// </summary>
+    [Description("Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.")]
+    public List<EnergyFlowSource> Sources { get; set; } = new();
+
+    /// <summary>
+    /// Legacy pre-<see cref="Sources"/> MQTT bindings (#205). Still honored on load so older configs keep
+    /// working; the GUI migrates these into <see cref="Sources"/> (each was implicitly <c>Type: mqtt</c>).
+    /// </summary>
+    [Description("Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat.")]
+    public List<EnergyFlowSource> Mqtt { get; set; } = new();
+
+    /// <summary>Every effective binding — the new <see cref="Sources"/> plus any legacy <see cref="Mqtt"/>.</summary>
+    public IEnumerable<EnergyFlowSource> AllSources() => Sources.Concat(Mqtt);
 }
 
 /// <summary>
-/// Binds one MQTT topic to one metric of a flow node (#205). Built for producers that already publish to
-/// the broker — Solar Assistant, CT clamps, an inverter bridge — so their data joins the same hierarchy,
-/// roll-ups and exports as the PDU outlets.
+/// Binds one external source to one metric of a flow node (#205). Built for producers that already publish
+/// their data — Solar Assistant, CT clamps, an inverter bridge — so it joins the same hierarchy, roll-ups
+/// and exports as the PDU outlets. <see cref="Type"/> selects the ingest; the transport-specific fields
+/// (today just the MQTT ones) apply per type.
 /// </summary>
-public class EnergyFlowMqttSource
+public class EnergyFlowSource
 {
-    [Description("MQTT topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
-    public string Topic { get; set; } = "";
+    [DefaultValue("mqtt")]
+    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection).")]
+    [AllowedValues("mqtt", "modbus")]
+    public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
-    [Description("Which measurement this topic supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.")]
+    [Description("Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.")]
     [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
     public string Metric { get; set; } = "realpower";
+
+    /// <summary>
+    /// The unit the source publishes this value in (e.g. <c>kW</c>, <c>Wh</c>). The reading is converted to
+    /// the metric's canonical unit (W, kWh, V, …) on ingest so every export stays consistent. Blank assumes
+    /// the value is already canonical. See <see cref="rPDU2MQTT.Core.Flow.FlowUnits"/>.
+    /// </summary>
+    [Description("Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.")]
+    public string? Unit { get; set; }
+
+    [Description("For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
+    public string Topic { get; set; } = "";
 
     /// <summary>
     /// For JSON payloads: the field to read, dotted for nesting (<c>battery.power</c>). Blank treats the
@@ -112,4 +179,27 @@ public class EnergyFlowMqttSource
     [Range(0, 86400, ErrorMessage = "StaleAfterSeconds must be between 0 and 86400.")]
     [Description("Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).")]
     public int StaleAfterSeconds { get; set; } = 900;
+
+    // --- Type 'modbus' -----------------------------------------------------------------------------
+
+    [Description("For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from.")]
+    public string? Connection { get; set; }
+
+    [Description("For Type 'modbus': the register address to read (0-based).")]
+    public int Register { get; set; }
+
+    [DefaultValue("holding")]
+    [Description("For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4).")]
+    [AllowedValues("holding", "input")]
+    public string RegisterType { get; set; } = "holding";
+
+    [DefaultValue("uint16")]
+    [Description("For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32.")]
+    [AllowedValues("uint16", "int16", "uint32", "int32", "float32")]
+    public string DataType { get; set; } = "uint16";
+
+    [DefaultValue("big")]
+    [Description("For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).")]
+    [AllowedValues("big", "little")]
+    public string WordOrder { get; set; } = "big";
 }

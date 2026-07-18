@@ -1469,11 +1469,334 @@
        "required": false
       },
       {
+       "key": "Kind",
+       "label": "Kind",
+       "description": "What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers.",
+       "type": "enum",
+       "required": false,
+       "default": "node",
+       "enumValues": [
+        "",
+        "node",
+        "panel",
+        "inverter",
+        "battery",
+        "solar",
+        "grid",
+        "load"
+       ]
+      },
+      {
        "key": "Value",
        "label": "Value",
-       "description": "Optional directly-known value for a leaf node (used until a live sensor is bound).",
+       "description": "Optional fixed value for a leaf node. Used only when no live source has reported for it.",
        "type": "double",
        "required": false
+      },
+      {
+       "key": "StorageKwh",
+       "label": "StorageKwh",
+       "description": "For a battery node: usable storage capacity in kWh (display metadata; optional).",
+       "type": "double",
+       "required": false
+      },
+      {
+       "key": "Mode",
+       "label": "Mode",
+       "description": "How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.",
+       "type": "enum",
+       "required": false,
+       "default": "auto",
+       "enumValues": [
+        "",
+        "auto",
+        "static",
+        "residual",
+        "untracked",
+        "none"
+       ]
+      },
+      {
+       "key": "Sources",
+       "label": "Sources",
+       "description": "Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.",
+       "type": "list",
+       "required": false,
+       "valueSchema": {
+        "key": "",
+        "label": "",
+        "type": "object",
+        "required": false,
+        "properties": [
+         {
+          "key": "Type",
+          "label": "Type",
+          "description": "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection).",
+          "type": "enum",
+          "required": false,
+          "default": "mqtt",
+          "enumValues": [
+           "",
+           "mqtt",
+           "modbus"
+          ]
+         },
+         {
+          "key": "Metric",
+          "label": "Metric",
+          "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.",
+          "type": "enum",
+          "required": false,
+          "default": "realpower",
+          "enumValues": [
+           "",
+           "realpower",
+           "apparentpower",
+           "energy",
+           "current",
+           "voltage",
+           "frequency",
+           "powerfactor"
+          ]
+         },
+         {
+          "key": "Unit",
+          "label": "Unit",
+          "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, \u2026) on ingest. Blank = already canonical.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Topic",
+          "label": "Topic",
+          "description": "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "JsonField",
+          "label": "JsonField",
+          "description": "For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Scale",
+          "label": "Scale",
+          "description": "Multiplier applied to the received value \u2014 for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
+          "type": "double",
+          "required": false,
+          "default": 1
+         },
+         {
+          "key": "StaleAfterSeconds",
+          "label": "StaleAfterSeconds",
+          "description": "Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).",
+          "type": "int",
+          "required": false,
+          "default": 900,
+          "min": 0,
+          "max": 86400
+         },
+         {
+          "key": "Connection",
+          "label": "Connection",
+          "description": "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Register",
+          "label": "Register",
+          "description": "For Type 'modbus': the register address to read (0-based).",
+          "type": "int",
+          "required": false
+         },
+         {
+          "key": "RegisterType",
+          "label": "RegisterType",
+          "description": "For Type 'modbus': which register bank \u2014 'holding' (function 3) or 'input' (function 4).",
+          "type": "enum",
+          "required": false,
+          "default": "holding",
+          "enumValues": [
+           "",
+           "holding",
+           "input"
+          ]
+         },
+         {
+          "key": "DataType",
+          "label": "DataType",
+          "description": "For Type 'modbus': how to decode the register(s) \u2014 uint16, int16, uint32, int32, or float32.",
+          "type": "enum",
+          "required": false,
+          "default": "uint16",
+          "enumValues": [
+           "",
+           "uint16",
+           "int16",
+           "uint32",
+           "int32",
+           "float32"
+          ]
+         },
+         {
+          "key": "WordOrder",
+          "label": "WordOrder",
+          "description": "For Type 'modbus' 32-bit values: word order \u2014 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
+          "type": "enum",
+          "required": false,
+          "default": "big",
+          "enumValues": [
+           "",
+           "big",
+           "little"
+          ]
+         }
+        ]
+       }
+      },
+      {
+       "key": "Mqtt",
+       "label": "Mqtt",
+       "description": "Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat.",
+       "type": "list",
+       "required": false,
+       "valueSchema": {
+        "key": "",
+        "label": "",
+        "type": "object",
+        "required": false,
+        "properties": [
+         {
+          "key": "Type",
+          "label": "Type",
+          "description": "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection).",
+          "type": "enum",
+          "required": false,
+          "default": "mqtt",
+          "enumValues": [
+           "",
+           "mqtt",
+           "modbus"
+          ]
+         },
+         {
+          "key": "Metric",
+          "label": "Metric",
+          "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.",
+          "type": "enum",
+          "required": false,
+          "default": "realpower",
+          "enumValues": [
+           "",
+           "realpower",
+           "apparentpower",
+           "energy",
+           "current",
+           "voltage",
+           "frequency",
+           "powerfactor"
+          ]
+         },
+         {
+          "key": "Unit",
+          "label": "Unit",
+          "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, \u2026) on ingest. Blank = already canonical.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Topic",
+          "label": "Topic",
+          "description": "For Type 'mqtt': the topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "JsonField",
+          "label": "JsonField",
+          "description": "For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Scale",
+          "label": "Scale",
+          "description": "Multiplier applied to the received value \u2014 for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
+          "type": "double",
+          "required": false,
+          "default": 1
+         },
+         {
+          "key": "StaleAfterSeconds",
+          "label": "StaleAfterSeconds",
+          "description": "Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).",
+          "type": "int",
+          "required": false,
+          "default": 900,
+          "min": 0,
+          "max": 86400
+         },
+         {
+          "key": "Connection",
+          "label": "Connection",
+          "description": "For Type 'modbus': the id of the Modbus connection (from the Modbus section) to read from.",
+          "type": "string",
+          "required": false
+         },
+         {
+          "key": "Register",
+          "label": "Register",
+          "description": "For Type 'modbus': the register address to read (0-based).",
+          "type": "int",
+          "required": false
+         },
+         {
+          "key": "RegisterType",
+          "label": "RegisterType",
+          "description": "For Type 'modbus': which register bank \u2014 'holding' (function 3) or 'input' (function 4).",
+          "type": "enum",
+          "required": false,
+          "default": "holding",
+          "enumValues": [
+           "",
+           "holding",
+           "input"
+          ]
+         },
+         {
+          "key": "DataType",
+          "label": "DataType",
+          "description": "For Type 'modbus': how to decode the register(s) \u2014 uint16, int16, uint32, int32, or float32.",
+          "type": "enum",
+          "required": false,
+          "default": "uint16",
+          "enumValues": [
+           "",
+           "uint16",
+           "int16",
+           "uint32",
+           "int32",
+           "float32"
+          ]
+         },
+         {
+          "key": "WordOrder",
+          "label": "WordOrder",
+          "description": "For Type 'modbus' 32-bit values: word order \u2014 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
+          "type": "enum",
+          "required": false,
+          "default": "big",
+          "enumValues": [
+           "",
+           "big",
+           "little"
+          ]
+         }
+        ]
+       }
       }
      ]
     }
@@ -1544,6 +1867,85 @@
      "metric",
      "units"
     ]
+   }
+  ]
+ },
+ {
+  "key": "Modbus",
+  "label": "Modbus",
+  "description": "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).",
+  "type": "object",
+  "required": false,
+  "properties": [
+   {
+    "key": "Connections",
+    "label": "Connections",
+    "description": "Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.",
+    "type": "list",
+    "required": false,
+    "valueSchema": {
+     "key": "",
+     "label": "",
+     "type": "object",
+     "required": false,
+     "properties": [
+      {
+       "key": "Id",
+       "label": "Id",
+       "description": "Stable id used to reference this connection from a source binding.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Name",
+       "label": "Name",
+       "description": "Friendly name for the device (shown in the editor).",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Host",
+       "label": "Host",
+       "description": "Hostname or IP address of the Modbus TCP device.",
+       "type": "string",
+       "required": false
+      },
+      {
+       "key": "Port",
+       "label": "Port",
+       "description": "TCP port the device listens on (Modbus default 502).",
+       "type": "int",
+       "required": false,
+       "default": 502
+      },
+      {
+       "key": "UnitId",
+       "label": "UnitId",
+       "description": "Modbus unit / slave id.",
+       "type": "int",
+       "required": false,
+       "default": 1
+      },
+      {
+       "key": "PollIntervalSeconds",
+       "label": "PollIntervalSeconds",
+       "description": "How often to poll this device, in seconds.",
+       "type": "int",
+       "required": false,
+       "default": 10,
+       "min": 1,
+       "max": 86400
+      },
+      {
+       "key": "Enabled",
+       "label": "Enabled",
+       "description": "Poll this device. Turn off to disable it without deleting the connection.",
+       "type": "bool",
+       "required": false,
+       "default": true
+      }
+     ]
+    }
    }
   ]
  }
