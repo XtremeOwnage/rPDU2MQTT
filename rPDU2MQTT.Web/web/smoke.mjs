@@ -155,12 +155,13 @@ const linkText = query(nav, 'a', true).map(a => a.textContent);
 const groups = query(nav, '.nav-group', true).map(g => g.textContent);
 
 if (!linkText.length) fail('no nav links were rendered');
-for (const g of ['PDUs', 'Energy Flow', 'Integrations', 'Destinations', 'System'])
+for (const g of ['Sources', 'Energy Flow', 'Integrations', 'Destinations', 'System'])
   if (!groups.includes(g)) fail(`nav group "${g}" missing (got: ${groups.join(', ')})`);
 
-// Every non-hidden schema section must reach the nav. "Api" is deliberately in no NAV_GROUPS list, so
-// this also pins the catch-all: without it, ungrouped sections vanish from the UI entirely.
-for (const key of ['MQTT', 'Pdus', 'EmonCMS', 'HomeAssistant', 'Prometheus', 'Api'])
+// Every non-hidden schema section must reach the nav (tokens match the display label, e.g. Pdus renders as
+// "Vertiv rPDU"). "Api" is deliberately in no NAV_GROUPS list, so this also pins the catch-all: without it,
+// ungrouped sections vanish from the UI entirely.
+for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', 'Api'])
   if (!linkText.some(t => t.replace(/\s/g, '').toLowerCase().includes(key.toLowerCase())))
     fail(`schema section "${key}" has no nav link (got: ${linkText.join(', ')})`);
 

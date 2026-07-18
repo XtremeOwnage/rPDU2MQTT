@@ -162,9 +162,10 @@ function renderList(node: any, arr: any[]) {
 // value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
 // plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
 // (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
-type NavItem = { schema: string } | { tool: (nav: any, sections: any) => any, child?: boolean };
+type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections: any) => any, child?: boolean };
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
-  { title: 'PDUs', items: [{ schema: 'Pdus' }, { schema: 'Overrides' }, { tool: addLiveDataSection }, { tool: addControlSection }, { tool: addPathsSection }] },
+  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
+  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addNodesSection }, { tool: addFlowSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
@@ -172,7 +173,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
-const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'PDUs', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
+const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
 // A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
 // (schema sections or tool tabs) are appended into.
@@ -245,8 +246,10 @@ export function build() {
     if (!items.length) continue;
     const container = navGroup(nav, g.title);
     for (const it of items) {
-      if ('schema' in it) { renderConfigSection(byKey.get(it.schema), container, sections); }
-      else {
+      if ('schema' in it) {
+        const l = renderConfigSection(byKey.get(it.schema), container, sections);
+        if (it.child && l) l.classList.add('nav-child');
+      } else {
         const before = container.children.length;
         it.tool(container, sections);
         if (it.child && container.children[before]) container.children[before].classList.add('nav-child');

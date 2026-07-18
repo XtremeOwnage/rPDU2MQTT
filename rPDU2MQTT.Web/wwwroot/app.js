@@ -1804,7 +1804,8 @@ function renderList(node     , arr       ) {
 // (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
 
 const NAV_GROUPS                                        = [
-  { title: 'PDUs', items: [{ schema: 'Pdus' }, { schema: 'Overrides' }, { tool: addLiveDataSection }, { tool: addControlSection }, { tool: addPathsSection }] },
+  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
+  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addNodesSection }, { tool: addFlowSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
@@ -1812,7 +1813,7 @@ const NAV_GROUPS                                        = [
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
-const LABEL_OVERRIDES                         = { Pdus: 'PDUs', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
+const LABEL_OVERRIDES                         = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
 // A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
 // (schema sections or tool tabs) are appended into.
@@ -1885,8 +1886,10 @@ function build() {
     if (!items.length) continue;
     const container = navGroup(nav, g.title);
     for (const it of items) {
-      if ('schema' in it) { renderConfigSection(byKey.get(it.schema), container, sections); }
-      else {
+      if ('schema' in it) {
+        const l = renderConfigSection(byKey.get(it.schema), container, sections);
+        if (it.child && l) l.classList.add('nav-child');
+      } else {
         const before = container.children.length;
         it.tool(container, sections);
         if (it.child && container.children[before]) container.children[before].classList.add('nav-child');
