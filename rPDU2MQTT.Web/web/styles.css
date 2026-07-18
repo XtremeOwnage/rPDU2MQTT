@@ -82,10 +82,15 @@
   .layout { display:flex; min-height:calc(100vh - var(--header-h)); }
   nav { width:210px; flex:none; border-right:1px solid var(--line); background:var(--panel); padding:var(--sp-2) 0 var(--sp-5); }
   .nav-group {
+    display:flex; align-items:center; cursor:pointer; user-select:none;
     padding:var(--sp-4) var(--sp-5) var(--sp-1); font-size:10px; font-weight:700; letter-spacing:.09em;
     text-transform:uppercase; color:var(--faint);
   }
-  .nav-group:first-child { padding-top:var(--sp-2); }
+  .nav-group::after { content:'▾'; margin-left:auto; font-size:9px; opacity:.55; transition:transform .12s; }
+  .nav-group:hover { color:var(--muted); }
+  .nav-group-wrap:first-child .nav-group { padding-top:var(--sp-2); }
+  .nav-group-wrap.collapsed .nav-group::after { transform:rotate(-90deg); }
+  .nav-group-wrap.collapsed .nav-group-items { display:none; }
   nav a {
     display:block; margin:1px var(--sp-2); padding:7px 14px; color:var(--muted); cursor:pointer;
     border-radius:var(--r-sm); font-size:13.5px; user-select:none;
@@ -93,6 +98,7 @@
   }
   nav a:hover { color:var(--fg); background:var(--panel2); }
   nav a.active { color:var(--fg); background:var(--accent-bg); font-weight:600; box-shadow:inset 2px 0 0 var(--accent); }
+  nav a.nav-child { padding-left:32px; }
   main { flex:1; min-width:0; padding:var(--sp-5) var(--sp-6); max-width:1700px; }
   .section { display:none; } .section.active { display:block; animation:rpdu-fade .18s ease-out; }
   @keyframes rpdu-fade { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
@@ -217,7 +223,9 @@
     nav { width:auto; border-right:none; border-bottom:1px solid var(--line); padding:var(--sp-2);
       display:flex; gap:var(--sp-1); overflow-x:auto; white-space:nowrap; }
     .nav-group { display:none; }
-    nav a { padding:6px 12px; }
+    /* Flatten the group wrappers so the links flow in the horizontal strip (and none stay collapsed). */
+    .nav-group-wrap, .nav-group-items, .nav-group-wrap.collapsed .nav-group-items { display:contents; }
+    nav a, nav a.nav-child { padding:6px 12px; }
     nav a.active { box-shadow:none; }
     main { padding:var(--sp-4); }
     .actions { margin:var(--sp-4) calc(var(--sp-4) * -1) calc(var(--sp-4) * -1); padding:var(--sp-3) var(--sp-4); }

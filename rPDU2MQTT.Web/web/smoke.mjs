@@ -155,7 +155,7 @@ const linkText = query(nav, 'a', true).map(a => a.textContent);
 const groups = query(nav, '.nav-group', true).map(g => g.textContent);
 
 if (!linkText.length) fail('no nav links were rendered');
-for (const g of ['Data Sources', 'Destinations', 'System', 'Tools'])
+for (const g of ['PDUs', 'Energy Flow', 'Integrations', 'Destinations', 'System'])
   if (!groups.includes(g)) fail(`nav group "${g}" missing (got: ${groups.join(', ')})`);
 
 // Every non-hidden schema section must reach the nav. "Api" is deliberately in no NAV_GROUPS list, so
