@@ -46,11 +46,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly HeartbeatService heartbeats;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly EmonCmsFeedSync emonCmsFeeds;
+    private readonly Core.Flow.IFlowValueSource? live;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Core.Flow.IFlowValueSource? live = null)
     {
+        this.live = live;
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
@@ -815,7 +817,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
                 var data = await ResolveData(id, pdu, cts.Token);
                 var metric = ctx.Request.Query["metric"].ToString();
-                var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric);
+                var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric, live);
                 return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
             }
             catch (Exception ex)

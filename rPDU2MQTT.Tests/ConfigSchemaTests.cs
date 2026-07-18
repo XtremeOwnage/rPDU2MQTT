@@ -238,6 +238,41 @@ public class ConfigSchemaTests
     }
 
     [Fact]
+    public void EnergyFlowMqttSources_SurviveTheSaveThenReloadRoundTrip()
+    {
+        // Same path as above, for the live MQTT bindings (#205). The GUI is the only way to set these, so
+        // if they don't survive JSON -> YAML -> load, a bound topic silently disappears on save.
+        var posted = new Config();
+        posted.EnergyFlow.Nodes.Add(new EnergyFlowNode
+        {
+            Id = "solar",
+            Label = "Solar",
+            Mqtt =
+            {
+                new EnergyFlowMqttSource { Topic = "solar_assistant/inverter_1/pv_power/state", Metric = "realpower" },
+                new EnergyFlowMqttSource { Topic = "solar_assistant/inverter_1/pv_energy/state", Metric = "energy", JsonField = "value", Scale = 0.001, StaleAfterSeconds = 0 },
+            },
+        });
+
+        var parsed = ConfigSchema.FromJson(ConfigSchema.ToJson(posted));
+        var yaml = ConfigSchema.ToYaml(parsed);
+        var reloaded = YamlConfigLoader.DeserializeString(yaml);
+
+        var node = Assert.Single(reloaded.EnergyFlow.Nodes);
+        Assert.Equal(2, node.Mqtt.Count);
+
+        var power = Assert.Single(node.Mqtt, s => s.Metric == "realpower");
+        Assert.Equal("solar_assistant/inverter_1/pv_power/state", power.Topic);
+        Assert.Equal(1.0, power.Scale);                 // default survives
+        Assert.Equal(900, power.StaleAfterSeconds);     // default survives
+
+        var energy = Assert.Single(node.Mqtt, s => s.Metric == "energy");
+        Assert.Equal("value", energy.JsonField);
+        Assert.Equal(0.001, energy.Scale);
+        Assert.Equal(0, energy.StaleAfterSeconds);      // an explicit 0 must not be lost to the default
+    }
+
+    [Fact]
     public void Build_UsesFriendlyDisplayNamesAndHelpText()
     {
         // PDU settings now live under the Pdus instance map; the per-instance schema is its ValueSchema.

@@ -19,8 +19,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
     // Discovery config topics we've already retired (once per process) — the duplicate energyflow sensors
     // an earlier build published for outlets/PDU tiers (#177). Cleared by an empty retained message.
     private readonly HashSet<string> clearedDuplicates = new();
+    private readonly IFlowValueSource? live;
 
-    public EnergyFlowMqttExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.Primary.PollInterval) { }
+    public EnergyFlowMqttExportService(MQTTServiceDependencies deps, IFlowValueSource? live = null) : base(deps, deps.Cfg.Primary.PollInterval)
+        => this.live = live;
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
@@ -37,9 +39,9 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
         // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement, so
         // each tier gets a total (kWh) it can contribute to the Energy Dashboard.
-        var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric);
+        var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric, live);
         var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
-        var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric);
+        var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric, live);
 
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;

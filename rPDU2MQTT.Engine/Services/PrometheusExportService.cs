@@ -15,9 +15,11 @@ public class PrometheusExportService : baseMQTTService
     private readonly Dictionary<string, Gauge> gauges = new();
     private readonly IMetricServer? exporter;
     private readonly IMetricServer? pusher;
+    private readonly Core.Flow.IFlowValueSource? live;
 
-    public PrometheusExportService(MQTTServiceDependencies deps) : base(deps, deps.Cfg.Primary.PollInterval)
+    public PrometheusExportService(MQTTServiceDependencies deps, Core.Flow.IFlowValueSource? live = null) : base(deps, deps.Cfg.Primary.PollInterval)
     {
+        this.live = live;
         var cfg = deps.Cfg.Prometheus;
 
         if (cfg.Exporter)
@@ -87,7 +89,7 @@ public class PrometheusExportService : baseMQTTService
             foreach (var data in FreshSnapshots()) merged.Devices.AddRange(data.Devices);
             if (merged.Devices.Count == 0) return map;
 
-            var graph = Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric);
+            var graph = Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
             var labels = graph.Nodes.ToDictionary(n => n.Id, n => n.Label, StringComparer.OrdinalIgnoreCase);
             foreach (var node in graph.Nodes)
                 if (Core.Flow.FlowExport.Parents(graph, node.Id).FirstOrDefault() is { } parent)

@@ -77,4 +77,35 @@ public class KubernetesConfigTests
         Assert.Contains("HomeAssistant", yaml);     // generated spec property
         Assert.Contains("status", yaml);            // status subresource
     }
+
+    /// <summary>
+    /// The committed CRD manifests are generated artifacts (<c>rPDU2MQTT --emit-crd</c>), and nothing was
+    /// checking they still matched the config model. Examples/Kubernetes/crd/crd.yaml had silently drifted
+    /// 199 lines behind across several releases — anyone applying it got a schema with no EnergyFlow and no
+    /// EmonCMS feed settings. Pin both so adding a config field can't quietly leave them stale again.
+    /// </summary>
+    [Theory]
+    [InlineData("charts/rpdu2mqtt/crds/rpduconfig.yaml")]
+    [InlineData("Examples/Kubernetes/crd/crd.yaml")]
+    public void CommittedCrdManifests_MatchTheGenerator(string relativePath)
+    {
+        var repoRoot = FindRepoRoot();
+        var path = Path.Combine(repoRoot, relativePath);
+        Assert.True(File.Exists(path), $"{relativePath} is missing.");
+
+        var committed = File.ReadAllText(path).ReplaceLineEndings("\n").TrimEnd();
+        var generated = CrdGenerator.ToYaml().ReplaceLineEndings("\n").TrimEnd();
+
+        Assert.True(committed == generated,
+            $"{relativePath} is out of date with the config model. Regenerate it:\n" +
+            $"    dotnet run --project rPDU2MQTT --no-launch-profile -- --emit-crd > {relativePath}");
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "rPDU2MQTT.sln")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new InvalidOperationException("Could not locate the repository root (no rPDU2MQTT.sln above the test output).");
+    }
 }

@@ -99,6 +99,14 @@ public static class ServiceConfiguration
         // now" button, so register the singleton regardless of role.
         services.AddSingleton<Services.EmonCmsFeedSync>();
 
+        // Energy-flow values sourced from the broker (#205, e.g. Solar Assistant). Registered in every role
+        // and started unconditionally: any process that renders or exports the flow (GUI, API, worker) needs
+        // the live values, and it self-gates — with no Mqtt bindings configured it subscribes to nothing.
+        // It reconciles subscriptions on a timer, so binding a topic in the GUI needs no restart.
+        services.AddSingleton<Services.EnergyFlowMqttSourceService>();
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+        services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
         // Single-node "all" keeps the bus fully in-process and skips this (no extra broker traffic).

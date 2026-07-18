@@ -752,6 +752,78 @@ function addLiveDataSection(nav     , sections     ) {
 // ── sections/flow.ts ────────────────────────────────────────────
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
 
+// Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowMqttSource.Metric.
+const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'frequency', 'powerfactor'];
+
+// Binds custom nodes to live MQTT topics (#205): the values a producer (Solar Assistant, a CT clamp)
+// already publishes become this node's reading, so it rolls up and exports like a PDU outlet. Only custom
+// nodes appear — PDU/outlet nodes get their values from the poll.
+function renderMqttSources(customNodes       , rerender            ) {
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Live sources (MQTT)', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Feed a node from a topic already on your broker — e.g. Solar Assistant’s solar_assistant/inverter_1/pv_power/state. A live reading replaces the node’s fixed value; bind one topic per metric to drive both the power and the energy roll-up. Takes effect without a restart once saved.' }));
+
+  if (!customNodes.length) {
+    box.appendChild(el('div', { class: 'desc', text: 'Add a node above first — live sources attach to custom nodes.' }));
+    return box;
+  }
+
+  // Existing bindings, flattened across nodes.
+  const rows = customNodes.flatMap((n     ) => (n.Mqtt || []).map((s     ) => ({ node: n, src: s })));
+  if (rows.length) {
+    const tbl = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['Node', 'Topic', 'Metric', 'JSON field', 'Scale', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    tbl.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    rows.forEach(({ node, src }     ) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', { text: node.Label || node.Id }));
+      tr.appendChild(el('td', {}, el('code', { text: src.Topic })));
+      tr.appendChild(el('td', { text: src.Metric || 'realpower' }));
+      tr.appendChild(el('td', { text: src.JsonField || '—' }));
+      tr.appendChild(el('td', { class: 'num', text: String(src.Scale ?? 1) }));
+      const rm = btn('Remove', 'danger');
+      rm.onclick = () => { node.Mqtt.splice(node.Mqtt.indexOf(src), 1); rerender(); };
+      tr.appendChild(el('td', {}, rm));
+      body.appendChild(tr);
+    });
+    tbl.appendChild(body);
+    box.appendChild(tbl);
+  }
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const nodeSel = el('select', { style: { width: 'auto' } });
+  customNodes.forEach((n     ) => nodeSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
+  const topicIn = el('input', { type: 'text', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '320px' } });
+  const metricSel = el('select', { style: { width: 'auto' } });
+  SOURCE_METRICS.forEach(m => metricSel.appendChild(el('option', { value: m, text: m })));
+  const fieldIn = el('input', { type: 'text', placeholder: 'JSON field (optional)', style: { width: '150px' } });
+  const scaleIn = el('input', { type: 'number', step: 'any', placeholder: 'scale', value: '1', style: { width: '90px' } });
+  const add = btn('Bind topic', 'primary');
+  add.onclick = () => {
+    const topic = (topicIn.value || '').trim();
+    if (!topic) { toast('A topic is required.', false); return; }
+    const node = customNodes.find((n     ) => n.Id === nodeSel.value);
+    if (!node) { toast('Pick a node to bind.', false); return; }
+    const metric = metricSel.value;
+    const mqtt = ensure(node, 'Mqtt', []);
+    // One reading per metric per node — a second binding would just race the first.
+    if (mqtt.some((s     ) => (s.Metric || 'realpower') === metric)) {
+      toast(`${node.Label || node.Id} already has a ${metric} source.`, false); return;
+    }
+    const src      = { Topic: topic, Metric: metric };
+    const field = (fieldIn.value || '').trim(); if (field) src.JsonField = field;
+    const scale = +scaleIn.value; if (scaleIn.value !== '' && !isNaN(scale) && scale !== 1) src.Scale = scale;
+    mqtt.push(src);
+    toast(`${topic} → ${node.Label || node.Id} (${metric}).`, true);
+    rerender();
+  };
+  bar.append(nodeSel, topicIn, metricSel, fieldIn, scaleIn, add);
+  box.appendChild(bar);
+  return box;
+}
+
 function addFlowSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
@@ -897,6 +969,8 @@ function addFlowSection(nav     , sections     ) {
     expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
+
+    ed.appendChild(renderMqttSources(customNodes, renderEditor));
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = new Map();

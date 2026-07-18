@@ -692,7 +692,40 @@ spec:
                           description: Human-readable label shown in the flow diagram.
                         Value:
                           type: number
-                          description: Optional directly-known value for a leaf node (used until a live sensor is bound).
+                          description: Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.
+                        Mqtt:
+                          type: array
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              Topic:
+                                type: string
+                                description: MQTT topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.
+                              Metric:
+                                type: string
+                                enum:
+                                - ''
+                                - realpower
+                                - apparentpower
+                                - energy
+                                - current
+                                - voltage
+                                - frequency
+                                - powerfactor
+                                description: Which measurement this topic supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.
+                              JsonField:
+                                type: string
+                                description: For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.
+                              Scale:
+                                type: number
+                                description: Multiplier applied to the received value — for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.
+                              StaleAfterSeconds:
+                                type: integer
+                                description: Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).
+                                minimum: 0
+                                maximum: 86400
+                          description: Live values for this node read from MQTT topics (e.g. Solar Assistant). One entry per metric; supersedes Value.
                     description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
                   Links:
                     type: array
