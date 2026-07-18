@@ -688,6 +688,56 @@ curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
 ```
 
+## Energy Flow (Optional)
+
+The **Flow** tab models where your energy actually goes: PDU → outlet links are derived automatically, and
+you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Total"). Every tier's value
+rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
+discovery is enabled — appears in Home Assistant as its own device.
+
+### Live sources from MQTT
+
+A node doesn't have to be a fixed number. Bind it to a topic that's already on your broker and it becomes a
+live measurement, rolling up and exporting exactly like a PDU outlet does. This is how you pull in a
+producer that rPDU2MQTT doesn't poll itself — **Solar Assistant**, a CT clamp, an inverter bridge.
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - Id: solar
+      Label: Solar Array
+      Mqtt:
+        # Solar Assistant's /state topics publish a bare number, so no JsonField is needed.
+        - Topic: solar_assistant/inverter_1/pv_power/state
+          Metric: realpower           # drives the power roll-up (W)
+        - Topic: solar_assistant/inverter_1/pv_energy/state
+          Metric: energy              # drives the energy roll-up (kWh) -> HA Energy Dashboard
+    - Id: main_panel
+      Label: Main Panel
+  Links:
+    - { From: solar, To: main_panel }
+  MqttExport: true
+```
+
+Per-source settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `Topic` | The topic to subscribe to. Bound live — adding one in the GUI needs no restart. |
+| `Metric` | Which roll-up this feeds (`realpower`, `energy`, …). Bind one topic per metric to drive both power and energy. |
+| `JsonField` | For JSON payloads, the field to read — dotted for nesting (`battery.power`). Blank means the whole payload is the number. |
+| `Scale` | Multiplier for unit conversion (`0.001` for W → kW) or to flip a sign convention (`-1`). |
+| `StaleAfterSeconds` | Ignore the value once it's this old (default 900). Stops a dead publisher from propping up the flow with a reading that stopped being true. `0` disables the check. |
+
+Notes:
+
+- A live reading **supersedes** the node's fixed `Value`, which stays as the fallback for anything you're
+  modelling by hand. A live `0` is a real reading (solar at night), not a fall-back to `Value`.
+- Negative readings are clamped to `0` — a directed flow graph can't carry a negative, and it would
+  subtract from the roll-up. Use `Scale: -1` if your publisher's sign convention is inverted.
+- Values feed the same exports as everything else, so an MQTT-sourced node reaches Prometheus, the MQTT
+  tier export, and the HA Energy Dashboard without any extra wiring.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

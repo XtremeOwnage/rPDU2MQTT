@@ -65,12 +65,51 @@ public class EnergyFlowNode
     public string Label { get; set; } = "";
 
     /// <summary>
-    /// A directly-known value for this node, used when it has no children (a leaf). The seam where
-    /// external sensors will bind: today it's a manual/known figure (e.g. an untracked load, or a panel
-    /// you're modelling before its CT clamp is ingested); later a node can instead bind to a live
-    /// measurement from any producer (CT clamps over MQTT/emoncms, Tigo solar, inverter ports, …).
-    /// Ignored when the node aggregates children.
+    /// A directly-known value for this node, used when it has no children (a leaf) and no <see cref="Mqtt"/>
+    /// source has reported. A manual/known figure — e.g. an untracked load, or a panel you're modelling
+    /// before its CT clamp is ingested. Ignored when the node aggregates children.
     /// </summary>
-    [Description("Optional directly-known value for a leaf node (used until a live sensor is bound).")]
+    [Description("Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.")]
     public double? Value { get; set; }
+
+    /// <summary>
+    /// Live measurements for this leaf node, read straight off the broker (#205) — the seam
+    /// <see cref="Value"/> always described. One entry per metric, so the same node can feed both the
+    /// power and the energy roll-up (e.g. Solar Assistant's <c>pv_power</c> and <c>pv_energy</c> topics).
+    /// A live reading supersedes <see cref="Value"/>; ignored when the node aggregates children.
+    /// </summary>
+    [Description("Live values for this node read from MQTT topics (e.g. Solar Assistant). One entry per metric; supersedes Value.")]
+    public List<EnergyFlowMqttSource> Mqtt { get; set; } = new();
+}
+
+/// <summary>
+/// Binds one MQTT topic to one metric of a flow node (#205). Built for producers that already publish to
+/// the broker — Solar Assistant, CT clamps, an inverter bridge — so their data joins the same hierarchy,
+/// roll-ups and exports as the PDU outlets.
+/// </summary>
+public class EnergyFlowMqttSource
+{
+    [Description("MQTT topic carrying this value, e.g. 'solar_assistant/inverter_1/pv_power/state'. Subscribed on the configured broker.")]
+    public string Topic { get; set; } = "";
+
+    [DefaultValue("realpower")]
+    [Description("Which measurement this topic supplies. The flow is rolled up per metric, so use realpower for live power and energy for cumulative kWh.")]
+    [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
+    public string Metric { get; set; } = "realpower";
+
+    /// <summary>
+    /// For JSON payloads: the field to read, dotted for nesting (<c>battery.power</c>). Blank treats the
+    /// whole payload as the number, which is what Solar Assistant's <c>/state</c> topics publish.
+    /// </summary>
+    [Description("For JSON payloads, the field to read (dotted for nesting, e.g. 'battery.power'). Blank = the whole payload is the number.")]
+    public string? JsonField { get; set; }
+
+    [DefaultValue(1.0)]
+    [Description("Multiplier applied to the received value — for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.")]
+    public double Scale { get; set; } = 1.0;
+
+    [DefaultValue(900)]
+    [Range(0, 86400, ErrorMessage = "StaleAfterSeconds must be between 0 and 86400.")]
+    [Description("Ignore the last value once it is this old, so a dead publisher stops silently propping up the flow. 0 disables the check (value never expires).")]
+    public int StaleAfterSeconds { get; set; } = 900;
 }

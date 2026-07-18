@@ -17,12 +17,14 @@ public sealed class HaEnergyDashboardSync
 {
     private readonly Config config;
     private readonly Core.ISnapshotCache snapshots;
+    private readonly Core.Flow.IFlowValueSource? live;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public HaEnergyDashboardSync(Config config, Core.ISnapshotCache snapshots)
+    public HaEnergyDashboardSync(Config config, Core.ISnapshotCache snapshots, Core.Flow.IFlowValueSource? live = null)
     {
         this.config = config;
         this.snapshots = snapshots;
+        this.live = live;
     }
 
     /// <summary>
@@ -43,7 +45,7 @@ public sealed class HaEnergyDashboardSync
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
 
-        var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric);
+        var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
         Func<string, string?> resolver = id =>
         {
             var uid = native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id);

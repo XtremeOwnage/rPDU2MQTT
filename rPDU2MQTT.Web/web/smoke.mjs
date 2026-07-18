@@ -89,10 +89,30 @@ const getEl = (id) => (byId[id] ||= Object.assign(makeEl(id === 'nav' ? 'nav' : 
 root.appendChild(getEl('nav'));
 root.appendChild(getEl('sections'));
 
+// A config with a custom flow node already bound to an MQTT source (#205), so opening the Flow tab
+// exercises the hierarchy editor and the live-sources table rather than just their empty states.
+const config = {
+  EnergyFlow: {
+    Nodes: [
+      { Id: 'solar', Label: 'Solar', Mqtt: [{ Topic: 'solar_assistant/inverter_1/pv_power/state', Metric: 'realpower' }] },
+      { Id: 'panel', Label: 'Panel', Value: 100 },
+    ],
+    Links: [{ From: 'solar', To: 'panel' }],
+    MqttExport: true,
+  },
+};
+const flowGraph = {
+  ok: true,
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'node' }, { id: 'panel', label: 'Panel', kind: 'node' }],
+  links: [{ source: 'solar', target: 'panel', value: 750 }],
+  metric: 'realpower', units: 'W',
+};
+
 const bodies = (url) =>
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
-  url.includes('/api/config') ? {} :
+  url.includes('/api/config') ? config :
+  url.includes('/api/flow') ? flowGraph :
   { ok: true };
 
 const sandbox = {
@@ -144,4 +164,17 @@ if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the 
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
 
-console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; sections OK`);
+// Tabs build their body lazily on first click, so build() alone never touches the bespoke editors. Open
+// the Flow tab to exercise the hierarchy editor + the MQTT live-sources binding table (#205).
+const flowLink = query(nav, 'a', true).find(a => a.textContent === 'Flow');
+if (!flowLink) fail('no Flow tab');
+flowLink.click();
+await new Promise(r => setTimeout(r, 50));
+
+const sectionsText = query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ');
+if (!sectionsText.includes('Live sources (MQTT)')) fail('the Flow tab did not render the live-sources editor');
+// The configured binding must show in the table — proves it read Nodes[].Mqtt, not just the empty state.
+if (!sectionsText.includes('solar_assistant/inverter_1/pv_power/state'))
+  fail('the live-sources table did not list the configured MQTT binding');
+
+console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; Flow editor + MQTT sources OK`);

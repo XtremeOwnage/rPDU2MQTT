@@ -17,7 +17,11 @@ public static class FlowGraphBuilder
     public static FlowGraph Build(PduData data, string metric = DefaultMetric)
         => Build(data, null, metric);
 
-    public static FlowGraph Build(PduData data, EnergyFlowConfig? flow, string metric = DefaultMetric)
+    /// <param name="live">
+    /// Optional supplier of live leaf values for custom nodes (MQTT/Solar Assistant today, #205). A live
+    /// reading for the metric being built wins over the node's static <c>Value</c>.
+    /// </param>
+    public static FlowGraph Build(PduData data, EnergyFlowConfig? flow, string metric = DefaultMetric, IFlowValueSource? live = null)
     {
         flow ??= new EnergyFlowConfig();
         var label = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -89,14 +93,26 @@ public static class FlowGraphBuilder
             }
         }
 
-        // Custom upstream nodes (#129). A node with a directly-known Value is a leaf source (the seam
-        // where external sensors — CT clamps, emoncms, Tigo, inverter ports — will bind their live value).
+        // Custom upstream nodes (#129). A node is a leaf source when it has a value of its own: a live
+        // reading bound to this metric (MQTT/Solar Assistant, #205) if one has arrived, else the static
+        // Value. Nodes that aggregate children have neither and are summed from below.
         foreach (var n in flow.Nodes)
             if (!string.IsNullOrEmpty(n.Id))
             {
                 label[n.Id] = string.IsNullOrEmpty(n.Label) ? n.Id : n.Label;
                 if (!kind.ContainsKey(n.Id)) kind[n.Id] = "node";
-                if (n.Value is > 0) leaf[n.Id] = n.Value.Value;
+                if (live is not null && live.TryGetValue(n.Id, metric, out var liveValue))
+                {
+                    // A live reading is authoritative even at 0: solar at night generates nothing, and the
+                    // static Value must not resurrect a phantom figure. (0 makes it a producer supplying 0,
+                    // so its links drop out — as opposed to having no value at all, which would make it an
+                    // aggregator that passes its children's demand upward.)
+                    // A negative reading — a battery under the opposite sign convention — can't be expressed
+                    // in a directed DAG and would subtract from the roll-up, so clamp it; use Scale: -1 on
+                    // the source to flip the convention instead.
+                    leaf[n.Id] = Math.Max(0, liveValue);
+                }
+                else if (n.Value is > 0) leaf[n.Id] = n.Value.Value;
             }
 
         // Custom directed links (From feeds To) plus legacy Parents (parent feeds child) — only when both
