@@ -6,6 +6,70 @@ import { exportData } from '../overrides.js';
 // Metrics a live source can supply — mirrors [AllowedValues] on EnergyFlowMqttSource.Metric.
 const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'frequency', 'powerfactor'];
 
+// How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
+// always wins; this only governs nodes the graph would otherwise infer.
+const NODE_MODES: [string, string, string][] = [
+  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['residual', 'Residual (untracked)', 'The designated absorber for untracked load: carries the demand still needed after every measured feeder has supplied its part.'],
+  ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
+];
+
+// Virtual-node manager (#129): rename, retype, set a fixed value or mode, and delete the custom nodes — the
+// "page to manage those" that the graph editor alone didn't cover. Value population is source-agnostic: a
+// node's number can come from a fixed value, or a bound live source (MQTT today, other ingests later) shown
+// in the Sources column; the Mode governs only what happens when neither is present.
+function renderNodeManager(customNodes: any[], links: any[], rerender: () => void) {
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, a “Total”, producers). Rename them, give a leaf a fixed value, or set how an unmeasured node is valued. A fixed value or a bound live source always wins over the mode; the mode only decides what an otherwise-unknown node does.' }));
+
+  if (!customNodes.length) {
+    box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
+    return box;
+  }
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Id', 'Label', 'Fixed value', 'Mode', 'Sources', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const body = el('tbody');
+  customNodes.forEach((n: any) => {
+    const tr = el('tr');
+    tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
+
+    const labIn = el('input', { type: 'text', value: n.Label || '', placeholder: n.Id, style: { width: '180px' } });
+    labIn.onchange = () => { n.Label = labIn.value.trim() || undefined; };
+    tr.appendChild(el('td', {}, labIn));
+
+    const valIn = el('input', { type: 'number', step: 'any', value: n.Value ?? '', placeholder: '—', style: { width: '110px' } });
+    valIn.onchange = () => { const v = +valIn.value; n.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
+    tr.appendChild(el('td', {}, valIn));
+
+    const modeSel = el('select', { style: { width: 'auto' } });
+    NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+    modeSel.value = n.Mode || 'auto';
+    modeSel.onchange = () => { n.Mode = modeSel.value === 'auto' ? undefined : modeSel.value; };
+    tr.appendChild(el('td', {}, modeSel));
+
+    // Bound live sources (MQTT today) — the seam other ingests plug into. Detail/editing lives below.
+    const srcMetrics = (n.Mqtt || []).map((s: any) => s.Metric || 'realpower');
+    tr.appendChild(el('td', { text: srcMetrics.length ? srcMetrics.join(', ') : '—', class: srcMetrics.length ? '' : 'num' }));
+
+    const rm = btn('Delete', 'danger');
+    rm.onclick = () => {
+      customNodes.splice(customNodes.indexOf(n), 1);
+      for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      toast(`${n.Label || n.Id} deleted.`, true);
+      rerender();
+    };
+    tr.appendChild(el('td', {}, rm));
+    body.appendChild(tr);
+  });
+  tbl.appendChild(body);
+  box.appendChild(tbl);
+  return box;
+}
+
 // Binds custom nodes to live MQTT topics (#205): the values a producer (Solar Assistant, a CT clamp)
 // already publishes become this node's reading, so it rolls up and exports like a PDU outlet. Only custom
 // nodes appear — PDU/outlet nodes get their values from the poll.
@@ -199,7 +263,7 @@ export function addFlowSection(nav: any, sections: any) {
     ed.innerHTML = '';
 
     ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target). A node can have several feeders, and a producer is just a feed into what it powers — e.g. drag from Solar onto your inverter. The target highlights green when in range; click ✕ on a link to remove it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target). A node can have several feeders, and a producer is just a feed into what it powers — e.g. drag from Solar onto your inverter. The target highlights green when in range; click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder.' }));
 
     const addBar = el('div', { class: 'ld-toolbar' });
     const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
@@ -221,6 +285,7 @@ export function addFlowSection(nav: any, sections: any) {
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
 
+    ed.appendChild(renderNodeManager(customNodes, links, renderEditor));
     ed.appendChild(renderMqttSources(customNodes, renderEditor));
 
     // Candidate nodes (from the built graph + custom defs).
@@ -304,7 +369,21 @@ export function addFlowSection(nav: any, sections: any) {
       const t1 = svgEl('text', { x: 11, y: 19, fill: 'var(--fg)', 'font-size': '12', 'font-weight': '600' }); t1.textContent = c.label.length > 26 ? c.label.slice(0, 25) + '…' : c.label; g.appendChild(t1);
       const t2 = svgEl('text', { x: 11, y: 35, fill: 'var(--muted)', 'font-size': '10' }); t2.textContent = c.id; g.appendChild(t2);
       g.appendChild(svgEl('circle', { cx: NW, cy: NH / 2, r: 7, fill: color, style: 'cursor:crosshair', 'data-port': c.id }));
-      if (c.custom) { const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm); }
+      if (c.custom) {
+        const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
+        // Rename in place: double-click the node to relabel it. Only the Label changes — Id stays fixed, so
+        // every link/source keyed off it survives. (Ids aren't editable here for exactly that reason.)
+        t1.setAttribute('title', 'Double-click to rename'); g.style.cursor = 'pointer';
+        g.addEventListener('dblclick', (e: any) => {
+          e.preventDefault();
+          const node = customNodes.find((n: any) => n.Id === c.id); if (!node) return;
+          const next = window.prompt(`Rename “${node.Label || node.Id}” (id ${node.Id} is unchanged)`, node.Label || node.Id);
+          if (next == null) return; // cancelled
+          node.Label = next.trim() || node.Id;
+          toast(`Renamed to ${node.Label}. Save the hierarchy to keep it.`, true);
+          renderEditor();
+        });
+      }
       nodeLayer.appendChild(g); nodeG[c.id] = g;
     });
 

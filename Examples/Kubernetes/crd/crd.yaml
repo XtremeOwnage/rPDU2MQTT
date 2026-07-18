@@ -693,6 +693,14 @@ spec:
                         Value:
                           type: number
                           description: Optional fixed value for a leaf node. Used only when no live MQTT source has reported for it.
+                        Mode:
+                          type: string
+                          enum:
+                          - ''
+                          - auto
+                          - residual
+                          - none
+                          description: "How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand), or 'none' (never inferred). A live/static Value always wins."
                         Mqtt:
                           type: array
                           items:

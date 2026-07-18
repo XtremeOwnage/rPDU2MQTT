@@ -73,6 +73,25 @@ public class EnergyFlowNode
     public double? Value { get; set; }
 
     /// <summary>
+    /// How this node's value is decided when it has no direct measurement (#129). A live source or static
+    /// <see cref="Value"/> always wins regardless — this only governs nodes the graph would otherwise have
+    /// to infer:
+    /// <list type="bullet">
+    /// <item><c>auto</c> (default): aggregate children, and as an upstream feeder take a share of what's
+    /// left after measured siblings — the historical behaviour.</item>
+    /// <item><c>residual</c>: the designated "untracked" absorber — takes the demand a node still needs
+    /// after every measured feeder has supplied its bit (e.g. house load not behind a PDU or CT clamp).</item>
+    /// <item><c>none</c>: never inferred — contributes nothing unless it has a real value/children, so an
+    /// unmeasured source (e.g. Grid, when solar already covers the load) simply drops out instead of being
+    /// assigned a fabricated figure.</item>
+    /// </list>
+    /// </summary>
+    [DefaultValue("auto")]
+    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand), or 'none' (never inferred). A live/static Value always wins.")]
+    [AllowedValues("auto", "residual", "none")]
+    public string Mode { get; set; } = "auto";
+
+    /// <summary>
     /// Live measurements for this leaf node, read straight off the broker (#205) — the seam
     /// <see cref="Value"/> always described. One entry per metric, so the same node can feed both the
     /// power and the energy roll-up (e.g. Solar Assistant's <c>pv_power</c> and <c>pv_energy</c> topics).

@@ -125,13 +125,24 @@ public static class FlowGraphBuilder
             if (!string.IsNullOrEmpty(child) && !string.IsNullOrEmpty(parent) && label.ContainsKey(child) && label.ContainsKey(parent))
                 AddEdgeSafe(parent, child);
 
-        // How many feeders does each node have? A node's demand is split equally among them so a node
-        // reachable by several paths (e.g. a panel fed both directly and via a sub-panel) isn't counted
-        // multiple times — otherwise the inflow inflates and the Sankey can't balance.
-        var inCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (_, kids) in outgoing)
+        // Which feeders point into each node — used to split a node's demand across them (so a node
+        // reachable by several paths isn't counted multiple times) and, crucially, to let measured feeders
+        // supply their real figure before the untracked remainder is shared out among the rest.
+        var incoming = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (from, kids) in outgoing)
             foreach (var to in kids)
-                inCount[to] = inCount.GetValueOrDefault(to) + 1;
+            {
+                if (!incoming.TryGetValue(to, out var fs)) incoming[to] = fs = new();
+                fs.Add(from);
+            }
+
+        // Per-node value mode (#129): governs how an unmeasured node is valued. A node with a live/static
+        // value ignores this. Unknown/blank -> "auto" (the historical behaviour).
+        var mode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+            if (!string.IsNullOrEmpty(n.Id))
+                mode[n.Id] = string.IsNullOrWhiteSpace(n.Mode) ? "auto" : n.Mode.Trim().ToLowerInvariant();
+        string Mode(string id) => mode.TryGetValue(id, out var m) ? m : "auto";
 
         // Need(id): power this node must receive = its known value (outlet sink or producer), else the sum
         // of the flows on its outgoing links. Memoized + cycle-guarded.
@@ -147,19 +158,39 @@ public static class FlowGraphBuilder
             needMemo[id] = v;
             return v;
         }
-        // EdgeFlow(from -> to): a demand link carries the target's demand split among its feeders. A
-        // producer supplies its measured generation, divided across the things it powers in proportion to
-        // their downstream demand (equal split if none draw anything) — so a producer feeding several
-        // consumers isn't counted once per link.
+        // EdgeFlow(from -> to): how much flows along one link.
+        //  - A producer (a measured leaf feeding others) supplies its generation, divided across the things
+        //    it powers in proportion to their downstream demand (equal split if none draw anything) — so a
+        //    producer feeding several consumers isn't counted once per link.
+        //  - An unmeasured feeder conveys part of the target's *remaining* demand: measured siblings supply
+        //    their real figure first, and only what's left over (the untracked portion) is shared out. That
+        //    stops the graph fabricating a value for, say, Grid when Solar already covers the load. Which
+        //    unmeasured feeders share the remainder is set by their Mode: an explicit 'residual' node is the
+        //    designated absorber, 'none' takes nothing, and plain 'auto' feeders split it when no 'residual'
+        //    node is present.
         double EdgeFlow(string from, string to, HashSet<string> path)
         {
-            if (!leaf.TryGetValue(from, out var produced))
-                return Need(to, path) / Math.Max(1, inCount.GetValueOrDefault(to));
+            if (leaf.TryGetValue(from, out var produced))
+            {
+                var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
+                if (kids.Count <= 1) return produced;
+                var totalDemand = kids.Sum(c => Need(c, path));
+                return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
+            }
 
-            var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
-            if (kids.Count <= 1) return produced;
-            var totalDemand = kids.Sum(c => Need(c, path));
-            return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
+            if (Mode(from) == "none") return 0;   // explicitly contributes nothing ("leave unset")
+
+            var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
+            var measured = feeders.Where(leaf.ContainsKey).Sum(f => EdgeFlow(f, to, path));
+            var remainder = Math.Max(0, Need(to, path) - measured);
+
+            // Unmeasured, non-'none' feeders that may absorb the remainder. If any is 'residual', only those
+            // share it; otherwise the 'auto' feeders split it (back-compat when nothing is measured).
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && Mode(f) != "none").ToList();
+            var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
+            var absorbers = residual.Count > 0 ? residual : unmeasured;
+            if (absorbers.Count == 0 || !absorbers.Contains(from, StringComparer.OrdinalIgnoreCase)) return 0;
+            return remainder / absorbers.Count;
         }
 
         // Emit one link per edge, valued by the flow it carries.
