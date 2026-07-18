@@ -377,6 +377,60 @@ public class FlowGraphTests
         Assert.DoesNotContain(graph.Links, l => l.Source == "spare");
     }
 
+    [Fact]
+    public void Build_UntrackedChild_ShowsTheMeasuredParentsUnaccountedConsumption()
+    {
+        // A panel with a measured total (CT clamp = 250W) feeds a PDU that only accounts for 100W of it.
+        // An 'untracked' child surfaces the missing 150W instead of the PDU being scaled up to fill 250.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Main Panel", Value = 250 }, // measured total
+                new EnergyFlowNode { Id = "rest", Label = "Untracked", Mode = "untracked" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "pdu:pdu1" }, // tracked child (100W)
+                new EnergyFlowLink { From = "panel", To = "rest" },     // untracked child
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Equal(100, graph.Links.Single(l => l.Target == "pdu:pdu1").Value); // tracked child keeps its real draw
+        Assert.Equal(150, graph.Links.Single(l => l.Target == "rest").Value);     // untracked child = 250 - 100
+        // The parent's measured total is conserved across its children.
+        Assert.Equal(250, graph.Links.Where(l => l.Source == "panel").Sum(l => l.Value));
+    }
+
+    [Fact]
+    public void Build_UntrackedChild_ContributesNothing_WhenParentHasNoMeasuredTotal()
+    {
+        // Without a measured total on the parent there's no known figure to take a remainder from, so the
+        // untracked child stays at zero (and drops out) rather than inventing a number.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Main Panel" }, // aggregator, no measured total
+                new EnergyFlowNode { Id = "rest", Label = "Untracked", Mode = "untracked" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "pdu:pdu1" },
+                new EnergyFlowLink { From = "panel", To = "rest" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "rest");
+        Assert.Equal(100, graph.Links.Single(l => l.Target == "pdu:pdu1").Value); // panel still carries its tracked load
+    }
+
     // Walk the emitted links; true if they contain a directed cycle.
     private static bool HasCycle(FlowGraph graph)
     {

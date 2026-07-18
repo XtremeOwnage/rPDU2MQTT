@@ -759,7 +759,8 @@ const SOURCE_METRICS = ['realpower', 'apparentpower', 'energy', 'current', 'volt
 // always wins; this only governs nodes the graph would otherwise infer.
 const NODE_MODES                             = [
   ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
-  ['residual', 'Residual (untracked)', 'The designated absorber for untracked load: carries the demand still needed after every measured feeder has supplied its part.'],
+  ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
+  ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
   ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
 ];
 

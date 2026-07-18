@@ -158,10 +158,18 @@ public static class FlowGraphBuilder
             needMemo[id] = v;
             return v;
         }
+        // Demand a single child draws through one of its feeders (its downstream need, split if it has
+        // several feeders) — used when a measured parent distributes its total across tracked children.
+        double DemandShare(string child, HashSet<string> path)
+            => Need(child, path) / Math.Max(1, incoming.TryGetValue(child, out var f) ? f.Count : 1);
+
         // EdgeFlow(from -> to): how much flows along one link.
         //  - A producer (a measured leaf feeding others) supplies its generation, divided across the things
         //    it powers in proportion to their downstream demand (equal split if none draw anything) — so a
-        //    producer feeding several consumers isn't counted once per link.
+        //    producer feeding several consumers isn't counted once per link. Except: if one of its children
+        //    is marked 'untracked', the tracked children draw their real demand and the untracked child mops
+        //    up the parent's remaining measured throughput (HA-style untracked consumption) — so the parent's
+        //    total is conserved rather than scaled to fill the tracked children.
         //  - An unmeasured feeder conveys part of the target's *remaining* demand: measured siblings supply
         //    their real figure first, and only what's left over (the untracked portion) is shared out. That
         //    stops the graph fabricating a value for, say, Grid when Solar already covers the load. Which
@@ -173,6 +181,16 @@ public static class FlowGraphBuilder
             if (leaf.TryGetValue(from, out var produced))
             {
                 var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
+
+                // Untracked children only make sense under a parent with a known total (this measured leaf).
+                var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
+                if (untracked.Count > 0)
+                {
+                    var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
+                    var spare = Math.Max(0, produced - trackedDraw);
+                    return Mode(to) == "untracked" ? spare / untracked.Count : DemandShare(to, path);
+                }
+
                 if (kids.Count <= 1) return produced;
                 var totalDemand = kids.Sum(c => Need(c, path));
                 return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;

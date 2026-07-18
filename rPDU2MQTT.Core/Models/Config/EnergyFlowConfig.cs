@@ -79,16 +79,21 @@ public class EnergyFlowNode
     /// <list type="bullet">
     /// <item><c>auto</c> (default): aggregate children, and as an upstream feeder take a share of what's
     /// left after measured siblings — the historical behaviour.</item>
-    /// <item><c>residual</c>: the designated "untracked" absorber — takes the demand a node still needs
-    /// after every measured feeder has supplied its bit (e.g. house load not behind a PDU or CT clamp).</item>
+    /// <item><c>residual</c>: the designated "untracked" absorber on the <em>feeder</em> side — takes the
+    /// demand a node still needs after every measured feeder has supplied its bit (e.g. house load not
+    /// behind a PDU or CT clamp).</item>
+    /// <item><c>untracked</c>: the mirror on the <em>child</em> side — placed under a parent that has a
+    /// measured total (a bound source / fixed value), it shows the slice of that total the parent's tracked
+    /// children don't account for (HA-style untracked consumption). Contributes nothing if the parent has no
+    /// measured total.</item>
     /// <item><c>none</c>: never inferred — contributes nothing unless it has a real value/children, so an
     /// unmeasured source (e.g. Grid, when solar already covers the load) simply drops out instead of being
     /// assigned a fabricated figure.</item>
     /// </list>
     /// </summary>
     [DefaultValue("auto")]
-    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand), or 'none' (never inferred). A live/static Value always wins.")]
-    [AllowedValues("auto", "residual", "none")]
+    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live/static Value always wins.")]
+    [AllowedValues("auto", "residual", "untracked", "none")]
     public string Mode { get; set; } = "auto";
 
     /// <summary>
