@@ -132,6 +132,10 @@ public static class ServiceConfiguration
         if (roles != HostRole.All)
             services.AddHostedService(sp => sp.GetRequiredService<Services.HeartbeatService>());
 
+        // Listens for GUI-issued restart requests over the bus (#210), so a tier can be restarted remotely.
+        // Loaded in every role/process; a matching request stops the process and the orchestrator restarts it.
+        services.AddHostedService<Services.RestartCommandService>();
+
         // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
         if (worker)
         {
