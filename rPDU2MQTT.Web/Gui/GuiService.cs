@@ -52,9 +52,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Core.Flow.IFlowValueSource? live = null)
+    private readonly Orleans.IGrainFactory grains;
+
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
     {
         this.live = live;
+        this.grains = grains;
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
@@ -411,13 +414,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Update checks are only available with the Kubernetes config source." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.CheckAction, DateTime.UtcNow);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = "Update check requested." }, ConfigSchema.Json);
+                var report = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).CheckNow(force: true);
+                return Results.Json(new { ok = true, message = report.Message ?? "Checked.", update = report }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -455,13 +453,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "A tag is required." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.SetTagAction, DateTime.UtcNow, tag);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = $"Switching to '{tag}'. The Deployment will roll — watch the header/Diagnostics for the new version." }, ConfigSchema.Json);
+                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).SetTag(tag);
+                return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -474,13 +467,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Force update needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.RedeployAction, DateTime.UtcNow);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = "Force update requested — re-pulling the current tag and rolling the Deployment." }, ConfigSchema.Json);
+                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Redeploy();
+                return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -1370,19 +1358,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none. Bounded
     /// by a short timeout so a slow/unreachable API server can never hang the header's /api/status call.
     /// </summary>
-    private static async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
+    private async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
-        if (k8s is null) return null;
-        try
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(4));
-            var status = await k8s.ReadStatusAsync(cts.Token);
-            if (status is { } s && s.TryGetProperty("update", out var u))
-                return System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
-        }
-        catch (Exception ex) { Log.Debug($"Could not read operator update status: {ex.Message}"); }
-        return null;
+        if (k8s is null) return null;   // operator only runs with the Kubernetes config source
+        try { return await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Status(); }
+        catch (Exception ex) { Log.Debug($"Could not read operator status from grain: {ex.Message}"); return null; }
     }
 
     // --- Kubernetes rollout restart ------------------------------------------------------------

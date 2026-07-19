@@ -19,6 +19,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
+		<ProjectReference Include="..\rPDU2MQTT.Grains.Abstractions\rPDU2MQTT.Grains.Abstractions.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

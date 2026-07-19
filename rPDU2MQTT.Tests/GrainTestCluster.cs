@@ -15,11 +15,18 @@ public static class GrainTestCluster
 {
     private static bool IsAbstraction(Type t) => t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true;
 
+    private sealed class FakeRegistry : rPDU2MQTT.Services.Operator.IContainerRegistry
+    {
+        public Task<IReadOnlyList<string>> ListTagsAsync(string h, string r, CancellationToken ct) => Task.FromResult((IReadOnlyList<string>)Array.Empty<string>());
+        public Task<string?> ResolveDigestAsync(string h, string r, string reference, CancellationToken ct) => Task.FromResult<string?>(null);
+    }
+
     private sealed class Silo : ISiloConfigurator
     {
         public void Configure(ISiloBuilder silo)
         {
             silo.Services.AddSingleton(new Config());
+            silo.Services.AddSingleton<rPDU2MQTT.Services.Operator.IContainerRegistry, FakeRegistry>();
             silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: IsAbstraction));
         }
     }
