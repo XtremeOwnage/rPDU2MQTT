@@ -13,7 +13,10 @@ namespace rPDU2MQTT.Tests;
 /// </summary>
 public static class GrainTestCluster
 {
-    private static bool IsAbstraction(Type t) => t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true;
+    private static bool IsAbstraction(Type t) =>
+        t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true
+        || t.Namespace?.StartsWith("rPDU2MQTT.Models.PDU") == true
+        || t == typeof(rPDU2MQTT.Core.PduSnapshot);
 
     private sealed class FakeRegistry : rPDU2MQTT.Services.Operator.IContainerRegistry
     {

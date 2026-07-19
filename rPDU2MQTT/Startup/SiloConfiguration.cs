@@ -37,6 +37,14 @@ public static class SiloConfiguration
         // The pipeline DTOs (rPDU2MQTT.Abstractions.*) carry no Orleans attributes on purpose — the contract
         // layer stays framework-free. Ship them across grains with the JSON serializer instead of the
         // generated one; the purity test keeps Orleans out of Abstractions.
-        silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: t => t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true));
+        // Framework-free DTOs that cross grain boundaries: the pipeline contracts, and the PDU snapshot/model
+        // (which carry no Orleans attributes) — shipped with JSON so the domain stays serializer-agnostic.
+        silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: IsGrainDto));
     }
+
+    /// <summary>Types shipped across grains via JSON (no Orleans attributes on the domain).</summary>
+    public static bool IsGrainDto(Type t) =>
+        t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true
+        || t.Namespace?.StartsWith("rPDU2MQTT.Models.PDU") == true
+        || t == typeof(rPDU2MQTT.Core.PduSnapshot);
 }

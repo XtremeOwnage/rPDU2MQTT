@@ -8,4 +8,7 @@
     <PackageReference Include="Microsoft.Orleans.Sdk" Version="10.2.1" />
     <ProjectReference Include="..\rPDU2MQTT.Abstractions\rPDU2MQTT.Abstractions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
+  </ItemGroup>
 </Project>

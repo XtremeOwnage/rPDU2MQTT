@@ -87,10 +87,17 @@ public static class ServiceConfiguration
         // Status board shows "PDUs: no data yet / waiting on a worker node" forever even though the worker
         // is healthy (the consumer only publishes to the bus; nothing drained it).
         if (worker || api || ui)
+        {
             services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
-        // Data production (the PDU pollers) runs only in the Worker role.
+            // v3: PDU snapshots reach every process from the single-activation PduGrain via this sync
+            // (publishes onto the local bus → snapshot cache), replacing the MqttBusBridge mirroring.
+            services.AddHostedService<Hosting.PduSyncService>();
+        }
+        // v3: PDU polling is a single-activation grain per instance; this activator drives it (worker),
+        // replacing InstanceManager's per-process poller. InstanceManager stays a singleton for the GUI
+        // (primary repoint / reconcile) but no longer runs the pollers.
         if (worker)
-            services.AddHostedService(sp => sp.GetRequiredService<InstanceManager>());
+            services.AddHostedService<Hosting.PduGrainActivator>();
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
@@ -141,15 +148,8 @@ public static class ServiceConfiguration
         // (MqttToFlowBridge) both feed the flow grain, so this one source has all of it. No per-process ingest.
         services.AddSingleton<Core.Flow.IFlowValueSource>(grainSyncedFlow);
 
-        // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
-        // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
-        // Single-node "all" keeps the bus fully in-process and skips this (no extra broker traffic).
-        if (roles != HostRole.All)
-            services.AddHostedService(sp => new Services.MqttBusBridge(
-                sp.GetRequiredService<IHiveMQClient>(),
-                sp.GetRequiredService<Core.IMessageBus>(),
-                sp.GetRequiredService<Config>(),
-                producer: worker));
+        // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
+        // PduSyncService's job now (grains, not MQTT mirroring).
 
         // Per-process liveness beacons so the GUI can list every role process in a split deployment.
         // Always resolvable (the GUI reads it); only runs the publish/subscribe loop when roles are split.
