@@ -37,17 +37,13 @@ public sealed class EmonCmsStatus
         }
     }
 
-    /// <summary>A snapshot for serialization (e.g. the diagnostics endpoint).</summary>
-    public object Snapshot()
+    /// <summary>True once this process has actually tried an export — i.e. it runs the exporter (the worker).</summary>
+    public bool HasAttempted { get { lock (gate) return LastAttemptUtc is not null; } }
+
+    /// <summary>A snapshot for serialization (e.g. the diagnostics endpoint) and for the heartbeat.</summary>
+    public Core.EmonCmsHealth Snapshot()
     {
         lock (gate)
-            return new
-            {
-                ok = LastOk,
-                lastAttemptUtc = LastAttemptUtc,
-                lastSuccessUtc = LastSuccessUtc,
-                lastError = LastError,
-                count = LastCount,
-            };
+            return new Core.EmonCmsHealth(LastOk, LastAttemptUtc, LastSuccessUtc, LastError, LastCount);
     }
 }
