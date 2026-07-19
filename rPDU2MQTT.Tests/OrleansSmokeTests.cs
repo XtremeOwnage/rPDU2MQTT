@@ -1,4 +1,3 @@
-using Orleans.TestingHost;
 using rPDU2MQTT.Grains.Abstractions.Diagnostics;
 using Xunit;
 
@@ -10,17 +9,12 @@ public class OrleansSmokeTests
     [Fact]
     public async Task PingGrain_Activates_InTestCluster()
     {
-        var cluster = new TestClusterBuilder(1).Build();
-        await cluster.DeployAsync();
+        var cluster = await GrainTestCluster.StartAsync();
         try
         {
-            var grain = cluster.GrainFactory.GetGrain<IPingGrain>("self");
-            var reply = await grain.Ping();
+            var reply = await cluster.GrainFactory.GetGrain<IPingGrain>("self").Ping();
             Assert.Contains("pong", reply);
         }
-        finally
-        {
-            await cluster.StopAllSilosAsync();
-        }
+        finally { await cluster.StopAllSilosAsync(); }
     }
 }

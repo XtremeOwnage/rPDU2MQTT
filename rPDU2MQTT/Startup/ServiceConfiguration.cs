@@ -128,8 +128,10 @@ public static class ServiceConfiguration
         // contention — the reads time out. So the poller runs only in the Worker role (data production);
         // the API/UI read the values through the same bus/exports as any other producer.
         services.AddSingleton<Services.EnergyFlowModbusSourceService>();
+        // v3: the Modbus device is polled by its single-activation DeviceGrain (one owner cluster-wide),
+        // driven by this activator — not by a per-process poller. Removes single-client-gateway contention.
         if (worker)
-            services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
+            services.AddHostedService<Hosting.DeviceGrainActivator>();
 
         // The graph/exporters see one IFlowValueSource; the composite merges every ingest (MQTT + Modbus).
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
