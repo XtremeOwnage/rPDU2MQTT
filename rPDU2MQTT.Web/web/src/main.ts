@@ -21,10 +21,37 @@ export async function load() {
   refreshStatus();
 }
 
+// Last-seen operator update report, so "check now" can tell when a fresh result has landed.
+let lastCheckedAt: string | null = null;
+
+// Render the header update chip from the operator's report (#210). Hidden when no operator is reporting.
+function renderUpdate(u: any) {
+  const upd = document.getElementById('st-update') as any;
+  if (!u) { upd.style.display = 'none'; lastCheckedAt = null; return; }
+  lastCheckedAt = u.checkedAt || null;
+  upd.style.display = 'inline-flex';
+  upd.classList.remove('busy');
+  if (u.available) {
+    upd.className = 'st-update warn';
+    upd.textContent = '↑ ' + (u.latest || 'Update');
+    upd.title = 'Update available: ' + (u.latest || '?') + (u.current ? ' (on ' + u.current + ')' : '')
+      + (u.applied ? ' — auto-updated' : '') + '\nClick to check now';
+  } else if (u.current) {
+    upd.className = 'st-update good';
+    upd.textContent = '✓ ' + u.current;
+    upd.title = 'Up to date' + (u.checkedAt ? ' (checked ' + new Date(u.checkedAt).toLocaleString() + ')' : '') + '\nClick to check now';
+  } else {
+    upd.className = 'st-update';
+    upd.textContent = 'Check updates';
+    upd.title = (u.message || '') + '\nClick to check now';
+  }
+}
+
 export async function refreshStatus() {
   const { body } = await api('/api/status');
   (document.getElementById('st-version') as any).textContent = 'v' + (body.version || '?');
   (document.getElementById('st-mqtt-dot') as any).className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+  renderUpdate(body.update);
   // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
   const readOnly = body.configWritable === false;
   const save = document.getElementById('btn-save') as any;
@@ -38,6 +65,32 @@ export async function refreshStatus() {
   }
 }
 
+// "Check now": ask the operator (a separate process) to run a registry check, then poll for the result.
+async function checkUpdatesNow() {
+  const upd = document.getElementById('st-update') as any;
+  if (upd.classList.contains('busy')) return;
+  const priorCheckedAt = lastCheckedAt;
+  upd.classList.add('busy'); upd.textContent = '⏳ Checking…'; upd.title = 'Checking for updates…';
+
+  const r = await api('/api/operator/check', { method: 'POST' });
+  if (!r.ok || !r.body?.ok) { toast(r.body?.message || 'Update check failed.', false); await refreshStatus(); return; }
+
+  // The operator patches the CR status asynchronously; poll a few times for a newer checkedAt.
+  const started = Date.now();
+  while (Date.now() - started < 12000) {
+    await new Promise(res => setTimeout(res, 1500));
+    const s = (await api('/api/status')).body;
+    if (s.update && s.update.checkedAt && s.update.checkedAt !== priorCheckedAt) {
+      renderUpdate(s.update);
+      toast(s.update.available ? ('Update available: ' + (s.update.latest || '?')) : 'Up to date.', true);
+      return;
+    }
+  }
+  await refreshStatus();
+  toast('Requested a check — no response yet. Is the operator role running?', false);
+}
+
+(document.getElementById('st-update') as any).onclick = checkUpdatesNow;
 (document.getElementById('btn-reload') as any).onclick = load;
 (document.getElementById('btn-save') as any).onclick = async () => {
   const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });

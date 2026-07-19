@@ -388,7 +388,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapGet("/api/status", (HttpContext ctx) => Results.Json(new
+        app.MapGet("/api/status", async (HttpContext ctx) => Results.Json(new
         {
             version = Version,
             configSource = configSource.Describe,
@@ -399,7 +399,28 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             actionsEnabled = config.Primary.ActionsEnabled,
             auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
             user = UseOidc ? ctx.User?.Identity?.Name : null,
+            // Operator update state (#210) for the header indicator; null when no operator is reporting.
+            update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ctx.RequestAborted),
         }, ConfigSchema.Json));
+
+        // "Check now" from the header: the operator runs in a separate process, so ask it over the bus to
+        // run an immediate registry check. It patches the CR status, which the header then re-reads.
+        app.MapPost("/api/operator/check", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource)
+                return Results.Json(new { ok = false, message = "Update checks are only available with the Kubernetes config source." }, ConfigSchema.Json);
+            try
+            {
+                var cmd = new Core.OperatorCommand(Core.OperatorCommand.CheckAction, DateTime.UtcNow);
+                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
+                {
+                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
+                    Retain = false,
+                });
+                return Results.Json(new { ok = true, message = "Update check requested." }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
+        });
 
         // Configured PDU instances (the per-tab instance selector on Live Data / Control reads this).
         app.MapGet("/api/instances", () =>
@@ -421,17 +442,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             var k8s = configSource as KubernetesConfigSource;
 
             // Operator update report (#210), if the operator has written one to the CR status.
-            object? update = null;
-            if (k8s is not null)
-            {
-                try
-                {
-                    var status = await k8s.ReadStatusAsync(ctx.RequestAborted);
-                    if (status is { } s && s.TryGetProperty("update", out var u))
-                        update = System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
-                }
-                catch (Exception ex) { Log.Debug($"Diagnostics: could not read operator update status: {ex.Message}"); }
-            }
+            var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
             // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the
             // local status has never attempted an export — fall back to the worker's status carried on its
@@ -1286,6 +1297,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         using var stream = asm.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
+    }
+
+    /// <summary>Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none.</summary>
+    private static async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
+    {
+        if (k8s is null) return null;
+        try
+        {
+            var status = await k8s.ReadStatusAsync(ct);
+            if (status is { } s && s.TryGetProperty("update", out var u))
+                return System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
+        }
+        catch (Exception ex) { Log.Debug($"Could not read operator update status: {ex.Message}"); }
+        return null;
     }
 
     // --- Kubernetes rollout restart ------------------------------------------------------------
