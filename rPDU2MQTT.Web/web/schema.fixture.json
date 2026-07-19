@@ -1913,10 +1913,24 @@
                         {
                             "key": "Port",
                             "label": "Port",
-                            "description": "TCP port the device listens on (Modbus default 502).",
+                            "description": "TCP port the device listens on (Modbus TCP default 502; RS485-to-Ethernet gateways often use 4196, 8899, or 502).",
                             "type": "int",
                             "required": false,
                             "default": 502
+                        },
+                        {
+                            "key": "Framing",
+                            "label": "Framing",
+                            "description": "Wire protocol: 'auto' (try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device answers), 'tcp' (native Modbus TCP), or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket — what most RS485-to-Ethernet gateways / serial dongles speak, e.g. an EG4 inverter on port 4196/8899). Leave on 'auto' unless you want to pin one.",
+                            "type": "enum",
+                            "required": false,
+                            "default": "auto",
+                            "enumValues": [
+                                "",
+                                "auto",
+                                "tcp",
+                                "rtu-over-tcp"
+                            ]
                         },
                         {
                             "key": "UnitId",

@@ -44,6 +44,10 @@
   #st-version { font-family:var(--mono); font-size:11px; color:var(--faint); padding:2px 7px;
     border:1px solid var(--line); border-radius:100px; }
 
+  /* Import-device-template panel on the Nodes tab. */
+  .tpl-import { margin:8px 0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel2); }
+  .tpl-import .desc { margin:0 0 8px; }
+
   /* Header update indicator (#210): reflects the operator's registry check; click = check now. */
   .st-update { font:inherit; font-size:11px; color:var(--muted); padding:2px 9px; border:1px solid var(--line);
     border-radius:100px; background:transparent; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }

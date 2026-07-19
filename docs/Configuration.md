@@ -738,6 +738,36 @@ Notes:
 - Values feed the same exports as everything else, so an MQTT-sourced node reaches Prometheus, the MQTT
   tier export, and the HA Energy Dashboard without any extra wiring.
 
+### Live sources from Modbus TCP
+
+A node's value can also come from a Modbus TCP device (an inverter, a meter, a PLC). Define the connection
+once under `Modbus`, then bind a node's metric to a register — same live-value seam as MQTT (polled by the
+worker, rolled up and exported identically).
+
+Each connection has a **`Framing`**:
+
+- **`auto`** (default) — try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device
+  actually answers. You normally don't have to think about it. (The resolved framing is remembered per
+  connection so it isn't re-probed every poll.)
+- **`tcp`** — pin native Modbus TCP (a device/gateway that speaks Modbus/TCP directly, usually port 502).
+- **`rtu-over-tcp`** — pin Modbus RTU frames over a raw TCP socket. This is what most **RS485-to-Ethernet
+  gateways / serial dongles** speak (e.g. an **EG4** inverter reached on port 4196/8899).
+
+If a connection *connects* but every register reads as an error, it's the framing — `auto` handles that for
+you; pin one only if you want to skip the detection.
+
+### Device templates (Nodes tab → "Import device template")
+
+Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:
+pick the device, give it an id prefix and (for Modbus) its host/IP, and it drops in the Modbus connection
+plus pre-wired nodes (solar / battery / grid / inverter) with the register bindings filled in. Review and
+**Save** afterwards.
+
+> Register maps are **community starting points** and vary by model and firmware — verify the addresses and
+> scales against your own device. Each imported binding notes the register it maps, and the template links
+> its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
+> it can be turned into a template.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

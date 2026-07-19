@@ -436,6 +436,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, instances }, ConfigSchema.Json);
         });
 
+        // Ready-made energy-flow device templates the Nodes tab can import (EG4 inverters, meters, …).
+        app.MapGet("/api/node-templates", () =>
+            Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
+
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {
@@ -688,7 +692,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     return Results.Json(new { ok = false, message = "A host is required." }, ConfigSchema.Json);
 
                 var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
-                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Items), cts.Token);
+                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.Items), cts.Token);
                 return Results.Json(new { ok, message, readings }, ConfigSchema.Json);
             }
             catch (OperationCanceledException) { return Results.Json(new { ok = false, message = "Modbus probe timed out." }, ConfigSchema.Json); }
@@ -1373,7 +1377,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private static readonly System.Text.Json.JsonSerializerOptions ProbeJson = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
-    private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, List<EnergyFlowSource>? Items);
+    private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, List<EnergyFlowSource>? Items);
 
     /// <summary>One (node, metric) whose current live value the Nodes editor wants.</summary>
     private sealed record LiveValueQuery(string? Node, string? Metric);
