@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The v3 contract layer (see docs/v3-orleans-migration.md). This project is the architectural invariant:
+    it has ZERO package references and references no other project. Sources, the flow middleware, and
+    destinations all depend on these interfaces, never on each other's concrete types — and crucially, no
+    framework type (Orleans, HiveMQ, FluentModbus, Kubernetes) may ever appear here. If it needs a package,
+    it doesn't belong in Abstractions.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

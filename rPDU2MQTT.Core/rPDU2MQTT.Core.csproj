@@ -27,4 +27,8 @@
 		<InternalsVisibleTo Include="rPDU2MQTT.Tests" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <ProjectReference Include="..\rPDU2MQTT.Abstractions\rPDU2MQTT.Abstractions.csproj" />
+	</ItemGroup>
+
 </Project>
