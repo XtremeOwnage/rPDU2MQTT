@@ -1224,8 +1224,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         return new { ok = true, prometheusEnabled = promEnabled, emonEnabled, count = rows.Count, rows };
     }
 
-    private static string Version =>
-        Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+    private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
     /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
     private static string BuildManifest(Config config)

@@ -38,7 +38,7 @@ public sealed class HeartbeatService : IHostedService
         var host = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME") ?? Environment.MachineName;
         var rawId = $"{string.Join('-', roleNames)}-{host}-{Guid.NewGuid():N}".ToLowerInvariant();
         var id = Sanitize(rawId.Length > 80 ? rawId[..80] : rawId);
-        var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString();
+        var version = rPDU2MQTT.Helpers.AppInfo.Version;
         self = new Heartbeat(id, roleNames, host, DateTime.UtcNow, DateTime.UtcNow, version);
     }
 
