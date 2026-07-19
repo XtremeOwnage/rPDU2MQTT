@@ -44,10 +44,38 @@ public sealed class ContainerRegistryClient : IContainerRegistry
         return tags;
     }
 
-    private static Task<HttpResponseMessage> SendAsync(string url, string? token, CancellationToken ct)
+    // The manifest media types to ask for when resolving a tag → digest (indexes first for multi-arch).
+    private const string ManifestAccept =
+        "application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json," +
+        "application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json";
+
+    /// <summary>
+    /// Resolve a tag (or reference) to the image digest it currently points at, so a "force update" can pin
+    /// the exact bytes and pull even under <c>imagePullPolicy: IfNotPresent</c>. Null if the registry doesn't
+    /// report one.
+    /// </summary>
+    public async Task<string?> ResolveDigestAsync(string registryHost, string repository, string reference, CancellationToken ct)
+    {
+        var url = $"https://{registryHost}/v2/{repository}/manifests/{reference}";
+        using var response = await SendAsync(url, null, ct, ManifestAccept);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            var token = await AcquireTokenAsync(response, repository, ct);
+            using var retried = await SendAsync(url, token, ct, ManifestAccept);
+            retried.EnsureSuccessStatusCode();
+            return DigestOf(retried);
+        }
+        response.EnsureSuccessStatusCode();
+        return DigestOf(response);
+    }
+
+    private static string? DigestOf(HttpResponseMessage response)
+        => response.Headers.TryGetValues("Docker-Content-Digest", out var v) ? v.FirstOrDefault() : null;
+
+    private static Task<HttpResponseMessage> SendAsync(string url, string? token, CancellationToken ct, string accept = "application/json")
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd(accept);
         if (token is not null)
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
