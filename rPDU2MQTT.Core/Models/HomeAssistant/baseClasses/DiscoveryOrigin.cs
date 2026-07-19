@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json.Serialization;
 
 namespace rPDU2MQTT.Models.HomeAssistant.baseClasses;
@@ -21,8 +20,7 @@ public class DiscoveryOrigin
     public static readonly DiscoveryOrigin Default = new()
     {
         Name = "rPDU2MQTT",
-        SoftwareVersion = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString(),
+        SoftwareVersion = rPDU2MQTT.Helpers.AppInfo.Version,
         SupportUrl = "https://github.com/XtremeOwnage/rPDU2MQTT"
     };
 }

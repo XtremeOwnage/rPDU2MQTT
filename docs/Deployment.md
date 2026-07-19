@@ -26,11 +26,18 @@ All methods need the same two things below.
 
 Images are published to GitHub Container Registry: **`ghcr.io/xtremeownage/rpdu2mqtt`**.
 
-| Tag | Meaning |
-| --- | --- |
-| `:stable` | Latest build of `main` — recommended for most users. |
-| `:X.Y.Z` / `:X.Y` | A specific release (pin this for reproducible deploys). |
-| `:dev` | Latest build of a non-`main` branch — bleeding edge. |
+| Tag | Points at | Use it when |
+| --- | --- | --- |
+| `:latest`, `:stable`, `:release` | Newest stable **release** | You want the latest released version and automatic updates — recommended for most users. |
+| `:X` (e.g. `:1`) | Newest release in a **major** line | You want updates but never a breaking change. `X` moves forward as new `X.*` releases ship. |
+| `:X.Y` (e.g. `:1.2`) | Newest release in a **minor** line | You want patch/bugfix updates only. `X.Y` moves forward as new `X.Y.*` patches ship. |
+| `:X.Y.Z` (e.g. `:1.2.3`) | One exact **release** | You want a fully pinned, reproducible deploy that never changes. |
+| `:edge`, `:main` | Latest build of the `main` branch | You want everything merged to `main` — ahead of releases, potentially unstable. |
+| `:dev`, `:unstable` | Latest build of any non-`main` branch | You're testing an in-progress feature branch. Expect breakage. |
+
+Releases follow [SemVer](https://semver.org/): a **major** bump signals breaking/major changes, while **minor** and **patch** releases are drop-in upgrades. Because the `:X` and `:X.Y` tags are re-pointed at each release, pinning to `:1` or `:1.2` gets you updates within that line automatically; pin the full `:X.Y.Z` when you want zero surprises.
+
+The running version is stamped into the binary at build time and shown in the GUI (and in MQTT discovery / heartbeat). Releases report a clean semver (`1.2.3`); non-release builds report a traceable pre-release string such as `0.0.0-main.42+abc1234`, mapping back to the branch, CI run number, and commit that produced the image.
 
 > The image is built on the ASP.NET Core runtime (the optional embedded GUI needs it).
 
@@ -192,7 +199,7 @@ for you from `credentials.*` (or an `existingSecret`).
 
 - **Compose:** `docker compose pull && docker compose up -d`.
 - **Helm:** `helm upgrade rpdu2mqtt ./charts/rpdu2mqtt -n rpdu2mqtt -f my-values.yaml`.
-- Pin `:X.Y.Z` for predictable upgrades; `:stable` tracks `main`.
+- Pin `:X.Y.Z` for fully reproducible deploys; use `:X` / `:X.Y` to track a major/minor line, or `:stable` for the newest release. `:edge` follows `main` (unreleased).
 
 ## Troubleshooting
 

@@ -64,6 +64,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Compute a human-readable, traceable app version that gets stamped into the binary
+      # (surfaced in the GUI / MQTT discovery / heartbeat). Releases (v*.*.* tags) get the
+      # clean semver; every other build gets a pre-release string carrying the branch, the
+      # run number, and the short commit so a running instance maps back to a specific build.
+      - name: Compute app version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            value="${GITHUB_REF_NAME#v}"
+          else
+            ref_slug="$(echo "${GITHUB_REF_NAME}" | tr '/_' '--' | tr -cd 'A-Za-z0-9.-')"
+            value="0.0.0-${ref_slug}.${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+          fi
+          echo "value=${value}" >> "$GITHUB_OUTPUT"
+          echo "App version: ${value}"
+
       # Extract metadata (tags, labels) for Docker
       # https://github.com/docker/metadata-action
       - name: Extract Docker metadata
@@ -71,14 +87,27 @@ jobs:
         uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Release tags -> :<version> + :stable (skipping prereleases like v1.0.0-beta).
-          # main -> :edge, any other branch -> :dev.
+          # `latest` is managed explicitly below (release-only), never auto-applied to prereleases.
+          flavor: |
+            latest=false
+          # Tagging strategy (see issue #212):
+          #   Release tag vX.Y.Z (non-prerelease):
+          #     X.Y.Z, X.Y, X  -> pin to an exact/minor/major line and follow updates
+          #     latest, stable, release -> always the newest stable release
+          #   main branch:            edge, main         (bleeding edge, may be unstable)
+          #   any other branch:       dev, unstable      (work-in-progress builds)
+          #   pull request:           pr-<n>
           tags: |
-            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
-            type=edge,branch=main
-            type=raw,value=dev,enable=${{ startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=release,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=edge,branch=main
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' }}
+            type=raw,value=unstable,enable=${{ startsWith(github.ref, 'refs/heads/') && github.ref != 'refs/heads/main' }}
             type=ref,event=pr
 
       # Build and push Docker image with Buildx (don't push on PR)
@@ -91,6 +120,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.value }}
 
       # Sign the resulting Docker image digest except on PRs.
       # This will only write to the public Rekor transparency log when the Docker
