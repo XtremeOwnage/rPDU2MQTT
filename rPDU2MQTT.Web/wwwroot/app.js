@@ -1454,6 +1454,88 @@ function addFlowSection(nav     , sections     ) {
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
 // bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+// Ready-made device templates (EG4 inverters, meters, …), fetched once and cached.
+let nodeTemplatesCache               = null;
+async function loadNodeTemplates()                 {
+  if (nodeTemplatesCache) return nodeTemplatesCache;
+  const r = await api('/api/node-templates');
+  nodeTemplatesCache = (r.body?.ok && r.body.templates) ? r.body.templates : [];
+  return nodeTemplatesCache;
+}
+
+// Instantiate a template into the live config: create its Modbus connection (if any) and its pre-wired
+// nodes/links, all under an id prefix so the same device can be imported more than once without clashes.
+function instantiateTemplate(tpl     , prefix        , host        , unitId        , flow     )           {
+  const nodes = ensure(flow, 'Nodes', []);
+  const links = ensure(flow, 'Links', []);
+  let connId                    ;
+  if (tpl.transport === 'modbus' && tpl.modbus) {
+    const conns = ensure(ensure(state.data, 'Modbus', {}), 'Connections', []);
+    connId = prefix;
+    conns.push({ Id: connId, Name: tpl.name, Host: host || '', Port: tpl.modbus.port, UnitId: unitId,
+      PollIntervalSeconds: tpl.modbus.pollIntervalSeconds, Enabled: true });
+  }
+  const idOf = (key        ) => prefix + '-' + key;
+  const added           = [];
+  (tpl.nodes || []).forEach((tn     ) => {
+    const node      = { Id: idOf(tn.key), Label: tn.label, Kind: tn.kind, Sources: (tn.sources || []).map((s     ) => {
+      const src      = { Type: tpl.transport, Metric: s.metric };
+      if (s.unit) src.Unit = s.unit;
+      if (s.scale != null && s.scale !== 1) src.Scale = s.scale;
+      if (tpl.transport === 'modbus') {
+        src.Connection = connId; src.Register = s.register; src.RegisterType = s.registerType;
+        src.DataType = s.dataType; src.WordOrder = s.wordOrder;
+      } else { if (s.topic) src.Topic = s.topic; if (s.jsonField) src.JsonField = s.jsonField; }
+      return src;
+    }) };
+    nodes.push(node); added.push(node.Id);
+    if (tn.feedsKey) links.push({ From: idOf(tn.key), To: idOf(tn.feedsKey) });
+  });
+  return added;
+}
+
+// The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit, and drop the
+// pre-wired nodes into the config for review.
+function renderImportPanel(flow     , existingIds             , rerender            )              {
+  const panel = el('div', { class: 'tpl-import' });
+  panel.appendChild(el('div', { class: 'desc', text: 'Import a known device to pre-fill its nodes and register bindings. Review and Save afterwards; addresses are community starting points — verify against your firmware.' }));
+  const row = el('div', { class: 'ld-toolbar' });
+  const sel = el('select', { style: { width: 'auto' } })                     ;
+  const prefixIn = el('input', { type: 'text', placeholder: 'id prefix (e.g. eg4)' })                    ;
+  const hostIn = el('input', { type: 'text', placeholder: 'Modbus host / IP' })                    ;
+  const unitIn = el('input', { type: 'number', placeholder: 'unit', style: { width: '70px' } })                    ;
+  const importBtn = btn('Import', 'primary');
+  const note = el('div', { class: 'desc' });
+  row.append(sel, prefixIn, hostIn, unitIn, importBtn);
+  panel.append(row, note);
+
+  loadNodeTemplates().then(tpls => {
+    if (!tpls.length) { note.textContent = 'No device templates available.'; return; }
+    tpls.forEach((t     ) => sel.appendChild(el('option', { value: t.id, text: t.vendor + ' · ' + t.name })));
+    const showMeta = () => {
+      const t = tpls.find((x     ) => x.id === sel.value);
+      if (!t) return;
+      prefixIn.value = t.id; hostIn.style.display = t.transport === 'modbus' ? '' : 'none';
+      unitIn.style.display = t.transport === 'modbus' ? '' : 'none';
+      unitIn.value = t.modbus ? String(t.modbus.unitId) : '';
+      note.innerHTML = '';
+      note.append(el('span', { text: (t.description || '') + ' ' }));
+      if (t.sourceUrl) { const a = document.createElement('a'); a.href = t.sourceUrl; a.target = '_blank'; a.textContent = 'Register source ↗'; a.style.color = 'var(--accent)'; note.appendChild(a); }
+    };
+    sel.onchange = showMeta; showMeta();
+    importBtn.onclick = () => {
+      const t = tpls.find((x     ) => x.id === sel.value); if (!t) return;
+      const prefix = (prefixIn.value || '').trim(); if (!prefix) { toast('An id prefix is required.', false); return; }
+      const clash = (t.nodes || []).map((n     ) => prefix + '-' + n.key).find((id        ) => existingIds.has(id));
+      if (clash) { toast(`Node id '${clash}' already exists — pick a different prefix.`, false); return; }
+      const added = instantiateTemplate(t, prefix, hostIn.value.trim(), parseInt(unitIn.value) || 1, flow);
+      toast(`Imported ${t.name}: ${added.length} node(s). Set the Modbus host if needed, then Save.`, true);
+      rerender();
+    };
+  });
+  return panel;
+}
+
 function addNodesSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
@@ -1484,6 +1566,7 @@ function addNodesSection(nav     , sections     ) {
     const kindSel = el('select', { style: { width: 'auto' } });
     NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
     const addBtn = btn('Add node', 'primary');
+    const importBtn = btn('Import device template');
     const save = btn('Save', 'primary');
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
@@ -1493,7 +1576,15 @@ function addNodesSection(nav     , sections     ) {
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
     save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, save); ed.appendChild(addBar);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
+
+    // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
+    const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
+    const impWrap = el('div'); ed.appendChild(impWrap);
+    importBtn.onclick = () => {
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
+      impWrap.appendChild(renderImportPanel(flow, existingIds, render));
+    };
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));

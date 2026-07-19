@@ -436,6 +436,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, instances }, ConfigSchema.Json);
         });
 
+        // Ready-made energy-flow device templates the Nodes tab can import (EG4 inverters, meters, …).
+        app.MapGet("/api/node-templates", () =>
+            Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
+
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {
