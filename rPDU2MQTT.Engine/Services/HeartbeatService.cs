@@ -24,15 +24,17 @@ public sealed class HeartbeatService : IHostedService
 
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
+    private readonly EmonCmsStatus emon;
     private readonly Heartbeat self;
     private readonly ConcurrentDictionary<string, Heartbeat> seen = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource cts = new();
     private Task? pump;
 
-    public HeartbeatService(IHiveMQClient mqtt, Config cfg, HostRole roles)
+    public HeartbeatService(IHiveMQClient mqtt, Config cfg, HostRole roles, EmonCmsStatus emon)
     {
         this.mqtt = (HiveMQClient)mqtt;
         this.cfg = cfg;
+        this.emon = emon;
 
         var roleNames = new[] { HostRole.Worker, HostRole.Api, HostRole.Ui }.Where(r => roles.HasFlag(r)).Select(r => r.ToString().ToLowerInvariant()).ToArray();
         var host = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME") ?? Environment.MachineName;
@@ -68,7 +70,9 @@ public sealed class HeartbeatService : IHostedService
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Heartbeat.IntervalSeconds));
             do
             {
-                var beat = self with { TimestampUtc = DateTime.UtcNow };
+                // Only the process actually exporting (the worker) has attempted an export; carry its status
+                // so a split API/UI node can show the true EmonCMS health on the Status board.
+                var beat = self with { TimestampUtc = DateTime.UtcNow, EmonCms = emon.HasAttempted ? emon.Snapshot() : null };
                 seen[beat.Id] = beat;
                 await mqtt.PublishAsync(new MQTT5PublishMessage(TopicFor(beat.Id), QualityOfService.AtLeastOnceDelivery)
                 {

@@ -87,14 +87,16 @@ public static class ServiceConfiguration
         // Owns the PDU producer(s) — one poller per configured instance; reconciled at runtime when the
         // GUI saves instance changes. Singleton + hosted-service facade so the GUI can trigger reconcile.
         services.AddSingleton<InstanceManager>();
-        // Data production runs in the Worker role; the cache/bus singletons stay registered so the API/GUI
-        // can read them in-process (a single-node 'all' deployment). Splitting these across processes is the
-        // job of the planned message-bus transport.
-        if (worker)
-        {
+        // The snapshot cache must drain the bus on any node that serves data. On a worker it consumes the
+        // local poller; on a split API/UI node it consumes the worker's snapshots that the MqttBusBridge
+        // ingests onto the bus. Without starting it here, a non-worker node's cache never fills and the
+        // Status board shows "PDUs: no data yet / waiting on a worker node" forever even though the worker
+        // is healthy (the consumer only publishes to the bus; nothing drained it).
+        if (worker || api || ui)
             services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
+        // Data production (the PDU pollers) runs only in the Worker role.
+        if (worker)
             services.AddHostedService(sp => sp.GetRequiredService<InstanceManager>());
-        }
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();

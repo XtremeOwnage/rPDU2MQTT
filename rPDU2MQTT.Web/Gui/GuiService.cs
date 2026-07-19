@@ -433,6 +433,22 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 catch (Exception ex) { Log.Debug($"Diagnostics: could not read operator update status: {ex.Message}"); }
             }
 
+            // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the
+            // local status has never attempted an export — fall back to the worker's status carried on its
+            // heartbeat, so the Status board shows the true state instead of a misleading "waiting".
+            object? emonStatus = null;
+            if (config.EmonCMS.Enabled)
+            {
+                if (emonCmsStatus.HasAttempted)
+                    emonStatus = emonCmsStatus.Snapshot();
+                else
+                    emonStatus = heartbeats.Processes
+                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Heartbeat.StaleAfterSeconds)
+                        .OrderByDescending(p => p.TimestampUtc)
+                        .Select(p => (object?)p.EmonCms)
+                        .FirstOrDefault() ?? emonCmsStatus.Snapshot();
+            }
+
             return Results.Json(new
             {
                 ok = true,
@@ -486,7 +502,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
                 emoncms = config.EmonCMS.Enabled
-                    ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = (object?)emonCmsStatus.Snapshot() }
+                    ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonStatus }
                     : new { enabled = false, transport = (string?)null, status = (object?)null },
             }, ConfigSchema.Json);
         });
