@@ -81,8 +81,18 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: RPDU2MQTT_IMAGE
               value: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+            {{- if $.Values.split.enabled }}
+            # v3: split roles are separate Orleans silos that must form one cluster (grains coordinate across
+            # them). Kubernetes membership needs no external DB; see rbac.yaml + the orleans NetworkPolicy rule.
+            - name: RPDU2MQTT_ORLEANS_CLUSTERING
+              value: kubernetes
+            {{- end }}
             {{- if $.Values.kubernetesConfigSource.enabled }}
             - name: RPDU2MQTT_CONFIG_SOURCE
               value: k8s
@@ -112,6 +122,13 @@ spec:
             {{- if dig "Health" "Enabled" true $.Values.config }}
             - name: health
               containerPort: {{ dig "Health" "Port" 8081 $.Values.config }}
+            {{- end }}
+            {{- if $.Values.split.enabled }}
+            # Orleans silo-to-silo + gateway ports (v3 clustering).
+            - name: orleans-silo
+              containerPort: 11111
+            - name: orleans-gw
+              containerPort: 30000
             {{- end }}
           {{- if and $.Values.healthProbes.enabled (dig "Health" "Enabled" true $.Values.config) }}
           livenessProbe:

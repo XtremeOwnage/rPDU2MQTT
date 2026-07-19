@@ -25,8 +25,17 @@ public static class SiloConfiguration
         var clustering = (Environment.GetEnvironmentVariable("RPDU2MQTT_ORLEANS_CLUSTERING") ?? "localhost").ToLowerInvariant();
         if (clustering is "kubernetes" or "k8s")
         {
+            // Advertise this pod's IP so sibling silos (other role deployments) can reach it directly — the
+            // CNI routes pod IPs. Fixed silo/gateway ports (exposed on the container + allowed by NetworkPolicy).
+            var podIp = Environment.GetEnvironmentVariable("POD_IP");
+            silo.Configure<Orleans.Configuration.EndpointOptions>(o =>
+            {
+                if (System.Net.IPAddress.TryParse(podIp, out var ip)) o.AdvertisedIPAddress = ip;
+                o.SiloPort = 11111;
+                o.GatewayPort = 30000;
+            });
             silo.UseKubeMembership();
-            Serilog.Log.Information("Orleans: Kubernetes clustering (KubeMembership).");
+            Serilog.Log.Information($"Orleans: Kubernetes clustering (KubeMembership), advertising {podIp}:11111.");
         }
         else
         {
