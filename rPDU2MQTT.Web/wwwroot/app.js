@@ -1000,16 +1000,20 @@ function renderNodeEditor(node     , links       , cand                  , reren
         const conns        = (state.data?.Modbus?.Connections) || [];
         const byConn = new Map                                   ();
         modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id) ).push(lc); });
+        let probeMsg = '';   // a Modbus error/result to show instead of a bare "updated <time>"
         for (const [connId, cells] of byConn) {
           const conn = conns.find(c => c.Id === connId);
-          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); continue; }
+          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
           try {
             const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
-            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = r.body.message || 'probe failed'; continue; }
+            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
             const readings = r.body.readings || [];
             cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
-          } catch (e     ) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = String(e?.message || e); }
+            // Surface the connection result + the first register error inline (not just in the cell tooltip).
+            const firstErr = readings.find((rd     ) => rd?.error)?.error;
+            if (firstErr) probeMsg = (r.body.message || '') + ' — ' + firstErr;
+          } catch (e     ) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = String(e?.message || e); }
         }
 
         // MQTT + future types: whatever the running ingest currently holds in the shared cache.
@@ -1022,7 +1026,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
             others.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
           } catch (e     ) { others.forEach(lc => setCell(lc.cell, null, 'err')); }
         }
-        status.textContent = `updated ${new Date().toLocaleTimeString()}`;
+        // A Modbus error/result wins over the bare timestamp so the failure reason is visible without hovering.
+        status.textContent = probeMsg || `updated ${new Date().toLocaleTimeString()}`;
+        status.style.color = probeMsg ? 'var(--bad)' : 'var(--muted)';
       };
       const refreshBtn = btn('Refresh values');
       refreshBtn.onclick = refresh;
