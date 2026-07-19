@@ -83,6 +83,7 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
         config.Debug = reloaded.Debug;
         config.Pdus = reloaded.Pdus;
         config.MQTT = reloaded.MQTT;
+        config.Operator = reloaded.Operator;
 
         // Re-point the broker connection in place rather than exiting to be restarted (#192).
         await mqtt.ApplyAsync(stoppingCts.Token);

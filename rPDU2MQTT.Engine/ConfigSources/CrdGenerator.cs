@@ -29,6 +29,23 @@ public static class CrdGenerator
                 ["deviceCount"] = new Dictionary<string, object?> { ["type"] = "integer" },
                 ["lastPoll"] = new Dictionary<string, object?> { ["type"] = "string" },
                 ["message"] = new Dictionary<string, object?> { ["type"] = "string" },
+                // Operator update check (#210): reported by the operator role, merged alongside the fields above.
+                ["update"] = new Dictionary<string, object?>
+                {
+                    ["type"] = "object",
+                    ["x-kubernetes-preserve-unknown-fields"] = true,
+                    ["properties"] = new Dictionary<string, object?>
+                    {
+                        ["available"] = new Dictionary<string, object?> { ["type"] = "boolean" },
+                        ["current"] = new Dictionary<string, object?> { ["type"] = "string" },
+                        ["latest"] = new Dictionary<string, object?> { ["type"] = "string" },
+                        ["policy"] = new Dictionary<string, object?> { ["type"] = "string" },
+                        ["autoUpdate"] = new Dictionary<string, object?> { ["type"] = "boolean" },
+                        ["applied"] = new Dictionary<string, object?> { ["type"] = "string" },
+                        ["checkedAt"] = new Dictionary<string, object?> { ["type"] = "string" },
+                        ["message"] = new Dictionary<string, object?> { ["type"] = "string" },
+                    },
+                },
             },
         };
 
@@ -64,6 +81,7 @@ public static class CrdGenerator
                             PrinterColumn("Connected", "string", ".status.connected"),
                             PrinterColumn("Devices", "integer", ".status.deviceCount"),
                             PrinterColumn("LastPoll", "string", ".status.lastPoll"),
+                            PrinterColumn("Update", "string", ".status.update.latest"),
                         },
                         ["schema"] = new Dictionary<string, object?>
                         {

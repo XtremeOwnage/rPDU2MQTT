@@ -23,6 +23,7 @@ public static class HostRoles
                 "worker" or "engine" or "data" => HostRole.Worker,
                 "api" => HostRole.Api,
                 "ui" or "gui" or "web" => HostRole.Ui,
+                "operator" or "op" => HostRole.Operator,
                 _ => HostRole.None,
             };
 

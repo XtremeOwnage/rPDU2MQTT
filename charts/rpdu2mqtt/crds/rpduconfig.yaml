@@ -27,6 +27,9 @@ spec:
     - name: LastPoll
       type: string
       jsonPath: .status.lastPoll
+    - name: Update
+      type: string
+      jsonPath: .status.update.latest
     schema:
       openAPIV3Schema:
         type: object
@@ -926,6 +929,36 @@ spec:
                           description: Poll this device. Turn off to disable it without deleting the connection.
                     description: Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.
                 description: Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).
+              Operator:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Enabled:
+                    type: boolean
+                    description: "Enable the Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update). Requires the Kubernetes config source and the 'operator' role. No effect otherwise."
+                  CheckForUpdates:
+                    type: boolean
+                    description: Periodically check the container registry for a newer image and report it (in the CR status and the GUI Diagnostics page). Read-only — never changes the Deployment on its own.
+                  CheckIntervalHours:
+                    type: integer
+                    description: How often to check the registry for updates, in hours.
+                  Policy:
+                    type: string
+                    enum:
+                    - Patch
+                    - Minor
+                    - Major
+                    description: 'How far an update may move the deployed version: Patch (same major.minor), Minor (same major, no breaking changes), or Major (any newer release).'
+                  AutoUpdate:
+                    type: boolean
+                    description: Automatically roll the Deployment to the newest eligible release (bounded by Policy). Off by default — checking is safe, but applying an update restarts the workload.
+                  Registry:
+                    type: string
+                    description: Override the registry host to query (e.g. ghcr.io). Defaults to the registry of the currently-deployed image.
+                  Repository:
+                    type: string
+                    description: Override the repository to query (e.g. xtremeownage/rpdu2mqtt). Defaults to the repository of the currently-deployed image.
+                description: 'Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update).'
           status:
             type: object
             x-kubernetes-preserve-unknown-fields: true
@@ -938,3 +971,23 @@ spec:
                 type: string
               message:
                 type: string
+              update:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  available:
+                    type: boolean
+                  current:
+                    type: string
+                  latest:
+                    type: string
+                  policy:
+                    type: string
+                  autoUpdate:
+                    type: boolean
+                  applied:
+                    type: string
+                  checkedAt:
+                    type: string
+                  message:
+                    type: string

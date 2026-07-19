@@ -17,5 +17,12 @@ public enum HostRole
     Api = 2,
     /// <summary>The configuration GUI.</summary>
     Ui = 4,
+    /// <summary>
+    /// Kubernetes operator (#210): reconciles this release's own deployment — checks the container
+    /// registry for newer images and can roll the Deployment to a chosen/newer tag. Opt-in, so it is
+    /// <b>not</b> part of <see cref="All"/>; run it as its own process (<c>--role operator</c>) or alongside
+    /// others. Only meaningful with the Kubernetes config source.
+    /// </summary>
+    Operator = 8,
     All = Worker | Api | Ui,
 }

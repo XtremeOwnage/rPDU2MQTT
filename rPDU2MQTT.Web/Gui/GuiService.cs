@@ -416,14 +416,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
-        app.MapGet("/api/diagnostics", () =>
+        app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {
             var k8s = configSource as KubernetesConfigSource;
+
+            // Operator update report (#210), if the operator has written one to the CR status.
+            object? update = null;
+            if (k8s is not null)
+            {
+                try
+                {
+                    var status = await k8s.ReadStatusAsync(ctx.RequestAborted);
+                    if (status is { } s && s.TryGetProperty("update", out var u))
+                        update = System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
+                }
+                catch (Exception ex) { Log.Debug($"Diagnostics: could not read operator update status: {ex.Message}"); }
+            }
+
             return Results.Json(new
             {
                 ok = true,
                 version = Version,
                 image = Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"),
+                update,
                 dotnet = Environment.Version.ToString(),
                 os = RuntimeInformation.OSDescription,
                 startedUtc = health.StartedUtc,
