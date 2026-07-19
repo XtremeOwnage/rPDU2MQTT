@@ -1,8 +1,12 @@
+using HiveMQtt.Client;
+using HiveMQtt.Client.Events;
+using HiveMQtt.MQTT5.Types;
 using k8s;
 using k8s.Autorest;
 using k8s.Models;
 using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core;
 using rPDU2MQTT.Startup.ConfigSources;
 using rPDU2MQTT.Updates;
 
@@ -20,23 +24,40 @@ public sealed class OperatorService : IHostedService, IDisposable
     private readonly KubernetesConfigSource source;
     private readonly Config cfg;
     private readonly IContainerRegistry registry;
+    private readonly HiveMQClient mqtt;
     private readonly CancellationTokenSource stoppingCts = new();
+    // Released by a "check now" command so the loop runs a check immediately instead of waiting for the timer.
+    private readonly SemaphoreSlim checkNow = new(0, 1);
     private Task loop = Task.CompletedTask;
 
     // Container images this app publishes; used to pick the right container(s) to read/patch in a pod spec.
     private const string ContainerName = "rpdu2mqtt";
 
-    public OperatorService(KubernetesConfigSource source, Config cfg, IContainerRegistry registry)
+    public OperatorService(KubernetesConfigSource source, Config cfg, IContainerRegistry registry, IHiveMQClient mqtt)
     {
         this.source = source;
         this.cfg = cfg;
         this.registry = registry;
+        this.mqtt = (HiveMQClient)mqtt;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    private string CommandTopic => OperatorCommand.TopicFor(cfg.MQTT.ParentTopic);
+
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // Listen for "check now" requests the GUI publishes over the bus (it runs in a different process).
+        mqtt.OnMessageReceived += OnMessageReceived;
+        try { await mqtt.SubscribeAsync(CommandTopic, QualityOfService.AtLeastOnceDelivery); }
+        catch (Exception ex) { Log.Warning($"Operator: could not subscribe to {CommandTopic}: {ex.Message}"); }
         loop = RunAsync(stoppingCts.Token);
-        return Task.CompletedTask;
+    }
+
+    private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
+    {
+        if (!string.Equals(e.PublishMessage.Topic, CommandTopic, StringComparison.Ordinal)) return;
+        // Any operator command currently means "check now"; wake the loop (ignore if a wake is already pending).
+        Log.Information("Operator: on-demand update check requested over the bus.");
+        try { checkNow.Release(); } catch (SemaphoreFullException) { /* a check is already pending */ }
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -53,8 +74,9 @@ public sealed class OperatorService : IHostedService, IDisposable
                 catch (Exception ex) { Log.Warning($"Operator: update check failed: {ex.Message}"); }
             }
 
+            // Wait for the interval, but wake early if a "check now" arrives.
             var hours = Math.Max(1, cfg.Operator.CheckIntervalHours);
-            try { await Task.Delay(TimeSpan.FromHours(hours), ct); }
+            try { await checkNow.WaitAsync(TimeSpan.FromHours(hours), ct); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -192,9 +214,14 @@ public sealed class OperatorService : IHostedService, IDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        mqtt.OnMessageReceived -= OnMessageReceived;
         await stoppingCts.CancelAsync();
         await Task.WhenAny(loop, Task.Delay(Timeout.Infinite, cancellationToken));
     }
 
-    public void Dispose() => stoppingCts.Dispose();
+    public void Dispose()
+    {
+        stoppingCts.Dispose();
+        checkNow.Dispose();
+    }
 }
