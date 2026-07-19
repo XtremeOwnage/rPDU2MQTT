@@ -114,12 +114,16 @@ public static class ServiceConfiguration
         // now" button, so register the singleton regardless of role.
         services.AddSingleton<Services.EmonCmsFeedSync>();
 
-        // Energy-flow values sourced from the broker (#205, e.g. Solar Assistant). Registered in every role
-        // and started unconditionally: any process that renders or exports the flow (GUI, API, worker) needs
-        // the live values, and it self-gates — with no Mqtt bindings configured it subscribes to nothing.
-        // It reconciles subscriptions on a timer, so binding a topic in the GUI needs no restart.
+        // Energy-flow values from the broker (#205, e.g. Solar Assistant). v3: the MQTT ingest runs on the
+        // worker and its values are pushed to the flow grain by MqttToFlowBridge; every other process reads
+        // them back through the grain sync (no per-process subscription duplication). The singleton stays
+        // registered everywhere so the bridge can resolve it on the worker.
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
-        services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+        if (worker)
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+            services.AddHostedService<Hosting.MqttToFlowBridge>();
+        }
 
         // Modbus TCP is a second live-value ingest (#129): poll inverters/meters/PLCs into the same seam.
         // Self-gating too — with no connections/bindings configured it opens no sockets. Unlike the MQTT
@@ -139,11 +143,9 @@ public static class ServiceConfiguration
         if (worker || api || ui)
             services.AddHostedService(sp => new Hosting.FlowGrainSyncService(sp.GetRequiredService<Orleans.IGrainFactory>(), grainSyncedFlow));
 
-        // The graph/exporters see one IFlowValueSource; the composite merges the grain-synced values with the
-        // (still in-process) MQTT ingest. As MQTT moves onto the grain too, the grain-synced source subsumes it.
-        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
-            grainSyncedFlow,
-            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>()));
+        // v3: every process reads flow values through the grain-synced mirror — Modbus (DeviceGrain) and MQTT
+        // (MqttToFlowBridge) both feed the flow grain, so this one source has all of it. No per-process ingest.
+        services.AddSingleton<Core.Flow.IFlowValueSource>(grainSyncedFlow);
 
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.
