@@ -756,6 +756,13 @@ Each connection has a **`Framing`**:
 If a connection *connects* but every register reads as an error, it's the framing — `auto` handles that for
 you; pin one only if you want to skip the detection.
 
+**One poller per device.** Many RS485-to-Ethernet gateways accept only **one TCP client at a time**, so the
+Modbus poller runs **only in the Worker role** — in a split deployment the API/UI don't poll the device
+themselves (they'd contend with the worker and each other, and reads would time out). The Nodes editor shows
+each binding's value from the shared live cache the worker fills; the **"Test device read"** button opens a
+one-off connection to check a binding before it's saved — use it sparingly if your gateway is single-client,
+since it briefly competes with the worker's poll.
+
 ### Device templates (Nodes tab → "Import device template")
 
 Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:

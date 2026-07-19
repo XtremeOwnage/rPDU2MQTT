@@ -122,9 +122,14 @@ public static class ServiceConfiguration
         services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
 
         // Modbus TCP is a second live-value ingest (#129): poll inverters/meters/PLCs into the same seam.
-        // Self-gating too — with no connections/bindings configured it opens no sockets.
+        // Self-gating too — with no connections/bindings configured it opens no sockets. Unlike the MQTT
+        // source (broker fan-out is free), a Modbus device is a shared serial resource: many RS485-to-Ethernet
+        // gateways accept only ONE TCP client at a time, so every process polling it independently causes
+        // contention — the reads time out. So the poller runs only in the Worker role (data production);
+        // the API/UI read the values through the same bus/exports as any other producer.
         services.AddSingleton<Services.EnergyFlowModbusSourceService>();
-        services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
+        if (worker)
+            services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
 
         // The graph/exporters see one IFlowValueSource; the composite merges every ingest (MQTT + Modbus).
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(

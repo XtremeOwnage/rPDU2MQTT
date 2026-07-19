@@ -216,48 +216,52 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
         if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
-      const refresh = async () => {
-        // Modbus: probe the device(s), grouped by connection so each is read once.
-        const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
-        const conns: any[] = (state.data?.Modbus?.Connections) || [];
-        const byConn = new Map<string, { src: any, cell: any }[]>();
-        modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id)!).push(lc); });
-        let probeMsg = '';   // a Modbus error/result to show instead of a bare "updated <time>"
-        for (const [connId, cells] of byConn) {
-          const conn = conns.find(c => c.Id === connId);
-          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
-          try {
-            const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
-            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
-            const readings = r.body.readings || [];
-            cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
-            // Surface the connection result + the first register error inline (not just in the cell tooltip).
-            const firstErr = readings.find((rd: any) => rd?.error)?.error;
-            if (firstErr) probeMsg = (r.body.message || '') + ' — ' + firstErr;
-          } catch (e: any) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = String(e?.message || e); }
+      // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
+      // the worker already polls it. So auto-refresh reads the shared live cache (no device access); only an
+      // explicit "Test device read" opens its own connection, to check a binding before it's saved/polled.
+      const refresh = async (probe = false) => {
+        let probeMsg = '';
+        if (probe) {
+          const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
+          const conns: any[] = (state.data?.Modbus?.Connections) || [];
+          const byConn = new Map<string, { src: any, cell: any }[]>();
+          modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id)!).push(lc); });
+          for (const [connId, cells] of byConn) {
+            const conn = conns.find(c => c.Id === connId);
+            if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
+            try {
+              const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
+              if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
+              const readings = r.body.readings || [];
+              cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
+              const firstErr = readings.find((rd: any) => rd?.error)?.error;
+              if (firstErr) probeMsg = (r.body.message || '') + ' — ' + firstErr;
+            } catch (e: any) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = String(e?.message || e); }
+          }
         }
 
-        // MQTT + future types: whatever the running ingest currently holds in the shared cache.
-        const others = liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus');
-        if (others.length) {
+        // Every binding not just device-probed reads the shared live cache the running ingests fill.
+        const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
+        if (cached.length) {
           try {
             const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(others.map(lc => ({ Node: node.Id, Metric: lc.src.Metric || 'realpower' }))) });
+              body: JSON.stringify(cached.map(lc => ({ Node: node.Id, Metric: lc.src.Metric || 'realpower' }))) });
             const vals = (r.body && r.body.values) || [];
-            others.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
-          } catch (e: any) { others.forEach(lc => setCell(lc.cell, null, 'err')); }
+            cached.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
+          } catch (e: any) { cached.forEach(lc => setCell(lc.cell, null, 'err')); }
         }
-        // A Modbus error/result wins over the bare timestamp so the failure reason is visible without hovering.
         status.textContent = probeMsg || `updated ${new Date().toLocaleTimeString()}`;
         status.style.color = probeMsg ? 'var(--bad)' : 'var(--muted)';
       };
-      const refreshBtn = btn('Refresh values');
-      refreshBtn.onclick = refresh;
+      const hasModbus = liveCells.some(lc => (lc.src.Type || 'mqtt') === 'modbus');
+      const refreshBtn = btn(hasModbus ? 'Test device read' : 'Refresh values');
+      if (hasModbus) refreshBtn.title = 'Open a one-off connection to the device to test these bindings. Normally the worker polls it and the value shows here automatically — avoid hammering a gateway that allows only one client.';
+      refreshBtn.onclick = () => refresh(true);
       box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
-      refresh();
+      refresh(false);
       // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
-      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(); }, 5000);
+      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 5000);
     }
   }
 
