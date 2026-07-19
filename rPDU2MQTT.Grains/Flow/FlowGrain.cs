@@ -25,4 +25,6 @@ public sealed class FlowGrain : Grain, IFlowGrain
 
     public Task<double?> NodeValue(string nodeId, Metric metric)
         => Task.FromResult(middleware.TryGetValue(nodeId, metric.CanonicalName(), out var v) ? v : (double?)null);
+
+    public Task<List<RawValue>> RawValues() => Task.FromResult(middleware.RawValues().ToList());
 }

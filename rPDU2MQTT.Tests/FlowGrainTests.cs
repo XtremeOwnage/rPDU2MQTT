@@ -23,6 +23,10 @@ public class FlowGrainTests
 
             Assert.Equal(1200, await flow.NodeValue("grid", Metric.RealPower));
             Assert.Null(await flow.NodeValue("grid", Metric.Energy));    // nothing ingested for this metric
+
+            // RawValues drives the per-process sync back into each IFlowValueSource.
+            var raw = await flow.RawValues();
+            Assert.Contains(raw, r => r.NodeId == "grid" && r.Metric == Metric.RealPower && r.Value == 1200);
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

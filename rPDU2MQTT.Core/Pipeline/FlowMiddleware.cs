@@ -41,6 +41,16 @@ public sealed class FlowMiddleware : IFlowMiddleware, IFlowValueSource
 
     public bool TryGetValue(string nodeId, string metric, out double value) => cache.TryGetValue(nodeId, metric, out value);
 
+    public IReadOnlyList<RawValue> RawValues()
+    {
+        var now = DateTime.UtcNow;
+        var list = new List<RawValue>();
+        foreach (var (node, metric) in cache.Keys)
+            if (cache.TryGetValue(node, metric, now, out var v) && Metrics.TryParse(metric, out var m))
+                list.Add(new RawValue(node, m, v));
+        return list;
+    }
+
     public FlowSnapshot Snapshot()
     {
         var cfg = flow();

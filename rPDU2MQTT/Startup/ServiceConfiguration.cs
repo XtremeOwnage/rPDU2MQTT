@@ -133,10 +133,17 @@ public static class ServiceConfiguration
         if (worker)
             services.AddHostedService<Hosting.DeviceGrainActivator>();
 
-        // The graph/exporters see one IFlowValueSource; the composite merges every ingest (MQTT + Modbus).
+        // v3: a local mirror of the flow grain's live values (Modbus via the DeviceGrain, and later every
+        // grain-fed source), synced by FlowGrainSyncService and read through the same IFlowValueSource seam.
+        var grainSyncedFlow = new Core.Flow.FlowValueCache();
+        if (worker || api || ui)
+            services.AddHostedService(sp => new Hosting.FlowGrainSyncService(sp.GetRequiredService<Orleans.IGrainFactory>(), grainSyncedFlow));
+
+        // The graph/exporters see one IFlowValueSource; the composite merges the grain-synced values with the
+        // (still in-process) MQTT ingest. As MQTT moves onto the grain too, the grain-synced source subsumes it.
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
-            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-            sp.GetRequiredService<Services.EnergyFlowModbusSourceService>()));
+            grainSyncedFlow,
+            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>()));
 
         // When roles are split across processes, bridge the in-process snapshot bus over MQTT: a Worker
         // mirrors its snapshots to the broker; a consumer-only node ingests them onto its own bus/cache.

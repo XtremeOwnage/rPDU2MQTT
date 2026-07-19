@@ -28,4 +28,11 @@ public interface IFlowMiddleware
     /// to call for a "current value" query without touching any source.
     /// </summary>
     FlowSnapshot Snapshot();
+
+    /// <summary>
+    /// Every fresh raw <c>(node, metric)</c> value currently held — the un-rolled-up leaf readings, for
+    /// syncing out to each process's live-value source so local graph builds and exports read the same live
+    /// data without each process polling the sources itself.
+    /// </summary>
+    IReadOnlyList<RawValue> RawValues();
 }

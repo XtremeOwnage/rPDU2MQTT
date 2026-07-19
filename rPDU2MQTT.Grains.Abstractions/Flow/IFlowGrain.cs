@@ -18,4 +18,7 @@ public interface IFlowGrain : IGrainWithIntegerKey
 
     /// <summary>The current rolled-up value for one (node, metric), or null if unmapped.</summary>
     Task<double?> NodeValue(string nodeId, Metric metric);
+
+    /// <summary>Every fresh raw leaf value — for each process to sync into its local live-value source.</summary>
+    Task<List<RawValue>> RawValues();
 }

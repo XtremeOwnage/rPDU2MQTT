@@ -41,6 +41,8 @@ public class PipelineContractsTests
         public FlowSnapshot Snapshot() => new(
             FlowSnapshot.FlowSourceId, DateTimeOffset.UtcNow, ++version,
             state.Select(kv => new FlowNodeValue(kv.Key.Item1, kv.Key.Item2, kv.Value)).ToList());
+        public IReadOnlyList<RawValue> RawValues() =>
+            state.Select(kv => new RawValue(kv.Key.Item1, kv.Key.Item2, kv.Value)).ToList();
     }
 
     private sealed class FakeDestination : IDestination<FlowSnapshot>
