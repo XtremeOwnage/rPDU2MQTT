@@ -27,7 +27,7 @@ public sealed record NodeTemplate(
 }
 
 /// <summary>Defaults for the Modbus connection an imported Modbus template creates (host is prompted).</summary>
-public sealed record ModbusConnectionTemplate(int Port = 502, int UnitId = 1, int PollIntervalSeconds = 10);
+public sealed record ModbusConnectionTemplate(int Port = 502, int UnitId = 1, int PollIntervalSeconds = 10, string Framing = "tcp");
 
 /// <summary>
 /// One node the template contributes. <see cref="Key"/> is a short suffix appended to the user-chosen id

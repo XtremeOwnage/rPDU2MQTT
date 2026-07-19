@@ -915,7 +915,14 @@ spec:
                           description: Hostname or IP address of the Modbus TCP device.
                         Port:
                           type: integer
-                          description: TCP port the device listens on (Modbus default 502).
+                          description: TCP port the device listens on (Modbus TCP default 502; RS485-to-Ethernet gateways often use 4196, 8899, or 502).
+                        Framing:
+                          type: string
+                          enum:
+                          - ''
+                          - tcp
+                          - rtu-over-tcp
+                          description: "Wire protocol: 'tcp' (native Modbus TCP) or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket). Most RS485-to-Ethernet gateways / serial dongles — e.g. an EG4 inverter reached on port 4196/8899 — speak rtu-over-tcp, not native Modbus TCP."
                         UnitId:
                           type: integer
                           description: Modbus unit / slave id.

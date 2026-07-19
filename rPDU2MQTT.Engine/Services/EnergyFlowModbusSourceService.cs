@@ -75,13 +75,17 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var nodeOf = new Dictionary<EnergyFlowSource, string>(ReferenceEqualityComparer.Instance);
         foreach (var (nodeId, src) in forConn) nodeOf[src] = nodeId;
 
-        ReadBatch(conn.Host, conn.Port, conn.UnitId, forConn.Select(f => f.Source).ToList(),
+        ReadBatch(conn.Host, conn.Port, conn.UnitId, conn.Framing, forConn.Select(f => f.Source).ToList(),
             onValue: (src, value) => latest.Set(nodeOf[src], src.Metric, value, src.StaleAfterSeconds, nowUtc),
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"));
     }
 
+    /// <summary>True for the RTU-over-TCP framing most RS485-to-Ethernet gateways / serial dongles use.</summary>
+    private static bool IsRtuOverTcp(string? framing)
+        => framing is not null && (framing.Equals("rtu-over-tcp", StringComparison.OrdinalIgnoreCase) || framing.Equals("rtu", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Read + decode one source's register(s), then normalise the unit and apply Scale (same pipeline as MQTT).</summary>
-    private static double ReadValue(ModbusTcpClient client, int unitId, EnergyFlowSource src)
+    private static double ReadValue(ModbusClient client, int unitId, EnergyFlowSource src)
     {
         var count = ModbusDecode.RegisterCount(src.DataType);
         var regs = string.Equals(src.RegisterType, "input", StringComparison.OrdinalIgnoreCase)
@@ -97,16 +101,27 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// silent-corruption risk. Reconnecting after any error closes that window and retries the register once.
     /// Throws only if the initial connect fails (so callers can report "unreachable").
     /// </summary>
-    private static void ReadBatch(string host, int port, int unitId, IReadOnlyList<EnergyFlowSource> items,
+    private static void ReadBatch(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource> items,
         Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null)
     {
         var endpoint = new IPEndPoint(ResolveHost(host), port);
-        ModbusTcpClient? client = null;
+        var rtu = IsRtuOverTcp(framing);
+        ModbusClient? client = null;
         void Reconnect()
         {
-            client?.Dispose();
-            client = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
-            client.Connect(endpoint, ModbusEndianness.BigEndian);
+            (client as IDisposable)?.Dispose();
+            if (rtu)
+            {
+                var c = new ModbusRtuOverTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+                c.Connect(endpoint, ModbusEndianness.BigEndian);
+                client = c;
+            }
+            else
+            {
+                var c = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+                c.Connect(endpoint, ModbusEndianness.BigEndian);
+                client = c;
+            }
         }
 
         try
@@ -125,7 +140,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 }
             }
         }
-        finally { client?.Dispose(); }
+        finally { (client as IDisposable)?.Dispose(); }
     }
 
     /// <summary>One probed register value (or the error hit reading it), in the request's item order.</summary>
@@ -136,12 +151,12 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// connection" button and the live per-binding value display, so a mapping can be verified before it's
     /// wired into the flow. Read-only; opens and closes a throwaway connection.
     /// </summary>
-    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, IReadOnlyList<EnergyFlowSource>? items)
+    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource>? items)
     {
         var readings = new List<ModbusReading>();
         try
         {
-            ReadBatch(host, port, unitId, items ?? Array.Empty<EnergyFlowSource>(),
+            ReadBatch(host, port, unitId, framing, items ?? Array.Empty<EnergyFlowSource>(),
                 onValue: (src, value) => readings.Add(new ModbusReading(src.Register, src.Metric, value, null)),
                 onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)));
         }

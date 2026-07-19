@@ -1005,7 +1005,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
           if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); continue; }
           try {
             const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Items: cells.map(lc => lc.src) }) });
+              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
             if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); status.textContent = r.body.message || 'probe failed'; continue; }
             const readings = r.body.readings || [];
             cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
@@ -1473,7 +1473,7 @@ function instantiateTemplate(tpl     , prefix        , host        , unitId     
     const conns = ensure(ensure(state.data, 'Modbus', {}), 'Connections', []);
     connId = prefix;
     conns.push({ Id: connId, Name: tpl.name, Host: host || '', Port: tpl.modbus.port, UnitId: unitId,
-      PollIntervalSeconds: tpl.modbus.pollIntervalSeconds, Enabled: true });
+      PollIntervalSeconds: tpl.modbus.pollIntervalSeconds, Framing: tpl.modbus.framing || 'tcp', Enabled: true });
   }
   const idOf = (key        ) => prefix + '-' + key;
   const added           = [];

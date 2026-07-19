@@ -744,6 +744,14 @@ A node's value can also come from a Modbus TCP device (an inverter, a meter, a P
 once under `Modbus`, then bind a node's metric to a register — same live-value seam as MQTT (polled by the
 worker, rolled up and exported identically).
 
+Set each connection's **`Framing`** to match the device:
+
+- **`tcp`** (default) — native Modbus TCP (a device or gateway that speaks Modbus/TCP directly, usually port 502).
+- **`rtu-over-tcp`** — Modbus RTU frames over a raw TCP socket. This is what most **RS485-to-Ethernet
+  gateways / serial dongles** speak (e.g. an **EG4** inverter reached on port 4196/8899). If a connection
+  *connects* but every register reads as an error, it's almost always this — switch `Framing` to
+  `rtu-over-tcp`.
+
 ### Device templates (Nodes tab → "Import device template")
 
 Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:
