@@ -466,6 +466,25 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
         });
 
+        // Force update: re-pull the currently-deployed tag now (the operator pins its current digest so it
+        // rolls even under IfNotPresent). Useful for moving channels (edge/dev/stable) that changed underneath.
+        app.MapPost("/api/operator/redeploy", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource)
+                return Results.Json(new { ok = false, message = "Force update needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
+            try
+            {
+                var cmd = new Core.OperatorCommand(Core.OperatorCommand.RedeployAction, DateTime.UtcNow);
+                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
+                {
+                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
+                    Retain = false,
+                });
+                return Results.Json(new { ok = true, message = "Force update requested — re-pulling the current tag and rolling the Deployment." }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
+        });
+
         // Configured PDU instances (the per-tab instance selector on Live Data / Control reads this).
         app.MapGet("/api/instances", () =>
         {

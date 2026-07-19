@@ -67,6 +67,11 @@ public sealed class OperatorService : IHostedService, IDisposable
             Log.Information($"Operator: switch-to-tag '{cmd.Tag}' requested over the bus.");
             _ = Task.Run(() => SetTagAsync(cmd.Tag!.Trim(), stoppingCts.Token));
         }
+        else if (string.Equals(cmd.Action, OperatorCommand.RedeployAction, StringComparison.Ordinal))
+        {
+            Log.Information("Operator: force redeploy requested over the bus.");
+            _ = Task.Run(() => RedeployAsync(stoppingCts.Token));
+        }
         else
         {
             // "check now": wake the loop (ignore if a wake is already pending).
@@ -204,6 +209,43 @@ public sealed class OperatorService : IHostedService, IDisposable
         {
             Log.Error($"Operator: could not switch to {newImage}: {ex.Message}");
             try { await PatchUpdateStatusAsync(new { current = image.Tag, checkedAt = DateTime.UtcNow.ToString("o"), message = $"Switch to {tag} failed: {ex.Message}" }, ct); }
+            catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>
+    /// Force a re-pull of the currently-deployed tag now: resolve it to its current digest and pin
+    /// <c>repo:tag@digest</c> on the Deployment(s), so it rolls and pulls the new bytes even under
+    /// <c>imagePullPolicy: IfNotPresent</c> (the point of a "force update" on a moving channel like edge/dev).
+    /// </summary>
+    private async Task RedeployAsync(CancellationToken ct)
+    {
+        if (!ImageReference.TryParse(Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"), out var image) || string.IsNullOrEmpty(image.Tag))
+        {
+            Log.Warning("Operator: can't force-update — the deployed image has no tag to re-pull.");
+            return;
+        }
+
+        var registryHost = ResolveRegistryHost(image);
+        var repository = cfg.Operator.Repository ?? image.Repository;
+        try
+        {
+            var digest = await registry.ResolveDigestAsync(registryHost, repository, image.Tag, ct);
+            // Keep the tag visible for humans but pin the digest so IfNotPresent still pulls.
+            var newImage = digest is not null ? $"{image.Registry}/{repository}:{image.Tag}@{digest}" : image.WithTag(image.Tag);
+            var patched = await SetImageAsync(repository, newImage, ct);
+            Log.Warning($"Operator: force redeploy — rolled {(patched.Count > 0 ? string.Join(", ", patched) : "no")} deployment(s) to {newImage}.");
+            await PatchUpdateStatusAsync(new
+            {
+                current = image.Tag,
+                checkedAt = DateTime.UtcNow.ToString("o"),
+                message = digest is not null ? $"Redeploying {image.Tag} ({digest[..Math.Min(digest.Length, 19)]}…)." : $"Redeploying {image.Tag}.",
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Operator: force redeploy failed: {ex.Message}");
+            try { await PatchUpdateStatusAsync(new { current = image.Tag, checkedAt = DateTime.UtcNow.ToString("o"), message = $"Redeploy failed: {ex.Message}" }, ct); }
             catch { /* best effort */ }
         }
     }

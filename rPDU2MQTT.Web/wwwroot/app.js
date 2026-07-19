@@ -2130,9 +2130,20 @@ function wireOperatorSwitch(sec     ) {
   const row = el('div', { class: 'sec-actions' });
   const sel = document.createElement('select'); sel.style.width = 'auto';
   const switchBtn = btn('Switch', 'primary');
+  const forceBtn = btn('Force update');
+  forceBtn.title = 'Re-pull the current tag now (pins its current digest so it rolls even on IfNotPresent). Use for moving channels like edge/dev that changed underneath.';
   const status = el('div', { class: 'desc' });
-  row.append(sel, switchBtn); box.append(row, status);
+  row.append(sel, switchBtn, forceBtn); box.append(row, status);
   sec.appendChild(box);
+
+  forceBtn.onclick = async () => {
+    if (!confirm('Force a re-pull of the currently-deployed tag and roll the Deployment now?')) return;
+    forceBtn.disabled = true;
+    const res = await api('/api/operator/redeploy', { method: 'POST' });
+    forceBtn.disabled = false;
+    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), res.ok && res.body?.ok);
+    if (res.ok && res.body?.ok) status.textContent = res.body.message;
+  };
 
   const CHANNEL_LABEL                         = {
     stable: 'stable — newest release', latest: 'latest — newest release', edge: 'edge — main branch (bleeding edge)',
@@ -2141,7 +2152,7 @@ function wireOperatorSwitch(sec     ) {
 
   api('/api/operator/tags').then(r => {
     const b = r.body || {};
-    if (!b.ok) { desc.textContent = b.message || 'Version switching is unavailable.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; return; }
+    if (!b.ok) { desc.textContent = b.message || 'Version switching is unavailable.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; return; }
     desc.innerHTML = `Roll the Deployment to a different image tag. Currently deployed: <b>${b.current || '—'}</b>. Switching restarts the workload (a normal rolling update).`;
     const group = (label        , tags          , fmt                       ) => {
       if (!tags || !tags.length) return;
@@ -2163,7 +2174,7 @@ function wireOperatorSwitch(sec     ) {
       toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), res.ok && res.body?.ok);
       if (res.ok && res.body?.ok) status.textContent = res.body.message;
     };
-  }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; });
+  }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
 
 // Section-specific action buttons (connection tests; Home Assistant discovery actions).

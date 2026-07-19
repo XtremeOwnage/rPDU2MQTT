@@ -12,4 +12,10 @@ public interface IContainerRegistry
     /// for public images and pagination followed).
     /// </summary>
     Task<IReadOnlyList<string>> ListTagsAsync(string registryHost, string repository, CancellationToken ct);
+
+    /// <summary>
+    /// Resolve a tag/reference to the image digest it points at, so a "force update" can pin the exact bytes
+    /// and pull even under <c>imagePullPolicy: IfNotPresent</c>. Null if the registry reports none.
+    /// </summary>
+    Task<string?> ResolveDigestAsync(string registryHost, string repository, string reference, CancellationToken ct);
 }
