@@ -32,6 +32,7 @@ public sealed class OperatorService : IHostedService, IDisposable
 
     // Container images this app publishes; used to pick the right container(s) to read/patch in a pod spec.
     private const string ContainerName = "rpdu2mqtt";
+    private static readonly System.Text.Json.JsonSerializerOptions Json = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     public OperatorService(KubernetesConfigSource source, Config cfg, IContainerRegistry registry, IHiveMQClient mqtt)
     {
@@ -55,9 +56,23 @@ public sealed class OperatorService : IHostedService, IDisposable
     private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
         if (!string.Equals(e.PublishMessage.Topic, CommandTopic, StringComparison.Ordinal)) return;
-        // Any operator command currently means "check now"; wake the loop (ignore if a wake is already pending).
-        Log.Information("Operator: on-demand update check requested over the bus.");
-        try { checkNow.Release(); } catch (SemaphoreFullException) { /* a check is already pending */ }
+
+        OperatorCommand? cmd;
+        try { cmd = System.Text.Json.JsonSerializer.Deserialize<OperatorCommand>(e.PublishMessage.PayloadAsString ?? "", Json); }
+        catch { return; }
+        if (cmd is null) return;
+
+        if (string.Equals(cmd.Action, OperatorCommand.SetTagAction, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(cmd.Tag))
+        {
+            Log.Information($"Operator: switch-to-tag '{cmd.Tag}' requested over the bus.");
+            _ = Task.Run(() => SetTagAsync(cmd.Tag!.Trim(), stoppingCts.Token));
+        }
+        else
+        {
+            // "check now": wake the loop (ignore if a wake is already pending).
+            Log.Information("Operator: on-demand update check requested over the bus.");
+            try { checkNow.Release(); } catch (SemaphoreFullException) { /* a check is already pending */ }
+        }
     }
 
     private async Task RunAsync(CancellationToken ct)
@@ -144,6 +159,53 @@ public sealed class OperatorService : IHostedService, IDisposable
                 ? (applied is not null ? $"Auto-updated to {applied}." : $"Update available: {latest}.")
                 : "Up to date.",
         }, ct);
+    }
+
+    /// <summary>
+    /// Roll the managed Deployment(s) to a chosen tag — a channel (<c>stable</c>/<c>edge</c>/<c>dev</c>) or a
+    /// specific version — requested from the GUI. This is the manual counterpart to auto-update.
+    /// </summary>
+    private async Task SetTagAsync(string tag, CancellationToken ct)
+    {
+        var deployedImage = Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE");
+        if (!ImageReference.TryParse(deployedImage, out var image))
+        {
+            Log.Warning($"Operator: can't switch tag — deployed image unknown (RPDU2MQTT_IMAGE='{deployedImage}').");
+            return;
+        }
+
+        var repository = cfg.Operator.Repository ?? image.Repository;
+        var newImage = image.WithTag(tag);
+
+        // Report the intent before patching: switching may roll this operator's own pod, cutting the run short.
+        await PatchUpdateStatusAsync(new
+        {
+            current = image.Tag,
+            latest = tag,
+            checkedAt = DateTime.UtcNow.ToString("o"),
+            message = $"Switching to {tag}…",
+        }, ct);
+
+        try
+        {
+            var patched = await SetImageAsync(repository, newImage, ct);
+            Log.Warning($"Operator: switched {(patched.Count > 0 ? string.Join(", ", patched) : "no")} deployment(s) to {newImage}.");
+            await PatchUpdateStatusAsync(new
+            {
+                available = false,
+                current = tag,
+                latest = tag,
+                applied = tag,
+                checkedAt = DateTime.UtcNow.ToString("o"),
+                message = $"Switched to {tag}.",
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Operator: could not switch to {newImage}: {ex.Message}");
+            try { await PatchUpdateStatusAsync(new { current = image.Tag, checkedAt = DateTime.UtcNow.ToString("o"), message = $"Switch to {tag} failed: {ex.Message}" }, ct); }
+            catch { /* best effort */ }
+        }
     }
 
     private string ResolveRegistryHost(ImageReference image)

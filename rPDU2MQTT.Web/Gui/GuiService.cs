@@ -422,6 +422,50 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
         });
 
+        // Tags available for the deployed image, so the Operator page can offer a channel/version switch.
+        // The GUI process queries the registry directly (a plain HTTPS call); the switch itself is the operator's job.
+        app.MapGet("/api/operator/tags", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource)
+                return Results.Json(new { ok = false, message = "Switching versions needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
+            if (!Updates.ImageReference.TryParse(Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"), out var image))
+                return Results.Json(new { ok = false, message = "The deployed image is unknown (RPDU2MQTT_IMAGE is unset)." }, ConfigSchema.Json);
+            try
+            {
+                var host = image.Registry == Updates.ImageReference.DefaultRegistry ? "registry-1.docker.io" : image.Registry;
+                var tags = await new Services.Operator.ContainerRegistryClient().ListTagsAsync(host, image.Repository, ctx.RequestAborted);
+                // Offer the moving channels that actually exist, then release versions newest-first.
+                var channels = new[] { "stable", "latest", "edge", "dev", "unstable" }.Where(tags.Contains).ToArray();
+                var versions = tags.Where(t => Updates.SemVer.TryParse(t, out _))
+                    .Select(t => { Updates.SemVer.TryParse(t, out var v); return (Tag: t, Ver: v!); })
+                    .Where(x => !x.Ver.IsPreRelease)
+                    .OrderByDescending(x => x.Ver).Select(x => x.Tag).Take(50).ToArray();
+                return Results.Json(new { ok = true, current = image.Tag, registry = image.Registry, repository = image.Repository, channels, versions }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not list tags: {ex.Message}" }, ConfigSchema.Json); }
+        });
+
+        // Switch the deployed image tag (channel or version). The operator rolls the Deployment(s) to it.
+        app.MapPost("/api/operator/set-tag", async (HttpContext ctx) =>
+        {
+            if (configSource is not KubernetesConfigSource)
+                return Results.Json(new { ok = false, message = "Switching versions needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
+            var tag = ctx.Request.Query["tag"].FirstOrDefault()?.Trim();
+            if (string.IsNullOrWhiteSpace(tag))
+                return Results.Json(new { ok = false, message = "A tag is required." }, ConfigSchema.Json);
+            try
+            {
+                var cmd = new Core.OperatorCommand(Core.OperatorCommand.SetTagAction, DateTime.UtcNow, tag);
+                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
+                {
+                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
+                    Retain = false,
+                });
+                return Results.Json(new { ok = true, message = $"Switching to '{tag}'. The Deployment will roll — watch the header/Diagnostics for the new version." }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
+        });
+
         // Configured PDU instances (the per-tab instance selector on Live Data / Control reads this).
         app.MapGet("/api/instances", () =>
         {
@@ -1303,13 +1347,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         return reader.ReadToEnd();
     }
 
-    /// <summary>Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none.</summary>
+    /// <summary>
+    /// Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none. Bounded
+    /// by a short timeout so a slow/unreachable API server can never hang the header's /api/status call.
+    /// </summary>
     private static async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
         if (k8s is null) return null;
         try
         {
-            var status = await k8s.ReadStatusAsync(ct);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(4));
+            var status = await k8s.ReadStatusAsync(cts.Token);
             if (status is { } s && s.TryGetProperty("update", out var u))
                 return System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
         }

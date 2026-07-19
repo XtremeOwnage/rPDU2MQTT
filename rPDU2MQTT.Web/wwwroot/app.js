@@ -1985,6 +1985,7 @@ function renderConfigSection(node     , nav     , sections     ) {
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
+    else if (node.key === 'Operator') wireOperatorSwitch(sec);
     link.onclick = () => activate(link, sec);
   }
   return link;
@@ -2119,6 +2120,50 @@ function wireApiDocs(sec     ) {
   enabled?.addEventListener('change', apply);
   apply();
   sec.appendChild(box);
+}
+
+// Operator page: a channel/version switcher — roll the Deployment to stable/edge/dev or a specific release (#210).
+function wireOperatorSwitch(sec     ) {
+  const box = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = 'Deployed version'; box.appendChild(lg);
+  const desc = el('div', { class: 'desc' }); box.appendChild(desc);
+  const row = el('div', { class: 'sec-actions' });
+  const sel = document.createElement('select'); sel.style.width = 'auto';
+  const switchBtn = btn('Switch', 'primary');
+  const status = el('div', { class: 'desc' });
+  row.append(sel, switchBtn); box.append(row, status);
+  sec.appendChild(box);
+
+  const CHANNEL_LABEL                         = {
+    stable: 'stable — newest release', latest: 'latest — newest release', edge: 'edge — main branch (bleeding edge)',
+    dev: 'dev — work-in-progress builds', unstable: 'unstable — work-in-progress builds',
+  };
+
+  api('/api/operator/tags').then(r => {
+    const b = r.body || {};
+    if (!b.ok) { desc.textContent = b.message || 'Version switching is unavailable.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; return; }
+    desc.innerHTML = `Roll the Deployment to a different image tag. Currently deployed: <b>${b.current || '—'}</b>. Switching restarts the workload (a normal rolling update).`;
+    const group = (label        , tags          , fmt                       ) => {
+      if (!tags || !tags.length) return;
+      const og = document.createElement('optgroup'); og.label = label;
+      tags.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = fmt(t); if (t === b.current) o.selected = true; og.appendChild(o); });
+      sel.appendChild(og);
+    };
+    group('Channels', b.channels || [], (t        ) => CHANNEL_LABEL[t] || t);
+    group('Versions', b.versions || [], (t        ) => t);
+    if (!sel.options.length) { desc.textContent += ' No tags found in the registry.'; switchBtn.disabled = true; }
+
+    switchBtn.onclick = async () => {
+      const tag = sel.value; if (!tag) return;
+      if (tag === b.current) { toast('That tag is already deployed.', false); return; }
+      if (!confirm(`Switch the deployment to "${tag}"? This rolls the workload (all tiers) to that image.`)) return;
+      switchBtn.disabled = true;
+      const res = await api('/api/operator/set-tag?tag=' + encodeURIComponent(tag), { method: 'POST' });
+      switchBtn.disabled = false;
+      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), res.ok && res.body?.ok);
+      if (res.ok && res.body?.ok) status.textContent = res.body.message;
+    };
+  }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; });
 }
 
 // Section-specific action buttons (connection tests; Home Assistant discovery actions).
