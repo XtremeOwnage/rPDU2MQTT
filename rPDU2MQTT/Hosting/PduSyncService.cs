@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Orleans;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
+using rPDU2MQTT.Core.Transport;
 using rPDU2MQTT.Grains.Abstractions.Pdu;
 
 namespace rPDU2MQTT.Hosting;
@@ -34,8 +35,9 @@ public sealed class PduSyncService : BackgroundService
             {
                 try
                 {
-                    var snapshot = await grains.GetGrain<IPduGrain>(id).Latest();
-                    if (snapshot is not null) await bus.PublishAsync(snapshot, stoppingToken);
+                    var wire = await grains.GetGrain<IPduGrain>(id).Latest();
+                    if (wire is not null)
+                        await bus.PublishAsync(new PduSnapshot(wire.InstanceId, wire.TimestampUtc, RawSnapshotMapper.ToData(wire)), stoppingToken);
                 }
                 catch (Exception ex) { Serilog.Log.Debug($"PDU sync: {id} failed: {ex.Message}"); }
             }

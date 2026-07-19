@@ -54,6 +54,5 @@ public static class SiloConfiguration
     /// <summary>Types shipped across grains via JSON (no Orleans attributes on the domain).</summary>
     public static bool IsGrainDto(Type t) =>
         t.Namespace?.StartsWith("rPDU2MQTT.Abstractions") == true
-        || t.Namespace?.StartsWith("rPDU2MQTT.Models.PDU") == true
-        || t == typeof(rPDU2MQTT.Core.PduSnapshot);
+        || t.Namespace == "rPDU2MQTT.Core.Transport";   // RawSnapshot wire form (round-trippable PDU data)
 }

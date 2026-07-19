@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Core;
+using rPDU2MQTT.Core.Transport;
 using rPDU2MQTT.Grains.Abstractions.Pdu;
 
 namespace rPDU2MQTT.Grains.Pdu;
@@ -16,7 +16,7 @@ public sealed class PduGrain : Grain, IPduGrain
     private readonly PduInstanceRegistry registry;
     private readonly HealthState health;
     private readonly ILogger<PduGrain> log;
-    private PduSnapshot? latest;
+    private RawSnapshot? latest;
     private DateTime lastPollUtc = DateTime.MinValue;
 
     public PduGrain(Config config, PduInstanceRegistry registry, HealthState health, ILogger<PduGrain> log)
@@ -27,7 +27,7 @@ public sealed class PduGrain : Grain, IPduGrain
         this.log = log;
     }
 
-    public Task<PduSnapshot?> Latest() => Task.FromResult(latest);
+    public Task<RawSnapshot?> Latest() => Task.FromResult(latest);
 
     public async Task Poll()
     {
@@ -41,7 +41,8 @@ public sealed class PduGrain : Grain, IPduGrain
         try
         {
             var data = await pdu.GetRootData_Public(CancellationToken.None);
-            latest = new PduSnapshot(id, DateTime.UtcNow, data);
+            // Project onto the round-trippable wire form — the live PduData can't be re-serialized faithfully.
+            latest = RawSnapshotMapper.ToWire(id, DateTime.UtcNow, data);
             health.RecordPollSuccess();
         }
         catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }
