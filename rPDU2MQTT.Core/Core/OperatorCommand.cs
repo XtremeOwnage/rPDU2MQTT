@@ -8,10 +8,13 @@ namespace rPDU2MQTT.Core;
 /// from the header — instead of waiting for the next timer tick. The operator subscribes to
 /// <see cref="TopicFor"/> and runs a check as soon as one arrives.
 /// </summary>
-public sealed record OperatorCommand(string Action, DateTime AtUtc)
+public sealed record OperatorCommand(string Action, DateTime AtUtc, string? Tag = null)
 {
     /// <summary>Run an update check immediately.</summary>
     public const string CheckAction = "check";
+
+    /// <summary>Roll the managed Deployment(s) to <see cref="Tag"/> — a channel (stable/edge/dev) or a version.</summary>
+    public const string SetTagAction = "set-tag";
 
     /// <summary>The (non-retained) bus topic operator commands are published to.</summary>
     public static string TopicFor(string parentTopic) => MQTTHelper.JoinPaths(parentTopic, "_bus", "command", "operator");
