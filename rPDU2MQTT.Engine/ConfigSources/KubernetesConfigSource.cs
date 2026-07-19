@@ -152,13 +152,26 @@ public sealed class KubernetesConfigSource : IConfigSource
         }
     }
 
-    /// <summary>Patch the CR's status subresource.</summary>
+    /// <summary>
+    /// Merge-patch the CR's status subresource. Only the keys present in <paramref name="status"/> are
+    /// touched, so independent writers compose rather than clobber each other — the worker reports
+    /// connectivity while the operator reports update availability (#210), both under <c>.status</c>.
+    /// </summary>
     public async Task PatchStatusAsync(object status, CancellationToken cancellationToken)
     {
         var statusJson = JsonSerializer.Serialize(status, ConfigSchema.Json);
-        var patch = new V1Patch($"[{{\"op\":\"add\",\"path\":\"/status\",\"value\":{statusJson}}}]", V1Patch.PatchType.JsonPatch);
+        var patch = new V1Patch($"{{\"status\":{statusJson}}}", V1Patch.PatchType.MergePatch);
         await Client.CustomObjects.PatchNamespacedCustomObjectStatusAsync(
             patch, RpduCrd.Group, RpduCrd.Version, Namespace, RpduCrd.Plural, Name, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>Read the CR's <c>status</c> subresource (e.g. the operator's update report), or null if unset.</summary>
+    public async Task<JsonElement?> ReadStatusAsync(CancellationToken cancellationToken)
+    {
+        var obj = await Client.CustomObjects.GetNamespacedCustomObjectAsync(
+            RpduCrd.Group, RpduCrd.Version, Namespace, RpduCrd.Plural, Name, cancellationToken: cancellationToken);
+        var root = obj is JsonElement je ? je : JsonSerializer.SerializeToElement(obj);
+        return root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Object ? status : null;
     }
 
     /// <summary>Serialize the current CR's spec to a stable string for change detection.</summary>

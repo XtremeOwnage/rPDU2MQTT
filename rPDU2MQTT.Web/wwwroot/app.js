@@ -406,6 +406,17 @@ function addDiagnosticsSection(nav     , sections     ) {
     info.innerHTML = '';
     info.appendChild(row('App version', b.version));
     if (b.image) info.appendChild(row('Container image', b.image));
+    if (b.update) {
+      // Operator update report (#210). Highlight when a newer release than the deployed one is available.
+      const u = b.update;
+      let txt        ;
+      if (u.available) txt = 'update available → ' + (u.latest || '?') + (u.applied ? ' (auto-updated)' : '') + (u.current ? ' (on ' + u.current + ')' : '');
+      else if (u.current) txt = 'up to date (' + u.current + ')';
+      else txt = u.message || '—';
+      const tr = row('Updates', txt);
+      if (u.available && !u.applied) (tr.lastChild               ).style.color = 'var(--warn, #d08700)';
+      info.appendChild(tr);
+    }
     info.appendChild(row('Uptime', b.uptimeSeconds != null ? fmtUptime(b.uptimeSeconds) : null));
     info.appendChild(row('Started (UTC)', b.startedUtc));
     info.appendChild(row('MQTT', (b.mqttConnected ? 'connected' : 'disconnected') + ' — ' + b.mqttHost));

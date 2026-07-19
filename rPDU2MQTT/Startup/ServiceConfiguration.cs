@@ -33,6 +33,7 @@ public static class ServiceConfiguration
         bool worker = roles.HasFlag(HostRole.Worker);
         bool api = roles.HasFlag(HostRole.Api);
         bool ui = roles.HasFlag(HostRole.Ui);
+        bool @operator = roles.HasFlag(HostRole.Operator);
 
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
@@ -42,7 +43,19 @@ public static class ServiceConfiguration
             services.AddSingleton(k8sSource);
             services.AddHostedService<KubernetesStatusService>();
             services.AddHostedService<KubernetesConfigWatcher>();
+
+            // ---- Operator role: this release manages its own Deployment (#210). ----
+            // Only meaningful with the Kubernetes config source (it patches the CR status + Deployments),
+            // so it's registered here. Self-gates on Operator.Enabled each pass, so toggling it in the GUI
+            // takes effect without a restart.
+            if (@operator)
+            {
+                services.AddSingleton<Services.Operator.IContainerRegistry, Services.Operator.ContainerRegistryClient>();
+                services.AddHostedService<Services.Operator.OperatorService>();
+            }
         }
+        else if (@operator)
+            Log.Warning("The 'operator' role needs the Kubernetes config source (RPDU2MQTT_CONFIG_SOURCE=k8s); it does nothing with a file config. Ignoring.");
 
         // Configure Logging.
         services.ConfigureLogging(cfg);

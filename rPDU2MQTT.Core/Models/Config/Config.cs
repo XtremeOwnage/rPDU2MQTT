@@ -75,6 +75,9 @@ public class Config
     [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
     public ModbusConfig Modbus { get; set; } = new ModbusConfig();
 
+    [YamlMember(Alias = "Operator", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update).")]
+    public OperatorConfig Operator { get; set; } = new OperatorConfig();
+
     /// <summary>
     /// Replace this instance's settings with another's. Used to hot-reload the shared singleton on
     /// rediscovery (services read these sections live). Connection-level settings (MQTT/PDU host/port,
@@ -95,5 +98,6 @@ public class Config
         Api = other.Api;
         EnergyFlow = other.EnergyFlow;
         Modbus = other.Modbus;
+        Operator = other.Operator;
     }
 }

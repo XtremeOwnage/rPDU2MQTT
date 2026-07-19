@@ -10,6 +10,10 @@
       (dict "suffix" "-api"    "role" "api"    "component" "api"    "replicas" (.Values.split.api.replicaCount    | int) "strategy" "RollingUpdate")
       (dict "suffix" "-ui"     "role" "ui"     "component" "ui"     "replicas" (.Values.split.ui.replicaCount     | int) "strategy" "RollingUpdate") }}
 {{- end }}
+{{- /* The operator (#210) manages this release's own Deployment; run it as its own single-replica process. */}}
+{{- if .Values.operator.enabled }}
+{{- $roles = append $roles (dict "suffix" "-operator" "role" "operator" "component" "operator" "replicas" 1 "strategy" "Recreate") }}
+{{- end }}
 {{- range $r := $roles }}
 ---
 apiVersion: apps/v1

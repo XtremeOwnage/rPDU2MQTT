@@ -217,6 +217,56 @@ the pod's logs/events on demand (using the RBAC the chart grants):
 
 ![GUI Diagnostics in Kubernetes — RpduConfig source + pod logs](images/gui-diagnostics-kubernetes.webp)
 
+## Operator role: self-managed updates (#210)
+
+With the Kubernetes config source, the app can run as its own lightweight operator to manage the
+Deployment it lives in. It runs as a dedicated role (`--role operator` / `RPDU2MQTT_ROLE=operator`),
+so — like the worker/api/ui split — it's a separate process you opt into; it is **not** part of the
+default `all` role.
+
+What it does today:
+
+- **Update checks (read-only).** On a timer it reads the currently-deployed image (`RPDU2MQTT_IMAGE`),
+  lists the repository's tags from the container registry (anonymous pull, OCI/Docker Registry v2), and
+  works out the newest eligible release under a **policy**:
+  - `Patch` — newer patches on the same `MAJOR.MINOR` (e.g. `1.2.3 → 1.2.9`).
+  - `Minor` — newer minors within the same `MAJOR`, no breaking changes (default).
+  - `Major` — any newer release, including a new major.
+
+  Pre-releases and moving channel tags (`stable`, `edge`, …) are never chosen as an update target; a
+  deployment pinned to a moving channel simply reports "not a release version".
+- **Reporting.** The result is written to the CR `.status.update` (`available`, `current`, `latest`,
+  `policy`, `checkedAt`, …) so it shows in `kubectl get rpduconfig` (an **Update** printer column) and on
+  the GUI **Diagnostics** page. Status is merge-patched, so it composes with the worker's connectivity
+  status rather than clobbering it.
+- **Self-update (opt-in).** With `Operator.AutoUpdate: true`, when an eligible newer release exists the
+  operator rolls the managed Deployment(s) to that tag (a strategic-merge patch of the `rpdu2mqtt`
+  container image) — a normal rolling update. Off by default: checking is safe, applying restarts the
+  workload.
+
+Config (see `Operator` in [Configuration.md](Configuration.md)): `Enabled`, `CheckForUpdates`,
+`CheckIntervalHours`, `Policy`, `AutoUpdate`, and optional `Registry` / `Repository` overrides.
+
+Enabling it with the chart:
+
+```yaml
+operator:
+  enabled: true            # deploy the operator as its own single-replica process
+kubernetesConfigSource:
+  enabled: true            # the operator patches the CR status + Deployments
+config:
+  Operator:
+    Enabled: true          # activate the checks (toggleable live from the GUI)
+    Policy: Minor
+    AutoUpdate: false
+```
+
+RBAC is already covered by the CRD config source's Role: `get,list,patch` on `apps/deployments`,
+`get,list` on `pods`, and `patch` on `rpduconfigs/status`.
+
+Deferred (future work): reconciling infrastructure objects (Service/Ingress/HTTPRoute) from config
+toggles — that overlaps with Helm's ownership of those resources and needs its own design.
+
 ## Manifests to ship
 
 Under `Examples/Kubernetes/crd/`:

@@ -28,6 +28,13 @@ split:
     replicaCount: 1
     resources: {}
 
+# Kubernetes operator (#210): run a dedicated single-replica process that manages this release's own
+# Deployment — checks the registry for newer images and (if config.Operator.AutoUpdate) rolls to them.
+# Needs kubernetesConfigSource.enabled (it patches the CR status + Deployments). Also switch on the
+# behaviour with config.Operator.Enabled below.
+operator:
+  enabled: false
+
 # ---------------------------------------------------------------------------
 # Application configuration.
 # This whole block is rendered verbatim into config.yaml (mounted at /config).

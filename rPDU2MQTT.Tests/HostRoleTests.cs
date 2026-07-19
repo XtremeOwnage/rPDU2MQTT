@@ -24,8 +24,16 @@ public class HostRoleTests
     [InlineData("ui", HostRole.Ui)]
     [InlineData("gui", HostRole.Ui)]
     [InlineData("web", HostRole.Ui)]
+    [InlineData("operator", HostRole.Operator)]
+    [InlineData("op", HostRole.Operator)]
     [InlineData("all", HostRole.All)]
     public void ParsesSingleRole(string raw, HostRole expected) => Assert.Equal(expected, HostRoles.Resolve(Cfg(("role", raw))));
+
+    [Fact]
+    public void OperatorIsOptIn_NotPartOfAll() => Assert.False(HostRole.All.HasFlag(HostRole.Operator));
+
+    [Fact]
+    public void ParsesOperatorAlongsideAnotherRole() => Assert.Equal(HostRole.Ui | HostRole.Operator, HostRoles.Resolve(Cfg(("role", "ui,operator"))));
 
     [Fact]
     public void ParsesCommaSeparatedList() => Assert.Equal(HostRole.Api | HostRole.Ui, HostRoles.Resolve(Cfg(("role", "api, ui"))));
