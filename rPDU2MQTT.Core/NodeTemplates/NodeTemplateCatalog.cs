@@ -21,11 +21,11 @@ public static class NodeTemplateCatalog
         Id: "eg4-flexboss21",
         Name: "EG4 FlexBoss 21",
         Vendor: "EG4",
-        Description: "EG4 FlexBoss 21 hybrid inverter over an RS485-to-Ethernet gateway/dongle. Creates a Modbus connection (rtu-over-tcp — set your gateway's host and port, often 4196/8899) plus solar, battery, grid and inverter nodes wired into the inverter. Register map is a community starting point — verify against your firmware.",
+        Description: "EG4 FlexBoss 21 hybrid inverter over an RS485-to-Ethernet gateway/dongle. Creates a Modbus connection (framing auto-detected — set your gateway's host and port, often 4196/8899) plus solar, battery, grid and inverter nodes wired into the inverter. Register map is a community starting point — verify against your firmware.",
         SourceUrl: "https://github.com/snarfattack/ESPHome_EG4-BOSS/blob/main/flexboss21.yaml",
         Transport: NodeTemplate.ModbusTransport,
-        // EG4 monitoring is almost always via an RS485-to-Ethernet gateway, which speaks Modbus RTU over TCP.
-        Modbus: new ModbusConnectionTemplate(Port: 8899, UnitId: 1, PollIntervalSeconds: 10, Framing: "rtu-over-tcp"),
+        // Framing auto-detects (native TCP vs RTU-over-TCP) — EG4 gateways are usually the latter, but let the poller find out.
+        Modbus: new ModbusConnectionTemplate(Port: 8899, UnitId: 1, PollIntervalSeconds: 10, Framing: "auto"),
         Nodes: new[]
         {
             new TemplateNode("inverter", "EG4 FlexBoss 21", "inverter", new[]

@@ -31,10 +31,10 @@ public class ModbusConnection
     [Description("TCP port the device listens on (Modbus TCP default 502; RS485-to-Ethernet gateways often use 4196, 8899, or 502).")]
     public int Port { get; set; } = 502;
 
-    [DefaultValue("tcp")]
-    [Description("Wire protocol: 'tcp' (native Modbus TCP) or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket). Most RS485-to-Ethernet gateways / serial dongles — e.g. an EG4 inverter reached on port 4196/8899 — speak rtu-over-tcp, not native Modbus TCP.")]
-    [AllowedValues("tcp", "rtu-over-tcp")]
-    public string Framing { get; set; } = "tcp";
+    [DefaultValue("auto")]
+    [Description("Wire protocol: 'auto' (try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device answers), 'tcp' (native Modbus TCP), or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket — what most RS485-to-Ethernet gateways / serial dongles speak, e.g. an EG4 inverter on port 4196/8899). Leave on 'auto' unless you want to pin one.")]
+    [AllowedValues("auto", "tcp", "rtu-over-tcp")]
+    public string Framing { get; set; } = "auto";
 
     [DefaultValue(1)]
     [Description("Modbus unit / slave id.")]

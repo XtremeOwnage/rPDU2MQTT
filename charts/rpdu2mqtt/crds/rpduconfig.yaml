@@ -920,9 +920,10 @@ spec:
                           type: string
                           enum:
                           - ''
+                          - auto
                           - tcp
                           - rtu-over-tcp
-                          description: "Wire protocol: 'tcp' (native Modbus TCP) or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket). Most RS485-to-Ethernet gateways / serial dongles — e.g. an EG4 inverter reached on port 4196/8899 — speak rtu-over-tcp, not native Modbus TCP."
+                          description: "Wire protocol: 'auto' (try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device answers), 'tcp' (native Modbus TCP), or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket — what most RS485-to-Ethernet gateways / serial dongles speak, e.g. an EG4 inverter on port 4196/8899). Leave on 'auto' unless you want to pin one."
                         UnitId:
                           type: integer
                           description: Modbus unit / slave id.

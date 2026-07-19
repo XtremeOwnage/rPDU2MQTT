@@ -23,6 +23,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     private readonly Config cfg;
     private readonly FlowValueCache latest = new();
     private readonly Dictionary<string, DateTime> lastPolled = new(StringComparer.Ordinal);
+    // For 'auto' connections: the framing that actually read, so we don't re-probe both every poll.
+    private readonly Dictionary<string, string> resolvedFraming = new(StringComparer.Ordinal);
 
     public EnergyFlowModbusSourceService(Config cfg) => this.cfg = cfg;
 
@@ -75,14 +77,30 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var nodeOf = new Dictionary<EnergyFlowSource, string>(ReferenceEqualityComparer.Instance);
         foreach (var (nodeId, src) in forConn) nodeOf[src] = nodeId;
 
-        ReadBatch(conn.Host, conn.Port, conn.UnitId, conn.Framing, forConn.Select(f => f.Source).ToList(),
+        // For an 'auto' connection, reuse the framing we already resolved so we don't retry native TCP every
+        // poll on a device that only speaks RTU-over-TCP.
+        var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
+
+        ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, forConn.Select(f => f.Source).ToList(),
             onValue: (src, value) => latest.Set(nodeOf[src], src.Metric, value, src.StaleAfterSeconds, nowUtc),
-            onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"));
+            onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
+            onResolved: f => resolvedFraming[conn.Id] = f);
     }
 
     /// <summary>True for the RTU-over-TCP framing most RS485-to-Ethernet gateways / serial dongles use.</summary>
     private static bool IsRtuOverTcp(string? framing)
         => framing is not null && (framing.Equals("rtu-over-tcp", StringComparison.OrdinalIgnoreCase) || framing.Equals("rtu", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The framing(s) to try for a connection, in order. An explicit 'tcp'/'rtu-over-tcp' pins one; anything
+    /// else ('auto', blank) tries native Modbus TCP first, then Modbus RTU over TCP.
+    /// </summary>
+    public static IReadOnlyList<string> FramingCandidates(string? framing)
+    {
+        if (IsRtuOverTcp(framing)) return new[] { "rtu-over-tcp" };
+        if (framing is not null && framing.Equals("tcp", StringComparison.OrdinalIgnoreCase)) return new[] { "tcp" };
+        return new[] { "tcp", "rtu-over-tcp" };
+    }
 
     /// <summary>Read + decode one source's register(s), then normalise the unit and apply Scale (same pipeline as MQTT).</summary>
     private static double ReadValue(ModbusClient client, int unitId, EnergyFlowSource src)
@@ -94,39 +112,63 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         return ModbusDecode.Decode(regs, src.DataType, src.WordOrder) * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
     }
 
+    private static ModbusClient Connect(IPEndPoint endpoint, string framing)
+    {
+        if (IsRtuOverTcp(framing))
+        {
+            var c = new ModbusRtuOverTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+            c.Connect(endpoint, ModbusEndianness.BigEndian);
+            return c;
+        }
+        var t = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+        t.Connect(endpoint, ModbusEndianness.BigEndian);
+        return t;
+    }
+
     /// <summary>
-    /// Read a batch of sources on one connection, reconnecting on a read error before the next register. A
-    /// failed read (an exception response, or cross-talk on a serial gateway shared by another master) can
-    /// leave the TCP stream misaligned, so the following reads come back as *another* register's data — a
-    /// silent-corruption risk. Reconnecting after any error closes that window and retries the register once.
-    /// Throws only if the initial connect fails (so callers can report "unreachable").
+    /// Read a batch of sources on one connection. When <paramref name="framing"/> is 'auto' (or blank), the
+    /// framing is chosen by which one actually reads the first register — native Modbus TCP, else Modbus RTU
+    /// over TCP — and reported via <paramref name="onResolved"/> so the caller can cache it. Then every
+    /// register is read, reconnecting once on a read error before the next (a failed read can leave a serial
+    /// gateway's stream misaligned, so the following reads would return another register's data). Throws only
+    /// if no framing can even connect the socket (so callers can report "unreachable").
     /// </summary>
     private static void ReadBatch(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource> items,
-        Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null)
+        Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null, Action<string>? onResolved = null)
     {
         var endpoint = new IPEndPoint(ResolveHost(host), port);
-        var rtu = IsRtuOverTcp(framing);
+        var candidates = FramingCandidates(framing);
         ModbusClient? client = null;
-        void Reconnect()
-        {
-            (client as IDisposable)?.Dispose();
-            if (rtu)
-            {
-                var c = new ModbusRtuOverTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
-                c.Connect(endpoint, ModbusEndianness.BigEndian);
-                client = c;
-            }
-            else
-            {
-                var c = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
-                c.Connect(endpoint, ModbusEndianness.BigEndian);
-                client = c;
-            }
-        }
+        string chosen = candidates[0];
 
         try
         {
-            Reconnect();   // an initial-connect failure propagates to the caller
+            if (candidates.Count == 1 || items.Count == 0)
+            {
+                client = Connect(endpoint, chosen);   // pinned framing (or nothing to probe): connect-failure propagates
+            }
+            else
+            {
+                // 'auto': the first framing that both connects and reads item[0] wins.
+                Exception? connectErr = null, readErr = null; bool anyConnected = false;
+                foreach (var f in candidates)
+                {
+                    ModbusClient c;
+                    try { c = Connect(endpoint, f); anyConnected = true; }
+                    catch (Exception ex) { connectErr = ex; continue; }
+                    try { _ = ReadValue(c, unitId, items[0]); client = c; chosen = f; break; }
+                    catch (Exception ex) { readErr = ex; (c as IDisposable)?.Dispose(); }
+                }
+                if (client is null)
+                {
+                    if (!anyConnected) throw connectErr!;   // truly unreachable
+                    // Connected but nothing readable with either framing — report per item, don't throw.
+                    foreach (var src in items) onError?.Invoke(src, readErr?.Message ?? "no readable framing");
+                    return;
+                }
+            }
+            onResolved?.Invoke(chosen);
+
             foreach (var src in items)
             {
                 for (var attempt = 0; ; attempt++)
@@ -135,7 +177,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                     catch (Exception ex)
                     {
                         if (attempt >= 1) { onError?.Invoke(src, ex.Message); break; }
-                        try { Reconnect(); } catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
+                        try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen); }
+                        catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
                     }
                 }
             }
@@ -154,17 +197,20 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource>? items)
     {
         var readings = new List<ModbusReading>();
+        string? usedFraming = null;
         try
         {
             ReadBatch(host, port, unitId, framing, items ?? Array.Empty<EnergyFlowSource>(),
                 onValue: (src, value) => readings.Add(new ModbusReading(src.Register, src.Metric, value, null)),
-                onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)));
+                onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)),
+                onResolved: f => usedFraming = f);
         }
         catch (Exception ex) { return (false, $"Could not connect to {host}:{port} — {ex.Message}", readings); }
 
         var okCount = readings.Count(r => r.Error is null);
+        var via = usedFraming is not null ? $" via {usedFraming}" : "";
         var suffix = readings.Count > 0 ? $" Read {okCount}/{readings.Count} register(s)." : "";
-        return (true, $"Connected to {host}:{port}.{suffix}", readings);
+        return (true, $"Connected to {host}:{port}{via}.{suffix}", readings);
     }
 
     private static IPAddress ResolveHost(string host)
