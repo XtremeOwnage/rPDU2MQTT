@@ -592,7 +592,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     .ToArray();
 
                 // Grain types → total activations + per-silo placement (the tree the Diagnostics page renders).
+                // Drop Orleans' own system grains (management/reminders/etc.) — only the app's grains matter here.
                 var grainTypes = stats
+                    .Where(s => !s.GrainType.StartsWith("Orleans.", StringComparison.Ordinal))
                     .GroupBy(s => s.GrainType)
                     .Select(g => new
                     {
@@ -1367,13 +1369,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
-    /// <summary>Short, readable grain name from Orleans' grain-type string (drops the namespace/suffix).</summary>
+    /// <summary>
+    /// Short, readable grain name from Orleans' grain-type string. That string is the assembly-qualified CLR
+    /// name (e.g. "rPDU2MQTT.Grains.Modbus.ModbusGrain, rPDU2MQTT.Grains"), so strip the ", Assembly" tail and
+    /// any generic/nested markers first, then take the class name and drop the "Grain" suffix.
+    /// </summary>
     private static string FriendlyGrainType(string grainType)
     {
         if (string.IsNullOrWhiteSpace(grainType)) return grainType;
-        var last = grainType.Split('.', '/').Last();          // "rpdu2mqtt.grains.modbus.modbusgrain" -> "modbusgrain"
+        var s = grainType;
+        var comma = s.IndexOf(',');   if (comma >= 0) s = s[..comma];        // drop ", AssemblyName"
+        var bracket = s.IndexOf('[');  if (bracket >= 0) s = s[..bracket];    // drop generic args
+        var last = s.Split('.', '+', '/').Last().Trim();                       // class name (+ = nested type)
         if (last.EndsWith("grain", StringComparison.OrdinalIgnoreCase))
-            last = last[..^"grain".Length];                   // -> "modbus"
+            last = last[..^"grain".Length];                                    // "ModbusGrain" -> "Modbus"
         return last.Length == 0 ? grainType : char.ToUpperInvariant(last[0]) + last[1..];
     }
 

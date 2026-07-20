@@ -393,17 +393,25 @@ function addDiagnosticsSection(nav     , sections     ) {
     sub.textContent = silos.length + ' silo' + (silos.length === 1 ? '' : 's') + ' · leader: ' + (g.leader || 'none');
     grainsWrap.appendChild(sub);
 
+    // Only show the per-silo placement column when there's more than one silo — otherwise it's the same
+    // address on every row and just noise.
+    const multiSilo = silos.length > 1;
+    const cols = multiSilo ? ['Grain', 'Active', 'Placement'] : ['Grain', 'Active'];
     const t = document.createElement('table'); t.className = 'ld';
-    const hr = document.createElement('tr'); ['Grain', 'Active', 'Placement'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const hr = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
     const tb = document.createElement('tbody');
     (g.grains || []).forEach((row     ) => {
       const tr = document.createElement('tr');
       const c1 = document.createElement('td'); c1.textContent = row.type; c1.title = row.fullType || '';
       const c2 = document.createElement('td'); c2.textContent = row.activations;
-      const c3 = document.createElement('td'); c3.style.cssText = 'color:var(--muted);font-size:12px;';
-      c3.textContent = (row.silos || []).map((s     ) => shortSilo(s.silo) + ' ×' + s.count).join(', ');
-      tr.appendChild(c1); tr.appendChild(c2); tr.appendChild(c3); tb.appendChild(tr);
+      tr.appendChild(c1); tr.appendChild(c2);
+      if (multiSilo) {
+        const c3 = document.createElement('td'); c3.style.cssText = 'color:var(--muted);font-size:12px;';
+        c3.textContent = (row.silos || []).map((s     ) => shortSilo(s.silo) + ' ×' + s.count).join(', ');
+        tr.appendChild(c3);
+      }
+      tb.appendChild(tr);
     });
     t.appendChild(tb); grainsWrap.appendChild(t);
     if (!(g.grains || []).length) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'No active grains.'; grainsWrap.appendChild(d); }
