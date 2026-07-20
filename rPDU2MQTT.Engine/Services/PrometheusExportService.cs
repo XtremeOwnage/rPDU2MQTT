@@ -62,6 +62,10 @@ public class PrometheusExportService : baseMQTTService
         }
     }
 
+    // Per-instance metrics: every pod refreshes and serves its own /metrics (and pushes its own gauges), so
+    // this is NOT run-once cluster-wide — don't leader-gate it.
+    protected override bool LeaderGated => false;
+
     protected override Task Execute(CancellationToken cancellationToken)
     {
         var labelNames = PrometheusLabels.Names(cfg);

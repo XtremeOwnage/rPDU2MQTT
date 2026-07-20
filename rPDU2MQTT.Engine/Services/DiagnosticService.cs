@@ -17,6 +17,7 @@ public class DiagnosticService : IHostedService
     private readonly Config cfg;
     private readonly DiscoveryCoordinator coordinator;
     private readonly IHostApplicationLifetime lifetime;
+    private readonly Core.LeaderState? leader;
     private readonly string rediscoverTopic;
     private readonly string restartTopic;
 
@@ -28,6 +29,7 @@ public class DiagnosticService : IHostedService
         cfg = deps.Cfg;
         this.coordinator = coordinator;
         this.lifetime = lifetime;
+        leader = deps.Leader;
 
         rediscoverTopic = MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RediscoverSuffix);
         restartTopic = MQTTHelper.JoinPaths(cfg.MQTT.ParentTopic, MQTTHelper.RestartSuffix);
@@ -49,6 +51,9 @@ public class DiagnosticService : IHostedService
 
     private async void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
+        // v3: only the leader acts on diagnostic commands (rediscover once cluster-wide).
+        if (leader is { IsLeader: false }) return;
+
         var topic = e.PublishMessage.Topic ?? string.Empty;
         try
         {

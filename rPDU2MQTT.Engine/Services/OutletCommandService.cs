@@ -18,6 +18,7 @@ public class OutletCommandService : IHostedService
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     private readonly PDU pdu;
+    private readonly Core.LeaderState? leader;
     private readonly string[] commandFilters;
 
     public OutletCommandService(MQTTServiceDependencies deps)
@@ -27,6 +28,7 @@ public class OutletCommandService : IHostedService
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for command handling.");
         cfg = deps.Cfg;
         pdu = deps.PDU;
+        leader = deps.Leader;
 
         // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
         // (<ParentTopic>/+/outlets/+/<field>/set).
@@ -75,6 +77,9 @@ public class OutletCommandService : IHostedService
 
     private async void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
+        // v3: every instance may be subscribed, but only the leader acts — so one command = one action.
+        if (leader is { IsLeader: false }) return;
+
         var topic = e.PublishMessage.Topic ?? string.Empty;
         try
         {

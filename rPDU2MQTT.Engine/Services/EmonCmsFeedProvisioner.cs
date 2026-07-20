@@ -12,11 +12,13 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
 {
     private readonly Config config;
     private readonly EmonCmsFeedSync sync;
+    private readonly Core.LeaderState? leader;
 
-    public EmonCmsFeedProvisioner(Config config, EmonCmsFeedSync sync)
+    public EmonCmsFeedProvisioner(Config config, EmonCmsFeedSync sync, Core.LeaderState? leader = null)
     {
         this.config = config;
         this.sync = sync;
+        this.leader = leader;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -27,6 +29,8 @@ public sealed class EmonCmsFeedProvisioner : BackgroundService
         do
         {
             var e = config.EmonCMS;   // read fresh each tick — live-reload the toggle/settings.
+            // v3: run-once cluster-wide — only the leader provisions feeds.
+            if (leader is { IsLeader: false }) continue;
             if (e.Enabled && e.Feeds.AutoConfigure && !string.IsNullOrWhiteSpace(e.Url) && !string.IsNullOrWhiteSpace(e.ApiKey))
             {
                 try

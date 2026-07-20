@@ -34,6 +34,16 @@ public static class ServiceConfiguration
         bool api = roles.HasFlag(HostRole.Api);
         bool ui = roles.HasFlag(HostRole.Ui);
 
+        // v3: cluster-leadership, the enabler for a homogeneous fleet — scale by running N identical All-role
+        // instances instead of separate worker/api/ui deployments. The "run once cluster-wide" work
+        // (publishers/exporters) self-gates on holding the lease, so N instances don't duplicate output and
+        // leadership fails over automatically. Only worker-capable instances contest leadership (the leader
+        // must be able to run the exporters) — so a split deployment's single worker is always the leader,
+        // while a homogeneous All-role fleet elects one of the replicas.
+        services.AddSingleton<LeaderState>();
+        if (worker)
+            services.AddHostedService<Hosting.LeaderRenewalService>();
+
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
         services.AddSingleton(configSource);
