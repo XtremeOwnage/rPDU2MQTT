@@ -1951,6 +1951,16 @@
                             "max": 86400
                         },
                         {
+                            "key": "TimeoutMs",
+                            "label": "TimeoutMs",
+                            "description": "Read/write timeout per Modbus request, in milliseconds. Lower it to fail faster on an unresponsive device; raise it for a slow gateway.",
+                            "type": "int",
+                            "required": false,
+                            "default": 1500,
+                            "min": 200,
+                            "max": 30000
+                        },
+                        {
                             "key": "Enabled",
                             "label": "Enabled",
                             "description": "Poll this device. Turn off to disable it without deleting the connection.",

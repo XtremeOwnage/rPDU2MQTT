@@ -81,7 +81,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         // poll on a device that only speaks RTU-over-TCP.
         var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
 
-        ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, forConn.Select(f => f.Source).ToList(),
+        ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, conn.TimeoutMs, forConn.Select(f => f.Source).ToList(),
             onValue: (src, value) => latest.Set(nodeOf[src], src.Metric, value, src.StaleAfterSeconds, nowUtc),
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
             onResolved: f => resolvedFraming[conn.Id] = f);
@@ -112,15 +112,15 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         return ModbusDecode.Decode(regs, src.DataType, src.WordOrder) * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
     }
 
-    private static ModbusClient Connect(IPEndPoint endpoint, string framing)
+    private static ModbusClient Connect(IPEndPoint endpoint, string framing, int timeoutMs)
     {
         if (IsRtuOverTcp(framing))
         {
-            var c = new ModbusRtuOverTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+            var c = new ModbusRtuOverTcpClient { ReadTimeout = timeoutMs, WriteTimeout = timeoutMs };
             c.Connect(endpoint, ModbusEndianness.BigEndian);
             return c;
         }
-        var t = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+        var t = new ModbusTcpClient { ReadTimeout = timeoutMs, WriteTimeout = timeoutMs };
         t.Connect(endpoint, ModbusEndianness.BigEndian);
         return t;
     }
@@ -133,7 +133,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// gateway's stream misaligned, so the following reads would return another register's data). Throws only
     /// if no framing can even connect the socket (so callers can report "unreachable").
     /// </summary>
-    private static void ReadBatch(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource> items,
+    private static void ReadBatch(string host, int port, int unitId, string? framing, int timeoutMs, IReadOnlyList<EnergyFlowSource> items,
         Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null, Action<string>? onResolved = null)
     {
         var endpoint = new IPEndPoint(ResolveHost(host), port);
@@ -145,7 +145,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         {
             if (candidates.Count == 1 || items.Count == 0)
             {
-                client = Connect(endpoint, chosen);   // pinned framing (or nothing to probe): connect-failure propagates
+                client = Connect(endpoint, chosen, timeoutMs);   // pinned framing (or nothing to probe): connect-failure propagates
             }
             else
             {
@@ -154,7 +154,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 foreach (var f in candidates)
                 {
                     ModbusClient c;
-                    try { c = Connect(endpoint, f); anyConnected = true; }
+                    try { c = Connect(endpoint, f, timeoutMs); anyConnected = true; }
                     catch (Exception ex) { connectErr = ex; continue; }
                     try { _ = ReadValue(c, unitId, items[0]); client = c; chosen = f; break; }
                     catch (Exception ex) { readErr = ex; (c as IDisposable)?.Dispose(); }
@@ -177,7 +177,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                     catch (Exception ex)
                     {
                         if (attempt >= 1) { onError?.Invoke(src, ex.Message); break; }
-                        try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen); }
+                        try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen, timeoutMs); }
                         catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
                     }
                 }
@@ -194,13 +194,13 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// connection" button and the live per-binding value display, so a mapping can be verified before it's
     /// wired into the flow. Read-only; opens and closes a throwaway connection.
     /// </summary>
-    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource>? items)
+    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, int timeoutMs, IReadOnlyList<EnergyFlowSource>? items)
     {
         var readings = new List<ModbusReading>();
         string? usedFraming = null;
         try
         {
-            ReadBatch(host, port, unitId, framing, items ?? Array.Empty<EnergyFlowSource>(),
+            ReadBatch(host, port, unitId, framing, timeoutMs <= 0 ? 1500 : timeoutMs, items ?? Array.Empty<EnergyFlowSource>(),
                 onValue: (src, value) => readings.Add(new ModbusReading(src.Register, src.Metric, value, null)),
                 onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)),
                 onResolved: f => usedFraming = f);

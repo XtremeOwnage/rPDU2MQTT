@@ -133,10 +133,10 @@ public static class ServiceConfiguration
         // contention — the reads time out. So the poller runs only in the Worker role (data production);
         // the API/UI read the values through the same bus/exports as any other producer.
         services.AddSingleton<Services.EnergyFlowModbusSourceService>();
-        // v3: the Modbus device is polled by its single-activation DeviceGrain (one owner cluster-wide),
-        // driven by this activator — not by a per-process poller. Removes single-client-gateway contention.
+        // v3: one ModbusGrain per physical device (host:port:unitId), one owner cluster-wide. The reconciler
+        // reads config and pushes each device its bindings; the grains self-poll. Removes gateway contention.
         if (worker)
-            services.AddHostedService<Hosting.DeviceGrainActivator>();
+            services.AddHostedService<Hosting.ModbusReconciler>();
 
         // v3: a local mirror of the flow grain's live values (Modbus via the DeviceGrain, and later every
         // grain-fed source), synced by FlowGrainSyncService and read through the same IFlowValueSource seam.
