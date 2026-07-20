@@ -119,12 +119,12 @@ public static class ServiceConfiguration
         // worker and its values are pushed to the flow grain by MqttToFlowBridge; every other process reads
         // them back through the grain sync (no per-process subscription duplication). The singleton stays
         // registered everywhere so the bridge can resolve it on the worker.
+        // v3: in-process sources emit into the flow grain through this sink (event-driven). The MQTT
+        // subscription manager pushes each received value straight to the FlowGrain — no polling bridge.
+        services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>, Hosting.FlowGrainSink>();
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
         if (worker)
-        {
             services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
-            services.AddHostedService<Hosting.MqttToFlowBridge>();
-        }
 
         // Modbus TCP is a second live-value ingest (#129): poll inverters/meters/PLCs into the same seam.
         // Self-gating too — with no connections/bindings configured it opens no sockets. Unlike the MQTT

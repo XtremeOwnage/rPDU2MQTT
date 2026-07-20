@@ -4,6 +4,8 @@ using HiveMQtt.Client;
 using HiveMQtt.Client.Events;
 using HiveMQtt.MQTT5.Types;
 using Microsoft.Extensions.Hosting;
+using rPDU2MQTT.Abstractions.Flow;
+using rPDU2MQTT.Abstractions.Pipeline;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Models.Config;
@@ -29,13 +31,18 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     // Topic -> the bindings fed by it. One topic may drive several nodes/metrics.
     private volatile Dictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings = new(StringComparer.Ordinal);
     private readonly HashSet<string> subscribed = new(StringComparer.Ordinal);
+    // v3: the subscription manager pushes each received value to the flow middleware (the FlowGrain) via this
+    // sink — event-driven, no polling bridge. Null in tests / if not wired.
+    private readonly ISnapshotSink<MeasurementSnapshot>? sink;
+    private long version;
 
-    public EnergyFlowMqttSourceService(MQTTServiceDependencies deps)
+    public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null)
     {
         // OnMessageReceived lives on the concrete client, not the interface.
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for energy-flow MQTT sources.");
         cfg = deps.Cfg;
+        this.sink = sink;
     }
 
     public bool TryGetValue(string nodeId, string metric, out double value)
@@ -111,7 +118,20 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     }
 
     private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
-        => Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, DateTime.UtcNow);
+    {
+        var now = DateTime.UtcNow;
+        // Collect the readings this message produced (only if a sink is wired) and push them to the flow grain
+        // event-driven — the "subscription manager routes events to the recipient grain" (#v3).
+        List<MeasurementReading>? readings = sink is null ? null : new();
+        Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, now,
+            readings is null ? null : (node, metric, value, stale) =>
+            {
+                if (Metrics.TryParse(metric, out var m)) readings.Add(new MeasurementReading(node, m, value, stale));
+            });
+
+        if (sink is not null && readings is { Count: > 0 })
+            _ = sink.EmitAsync(new MeasurementSnapshot("mqtt", now, System.Threading.Interlocked.Increment(ref version), readings));
+    }
 
     /// <summary>
     /// Flatten the nodes' MQTT-type bindings into a topic → (node, source) lookup for the subscriber. Reads
@@ -143,7 +163,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     /// </summary>
     internal static void Apply(
         IReadOnlyDictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings,
-        FlowValueCache cache, string? topic, string? payload, DateTime nowUtc)
+        FlowValueCache cache, string? topic, string? payload, DateTime nowUtc,
+        Action<string, string, double, int>? onReading = null)
     {
         if (topic is null || !bindings.TryGetValue(topic, out var list) || string.IsNullOrWhiteSpace(payload))
             return;
@@ -159,6 +180,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // consistent, then apply the manual Scale (sign flips / oddball adjustments) on top.
             var value = raw * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
             cache.Set(nodeId, src.Metric, value, src.StaleAfterSeconds, nowUtc);
+            onReading?.Invoke(nodeId, src.Metric, value, src.StaleAfterSeconds);
         }
     }
 
