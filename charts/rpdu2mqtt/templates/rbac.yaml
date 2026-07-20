@@ -42,7 +42,7 @@ subjects:
     name: {{ include "rpdu2mqtt.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
-{{- if .Values.split.enabled }}
+{{- if (include "rpdu2mqtt.clustered" .) }}
 ---
 # v3: Orleans Kubernetes clustering. Split roles are separate silos that form one cluster; membership is
 # stored in orleans.dot.net custom resources (no external DB). Namespaced CRUD on those resources:

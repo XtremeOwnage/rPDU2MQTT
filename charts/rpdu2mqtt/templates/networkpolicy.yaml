@@ -15,7 +15,7 @@ spec:
     - Egress
     {{- end }}
   ingress:
-    {{- if .Values.split.enabled }}
+    {{- if (include "rpdu2mqtt.clustered" .) }}
     # v3: Orleans silo-to-silo + gateway traffic between this release's own pods (clustering).
     - from:
         - podSelector:
@@ -65,6 +65,18 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+    {{- if (include "rpdu2mqtt.clustered" .) }}
+    # v3: Orleans silo-to-silo + gateway traffic to this release's own pods (clustering needs egress too).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "rpdu2mqtt.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 11111
+          protocol: TCP
+        - port: 30000
+          protocol: TCP
+    {{- end }}
     {{- with .Values.networkPolicy.egress }}
     # Caller-provided egress (MQTT broker, PDU, and the Kubernetes API server when using the
     # Kubernetes config source). Without these, restricted egress will block the bridge.

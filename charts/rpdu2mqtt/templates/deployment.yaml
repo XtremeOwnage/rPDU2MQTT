@@ -1,9 +1,12 @@
 {{- /*
-  One all-in-one Deployment by default. When split.enabled, render one Deployment per role
-  (worker/api/ui) so they scale independently (#179); the worker owns the single PDU session, so it
-  stays at one replica with a Recreate strategy while the stateless api/ui roles can scale.
+  One all-in-one Deployment by default. v3: it's a homogeneous Orleans fleet — scale it by raising
+  replicaCount and every replica is an identical silo; the single-owner work (the PDU session, the
+  publishers/exporters) is a single-activation grain / leader-gated, so replicas don't duplicate it.
+  RollingUpdate is safe now (grains fail over). The legacy split.enabled path still renders one
+  Deployment per role (worker/api/ui) for anyone who wants tiers instead (#179).
 */}}
-{{- $roles := list (dict "suffix" "" "role" "" "component" "" "replicas" .Values.replicaCount "strategy" "Recreate") }}
+{{- $multi := gt (int .Values.replicaCount) 1 }}
+{{- $roles := list (dict "suffix" "" "role" "" "component" "" "replicas" .Values.replicaCount "strategy" (ternary "RollingUpdate" "Recreate" $multi)) }}
 {{- if .Values.split.enabled }}
 {{- $roles = list
       (dict "suffix" "-worker" "role" "worker" "component" "worker" "replicas" (.Values.split.worker.replicaCount | int) "strategy" "Recreate")
@@ -14,6 +17,9 @@
 {{- if .Values.operator.enabled }}
 {{- $roles = append $roles (dict "suffix" "-operator" "role" "operator" "component" "operator" "replicas" 1 "strategy" "Recreate") }}
 {{- end }}
+{{- /* Kubernetes silo membership is needed whenever more than one silo exists: split roles, a scaled
+       all-in-one fleet, or the separate operator process (it joins the cluster to drive its grain). */}}
+{{- $clustered := include "rpdu2mqtt.clustered" . }}
 {{- range $r := $roles }}
 ---
 apiVersion: apps/v1
@@ -87,9 +93,10 @@ spec:
                   fieldPath: status.podIP
             - name: RPDU2MQTT_IMAGE
               value: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
-            {{- if $.Values.split.enabled }}
-            # v3: split roles are separate Orleans silos that must form one cluster (grains coordinate across
-            # them). Kubernetes membership needs no external DB; see rbac.yaml + the orleans NetworkPolicy rule.
+            {{- if $clustered }}
+            # v3: multiple silos (scaled fleet, split roles, or the operator process) must form one cluster so
+            # grains coordinate across them. Kubernetes membership needs no external DB; see rbac.yaml + the
+            # orleans NetworkPolicy rule.
             - name: RPDU2MQTT_ORLEANS_CLUSTERING
               value: kubernetes
             {{- end }}
@@ -123,7 +130,7 @@ spec:
             - name: health
               containerPort: {{ dig "Health" "Port" 8081 $.Values.config }}
             {{- end }}
-            {{- if $.Values.split.enabled }}
+            {{- if $clustered }}
             # Orleans silo-to-silo + gateway ports (v3 clustering).
             - name: orleans-silo
               containerPort: 11111
