@@ -45,7 +45,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
-    private readonly HeartbeatService heartbeats;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly EmonCmsFeedSync emonCmsFeeds;
     private readonly Core.Flow.IFlowValueSource? live;
@@ -54,7 +53,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
     {
         this.live = live;
         this.grains = grains;
@@ -71,7 +70,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.emonCmsStatus = emonCmsStatus;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
-        this.heartbeats = heartbeats;
         this.haEnergy = haEnergy;
         this.emonCmsFeeds = emonCmsFeeds;
     }
@@ -499,17 +497,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // Operator update report (#210), if the operator has written one to the CR status.
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
-            // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the
-            // local status has never attempted an export — fall back to the worker's status carried on its
-            // heartbeat, so the Status board shows the true state instead of a misleading "waiting".
+            // The cluster-wide process list (v3: the ProcessRegistryGrain, replacing the MQTT heartbeat).
+            var processList = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+
+            // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the local
+            // status has never attempted an export — fall back to the worker's status carried on its process
+            // registration, so the Status board shows the true state instead of a misleading "waiting".
             object? emonStatus = null;
             if (config.EmonCMS.Enabled)
             {
                 if (emonCmsStatus.HasAttempted)
                     emonStatus = emonCmsStatus.Snapshot();
                 else
-                    emonStatus = heartbeats.Processes
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Heartbeat.StaleAfterSeconds)
+                    emonStatus = processList
+                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds)
                         .OrderByDescending(p => p.TimestampUtc)
                         .Select(p => (object?)p.EmonCms)
                         .FirstOrDefault() ?? emonCmsStatus.Snapshot();
@@ -548,8 +549,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         };
                     })
                     .ToArray(),
-                // Other role processes seen on the bus (split deployments). Empty for a single-node "all".
-                processes = heartbeats.Processes
+                // Other role processes in the cluster (split deployments). Empty for a single-node "all".
+                processes = processList
                     .OrderBy(p => string.Join(',', p.Roles)).ThenBy(p => p.Host)
                     .Select(p =>
                     {
@@ -560,7 +561,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             roles = p.Roles,
                             host = p.Host,
                             ageSeconds = age,
-                            stale = age > Core.Heartbeat.StaleAfterSeconds,
+                            stale = age > Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds,
                         };
                     })
                     .ToArray(),
@@ -633,9 +634,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = true, method = "rollout", targets }, ConfigSchema.Json);
             }
 
-            // Non-Kubernetes: offer whole roles seen on the bus (split deployment), else just this process.
-            var roles = heartbeats.Processes.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
-            if (heartbeats.Processes.Count > 1 && roles.Count > 0)
+            // Non-Kubernetes: offer whole roles seen in the cluster (split deployment), else just this process.
+            var procs = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            var roles = procs.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
+            if (procs.Count > 1 && roles.Count > 0)
             {
                 var targets = new List<object> { new { id = "all", label = "Everything" } };
                 targets.AddRange(roles.Select(r => (object)new { id = r, label = r }));

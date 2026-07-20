@@ -151,11 +151,10 @@ public static class ServiceConfiguration
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
 
-        // Per-process liveness beacons so the GUI can list every role process in a split deployment.
-        // Always resolvable (the GUI reads it); only runs the publish/subscribe loop when roles are split.
-        services.AddSingleton<Services.HeartbeatService>();
+        // v3: each process registers itself with the cluster-wide ProcessRegistryGrain so the GUI can list
+        // every role process in a split deployment — replaces the MQTT HeartbeatService beacons.
         if (roles != HostRole.All)
-            services.AddHostedService(sp => sp.GetRequiredService<Services.HeartbeatService>());
+            services.AddHostedService<Hosting.ProcessRegistrar>();
 
         // Listens for GUI-issued restart requests over the bus (#210), so a tier can be restarted remotely.
         // Loaded in every role/process; a matching request stops the process and the orchestrator restarts it.
