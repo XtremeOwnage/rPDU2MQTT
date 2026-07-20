@@ -81,20 +81,40 @@ public sealed class ModbusGrain : Grain, IModbusGrain
             StaleAfterSeconds = b.StaleAfterSeconds,
         }).ToList();
 
-        var (_, message, readings) = await Task.Run(() =>
+        var (ok, message, readings) = await Task.Run(() =>
             EnergyFlowModbusSourceService.Probe(host, port, unitId, config.Framing, config.TimeoutMs, sources), ct);
 
+        // Couldn't even open the socket — the gateway/device is unreachable at host:port.
+        if (!ok)
+        {
+            log.LogWarning("Modbus {Key}: {Msg}", key, message);
+            return;
+        }
+
         var mapped = new List<MeasurementReading>();
+        var failures = new List<string>();
         for (int i = 0; i < readings.Count && i < config.Bindings.Count; i++)
         {
             var r = readings[i];
-            if (r.Error is not null || r.Value is null) continue;
-            if (!Metrics.TryParse(config.Bindings[i].Metric, out var metric)) continue;
-            mapped.Add(new MeasurementReading(config.Bindings[i].NodeId, metric, r.Value.Value, config.Bindings[i].StaleAfterSeconds));
+            var b = config.Bindings[i];
+            if (r.Error is not null || r.Value is null)
+            {
+                failures.Add($"{b.RegisterType} reg {b.Register} ({b.DataType}) → {r.Error ?? "no value"}");
+                continue;
+            }
+            if (!Metrics.TryParse(b.Metric, out var metric)) { failures.Add($"reg {b.Register}: unknown metric '{b.Metric}'"); continue; }
+            mapped.Add(new MeasurementReading(b.NodeId, metric, r.Value.Value, b.StaleAfterSeconds));
         }
 
-        if (mapped.Count == 0) { log.LogDebug("Modbus {Key}: no readings ({Msg})", key, message); return; }
+        // Surface partial/total read failures at Warning so they're actually visible (this is the whole point
+        // of "it doesn't work"): the device answered the socket but not the register reads.
+        if (failures.Count > 0)
+            log.LogWarning("Modbus {Key} ({Msg}): {Fail}/{Total} register(s) failed — {Details}",
+                key, message, failures.Count, readings.Count, string.Join("; ", failures));
 
+        if (mapped.Count == 0) return;
+
+        log.LogInformation("Modbus {Key}: read {Count} value(s) ({Msg}).", key, mapped.Count, message);
         latest = new MeasurementSnapshot(key, DateTimeOffset.UtcNow, ++version, mapped);
         await GrainFactory.GetGrain<IFlowGrain>(0).Ingest(latest);
     }

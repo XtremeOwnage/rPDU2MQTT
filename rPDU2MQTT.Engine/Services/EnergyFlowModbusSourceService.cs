@@ -87,6 +87,22 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
             onResolved: f => resolvedFraming[conn.Id] = f);
     }
 
+    /// <summary>
+    /// Turn a read exception into a cause the user can act on. The three failure modes are very different:
+    /// a Modbus <em>exception response</em> means the device answered but rejected the request (wrong
+    /// register/type), a <em>timeout</em> means it never answered (wrong unit id, gateway serial settings, or
+    /// framing), and a socket error means the connection itself dropped.
+    /// </summary>
+    internal static string Explain(Exception ex) => ex switch
+    {
+        ModbusException me => $"device rejected the request ({me.Message.Trim()}) — check the register address and type (holding vs input)",
+        System.Net.Sockets.SocketException se => $"socket error ({se.SocketErrorCode})",
+        TimeoutException => "device did not respond (timeout) — check the unit/slave id, the gateway's serial settings (baud/parity/stop bits), and the framing",
+        _ when ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            => "device did not respond (timeout) — check the unit/slave id, the gateway's serial settings (baud/parity/stop bits), and the framing",
+        _ => ex.Message,
+    };
+
     /// <summary>True for the RTU-over-TCP framing most RS485-to-Ethernet gateways / serial dongles use.</summary>
     private static bool IsRtuOverTcp(string? framing)
         => framing is not null && (framing.Equals("rtu-over-tcp", StringComparison.OrdinalIgnoreCase) || framing.Equals("rtu", StringComparison.OrdinalIgnoreCase));
@@ -163,7 +179,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 {
                     if (!anyConnected) throw connectErr!;   // truly unreachable
                     // Connected but nothing readable with either framing — report per item, don't throw.
-                    foreach (var src in items) onError?.Invoke(src, readErr?.Message ?? "no readable framing");
+                    var reason = readErr is not null ? Explain(readErr) : "no readable framing";
+                    foreach (var src in items) onError?.Invoke(src, reason);
                     return;
                 }
             }
@@ -176,9 +193,9 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                     try { onValue(src, ReadValue(client!, unitId, src)); break; }
                     catch (Exception ex)
                     {
-                        if (attempt >= 1) { onError?.Invoke(src, ex.Message); break; }
+                        if (attempt >= 1) { onError?.Invoke(src, Explain(ex)); break; }
                         try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen, timeoutMs); }
-                        catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
+                        catch { onError?.Invoke(src, Explain(ex)); break; }  // reconnect + retry once
                     }
                 }
             }
@@ -210,7 +227,12 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var okCount = readings.Count(r => r.Error is null);
         var via = usedFraming is not null ? $" via {usedFraming}" : "";
         var suffix = readings.Count > 0 ? $" Read {okCount}/{readings.Count} register(s)." : "";
-        return (true, $"Connected to {host}:{port}{via}.{suffix}", readings);
+        // Connected but nothing read: surface the first cause right in the summary so the user isn't left with
+        // a bare "Connected." that looks fine while no data flows.
+        var hint = okCount == 0 && readings.Count > 0
+            ? " " + (readings.FirstOrDefault(r => r.Error is not null)?.Error ?? "no data")
+            : "";
+        return (true, $"Connected to {host}:{port}{via}.{suffix}{hint}", readings);
     }
 
     private static IPAddress ResolveHost(string host)
