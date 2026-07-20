@@ -48,32 +48,55 @@ public class FlowGrainTests
 }
 
 /// <summary>
-/// Each node is its own grain: ingesting to the flow authority fans the node's leaf values out to its
-/// NodeGrain, which then serves them directly (and shows up as its own activation).
+/// The polymorphic node-grain tree: measured leaves hold a source's value, aggregate nodes sum their
+/// children, and the roll-up is distributed grain-to-grain — the model for a densely-measured tree
+/// (panels → strings → MPPTs → sub-panels → total).
 /// </summary>
 public class NodeGrainTests
 {
     [Fact]
-    public async Task Ingest_FansOut_ToPerNodeGrains()
+    public async Task Ingest_FeedsMeasuredLeafGrains()
     {
         var cluster = await GrainTestCluster.StartAsync();
         try
         {
             await cluster.GrainFactory.GetGrain<IFlowGrain>(0).Ingest(new MeasurementSnapshot(
-                "modbus:eg4", DateTimeOffset.UtcNow, 1, new[]
+                "modbus:tigo", DateTimeOffset.UtcNow, 1, new[]
                 {
-                    new MeasurementReading("grid", Metric.RealPower, 1200, 900),
-                    new MeasurementReading("solar", Metric.RealPower, 800, 900),
+                    new MeasurementReading("panel-1", Metric.RealPower, 300, 900),
+                    new MeasurementReading("panel-2", Metric.RealPower, 250, 900),
                 }));
 
-            var grid = await cluster.GrainFactory.GetGrain<INodeGrain>("grid").Values();
-            Assert.Contains(grid, r => r.Metric == Metric.RealPower && r.Value == 1200);
+            Assert.Equal(300, await cluster.GrainFactory.GetGrain<IMeasuredNodeGrain>("panel-1").Value(Metric.RealPower));
+            Assert.Equal(250, await cluster.GrainFactory.GetGrain<IMeasuredNodeGrain>("panel-2").Value(Metric.RealPower));
+            Assert.Null(await cluster.GrainFactory.GetGrain<IMeasuredNodeGrain>("panel-3").Value(Metric.RealPower));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
 
-            var solar = await cluster.GrainFactory.GetGrain<INodeGrain>("solar").Values();
-            Assert.Contains(solar, r => r.Metric == Metric.RealPower && r.Value == 800);
+    [Fact]
+    public async Task Aggregate_RollsUp_Children_Distributed()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var f = cluster.GrainFactory;
+            // Measured leaves: individual panels.
+            await f.GetGrain<IMeasuredNodeGrain>("panel-1").Observe(Metric.RealPower, 300);
+            await f.GetGrain<IMeasuredNodeGrain>("panel-2").Observe(Metric.RealPower, 250);
+            await f.GetGrain<IMeasuredNodeGrain>("panel-3").Observe(Metric.RealPower, 275);
 
-            // A node that wasn't fed has no values.
-            Assert.Empty(await cluster.GrainFactory.GetGrain<INodeGrain>("battery").Values());
+            // A string sums two panels; the MPPT sums the string plus a third panel — a two-level roll-up.
+            await f.GetGrain<IAggregateNodeGrain>("string-1").Configure(new NodeSpec("aggregate",
+                new() { new("measured", "panel-1"), new("measured", "panel-2") }));
+            await f.GetGrain<IAggregateNodeGrain>("mppt-1").Configure(new NodeSpec("aggregate",
+                new() { new("aggregate", "string-1"), new("measured", "panel-3") }));
+
+            Assert.Equal(550, await f.GetGrain<IAggregateNodeGrain>("string-1").Value(Metric.RealPower));
+            Assert.Equal(825, await f.GetGrain<IAggregateNodeGrain>("mppt-1").Value(Metric.RealPower));
+
+            // An unconfigured aggregate has no children → no value.
+            Assert.Null(await f.GetGrain<IAggregateNodeGrain>("empty").Value(Metric.RealPower));
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

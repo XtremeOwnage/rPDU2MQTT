@@ -19,11 +19,11 @@ public sealed class FlowGrain : Grain, IFlowGrain
     {
         middleware.Ingest(measurements);
 
-        // Fan each node's leaf values out to its own NodeGrain, so every node is an addressable, long-lived
-        // actor (and visible in the grain tree). Additive: the middleware above stays the roll-up authority,
-        // so this can't skew the hierarchy — it just gives nodes their own grain identity.
-        foreach (var byNode in measurements.Readings.GroupBy(r => r.NodeId))
-            await GrainFactory.GetGrain<INodeGrain>(byNode.Key).Set(byNode.ToList());
+        // Fan each source reading out to its measured-leaf node grain — the leaves of the distributed roll-up
+        // tree (a source feeds a measured node; aggregate nodes sum their children). Additive: the middleware
+        // still drives the diagram/exports today; the node-grain tree is the scale path.
+        foreach (var r in measurements.Readings)
+            await GrainFactory.GetGrain<IMeasuredNodeGrain>(r.NodeId).Observe(r.Metric, r.Value);
     }
 
     public Task<FlowSnapshot> Current() => Task.FromResult(middleware.Snapshot());
