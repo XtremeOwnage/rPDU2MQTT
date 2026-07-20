@@ -19,9 +19,10 @@ public class OutletCommandService : IHostedService
     private readonly Config cfg;
     private readonly PDU pdu;
     private readonly Core.LeaderState? leader;
+    private readonly Abstractions.Pdu.IOutletControl? outletControl;
     private readonly string[] commandFilters;
 
-    public OutletCommandService(MQTTServiceDependencies deps)
+    public OutletCommandService(MQTTServiceDependencies deps, Abstractions.Pdu.IOutletControl? outletControl = null)
     {
         // OnMessageReceived lives on the concrete client, not the interface.
         mqtt = deps.Mqtt as HiveMQClient
@@ -29,6 +30,8 @@ public class OutletCommandService : IHostedService
         cfg = deps.Cfg;
         pdu = deps.PDU;
         leader = deps.Leader;
+        // When wired, outlet writes route to the per-outlet grain (single owner); else call the PDU directly.
+        this.outletControl = outletControl;
 
         // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
         // (<ParentTopic>/+/outlets/+/<field>/set).
@@ -123,19 +126,19 @@ public class OutletCommandService : IHostedService
 
             if (command.Equals(MqttPath.Reboot.ToJsonString(), StringComparison.OrdinalIgnoreCase))
             {
-                await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None);
+                await Exec(deviceId, outletIndex, "reboot");
                 return;
             }
 
             if (command.Equals(ResetStatsCommand, StringComparison.OrdinalIgnoreCase))
             {
-                await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None);
+                await Exec(deviceId, outletIndex, "resetStats");
                 return;
             }
 
             // Otherwise it's the on/off switch command ([set]).
             var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
-            await pdu.SetOutletStateAsync(deviceId, outletIndex, on, CancellationToken.None);
+            await Exec(deviceId, outletIndex, on ? "on" : "off");
 
             // Optimistically publish the new state so HA reflects it immediately instead of waiting
             // for the next poll. The regular poll will confirm/correct it shortly after.
@@ -148,6 +151,22 @@ public class OutletCommandService : IHostedService
         catch (Exception ex)
         {
             Log.Error(ex, $"Failed to handle outlet command on topic {topic}.");
+        }
+    }
+
+    /// <summary>
+    /// Action an outlet through the grain (single cluster-wide owner) when wired, else straight to the PDU.
+    /// Same underlying PDU calls either way — the grain just makes the write actor-owned.
+    /// </summary>
+    private async Task Exec(string deviceId, int outletIndex, string action)
+    {
+        if (outletControl is not null) { await outletControl.Control(deviceId, outletIndex, action); return; }
+        switch (action.ToLowerInvariant())
+        {
+            case "on": await pdu.SetOutletStateAsync(deviceId, outletIndex, true, CancellationToken.None); break;
+            case "off": await pdu.SetOutletStateAsync(deviceId, outletIndex, false, CancellationToken.None); break;
+            case "reboot": await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None); break;
+            case "resetstats": await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None); break;
         }
     }
 

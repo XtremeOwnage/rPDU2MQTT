@@ -44,6 +44,17 @@ public sealed class PduGrain : Grain, IPduGrain
             // Project onto the round-trippable wire form — the live PduData can't be re-serialized faithfully.
             latest = RawSnapshotMapper.ToWire(id, DateTime.UtcNow, data);
             health.RecordPollSuccess();
+
+            // Fan out each outlet's state to its own OutletGrain — the PDU owns its outlet children, so every
+            // outlet becomes a live, addressable actor in the grain tree (and the write-owner for that outlet).
+            var now = DateTime.UtcNow;
+            foreach (var device in latest.Devices)
+            {
+                var deviceId = device.EntityName ?? device.Key ?? id;   // the identity used on the MQTT command topics
+                foreach (var o in device.Outlets)
+                    await GrainFactory.GetGrain<IOutletGrain>(IOutletGrain.KeyFor(deviceId, o.Key))
+                        .Observe(new global::rPDU2MQTT.Abstractions.Pdu.OutletState(deviceId, o.Key, o.Name, o.DisplayName, o.State, now));
+            }
         }
         catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }
     }

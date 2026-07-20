@@ -132,6 +132,9 @@ public static class ServiceConfiguration
         // v3: in-process sources emit into the flow grain through this sink (event-driven). The MQTT
         // subscription manager pushes each received value straight to the FlowGrain — no polling bridge.
         services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>, Hosting.FlowGrainSink>();
+        // v3: outlet writes route to the per-outlet grain (single cluster-wide owner) — the "grains for
+        // writing to PDUs". The command subscriber depends only on IOutletControl, not Orleans.
+        services.AddSingleton<Abstractions.Pdu.IOutletControl, Hosting.OutletGrainControl>();
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
         if (worker)
             services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
