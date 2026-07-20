@@ -10,4 +10,7 @@ public interface ILeaderGrain : IGrainWithIntegerKey
 {
     /// <summary>Grant or renew leadership to <paramref name="candidateId"/>. True if it is now the leader.</summary>
     Task<bool> Renew(string candidateId, int leaseSeconds);
+
+    /// <summary>The current leader's id (null if the lease has expired) — for diagnostics.</summary>
+    Task<string?> CurrentLeader();
 }

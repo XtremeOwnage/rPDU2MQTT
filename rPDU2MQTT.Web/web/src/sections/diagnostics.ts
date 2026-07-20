@@ -37,7 +37,39 @@ export function addDiagnosticsSection(nav: any, sections: any) {
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
+  const grainsWrap = document.createElement('div'); grainsWrap.style.margin = '14px 0 0'; sec.appendChild(grainsWrap);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
+
+  // The live grain tree (v3): every silo (pod), the grain types active on each, and the current leader.
+  const shortSilo = (s: string) => (s || '').split('@')[0];
+  const renderGrains = (g: any) => {
+    grainsWrap.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Grains'; head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; grainsWrap.appendChild(head);
+    if (!g || !g.ok) {
+      const d = document.createElement('div'); d.className = 'desc';
+      d.textContent = 'Grain diagnostics unavailable' + (g && g.message ? ': ' + g.message : ' (single-node cluster or management grain not ready).');
+      grainsWrap.appendChild(d); return;
+    }
+    const silos = g.silos || [];
+    const sub = document.createElement('div'); sub.className = 'desc'; sub.style.margin = '0 0 8px';
+    sub.textContent = silos.length + ' silo' + (silos.length === 1 ? '' : 's') + ' · leader: ' + (g.leader || 'none');
+    grainsWrap.appendChild(sub);
+
+    const t = document.createElement('table'); t.className = 'ld';
+    const hr = document.createElement('tr'); ['Grain', 'Active', 'Placement'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    (g.grains || []).forEach((row: any) => {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.textContent = row.type; c1.title = row.fullType || '';
+      const c2 = document.createElement('td'); c2.textContent = row.activations;
+      const c3 = document.createElement('td'); c3.style.cssText = 'color:var(--muted);font-size:12px;';
+      c3.textContent = (row.silos || []).map((s: any) => shortSilo(s.silo) + ' ×' + s.count).join(', ');
+      tr.appendChild(c1); tr.appendChild(c2); tr.appendChild(c3); tb.appendChild(tr);
+    });
+    t.appendChild(tb); grainsWrap.appendChild(t);
+    if (!(g.grains || []).length) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'No active grains.'; grainsWrap.appendChild(d); }
+  };
 
   // A "Components" panel: which roles this node runs, MQTT transport, and whether PDU data is flowing.
   const compLine = (dotClass: string, label: string) => {
@@ -95,6 +127,7 @@ export function addDiagnosticsSection(nav: any, sections: any) {
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
     info.appendChild(row('Kubernetes', b.kubernetes ? (b.ns + ' / ' + (b.pod || '?')) : 'no'));
+    try { const gr = await api('/api/grains'); renderGrains(gr.body); } catch { renderGrains(null); }
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };

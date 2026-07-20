@@ -19,4 +19,7 @@ public sealed class LeaderGrain : Grain, ILeaderGrain
         }
         return Task.FromResult(false);   // someone else holds a live lease
     }
+
+    public Task<string?> CurrentLeader()
+        => Task.FromResult(leader is not null && DateTime.UtcNow < expiresUtc ? leader : null);
 }

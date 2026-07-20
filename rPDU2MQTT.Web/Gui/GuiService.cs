@@ -574,6 +574,48 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
+        // Grain diagnostics (v3): the live grain tree — every silo (pod), the grain types active on each, and
+        // the current cluster leader. Uses Orleans' IManagementGrain, so it reflects the whole cluster from
+        // whichever process serves the GUI. Fails soft (ok:false) if the management grain is unavailable.
+        app.MapGet("/api/grains", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var mgmt = grains.GetGrain<Orleans.Runtime.IManagementGrain>(0);
+                var stats = await mgmt.GetSimpleGrainStatistics();
+                var hosts = await mgmt.GetHosts(onlyActive: true);
+                var leader = await grains.GetGrain<Grains.Abstractions.Cluster.ILeaderGrain>(0).CurrentLeader();
+
+                var silos = hosts
+                    .OrderBy(h => h.Key.ToParsableString())
+                    .Select(h => new { silo = h.Key.ToParsableString(), status = h.Value.ToString() })
+                    .ToArray();
+
+                // Grain types → total activations + per-silo placement (the tree the Diagnostics page renders).
+                var grainTypes = stats
+                    .GroupBy(s => s.GrainType)
+                    .Select(g => new
+                    {
+                        type = FriendlyGrainType(g.Key),
+                        fullType = g.Key,
+                        activations = g.Sum(x => x.ActivationCount),
+                        silos = g.GroupBy(x => x.SiloAddress.ToParsableString())
+                                 .Select(sg => new { silo = sg.Key, count = sg.Sum(x => x.ActivationCount) })
+                                 .OrderBy(x => x.silo)
+                                 .ToArray(),
+                    })
+                    .Where(t => t.activations > 0)
+                    .OrderByDescending(t => t.activations).ThenBy(t => t.type)
+                    .ToArray();
+
+                return Results.Json(new { ok = true, leader, silos, grains = grainTypes }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
+            }
+        });
+
         // Restart a tier — or everything. In Kubernetes this is a rollout restart of the matching
         // Deployment(s), which also rolls to the latest image; elsewhere it's a bus request every matching
         // process obeys; "local" just stops this process (the classic behaviour).
@@ -1324,6 +1366,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     }
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
+
+    /// <summary>Short, readable grain name from Orleans' grain-type string (drops the namespace/suffix).</summary>
+    private static string FriendlyGrainType(string grainType)
+    {
+        if (string.IsNullOrWhiteSpace(grainType)) return grainType;
+        var last = grainType.Split('.', '/').Last();          // "rpdu2mqtt.grains.modbus.modbusgrain" -> "modbusgrain"
+        if (last.EndsWith("grain", StringComparison.OrdinalIgnoreCase))
+            last = last[..^"grain".Length];                   // -> "modbus"
+        return last.Length == 0 ? grainType : char.ToUpperInvariant(last[0]) + last[1..];
+    }
 
     /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
     private static string BuildManifest(Config config)
