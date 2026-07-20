@@ -94,7 +94,10 @@ public class OutletCommandService : IHostedService
             {
                 var groupAction = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim().ToLowerInvariant();
                 if (groupAction is "on" or "off" or "reboot")
-                    await pdu.ControlGroupAsync(parts[groupsIdx + 1], groupAction, CancellationToken.None);
+                {
+                    if (outletControl is not null) await outletControl.ControlGroup(parts[groupsIdx + 1], groupAction);
+                    else await pdu.ControlGroupAsync(parts[groupsIdx + 1], groupAction, CancellationToken.None);
+                }
                 return;
             }
 

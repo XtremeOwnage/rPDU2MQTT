@@ -35,3 +35,36 @@ public class OutletGrainTests
         finally { await cluster.StopAllSilosAsync(); }
     }
 }
+
+/// <summary>The PDU supervisor's other children: the device (base data) grain and the OneView group control grain.</summary>
+public class PduChildGrainTests
+{
+    [Fact]
+    public async Task DeviceGrain_ObservesBaseData()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var dev = cluster.GrainFactory.GetGrain<IPduDeviceGrain>("pdu-a");
+            Assert.Null(await dev.State());
+            await dev.Observe(new DeviceState("pdu-a", "PDU A", "Rack PDU A", "Vertiv", "rPDU2", "normal", System.DateTime.UtcNow));
+            var s = await dev.State();
+            Assert.Equal("Vertiv", s!.Make);
+            Assert.Equal("normal", s.State);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task GroupGrain_DegradesGracefully_WithoutPdu()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var group = cluster.GrainFactory.GetGrain<IOneViewGroupGrain>("rack-1");
+            Assert.Contains("No PDU", await group.Control("on"));
+            Assert.Contains("Unknown group action", await group.Control("frobnicate"));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+}

@@ -1,3 +1,4 @@
+using rPDU2MQTT.Abstractions.Pdu;
 using rPDU2MQTT.Core.Transport;
 
 namespace rPDU2MQTT.Grains.Abstractions.Pdu;
@@ -19,4 +20,7 @@ public interface IPduGrain : IGrainWithStringKey
 
     /// <summary>The most recent snapshot for this instance in the round-trippable wire form, or null if none yet.</summary>
     Task<RawSnapshot?> Latest();
+
+    /// <summary>The child grains this PDU supervises (device + outlet grain keys), from its latest poll.</summary>
+    Task<PduChildren> Children();
 }
