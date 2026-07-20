@@ -26,4 +26,22 @@ public class OperatorGrainTests
         }
         finally { await cluster.StopAllSilosAsync(); }
     }
+
+    [Fact]
+    public void SetImagePatch_UpdatesBothTheImageAndTheReportedTagEnv()
+    {
+        // Regression: a switch that patched only the container image rolled the pod but left RPDU2MQTT_IMAGE
+        // (what the GUI/diagnostics report) on the old tag, so it looked like the switch didn't stick.
+        var json = rPDU2MQTT.Grains.Operator.OperatorGrain.BuildImagePatch(
+            new[] { "rpdu2mqtt" }, "ghcr.io/xtremeownage/rpdu2mqtt:unstable", "ghcr.io/xtremeownage/rpdu2mqtt:unstable");
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var container = doc.RootElement.GetProperty("spec").GetProperty("template").GetProperty("spec")
+            .GetProperty("containers")[0];
+        Assert.Equal("rpdu2mqtt", container.GetProperty("name").GetString());
+        Assert.Equal("ghcr.io/xtremeownage/rpdu2mqtt:unstable", container.GetProperty("image").GetString());
+        var env = container.GetProperty("env")[0];
+        Assert.Equal("RPDU2MQTT_IMAGE", env.GetProperty("name").GetString());
+        Assert.Equal("ghcr.io/xtremeownage/rpdu2mqtt:unstable", env.GetProperty("value").GetString());
+    }
 }

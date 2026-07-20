@@ -1,0 +1,11 @@
+I would expect to see more grain instances....
+
+For example- grains are intended to be lightswitch, and long-lived.
+
+So.... each "node" should itself, be a grain. And it should spin up children as it needs for its data, ie modbus grain, mqtt grain, etc.
+
+Parents should own and manage their children.
+
+Also, each instance... should be its own grain. Graints shouldn't be enumerating through lists of items to poll.... They should be their own grains.
+
+Next- There is SOMETHING FUCKING WRONG WITH FUCKING MODBUS. I HAVE FUCKING TOLD YOU 4 FFUCKING TIMES IT IS NOT FUCKING WORKING. IT STILL DOES NOT FUCKING WORK.

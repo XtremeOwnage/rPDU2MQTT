@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Orleans.Sdk" Version="10.2.1" />
     <ProjectReference Include="..\rPDU2MQTT.Grains.Abstractions\rPDU2MQTT.Grains.Abstractions.csproj" />
     <ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
