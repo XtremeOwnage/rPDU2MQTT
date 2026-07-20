@@ -15,10 +15,15 @@ public sealed class FlowGrain : Grain, IFlowGrain
 
     public FlowGrain(Config config) => middleware = new FlowMiddleware(() => config.EnergyFlow);
 
-    public Task Ingest(MeasurementSnapshot measurements)
+    public async Task Ingest(MeasurementSnapshot measurements)
     {
         middleware.Ingest(measurements);
-        return Task.CompletedTask;
+
+        // Fan each node's leaf values out to its own NodeGrain, so every node is an addressable, long-lived
+        // actor (and visible in the grain tree). Additive: the middleware above stays the roll-up authority,
+        // so this can't skew the hierarchy — it just gives nodes their own grain identity.
+        foreach (var byNode in measurements.Readings.GroupBy(r => r.NodeId))
+            await GrainFactory.GetGrain<INodeGrain>(byNode.Key).Set(byNode.ToList());
     }
 
     public Task<FlowSnapshot> Current() => Task.FromResult(middleware.Snapshot());
