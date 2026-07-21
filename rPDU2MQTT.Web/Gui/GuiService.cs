@@ -618,6 +618,23 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // The energy-flow tree computed by the distributed node grains (v3): each configured node's rolled-up
+        // value per metric, gathered straight from its grain. Lets the flow view read the actor tree.
+        app.MapGet("/api/flow/tree", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).TreeSnapshot();
+                var nodes = snap.Values
+                    .GroupBy(v => v.NodeId)
+                    .OrderBy(g => g.Key)
+                    .Select(g => new { node = g.Key, metrics = g.Select(v => new { metric = v.Metric.ToString(), value = v.Value }).ToArray() })
+                    .ToArray();
+                return Results.Json(new { ok = true, version = snap.Version, nodes }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Restart a tier — or everything. In Kubernetes this is a rollout restart of the matching
         // Deployment(s), which also rolls to the latest image; elsewhere it's a bus request every matching
         // process obeys; "local" just stops this process (the classic behaviour).

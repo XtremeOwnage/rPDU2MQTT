@@ -12,8 +12,14 @@ namespace rPDU2MQTT.Grains.Flow;
 public sealed class FlowGrain : Grain, IFlowGrain
 {
     private readonly FlowMiddleware middleware;
+    private readonly Config config;
+    private long treeVersion;
 
-    public FlowGrain(Config config) => middleware = new FlowMiddleware(() => config.EnergyFlow);
+    public FlowGrain(Config config)
+    {
+        this.config = config;
+        middleware = new FlowMiddleware(() => config.EnergyFlow);
+    }
 
     public async Task Ingest(MeasurementSnapshot measurements)
     {
@@ -32,4 +38,29 @@ public sealed class FlowGrain : Grain, IFlowGrain
         => Task.FromResult(middleware.TryGetValue(nodeId, metric.CanonicalName(), out var v) ? v : (double?)null);
 
     public Task<List<RawValue>> RawValues() => Task.FromResult(middleware.RawValues().ToList());
+
+    public async Task<FlowSnapshot> TreeSnapshot()
+    {
+        // Gather each configured node's value straight from the distributed node-grain tree: measured leaves
+        // report their source value, aggregates return the roll-up of their children, residuals the remainder.
+        // This is the tree driving the flow output (vs the in-process middleware solve).
+        var values = new List<FlowNodeValue>();
+        foreach (var n in config.EnergyFlow.Nodes)
+        {
+            if (string.IsNullOrWhiteSpace(n.Id)) continue;
+            var id = n.Id.Trim();
+            INodeGrain grain = Core.Flow.FlowNodeClassifier.TypeOf(n) switch
+            {
+                "measured" => GrainFactory.GetGrain<IMeasuredNodeGrain>(id),
+                "residual" => GrainFactory.GetGrain<IResidualNodeGrain>(id),
+                _ => GrainFactory.GetGrain<IAggregateNodeGrain>(id),
+            };
+            foreach (Metric metric in Enum.GetValues<Metric>())
+            {
+                var v = await grain.Value(metric);
+                if (v is { } val && val != 0) values.Add(new FlowNodeValue(id, metric, val));
+            }
+        }
+        return new FlowSnapshot(FlowSnapshot.FlowSourceId, DateTimeOffset.UtcNow, Interlocked.Increment(ref treeVersion), values);
+    }
 }

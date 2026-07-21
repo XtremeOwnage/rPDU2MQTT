@@ -41,32 +41,51 @@ public sealed class FlowReconciler : BackgroundService
             .GroupBy(n => n.Id.Trim(), cmp)
             .ToDictionary(g => g.Key, g => g.First(), cmp);
 
-        static string TypeOf(EnergyFlowNode n)
-            => n.AllSources().Any() || n.Value.HasValue ? "measured"
-             : string.Equals(n.Mode, "residual", StringComparison.OrdinalIgnoreCase) ? "residual"
-             : "aggregate";
+        static string TypeOf(EnergyFlowNode n) => Core.Flow.FlowNodeClassifier.TypeOf(n);
         string TypeOfId(string id) => byId.TryGetValue(id, out var n) ? TypeOf(n) : "measured";  // unknown ref = a leaf
 
-        // Feeders: for each target, the nodes wired to feed it (Links + legacy Parents both mean From feeds To).
+        // Feeders: for each target, the nodes wired to feed it. Feeds: for each source, what it feeds into.
+        // (Links + legacy Parents both mean From feeds To.)
         var feeders = new Dictionary<string, List<string>>(cmp);
+        var feeds = new Dictionary<string, List<string>>(cmp);
         void Feed(string? from, string? to)
         {
             if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
-            if (!feeders.TryGetValue(to.Trim(), out var list)) feeders[to.Trim()] = list = new();
-            list.Add(from.Trim());
+            from = from.Trim(); to = to.Trim();
+            if (!feeders.TryGetValue(to, out var f)) feeders[to] = f = new(); f.Add(from);
+            if (!feeds.TryGetValue(from, out var t)) feeds[from] = t = new(); t.Add(to);
         }
         foreach (var l in flow.Links) Feed(l.From, l.To);
         foreach (var (child, parent) in flow.Parents) Feed(parent, child);   // parent feeds child
+
+        NodeChild Ref(string id) => new(TypeOfId(id), id);
 
         var plans = new List<NodePlan>();
         foreach (var n in byId.Values)
         {
             var id = n.Id.Trim();
-            var children = feeders.TryGetValue(id, out var fs)
-                ? fs.Distinct(cmp).Select(f => new NodeChild(TypeOfId(f), f)).ToList()
-                : new List<NodeChild>();
+            var type = TypeOf(n);
             var mode = string.IsNullOrWhiteSpace(n.Mode) ? "auto" : n.Mode.Trim().ToLowerInvariant();
-            plans.Add(new NodePlan(id, TypeOf(n), new NodeSpec(mode, children), n.Value));
+
+            NodeSpec spec;
+            if (type == "residual")
+            {
+                // A residual splits the total of the node it feeds: parent = what it feeds, siblings = that
+                // parent's other measured feeders (the tracked portion it subtracts).
+                var parentId = feeds.TryGetValue(id, out var ts) ? ts.FirstOrDefault() : null;
+                var siblings = parentId is not null && feeders.TryGetValue(parentId, out var pf)
+                    ? pf.Where(f => !cmp.Equals(f, id) && TypeOfId(f) == "measured").Distinct(cmp).Select(Ref).ToList()
+                    : new List<NodeChild>();
+                spec = new NodeSpec(mode, siblings, parentId is null ? null : Ref(parentId));
+            }
+            else
+            {
+                var children = feeders.TryGetValue(id, out var fs)
+                    ? fs.Distinct(cmp).Select(Ref).ToList()
+                    : new List<NodeChild>();
+                spec = new NodeSpec(mode, children);
+            }
+            plans.Add(new NodePlan(id, type, spec, n.Value));
         }
         return plans;
     }

@@ -21,4 +21,10 @@ public interface IFlowGrain : IGrainWithIntegerKey
 
     /// <summary>Every fresh raw leaf value — for each process to sync into its local live-value source.</summary>
     Task<List<RawValue>> RawValues();
+
+    /// <summary>
+    /// Per-node values gathered from the distributed node-grain tree (aggregates roll up their children,
+    /// residuals report the remainder) — the tree-driven flow output, alongside the middleware solve.
+    /// </summary>
+    Task<FlowSnapshot> TreeSnapshot();
 }

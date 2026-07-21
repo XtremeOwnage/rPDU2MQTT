@@ -46,3 +46,19 @@ public class FlowReconcilerTests
         Assert.Equal("aggregate", plans["mppt-1"].Spec.Children[0].Type);
     }
 }
+
+/// <summary>The shared node classifier both the reconciler and the flow grain use to agree on node types.</summary>
+public class FlowNodeClassifierTests
+{
+    [Theory]
+    [InlineData(false, null, "auto", "aggregate")]
+    [InlineData(true, null, "auto", "measured")]        // has a source
+    [InlineData(false, 42.0, "auto", "measured")]       // has a static value
+    [InlineData(false, null, "residual", "residual")]
+    public void Classifies_By_Source_Value_And_Mode(bool hasSource, double? value, string mode, string expected)
+    {
+        var n = new rPDU2MQTT.Models.Config.EnergyFlowNode { Id = "n", Mode = mode, Value = value };
+        if (hasSource) n.Sources.Add(new rPDU2MQTT.Models.Config.EnergyFlowSource { Type = "modbus", Metric = "realpower" });
+        Assert.Equal(expected, rPDU2MQTT.Core.Flow.FlowNodeClassifier.TypeOf(n));
+    }
+}

@@ -101,3 +101,31 @@ public class NodeGrainTests
         finally { await cluster.StopAllSilosAsync(); }
     }
 }
+
+/// <summary>Residual node: reports its measured parent's total minus the measured siblings (untracked remainder).</summary>
+public class ResidualNodeGrainTests
+{
+    [Fact]
+    public async Task Residual_Reports_Total_Minus_MeasuredSiblings()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var f = cluster.GrainFactory;
+            // A measured main feed of 1000 W; two measured tracked loads draw 600; the residual absorbs 400.
+            await f.GetGrain<IMeasuredNodeGrain>("main").Observe(Metric.RealPower, 1000);
+            await f.GetGrain<IMeasuredNodeGrain>("load-a").Observe(Metric.RealPower, 400);
+            await f.GetGrain<IMeasuredNodeGrain>("load-b").Observe(Metric.RealPower, 200);
+
+            await f.GetGrain<IResidualNodeGrain>("untracked").Configure(new NodeSpec("residual",
+                new() { new("measured", "load-a"), new("measured", "load-b") }, new NodeChild("measured", "main")));
+
+            Assert.Equal(400, await f.GetGrain<IResidualNodeGrain>("untracked").Value(Metric.RealPower));
+
+            // Never negative: if tracked exceeds the total, the remainder clamps to 0.
+            await f.GetGrain<IMeasuredNodeGrain>("load-a").Observe(Metric.RealPower, 900);
+            Assert.Equal(0, await f.GetGrain<IResidualNodeGrain>("untracked").Value(Metric.RealPower));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+}
