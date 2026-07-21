@@ -1,6 +1,7 @@
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
+// v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
+// what "stale" or "waiting" means lives with the component that knows, not in the browser.
 import { api, btn, el, activate } from '../helpers.js';
-import { state } from '../state.js';
 
 export function addHomeSection(nav: any, sections: any) {
   const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
@@ -13,6 +14,9 @@ export function addHomeSection(nav: any, sections: any) {
   bar.appendChild(refresh); sec.appendChild(bar);
   const grid = el('div', { class: 'status-grid' }); sec.appendChild(grid);
 
+  // The dot/badge class per level; 'off' has no class (grey is the default).
+  const dotClass: any = { good: 'good', warn: 'warn', bad: 'bad', off: '' };
+
   const card = (cls: string, title: string, stateText: string, detail?: string | null) => {
     const c = el('div', { class: 'status-card' });
     const head = el('div', { class: 'status-head' });
@@ -24,54 +28,30 @@ export function addHomeSection(nav: any, sections: any) {
     return c;
   };
 
-  const age = (s: number) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
-  const uptime = (s: number) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  const ago = (s: number) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
+  const uptime = (s: number) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return 'up ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+
+  // A card's detail is the static part plus, where the grain asked for it, the aged instant it carries.
+  const detailOf = (c: any) => {
+    const parts: string[] = [];
+    if (c.detail) parts.push(c.detail);
+    if (c.eventUtc && c.age && c.age !== 'none') {
+      const secs = Math.max(0, (Date.now() - new Date(c.eventUtc).getTime()) / 1000);
+      parts.push(c.age === 'uptime' ? uptime(secs) : ago(Math.round(secs)));
+    }
+    return parts.join(' ');
+  };
 
   const load = async () => {
-    const r = await api('/api/diagnostics');
-    const b: any = r.body || {};
-    const cfg: any = state.data || {};
+    const r = await api('/api/status/board');
+    const cards = (r.body && r.body.cards) || [];
     grid.innerHTML = '';
 
-    grid.appendChild(card(b.mqttConnected ? 'good' : 'bad', 'MQTT', b.mqttConnected ? 'Connected' : 'Disconnected', b.mqttHost));
-
-    // One card per PDU: fresh data = green, stale = red, nothing yet = amber.
-    const sources = b.dataSources || [];
-    if (!sources.length) {
-      const worker = (b.roles || []).includes('worker');
-      grid.appendChild(card('warn', 'PDUs', 'No data yet', worker ? 'Waiting for the first poll' : 'Waiting on a worker node'));
-    } else {
-      sources.forEach((s: any) => grid.appendChild(card(s.stale ? 'bad' : 'good', 'PDU · ' + s.instance,
-        s.stale ? 'Stale' : 'Polling', 'Updated ' + age(s.ageSeconds))));
+    if (!cards.length) {
+      grid.appendChild(card('warn', 'Status', 'Waiting', 'No component has reported yet'));
+      return;
     }
-
-    const e: any = b.emoncms || {};
-    if (!e.enabled) grid.appendChild(card('', 'EmonCMS', 'Disabled'));
-    else {
-      const st: any = e.status || {};
-      const transport = e.transport ? e.transport.toUpperCase() : '';
-      if (st.ok === false) grid.appendChild(card('bad', 'EmonCMS', 'Error', st.lastError || 'Last export failed'));
-      else if (st.ok === true) grid.appendChild(card('good', 'EmonCMS', 'Exporting', transport + (st.count ? ' · ' + st.count + ' values' : '')));
-      else grid.appendChild(card('warn', 'EmonCMS', 'Waiting', transport + ' · no export attempted yet'));
-    }
-
-    const ha: any = cfg.HomeAssistant || {};
-    grid.appendChild(ha.DiscoveryEnabled
-      ? card('good', 'Home Assistant', 'Discovery on', 'Topic: ' + (ha.DiscoveryTopic || '—'))
-      : card('', 'Home Assistant', 'Discovery off'));
-
-    const prom: any = cfg.Prometheus || {};
-    grid.appendChild(prom.Exporter
-      ? card('good', 'Prometheus', 'Exporter on', ':' + (prom.Port || 9184) + '/metrics')
-      : card('', 'Prometheus', 'Exporter off'));
-
-    // Other role processes on the bus (split deployments only).
-    (b.processes || []).forEach((p: any) => grid.appendChild(card(p.stale ? 'bad' : 'good',
-      'Process · ' + ((p.roles || []).join('+') || '?'), p.stale ? 'Stale' : 'Alive',
-      (p.host || '') + ' · seen ' + age(p.ageSeconds))));
-
-    grid.appendChild(card('good', 'This node', (b.roles || []).join(', ') || 'all',
-      'v' + (b.version || '?') + ' · up ' + uptime(b.uptimeSeconds)));
+    cards.forEach((c: any) => grid.appendChild(card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c))));
   };
 
   refresh.onclick = () => load();

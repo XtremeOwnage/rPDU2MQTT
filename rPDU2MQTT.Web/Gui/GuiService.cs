@@ -489,6 +489,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
 
+        // The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
+        // connected/stale/waiting, and what colour that is — belong to the components, so this endpoint just
+        // hands the board over. One grain call, one cluster-wide answer, whichever replica serves the request.
+        app.MapGet("/api/status/board", async () =>
+        {
+            try
+            {
+                var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
+                var cards = board.Select(c => new
+                {
+                    id = c.Id,
+                    title = c.Title,
+                    level = c.Level.ToString().ToLowerInvariant(),
+                    state = c.State,
+                    detail = c.Detail,
+                    eventUtc = c.EventUtc,
+                    age = c.Age.ToString().ToLowerInvariant(),
+                }).ToArray();
+                return Results.Json(new { ok = true, cards }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {

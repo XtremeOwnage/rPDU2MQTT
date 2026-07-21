@@ -18,22 +18,18 @@ public sealed class ProcessRegistrar : BackgroundService
     private readonly EmonCmsStatus emon;
     private readonly ProcessInfo baseInfo;
 
-    public ProcessRegistrar(IGrainFactory grains, HostRole roles, EmonCmsStatus emon)
+    public ProcessRegistrar(IGrainFactory grains, EmonCmsStatus emon, ProcessIdentity self)
     {
         this.grains = grains;
         this.emon = emon;
 
-        var roleNames = new[] { HostRole.Worker, HostRole.Api, HostRole.Ui, HostRole.Operator }
-            .Where(r => roles.HasFlag(r)).Select(r => r.ToString().ToLowerInvariant()).ToArray();
-        var host = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME") ?? Environment.MachineName;
-        var id = $"{string.Join('-', roleNames)}-{host}-{Guid.NewGuid():N}".ToLowerInvariant();
         baseInfo = new ProcessInfo
         {
-            Id = id.Length > 80 ? id[..80] : id,
-            Roles = roleNames,
-            Host = host,
-            StartedUtc = DateTime.UtcNow,
-            Version = AppInfo.Version,
+            Id = self.Id,
+            Roles = self.Roles,
+            Host = self.Host,
+            StartedUtc = self.StartedUtc,
+            Version = self.Version,
         };
     }
 
