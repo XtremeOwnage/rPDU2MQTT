@@ -43,6 +43,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly PduInstanceRegistry registry;
     private readonly InstanceManager instances;
     private readonly EmonCmsStatus emonCmsStatus;
+    private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
@@ -52,7 +53,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null)
     {
         this.live = live;
         this.grains = grains;
@@ -67,6 +68,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.registry = registry;
         this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
+        this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
         this.haEnergy = haEnergy;
@@ -666,7 +668,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
             if (target is "" or "local")
             {
+                // #192: the restarter decides how — replacing the pod under Kubernetes, stopping otherwise.
+                if (restarter is not null)
+                {
+                    var message = await restarter.RestartAsync("GUI request");
+                    return Results.Json(new { ok = true, message }, ConfigSchema.Json);
+                }
                 Log.Information("Restart requested via GUI; stopping this process.");
+                Core.SelfRestart.Mark("GUI request");
                 _ = Task.Run(async () => { await Task.Delay(300); lifetime.StopApplication(); });
                 return Results.Json(new { ok = true, message = "Restarting this process…" }, ConfigSchema.Json);
             }

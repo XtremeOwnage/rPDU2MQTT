@@ -65,6 +65,7 @@ public class DiagnosticService : IHostedService
             else if (topic.Equals(restartTopic, StringComparison.OrdinalIgnoreCase))
             {
                 Log.Information("Restart requested via diagnostic action; stopping application.");
+                rPDU2MQTT.Core.SelfRestart.Mark("diagnostic action");   // #192: come back with exit 75, not 0
                 lifetime.StopApplication();
             }
         }
