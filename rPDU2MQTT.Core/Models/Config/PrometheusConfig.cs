@@ -36,7 +36,7 @@ public class PrometheusConfig
     /// <c>units</c>, <c>instance</c> (the PDU instance key), <c>hierarchy</c> (the energy-flow tier
     /// feeding this reading). Prometheus requires a consistent label set, so this applies to all metrics.
     /// </summary>
-    [Description("Labels attached to every exported metric. Available: device, source, name, number, type, units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set.")]
+    [Description("Labels attached to every exported metric. Available: device, device_name (the device's display name), source, name (the outlet/entity's display name), number, type, type_name (the measurement said in English, e.g. 'Real Power'), units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set.")]
     public List<string> Labels { get; set; } = new() { "device", "source", "units" };
 
     [Description("Push metrics to a Prometheus Pushgateway.")]
