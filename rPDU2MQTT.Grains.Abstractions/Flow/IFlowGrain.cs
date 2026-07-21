@@ -3,34 +3,29 @@ using rPDU2MQTT.Abstractions.Flow;
 namespace rPDU2MQTT.Grains.Abstractions.Flow;
 
 /// <summary>
-/// The energy-flow middleware as a single-activation grain (key 0) — the cluster-wide owner of the mapped
-/// hierarchy. Sources push their measurements here; the API/GUI/exporters read the computed flow here. This
-/// is the location-transparent replacement for the per-process <c>FlowValueCache</c> + the MQTT bus bridge:
-/// one authority, reachable from any silo.
+/// The cluster-wide edge of the energy flow (single-activation grain, key 0). Sources push their measurements
+/// in here; the API/GUI/exporters read the computed flow out of here.
+/// <para>
+/// It does not compute the flow — the node grains do, each owning its own value and pushing it here via
+/// <see cref="PublishNodeValue"/>. This grain is the <b>projection</b>: the current value of every node that
+/// has published one, assembled into a <see cref="FlowSnapshot"/> on demand. Nodes appear here simply by
+/// publishing, so config-declared and runtime-derived (auto PDU→outlet) nodes need no separate registration.
+/// </para>
 /// </summary>
 public interface IFlowGrain : IGrainWithIntegerKey
 {
     /// <summary>Ingest one source's measurements (already mapped to node/metric, canonical units).</summary>
     Task Ingest(MeasurementSnapshot measurements);
 
-    /// <summary>The current computed flow snapshot (fresh version each call).</summary>
+    /// <summary>A node grain reporting its newly computed value for a metric (null = it no longer has one).</summary>
+    Task PublishNodeValue(string nodeId, Metric metric, double? value);
+
+    /// <summary>The current flow snapshot: every node's value as the node grains last published it.</summary>
     Task<FlowSnapshot> Current();
 
-    /// <summary>The current rolled-up value for one (node, metric), or null if unmapped.</summary>
+    /// <summary>The current rolled-up value for one (node, metric), or null if no node has published it.</summary>
     Task<double?> NodeValue(string nodeId, Metric metric);
 
     /// <summary>Every fresh raw leaf value — for each process to sync into its local live-value source.</summary>
     Task<List<RawValue>> RawValues();
-
-    /// <summary>
-    /// Per-node values gathered from the distributed node-grain tree (aggregates roll up their children,
-    /// residuals report the remainder) — the tree-driven flow output, alongside the middleware solve.
-    /// </summary>
-    Task<FlowSnapshot> TreeSnapshot();
-
-    /// <summary>
-    /// Register runtime-derived (auto) nodes in the tree so <see cref="TreeSnapshot"/> includes them — the
-    /// PduGrain reports its auto PDU→outlet nodes (id → grain type) each poll.
-    /// </summary>
-    Task RegisterNodes(Dictionary<string, string> nodes);
 }

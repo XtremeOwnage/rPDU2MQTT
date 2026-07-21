@@ -7,10 +7,10 @@ namespace rPDU2MQTT.Abstractions.Flow;
 /// holds the latest per <c>(node, metric)</c>, applies the graph topology (feeders/children, aggregation,
 /// residual/untracked sharing), and produces <see cref="FlowSnapshot"/>s for the destinations.
 /// <para>
-/// The graph math is global (a feeder takes a share of what measured siblings don't cover), so it stays in
-/// one place here — it is not distributed across per-node actors. Node <b>state</b> may be distributed;
-/// node <b>computation</b> is centralized. The topology itself comes from configuration and is supplied by
-/// the implementation; this contract is only about the data flowing through.
+/// This is the <i>contract</i> only — data in, mapped flow out. It says nothing about where the math runs:
+/// the production implementation distributes both node state and node computation across per-node grains
+/// that subscribe to each other (see <c>INodeGrain</c>), and a test/in-process implementation can just as
+/// well do it in one object. The topology comes from configuration and is supplied by the implementation.
 /// </para>
 /// </summary>
 public interface IFlowMiddleware

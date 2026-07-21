@@ -5,9 +5,10 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// The flow middleware as a grain: measurements ingested from a (simulated) source are served back through
-/// the grain — which also exercises shipping the framework-free pipeline DTOs across the grain boundary via
-/// the JSON serializer (they carry no Orleans attributes by design).
+/// The flow's edge grain: measurements ingested from a (simulated) source reach the measured-leaf grains,
+/// which publish back — so the value is served from the projection. Also exercises shipping the
+/// framework-free pipeline DTOs across the grain boundary via the JSON serializer (they carry no Orleans
+/// attributes by design).
 /// </summary>
 public class FlowGrainTests
 {
@@ -49,8 +50,9 @@ public class FlowGrainTests
 
 /// <summary>
 /// The polymorphic node-grain tree: measured leaves hold a source's value, aggregate nodes sum their
-/// children, and the roll-up is distributed grain-to-grain — the model for a densely-measured tree
-/// (panels → strings → MPPTs → sub-panels → total).
+/// children, and the roll-up is a distributed grain-to-grain <i>subscription</i> — a node pushes its value to
+/// whoever subscribed, so <c>Value</c> is a cached read, not a tree walk. The model for a densely-measured
+/// tree (panels → strings → MPPTs → sub-panels → total).
 /// </summary>
 public class NodeGrainTests
 {
@@ -92,8 +94,14 @@ public class NodeGrainTests
             await f.GetGrain<IAggregateNodeGrain>("mppt-1").Configure(new NodeSpec("aggregate",
                 new() { new("aggregate", "string-1"), new("measured", "panel-3") }));
 
+            // Subscribing replayed each child's current value, so both levels are correct straight away.
             Assert.Equal(550, await f.GetGrain<IAggregateNodeGrain>("string-1").Value(Metric.RealPower));
             Assert.Equal(825, await f.GetGrain<IAggregateNodeGrain>("mppt-1").Value(Metric.RealPower));
+
+            // A leaf that moves pushes through every level above it — no reconfigure, no polling.
+            await f.GetGrain<IMeasuredNodeGrain>("panel-1").Observe(Metric.RealPower, 400);
+            Assert.Equal(650, await f.GetGrain<IAggregateNodeGrain>("string-1").Value(Metric.RealPower));
+            Assert.Equal(925, await f.GetGrain<IAggregateNodeGrain>("mppt-1").Value(Metric.RealPower));
 
             // An unconfigured aggregate has no children → no value.
             Assert.Null(await f.GetGrain<IAggregateNodeGrain>("empty").Value(Metric.RealPower));
@@ -130,11 +138,14 @@ public class ResidualNodeGrainTests
     }
 }
 
-/// <summary>TreeSnapshot gathers the whole tree — including the runtime auto PDU→outlet nodes the PduGrain registers.</summary>
-public class FlowTreeSnapshotTests
+/// <summary>
+/// The flow grain's snapshot is a projection of what the node grains published — a node appears in it by
+/// publishing, so runtime-derived nodes (the auto PDU→outlet tree) need no registration step.
+/// </summary>
+public class FlowProjectionTests
 {
     [Fact]
-    public async Task TreeSnapshot_Includes_RegisteredAutoNodes_RolledUp()
+    public async Task Current_Projects_WhatTheNodeGrainsPublished()
     {
         var cluster = await GrainTestCluster.StartAsync();
         try
@@ -144,17 +155,15 @@ public class FlowTreeSnapshotTests
             await f.GetGrain<IMeasuredNodeGrain>("outlet:pduA:2").Observe(Metric.RealPower, 150);
             await f.GetGrain<IAggregateNodeGrain>("pdu:pduA").Configure(new NodeSpec("aggregate",
                 new() { new("measured", "outlet:pduA:1"), new("measured", "outlet:pduA:2") }));
-            await f.GetGrain<IFlowGrain>(0).RegisterNodes(new()
-            {
-                ["outlet:pduA:1"] = "measured",
-                ["outlet:pduA:2"] = "measured",
-                ["pdu:pduA"] = "aggregate",
-            });
 
-            var snap = await f.GetGrain<IFlowGrain>(0).TreeSnapshot();
+            var snap = await f.GetGrain<IFlowGrain>(0).Current();
             var pdu = snap.Values.Single(v => v.NodeId == "pdu:pduA" && v.Metric == Metric.RealPower);
             Assert.Equal(250, pdu.Value);   // the PDU aggregate summed its two outlet leaves
             Assert.Contains(snap.Values, v => v.NodeId == "outlet:pduA:1" && v.Value == 100);
+
+            // An outlet moving republishes the aggregate — the projection follows without being asked.
+            await f.GetGrain<IMeasuredNodeGrain>("outlet:pduA:2").Observe(Metric.RealPower, 200);
+            Assert.Equal(300, await f.GetGrain<IFlowGrain>(0).NodeValue("pdu:pduA", Metric.RealPower));
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

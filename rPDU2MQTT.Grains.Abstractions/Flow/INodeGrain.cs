@@ -4,18 +4,41 @@ namespace rPDU2MQTT.Grains.Abstractions.Flow;
 
 /// <summary>
 /// The base energy-flow node actor (key = node id). Every node type — aggregate (Σ children), measured leaf,
-/// residual — implements this, so a parent rolls up its children uniformly through <see cref="Value"/>
-/// regardless of their type. Designed for scale: a densely-measured tree (per-panel → string → MPPT →
-/// sub-panel → total, CT-clamped breakers, outlets) rolls up as distributed grain-to-grain sums, each node
-/// owning its own state and children.
+/// residual — implements this, so a node depends on its upstreams uniformly regardless of their type.
+/// <para>
+/// Nodes are wired as a <b>push</b> dataflow, not a pull tree: a node <see cref="Subscribe"/>s to the nodes it
+/// depends on, each of those pushes <see cref="OnInputChanged"/> whenever its own value moves, and the node
+/// recomputes and publishes its value to <i>its</i> subscribers. Nothing walks the tree at read time —
+/// <see cref="Value"/> is the last computed value, already in hand. That's what makes a densely-measured tree
+/// (per-panel → string → MPPT → sub-panel → total, CT-clamped breakers, outlets) scale: a change touches only
+/// the path from the node that moved up to the root, and each node owns its own state, children and math.
+/// </para>
 /// </summary>
 public interface INodeGrain : IGrainWithStringKey
 {
-    /// <summary>Set this node's mode + children (pushed by the flow reconciler from config).</summary>
+    /// <summary>
+    /// Set this node's mode + upstreams (pushed by the flow reconciler from config). The node subscribes to
+    /// any new upstream and drops subscriptions it no longer needs, then recomputes.
+    /// </summary>
     Task Configure(NodeSpec spec);
 
-    /// <summary>This node's value for a metric — its own measurement (leaf) or the roll-up of its children.</summary>
+    /// <summary>This node's current value for a metric — computed on the last change, not on this call.</summary>
     Task<double?> Value(Metric metric);
+
+    /// <summary>
+    /// Start pushing this node's value changes to <paramref name="subscriber"/>. Idempotent, and it replays
+    /// the current values immediately so a fresh (or reactivated) subscriber starts from live state.
+    /// </summary>
+    Task Subscribe(NodeChild subscriber);
+
+    /// <summary>Stop pushing to that subscriber (its topology changed and it no longer depends on us).</summary>
+    Task Unsubscribe(string subscriberId);
+
+    /// <summary>
+    /// An upstream node this one subscribed to has a new value for a metric (null = it no longer has one).
+    /// The node caches it, recomputes its own value, and publishes onward if that value changed.
+    /// </summary>
+    Task OnInputChanged(string nodeId, Metric metric, double? value);
 
     /// <summary>Self-description for the grain tree.</summary>
     Task<NodeDescription> Describe();

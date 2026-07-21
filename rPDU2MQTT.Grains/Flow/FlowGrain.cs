@@ -1,77 +1,84 @@
+using Orleans.Concurrency;
 using rPDU2MQTT.Abstractions.Flow;
-using rPDU2MQTT.Classes;
-using rPDU2MQTT.Core.Pipeline;
+using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Grains.Abstractions.Flow;
 
 namespace rPDU2MQTT.Grains.Flow;
 
 /// <summary>
-/// Hosts the <see cref="FlowMiddleware"/> as the cluster-wide flow authority (singleton grain, key 0). Thin:
-/// all mapping is the middleware's (Core); the grain just makes it reachable from every silo.
+/// The flow's edge grain (singleton, key 0). Two jobs, no math:
+/// <list type="bullet">
+/// <item>ingest — fan each source reading out to its measured-leaf node grain, which is where the dataflow
+/// starts; the raw readings are also kept so each process can mirror them into its local value source.</item>
+/// <item>project — hold what every node grain published (they push on change plus a heartbeat) and serve it
+/// as a <see cref="FlowSnapshot"/>.</item>
+/// </list>
+/// Reentrant because ingest is a round trip: feeding a leaf makes that leaf (and its parents) publish back
+/// into this grain while the ingest call is still in flight.
 /// </summary>
+[Reentrant]
 public sealed class FlowGrain : Grain, IFlowGrain
 {
-    private readonly FlowMiddleware middleware;
-    private readonly Config config;
-    private long treeVersion;
-    // Runtime-derived nodes that aren't in config — the auto PDU→outlet tree the PduGrain feeds (id → type).
-    private readonly Dictionary<string, string> autoNodes = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Raw leaf readings as ingested, with their staleness — the per-process sync reads these.</summary>
+    private readonly FlowValueCache raw = new();
 
-    public FlowGrain(Config config)
-    {
-        this.config = config;
-        middleware = new FlowMiddleware(() => config.EnergyFlow);
-    }
+    /// <summary>Last seen snapshot version per source, so a duplicate/out-of-order snapshot is ignored.</summary>
+    private readonly Dictionary<string, long> sourceVersions = new(StringComparer.Ordinal);
 
-    public Task RegisterNodes(Dictionary<string, string> nodes)
-    {
-        foreach (var (id, type) in nodes) autoNodes[id] = type;
-        return Task.CompletedTask;
-    }
+    /// <summary>The projection: each node's current value per metric, as its grain last published it.</summary>
+    private readonly Dictionary<string, Dictionary<Metric, double>> nodes = new(StringComparer.OrdinalIgnoreCase);
+
+    private long version;
 
     public async Task Ingest(MeasurementSnapshot measurements)
     {
-        middleware.Ingest(measurements);
+        // Order-tolerant per source: an older/duplicate version is ignored.
+        if (sourceVersions.TryGetValue(measurements.SourceId, out var seen) && measurements.Version <= seen) return;
+        sourceVersions[measurements.SourceId] = measurements.Version;
 
-        // Fan each source reading out to its measured-leaf node grain — the leaves of the distributed roll-up
-        // tree (a source feeds a measured node; aggregate nodes sum their children). Additive: the middleware
-        // still drives the diagram/exports today; the node-grain tree is the scale path.
+        var now = DateTime.UtcNow;
+        foreach (var r in measurements.Readings)
+            raw.Set(r.NodeId, r.Metric.CanonicalName(), r.Value, r.StaleAfterSeconds, now);
+
+        // A source feeds a measured leaf; everything above it recomputes by subscription from there.
         foreach (var r in measurements.Readings)
             await GrainFactory.GetGrain<IMeasuredNodeGrain>(r.NodeId).Observe(r.Metric, r.Value);
     }
 
-    public Task<FlowSnapshot> Current() => Task.FromResult(middleware.Snapshot());
+    public Task PublishNodeValue(string nodeId, Metric metric, double? value)
+    {
+        if (!nodes.TryGetValue(nodeId, out var byMetric))
+            nodes[nodeId] = byMetric = new();
+
+        if (value is { } v) byMetric[metric] = v;
+        else byMetric.Remove(metric);
+
+        if (byMetric.Count == 0) nodes.Remove(nodeId);
+        return Task.CompletedTask;
+    }
+
+    public Task<FlowSnapshot> Current()
+    {
+        var values = new List<FlowNodeValue>();
+        foreach (var (id, byMetric) in nodes)
+            foreach (var (metric, value) in byMetric)
+                values.Add(new FlowNodeValue(id, metric, value));
+
+        return Task.FromResult(new FlowSnapshot(
+            FlowSnapshot.FlowSourceId, DateTimeOffset.UtcNow, Interlocked.Increment(ref version), values));
+    }
 
     public Task<double?> NodeValue(string nodeId, Metric metric)
-        => Task.FromResult(middleware.TryGetValue(nodeId, metric.CanonicalName(), out var v) ? v : (double?)null);
+        => Task.FromResult(nodes.TryGetValue(nodeId, out var byMetric) && byMetric.TryGetValue(metric, out var v)
+            ? v : (double?)null);
 
-    public Task<List<RawValue>> RawValues() => Task.FromResult(middleware.RawValues().ToList());
-
-    public async Task<FlowSnapshot> TreeSnapshot()
+    public Task<List<RawValue>> RawValues()
     {
-        // Gather each configured node's value straight from the distributed node-grain tree: measured leaves
-        // report their source value, aggregates return the roll-up of their children, residuals the remainder.
-        // This is the tree driving the flow output (vs the in-process middleware solve).
-        // The whole tree: configured nodes (classified from config) plus the runtime auto PDU→outlet nodes.
-        var types = new Dictionary<string, string>(autoNodes, StringComparer.OrdinalIgnoreCase);
-        foreach (var n in config.EnergyFlow.Nodes)
-            if (!string.IsNullOrWhiteSpace(n.Id)) types[n.Id.Trim()] = Core.Flow.FlowNodeClassifier.TypeOf(n);
-
-        var values = new List<FlowNodeValue>();
-        foreach (var (id, type) in types)
-        {
-            INodeGrain grain = type switch
-            {
-                "measured" => GrainFactory.GetGrain<IMeasuredNodeGrain>(id),
-                "residual" => GrainFactory.GetGrain<IResidualNodeGrain>(id),
-                _ => GrainFactory.GetGrain<IAggregateNodeGrain>(id),
-            };
-            foreach (Metric metric in Enum.GetValues<Metric>())
-            {
-                var v = await grain.Value(metric);
-                if (v is { } val && val != 0) values.Add(new FlowNodeValue(id, metric, val));
-            }
-        }
-        return new FlowSnapshot(FlowSnapshot.FlowSourceId, DateTimeOffset.UtcNow, Interlocked.Increment(ref treeVersion), values);
+        var now = DateTime.UtcNow;
+        var list = new List<RawValue>();
+        foreach (var (node, metric) in raw.Keys)
+            if (raw.TryGetValue(node, metric, now, out var v) && Metrics.TryParse(metric, out var m))
+                list.Add(new RawValue(node, m, v));
+        return Task.FromResult(list);
     }
 }

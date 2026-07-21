@@ -618,13 +618,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // The energy-flow tree computed by the distributed node grains (v3): each configured node's rolled-up
-        // value per metric, gathered straight from its grain. Lets the flow view read the actor tree.
+        // The energy-flow tree computed by the distributed node grains (v3): each node computes its own value
+        // and publishes it to the flow grain, which serves the projection here. Reads cost one grain call —
+        // nothing walks the tree.
         app.MapGet("/api/flow/tree", async (HttpContext ctx) =>
         {
             try
             {
-                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).TreeSnapshot();
+                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).Current();
                 var nodes = snap.Values
                     .GroupBy(v => v.NodeId)
                     .OrderBy(g => g.Key)

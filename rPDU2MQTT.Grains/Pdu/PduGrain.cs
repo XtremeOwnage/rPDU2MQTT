@@ -62,8 +62,7 @@ public sealed class PduGrain : Grain, IPduGrain
             outletKeys.Clear();
             // The auto PDU→outlet flow, now in grains: each outlet feeds a measured flow node, each device is
             // an aggregate flow node summing its outlets. Node ids match the auto convention (pdu:/outlet:) so
-            // custom nodes can wire onto them, and are registered with the flow grain for TreeSnapshot.
-            var flowNodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // custom nodes can wire onto them; the nodes reach the flow grain by publishing, not by listing.
             foreach (var device in latest.Devices)
             {
                 var deviceId = device.EntityName ?? device.Key ?? id;   // the identity used on the MQTT command topics
@@ -87,15 +86,11 @@ public sealed class PduGrain : Grain, IPduGrain
                             await GrainFactory.GetGrain<IMeasuredNodeGrain>(outletNodeId).Observe(metric, val * FlowUnits.ToCanonicalFactor(t, m.Units));
 
                     outletFlowNodes.Add(new NodeChild("measured", outletNodeId));
-                    flowNodes[outletNodeId] = "measured";
                 }
 
                 var pduNodeId = $"pdu:{deviceId}";
                 await GrainFactory.GetGrain<IAggregateNodeGrain>(pduNodeId).Configure(new NodeSpec("aggregate", outletFlowNodes));
-                flowNodes[pduNodeId] = "aggregate";
             }
-            if (flowNodes.Count > 0)
-                await GrainFactory.GetGrain<IFlowGrain>(0).RegisterNodes(flowNodes);
         }
         catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }
     }
