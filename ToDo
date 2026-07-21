@@ -24,8 +24,74 @@ Branch feat/v3-pipeline-abstractions.
         didn't host the activation failed its readiness probe forever. PduSyncService records it
         per-process now, only on a genuinely newer snapshot.
 
-Open — needs your call:
-    [ ] Two PDUs exposing the same OneView group key still collide: the command topic
-        (<parent>/Groups/<key>/control) has no instance segment, so the group grain is keyed by
-        the bare key and the last PDU to poll wins. Fixing it means changing that topic —
-        breaking change, so say the word.
+4. Group-key collision — 6685ca6
+    [x] No topic change was needed after all: the ambiguity was in the identity. A group grain is
+        keyed instanceId|groupKey, so "Rack 1" on two PDUs is two groups; a flat group command is
+        resolved by asking each PDU which groups it has, and actions every PDU that has that name.
+        <parent>/Groups/<key>/control is unchanged — existing automations keep working.
+
+5. Autocomplete / Picker — 2835481
+    [x] MQTT topic autocomplete while typing, plus a Browse picker showing each topic's last value.
+    [x] Choosing a topic infers metric / unit / value from the payload (a unit beats the topic's
+        wording), and never overwrites a choice you already made.
+    [x] JSON payloads offer their numeric field paths as autocomplete for the JSON field box; a
+        field's leaf name decides its metric (ENERGY.Voltage is a voltage, not an energy).
+    [x] Modbus explorer: "Browse…" reads a block of registers and shows each decoded as
+        uint16/int16/uint32/float32 — click the one that matches to bind it. One read per click.
+    [x] No background indexer. TopicIndexGrain leases itself to whoever is browsing; the broker
+        subscription exists only during a lease, the grain drops everything and deactivates when it
+        lapses, and it caps at 2000 topics while alive.
+
+Logging-
+    Browsing around, I noticed logging seems nearly non-existant.
+
+    Really should have a good assortment of logging for this project.....
+
+    Ideally, have trace/debug lines scattered around too, which can be optionally enabled when more verbose log output is required.
+
+Paths Page-
+    The paths page, for PDUs, Should ideally copy the value to clipboard when clicked. Minor change, but, nice.
+
+Node Rename-
+    Should have a button/action which can be used to rename a node.
+    Prob should show a warning to the user letting them know it may cause downstream impact to services consuming the data. But, renaming a node should be possible. And, the relationships should be updated automatailly as well.
+
+Grains/Targets/Emoncms
+    Should be grains for Emoncms...
+
+    A grain... for keeping feed/feed configs in sync...
+    For example.
+
+    If, updating emoncms via API, I'd argue, that should prob be handled by dedicated grain(s).
+    
+Readme/Project Goals-
+    While this project originally started as a solution for polling near-real time data for individual devices on my PDUs, and fully integrating the vertiv rPDUs with my home assistant, I have given this project a bit of identity crisis, and introduced a bit of heavy vibe coding.
+
+    The projects new purpose, is to handle mapping out the FULL energy flow across my house.
+
+    (you will need to update this.... here is the gist.)
+    ``` mermaid
+    individual panels (via tigo)
+    -> grouped into strings
+    -> connected to MPPTs (via modbus, or mqtt)
+    -> inverter output details (via modbus or mqtt)
+    -> inverter -> battery
+    -> gridboss/transfer switch details
+    -> main panel, load shedding panel, shop panel, east HVAC panel, pool panel (electrical panels, load centers)
+    -> per circuit metering for many of the meters, via Iotawatt, and other solutions
+    -> per device monitoring, via S31 smart plugs (https://static.xtremeownage.com/blog/2023/sonoff-s31---low-cost-energy-monitoring/), vertiv RPDUs (https://static.xtremeownage.com/blog/2024/metered-switch-pdu/?), And other z-wave, zigbee, esphome/etc devices which can support metering their own power.
+    ```
+
+    The end goal, is tracking everything, from end, to end.
+
+    Should you use it? Thats up to you. I built it for me, but, made it public, and tried to ensure it was at least half way documented.
+
+    One of the reaons I built this, instead of using home assistant directly- I keep a lot of history on energy data. I have 6 years worth of per-circuit measurements from my old house, collected via my Iotawatt.... at a 15 second data interval. 
+
+    I may never use this data. But, I like having this data incase I ever do need to use it. On more then one ocassion, an update to home assistant, or one of its plugins/containers/etc... has resulted in renamed entities breaking quite a few things for me. 
+
+    [Here](https://static.xtremeownage.com/blog/2023/home-assistant---energy-flow-diagram/?) is one of my flow diagrams from a few years back. That was at my old location, which was quite a bit more simple..... and much smaller.
+
+    Now- imagine, I have over 40 CT clamps to be deployed to various breaker panels, I have 5 different panels with breakers. And- I meter and measure everything.
+
+    This solution faciliaites the management for me. It updates / creates items in home assistant. It updates the energy dashboards. It creates and updates the feeds in emoncms. And, it even exports metrics to prometheus, incase I wanted to use grafana for charting.
