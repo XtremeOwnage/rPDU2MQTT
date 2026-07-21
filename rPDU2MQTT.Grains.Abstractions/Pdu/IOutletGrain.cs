@@ -1,4 +1,5 @@
 using rPDU2MQTT.Abstractions.Pdu;
+using rPDU2MQTT.Core.Transport;
 
 namespace rPDU2MQTT.Grains.Abstractions.Pdu;
 
@@ -10,11 +11,18 @@ namespace rPDU2MQTT.Grains.Abstractions.Pdu;
 /// </summary>
 public interface IOutletGrain : IGrainWithStringKey
 {
-    /// <summary>Record the outlet's latest observed state (pushed by the PDU grain's poll fan-out).</summary>
-    Task Observe(OutletState state);
+    /// <summary>
+    /// Take this outlet's document from the latest poll, handed down by its device grain. The outlet
+    /// extracts its own state and its own measurements from it — the parent doesn't pick fields on its
+    /// behalf. <paramref name="instanceId"/> is the PDU it lives on, which is what routes its writes.
+    /// </summary>
+    Task Observe(RawOutlet outlet, string deviceId, string instanceId, DateTime atUtc);
 
     /// <summary>The outlet's last observed state, or null if not polled yet.</summary>
     Task<OutletState?> State();
+
+    /// <summary>The outlet's whole last document — measurements included.</summary>
+    Task<RawOutlet?> Document();
 
     /// <summary>Execute a write against this outlet: <c>on</c>, <c>off</c>, <c>reboot</c>, or <c>resetStats</c>.</summary>
     Task<string> Control(string action);

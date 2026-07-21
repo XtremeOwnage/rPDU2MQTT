@@ -24,6 +24,7 @@ public sealed class PduGrain : Grain, IPduGrain
     // The children this supervisor owns, learned from the latest poll (device + outlet grain keys).
     private readonly List<string> deviceKeys = new();
     private readonly List<string> outletKeys = new();
+    private readonly List<string> groupKeys = new();
 
     public PduGrain(Config config, PduInstanceRegistry registry, HealthState health, ILogger<PduGrain> log)
     {
@@ -36,7 +37,7 @@ public sealed class PduGrain : Grain, IPduGrain
     public Task<RawSnapshot?> Latest() => Task.FromResult(latest);
 
     public Task<global::rPDU2MQTT.Abstractions.Pdu.PduChildren> Children()
-        => Task.FromResult(new global::rPDU2MQTT.Abstractions.Pdu.PduChildren(this.GetPrimaryKeyString(), deviceKeys.ToList(), outletKeys.ToList()));
+        => Task.FromResult(new global::rPDU2MQTT.Abstractions.Pdu.PduChildren(this.GetPrimaryKeyString(), deviceKeys.ToList(), outletKeys.ToList(), groupKeys.ToList()));
 
     public async Task Poll()
     {
@@ -54,42 +55,32 @@ public sealed class PduGrain : Grain, IPduGrain
             latest = RawSnapshotMapper.ToWire(id, DateTime.UtcNow, data);
             health.RecordPollSuccess();
 
-            // Supervise the children: this PDU owns a device (base-data) grain per device and an outlet grain
-            // per outlet, so each becomes a live, addressable actor in the grain tree (and the write-owner for
-            // its outlet). The parent tracks their keys so it can report its own subtree.
+            // Supervise the children: hand each device its own document and let it take what it needs (and
+            // pass its outlets' documents further down). This grain captures the poll; it doesn't pick fields
+            // on anyone else's behalf. It keeps only the keys, so it can report its own subtree.
             var now = DateTime.UtcNow;
             deviceKeys.Clear();
             outletKeys.Clear();
-            // The auto PDU→outlet flow, now in grains: each outlet feeds a measured flow node, each device is
-            // an aggregate flow node summing its outlets. Node ids match the auto convention (pdu:/outlet:) so
-            // custom nodes can wire onto them; the nodes reach the flow grain by publishing, not by listing.
+            groupKeys.Clear();
             foreach (var device in latest.Devices)
             {
                 var deviceId = device.EntityName ?? device.Key ?? id;   // the identity used on the MQTT command topics
                 deviceKeys.Add(deviceId);
-                await GrainFactory.GetGrain<IPduDeviceGrain>(deviceId)
-                    .Observe(new global::rPDU2MQTT.Abstractions.Pdu.DeviceState(deviceId, device.Name, device.DisplayName, device.Make, device.Model, device.State, now));
+                outletKeys.AddRange(device.Outlets.Select(o => IOutletGrain.KeyFor(deviceId, o.Key)));
 
-                var outletFlowNodes = new List<NodeChild>();
-                foreach (var o in device.Outlets)
-                {
-                    var key = IOutletGrain.KeyFor(deviceId, o.Key);
-                    outletKeys.Add(key);
-                    await GrainFactory.GetGrain<IOutletGrain>(key)
-                        .Observe(new global::rPDU2MQTT.Abstractions.Pdu.OutletState(deviceId, o.Key, o.Name, o.DisplayName, o.State, now));
+                // The instance id travels with the document: that's what routes a write back to *this* PDU
+                // when several are bridged, instead of to whichever one happens to be primary.
+                await GrainFactory.GetGrain<IPduDeviceGrain>(deviceId).Observe(device, id, now);
+            }
 
-                    // Feed the outlet's measurements into its measured flow node (canonical units).
-                    var outletNodeId = $"outlet:{deviceId}:{o.Key}";
-                    foreach (var m in o.Measurements)
-                        if (m.Type is { } t && Metrics.TryParse(t, out var metric)
-                            && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var val))
-                            await GrainFactory.GetGrain<IMeasuredNodeGrain>(outletNodeId).Observe(metric, val * FlowUnits.ToCanonicalFactor(t, m.Units));
-
-                    outletFlowNodes.Add(new NodeChild("measured", outletNodeId));
-                }
-
-                var pduNodeId = $"pdu:{deviceId}";
-                await GrainFactory.GetGrain<IAggregateNodeGrain>(pduNodeId).Configure(new NodeSpec("aggregate", outletFlowNodes));
+            // The OneView groups on this PDU are its children too: a group is resolved and actioned through
+            // the PDU that has it, so bind each one to this instance. Without this a group action goes out
+            // through the primary PDU, which on any other instance means the wrong outlets (or none).
+            foreach (var group in data.Groups)
+            {
+                if (string.IsNullOrWhiteSpace(group.Key)) continue;
+                groupKeys.Add(group.Key);
+                await GrainFactory.GetGrain<IOneViewGroupGrain>(group.Key).Bind(id);
             }
         }
         catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }

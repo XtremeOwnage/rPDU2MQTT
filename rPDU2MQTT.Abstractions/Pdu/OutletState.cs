@@ -11,4 +11,9 @@ public sealed record OutletState(
     string? Name,
     string? DisplayName,
     string? PowerState,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    /// <summary>
+    /// The PDU instance this outlet lives on, stamped by the polling PduGrain. With several PDUs bridged,
+    /// this is what routes a write to the PDU that actually has the outlet. Null until the first poll.
+    /// </summary>
+    string? InstanceId = null);

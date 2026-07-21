@@ -8,4 +8,6 @@ public sealed record DeviceState(
     string? Make,
     string? Model,
     string? State,
-    DateTime UpdatedUtc);
+    DateTime UpdatedUtc,
+    /// <summary>The PDU instance this device lives on, stamped by the polling PduGrain (null until polled).</summary>
+    string? InstanceId = null);
