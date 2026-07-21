@@ -181,6 +181,11 @@ public static class ServiceConfiguration
         // last poll, export outcome, itself) to the owning component grain, which decides what they mean.
         services.AddHostedService<Hosting.StatusReporter>();
 
+        // Topic autocomplete for the Nodes editor. Registered everywhere with a broker connection, but it
+        // only subscribes while someone is actually browsing (the index grain hands out short leases), so
+        // there is no standing background indexer.
+        services.AddHostedService<Hosting.MqttTopicIndexService>();
+
         // Listens for GUI-issued restart requests over the bus (#210), so a tier can be restarted remotely.
         // Loaded in every role/process; a matching request stops the process and the orchestrator restarts it.
         services.AddHostedService<Services.RestartCommandService>();

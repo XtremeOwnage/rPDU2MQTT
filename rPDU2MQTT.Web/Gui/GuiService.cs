@@ -815,6 +815,125 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Browse what's on the broker, for the Nodes editor's topic autocomplete. Asking is what keeps the
+        // index alive: the grain leases itself to readers and the subscription only exists while someone is
+        // browsing (see ITopicIndexGrain), so this endpoint both queries and renews.
+        app.MapGet("/api/mqtt/topics", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var state = await index.Renew();
+                var q = ctx.Request.Query["q"].FirstOrDefault();
+                var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
+
+                var topics = (await index.Search(q, limit)).Select(t =>
+                {
+                    var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
+                    return new
+                    {
+                        topic = t.Topic,
+                        payload = t.Payload,
+                        seenUtc = t.SeenUtc,
+                        metric = hint.Metric,
+                        unit = hint.Unit,
+                        value = hint.Value,
+                        isJson = hint.IsJson,
+                        fields = hint.Fields,
+                    };
+                }).ToArray();
+
+                // "listening" tells the editor whether anything is feeding the index yet, so it can say
+                // "waiting for the broker" instead of looking broken on the first keystroke.
+                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, topics }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // One topic's last payload and what it implies — the metric/unit to bind, and for a JSON payload the
+        // fields you can pick from. Used when a topic is chosen, to fill the rest of the binding in.
+        app.MapGet("/api/mqtt/topic", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                await index.Renew();
+                var sample = await index.Get(topic);
+                if (sample is null)
+                    return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);
+
+                var hint = Core.Flow.TopicSampleAnalyzer.Analyze(sample.Topic, sample.Payload);
+                var fields = hint.Fields.Select(f => new { field = f, metric = Core.Flow.TopicSampleAnalyzer.MetricForField(sample.Topic, f) }).ToArray();
+                return Results.Json(new
+                {
+                    ok = true,
+                    topic = sample.Topic,
+                    payload = sample.Payload,
+                    seenUtc = sample.SeenUtc,
+                    metric = hint.Metric,
+                    unit = hint.Unit,
+                    value = hint.Value,
+                    isJson = hint.IsJson,
+                    fields,
+                }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // Read a block of registers off a Modbus device — the explorer behind "Browse registers". One
+        // deliberate read per click (a gateway usually allows a single client, and the worker is already
+        // polling it), decoded every way that makes sense so you can see which one looks right.
+        app.MapPost("/api/modbus/scan", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var req = await System.Text.Json.JsonSerializer.DeserializeAsync<ModbusScanRequest>(ctx.Request.Body, ProbeJson, cts.Token);
+                if (req is null || string.IsNullOrWhiteSpace(req.Host))
+                    return Results.Json(new { ok = false, message = "A host is required." }, ConfigSchema.Json);
+
+                var start = Math.Max(0, req.Start);
+                var count = Math.Clamp(req.Count <= 0 ? 32 : req.Count, 1, 125);   // Modbus caps a read at 125 registers
+                var bank = string.IsNullOrWhiteSpace(req.RegisterType) ? "holding" : req.RegisterType!;
+
+                // Each register is read as uint16 and int16, and each pair additionally as float32/int32, so
+                // the answer to "which decoding is this device using?" is visible rather than guessed.
+                var items = new List<EnergyFlowSource>();
+                for (var i = 0; i < count; i++)
+                {
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "uint16" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "int16" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "uint32" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "float32" });
+                }
+
+                var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
+                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.TimeoutMs, items), cts.Token);
+
+                // Fold the four decodings of each register back into one row.
+                var rows = new List<object>();
+                for (var i = 0; i < count; i++)
+                {
+                    var at = i * 4;
+                    rows.Add(new
+                    {
+                        register = start + i,
+                        uint16 = at < readings.Count ? readings[at].Value : null,
+                        int16 = at + 1 < readings.Count ? readings[at + 1].Value : null,
+                        uint32 = at + 2 < readings.Count ? readings[at + 2].Value : null,
+                        float32 = at + 3 < readings.Count ? readings[at + 3].Value : null,
+                        error = at < readings.Count ? readings[at].Error : "not read",
+                    });
+                }
+
+                return Results.Json(new { ok, message, registerType = bank, rows }, ConfigSchema.Json);
+            }
+            catch (OperationCanceledException) { return Results.Json(new { ok = false, message = "Modbus scan timed out." }, ConfigSchema.Json); }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Probe a Modbus TCP device: connect, and optionally read a set of register specs, returning the
         // decoded values. Powers the "Test connection" button and the live per-binding value display in the
         // Flow editor. Read-only; uses a throwaway connection so it works before the config is saved.
@@ -1530,6 +1649,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
     private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, List<EnergyFlowSource>? Items);
+
+    /// <summary>Body of POST /api/modbus/scan: a device to reach + the block of registers to browse.</summary>
+    private sealed record ModbusScanRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, int Start, int Count, string? RegisterType);
 
     /// <summary>One (node, metric) whose current live value the Nodes editor wants.</summary>
     private sealed record LiveValueQuery(string? Node, string? Metric);

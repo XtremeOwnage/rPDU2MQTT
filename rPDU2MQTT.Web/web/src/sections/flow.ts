@@ -56,6 +56,216 @@ const NODE_MODES: [string, string, string][] = [
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
 ];
 
+// --- Browsing what's out there: MQTT topics, and a Modbus device's registers ----------------------
+//
+// The topic index behind these only exists while we're asking for it — every call renews a short lease and
+// the broker subscription is dropped when nobody is browsing (see ITopicIndexGrain). So autocomplete costs a
+// subscription while this editor is open and nothing at all afterwards; there's no background indexer.
+
+let pickerSeq = 0;
+
+/// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
+function overlay(title: string): { body: any, close: () => void } {
+  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
+  const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
+  head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
+  const x = btn('Close');
+  head.appendChild(x);
+  const body = el('div');
+  panel.append(head, body);
+  back.appendChild(panel);
+  document.body.appendChild(back);
+
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e: any) => { if (e.key === 'Escape') close(); };
+  x.onclick = close;
+  back.onclick = (e: any) => { if (e.target === back) close(); };
+  document.addEventListener('keydown', onKey);
+  return { body, close };
+}
+
+async function fetchTopics(q: string, limit = 50): Promise<any> {
+  const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}`);
+  return (r.body && r.body.ok) ? r.body : { topics: [], listening: false, indexed: 0 };
+}
+
+async function fetchTopicDetail(topic: string): Promise<any | null> {
+  if (!topic) return null;
+  const r = await api(`/api/mqtt/topic?topic=${encodeURIComponent(topic)}`);
+  return (r.body && r.body.ok) ? r.body : null;
+}
+
+/// Inline autocomplete for a topic input: a datalist kept in step with what you've typed.
+function topicSuggester(input: any, onExactPick: () => void) {
+  const list = el('datalist', { id: 'topics-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  let timer: any = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const body = await fetchTopics(input.value.trim());
+      list.innerHTML = '';
+      (body.topics || []).forEach((t: any) => list.appendChild(el('option', { value: t.topic })));
+      // Picking from the dropdown fires 'input', not 'change', so treat an exact hit as a choice.
+      if ((body.topics || []).some((t: any) => t.topic === input.value.trim())) onExactPick();
+    }, 250);
+  });
+  return { list };
+}
+
+/// Inline autocomplete for the JSON field, read from the chosen topic's own payload.
+function jsonFieldSuggester(input: any, topicOf: () => string) {
+  const list = el('datalist', { id: 'fields-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  const fill = async () => {
+    const detail = await fetchTopicDetail(topicOf());
+    list.innerHTML = '';
+    ((detail && detail.fields) || []).forEach((f: any) => list.appendChild(el('option', { value: f.field })));
+  };
+  input.addEventListener('focus', fill);
+  return list;
+}
+
+/// Fill in what the payload tells us about a freshly chosen topic — without overwriting deliberate choices.
+async function applyTopicHint(src: any, topic: string, fieldIn: any, rerender: () => void) {
+  const detail = await fetchTopicDetail(topic);
+  if (!detail) return;
+
+  const notes: string[] = [];
+  // Only infer where the user hasn't already decided: an untouched binding still reads 'realpower'.
+  if (detail.metric && (!src.Metric || src.Metric === 'realpower') && detail.metric !== src.Metric) {
+    src.Metric = detail.metric; src.Unit = undefined; notes.push(metricLabel(detail.metric));
+  }
+  if (detail.unit && !src.Unit && detail.unit !== metricMeta(src.Metric || 'realpower')[2]) {
+    src.Unit = detail.unit; notes.push(detail.unit);
+  }
+  if (detail.isJson && !src.JsonField && (detail.fields || []).length === 1) {
+    src.JsonField = detail.fields[0].field;
+    if (fieldIn) fieldIn.value = src.JsonField;
+    notes.push('field ' + src.JsonField);
+  }
+
+  const sample = detail.value != null ? `${formatNum(detail.value)}` : (detail.payload || '').slice(0, 40);
+  toast(notes.length ? `Read ${sample} — set ${notes.join(', ')}.` : `Last value: ${sample}`, true);
+  if (notes.length) rerender();
+}
+
+/// The topic browser: search what's on the broker, see each topic's last value, click to bind it.
+function openTopicPicker(current: string, onPick: (topic: string) => void) {
+  const { body, close } = overlay('Browse broker topics');
+  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter topics…', style: { width: '320px' } }) as HTMLInputElement;
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(search, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Topic', 'Last value', 'Looks like', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const load = async () => {
+    const b = await fetchTopics(search.value.trim(), 100);
+    tbody.innerHTML = '';
+    status.textContent = b.listening
+      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed`
+      : 'waiting for the broker subscription to come up…';
+    (b.topics || []).forEach((t: any) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: t.topic })));
+      tr.appendChild(el('td', { class: 'num', text: t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48) }));
+      tr.appendChild(el('td', { text: t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—') }));
+      const use = btn('Use', 'primary');
+      use.onclick = () => { onPick(t.topic); close(); };
+      tr.appendChild(el('td', {}, use));
+      tbody.appendChild(tr);
+    });
+  };
+
+  let timer: any = null;
+  search.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+  // Keep the index's lease alive (and the list fresh) for as long as the window is open.
+  const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } load(); }, 5000);
+}
+
+/// The Modbus explorer: read a block of registers off the device and pick the one that looks right.
+function openModbusExplorer(src: any, onPick: () => void) {
+  const conns: any[] = (state.data?.Modbus?.Connections) || [];
+  const conn = conns.find(c => c.Id === src.Connection);
+  const { body } = overlay('Modbus explorer' + (conn ? ` · ${conn.Name || conn.Id}` : ''));
+
+  if (!conn) {
+    body.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Pick a Modbus connection for this binding first (they are defined in the Modbus section).' }));
+    return;
+  }
+
+  body.appendChild(el('div', { class: 'desc', text: 'One read per click — a gateway usually accepts a single client, and the worker is already polling it. Each register is decoded every way that makes sense; click the value that matches what the device should be reporting.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const startIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'First register', style: { width: '90px' } }) as HTMLInputElement;
+  const countIn = el('input', { type: 'number', value: 32, title: 'How many', style: { width: '70px' } }) as HTMLInputElement;
+  const bankSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+  MODBUS_REGISTER_TYPES.forEach(t => bankSel.appendChild(el('option', { value: t, text: t })));
+  bankSel.value = src.RegisterType || 'holding';
+  const read = btn('Read', 'primary');
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(startIn, countIn, bankSel, read, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Register', 'uint16', 'int16', 'uint32', 'float32'].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const pick = (register: number, dataType: string) => {
+    src.Register = register;
+    src.RegisterType = bankSel.value === 'holding' ? undefined : bankSel.value;
+    src.DataType = dataType === 'uint16' ? undefined : dataType;
+    toast(`Bound register ${register} as ${dataType}.`, true);
+    onPick();
+  };
+
+  const cell = (row: any, key: string) => {
+    const td = el('td', { class: 'num' });
+    if (row[key] == null) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+    const link = el('span', { text: formatNum(row[key]), style: { cursor: 'pointer', color: 'var(--accent, #4f8cff)' }, title: `Use register ${row.register} as ${key}` });
+    link.onclick = () => pick(row.register, key);
+    td.appendChild(link);
+    return td;
+  };
+
+  read.onclick = async () => {
+    status.textContent = 'reading…';
+    const r = await api('/api/modbus/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs,
+        Start: parseInt(startIn.value) || 0, Count: parseInt(countIn.value) || 32, RegisterType: bankSel.value,
+      }),
+    });
+    status.textContent = (r.body && r.body.message) || (r.body?.ok ? '' : 'read failed');
+    status.style.color = r.body?.ok ? 'var(--muted)' : 'var(--bad)';
+    tbody.innerHTML = '';
+    ((r.body && r.body.rows) || []).forEach((row: any) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: String(row.register) })));
+      tr.append(cell(row, 'uint16'), cell(row, 'int16'), cell(row, 'uint32'), cell(row, 'float32'));
+      tbody.appendChild(tr);
+    });
+  };
+  read.onclick(null);
+}
+
 // A labelled field (label above a control) for the node editor's form grid.
 function field(labelText: string, control: HTMLElement, hint?: string) {
   const f = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
@@ -193,16 +403,42 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
         const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
         woSel.disabled = !is32();
         dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
-        details.append(regIn, regTypeSel, dtSel, woSel);
+
+        // Rather than guessing a register from a PDF, read the device and pick the value that looks right.
+        const explore = btn('Browse…');
+        explore.title = 'Read a block of registers from the device and choose one.';
+        explore.onclick = () => openModbusExplorer(src, rerender);
+
+        details.append(regIn, regTypeSel, dtSel, woSel, explore);
         tr.appendChild(el('td', {}, details));
       } else {
-        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
-        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
-        tr.appendChild(el('td', {}, topicIn));
+        // Source = the topic, with autocomplete off what the broker is actually carrying, and a Browse
+        // button for picking one by eye. Details = the JSON field, itself autocompleted from the payload.
+        const topicCell = el('td');
+        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } }) as HTMLInputElement;
+        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } }) as HTMLInputElement;
 
-        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } });
+        const suggest = topicSuggester(topicIn, () => {
+          src.Topic = topicIn.value.trim();
+          applyTopicHint(src, topicIn.value.trim(), fieldIn, rerender);
+        });
+        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); applyTopicHint(src, src.Topic, fieldIn, rerender); };
+
+        const browse = btn('Browse');
+        browse.title = 'Browse the topics currently on the broker and pick one.';
+        browse.onclick = () => openTopicPicker(topicIn.value.trim(), picked => {
+          topicIn.value = picked;
+          src.Topic = picked;
+          applyTopicHint(src, picked, fieldIn, rerender);
+        });
+
+        topicCell.append(topicIn, suggest.list, ' ', browse);
+        tr.appendChild(topicCell);
+
         fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
-        tr.appendChild(el('td', {}, fieldIn));
+        const fieldCell = el('td');
+        fieldCell.append(fieldIn, jsonFieldSuggester(fieldIn, () => src.Topic || ''));
+        tr.appendChild(fieldCell);
       }
 
       // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
