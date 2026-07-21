@@ -12,6 +12,15 @@ namespace rPDU2MQTT.Tests;
 public class PduOwnershipTests
 {
     [Fact]
+    public void SameGroupName_OnTwoPdus_IsTwoGroups()
+    {
+        // The collision that made group control ambiguous: keyed by name alone, "Rack 1" on two PDUs was one
+        // actor and the last poll decided where an action went. The instance is part of the identity now.
+        Assert.NotEqual(IOneViewGroupGrain.KeyFor("rack-a", "Rack 1"), IOneViewGroupGrain.KeyFor("rack-b", "Rack 1"));
+        Assert.Equal("rack-a|Rack 1", IOneViewGroupGrain.KeyFor("rack-a", "Rack 1"));
+    }
+
+    [Fact]
     public async Task PduGrain_OnlyEverTalksTo_ItsOwnInstance()
     {
         var cluster = await GrainTestCluster.StartAsync();
@@ -41,6 +50,8 @@ public class PduOwnershipTests
             Assert.Contains("No PDU", await outlet.Control("off"));
             Assert.Equal("", await outlet.SetConfig("onDelay", "5", isDelay: true));
 
+            // A group key with no instance in it (a legacy/hand-made reference) names no PDU, so it writes
+            // nowhere rather than picking one.
             var group = f.GetGrain<IOneViewGroupGrain>("group-unknown");
             Assert.Contains("No PDU", await group.Control("on"));
             Assert.Contains("Unknown group action", await group.Control("frobnicate"));
@@ -64,10 +75,8 @@ public class PduOwnershipTests
             // names rack-b. That's the proof it didn't quietly write through the one PDU that does exist.
             Assert.Contains("'rack-b' is not configured", await outlet.Control("off"));
 
-            // Binding a group is idempotent, and routes the same way.
-            var group = f.GetGrain<IOneViewGroupGrain>("rack-1");
-            await group.Bind("rack-b");
-            await group.Bind("rack-b");
+            // A group's instance is half of its identity, so it routes the same way with nothing pushed to it.
+            var group = f.GetGrain<IOneViewGroupGrain>(IOneViewGroupGrain.KeyFor("rack-b", "rack-1"));
             Assert.Contains("'rack-b' is not configured", await group.Control("on"));
         }
         finally { await cluster.StopAllSilosAsync(); }

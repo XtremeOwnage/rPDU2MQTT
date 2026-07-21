@@ -116,15 +116,11 @@ public sealed class PduGrain : Grain, IPduGrain
                 await GrainFactory.GetGrain<IPduDeviceGrain>(deviceId).Observe(device, id, now);
             }
 
-            // The OneView groups on this PDU are its children too: a group is resolved and actioned through
-            // the PDU that has it, so bind each one to this instance. Without this a group action goes out
-            // through the primary PDU, which on any other instance means the wrong outlets (or none).
+            // The OneView groups on this PDU are its children too. Recording their names is all that's
+            // needed: a group grain's key carries this instance, so it already knows to come back here.
             foreach (var group in data.Groups)
-            {
-                if (string.IsNullOrWhiteSpace(group.Key)) continue;
-                groupKeys.Add(group.Key);
-                await GrainFactory.GetGrain<IOneViewGroupGrain>(group.Key).Bind(id);
-            }
+                if (!string.IsNullOrWhiteSpace(group.Key))
+                    groupKeys.Add(group.Key);
         }
         catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }
     }

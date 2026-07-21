@@ -3,10 +3,10 @@ using rPDU2MQTT.Grains.Abstractions.Pdu;
 namespace rPDU2MQTT.Grains.Pdu;
 
 /// <summary>
-/// A OneView group (key = group key). Single cluster-wide owner of group control: an action fans out to the
-/// group's member outlets exactly once. Member resolution + fan-out belong to the PDU (which reads the
-/// OneView host→group mapping); the grain guarantees the single-owner property and, by holding the instance
-/// its parent bound it to, that the fan-out goes through the PDU the group is actually on.
+/// A OneView group on one PDU (key <c>instanceId|groupKey</c>). Single cluster-wide owner of that group's
+/// control: an action fans out to its member outlets exactly once. Member resolution + fan-out belong to the
+/// PDU (which reads the OneView host→group mapping), so this grain asks its parent to do it — and knows
+/// which parent because the instance is half of its own key.
 /// </summary>
 public sealed class OneViewGroupGrain : PduChildGrain, IOneViewGroupGrain
 {
@@ -14,14 +14,16 @@ public sealed class OneViewGroupGrain : PduChildGrain, IOneViewGroupGrain
 
     public override Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        groupKey = this.GetPrimaryKeyString();
-        return base.OnActivateAsync(cancellationToken);
-    }
+        var key = this.GetPrimaryKeyString();
+        var sep = key.IndexOf('|');   // instance ids can't contain '|'; a group name might
+        if (sep > 0)
+        {
+            BindOwner(key[..sep]);
+            groupKey = key[(sep + 1)..];
+        }
+        else groupKey = key;          // legacy key (no instance): its parent is unknown, so it writes nowhere
 
-    public Task Bind(string instanceId)
-    {
-        BindOwner(instanceId);
-        return Task.CompletedTask;
+        return base.OnActivateAsync(cancellationToken);
     }
 
     public async Task<string> Control(string action)
