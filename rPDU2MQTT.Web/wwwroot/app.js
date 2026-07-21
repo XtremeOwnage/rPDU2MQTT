@@ -38,6 +38,36 @@ function svgEl(tag        , attrs      )      {
 
 function toast(msg        , good          ) { const t      = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// Copy text, and say honestly whether it worked. navigator.clipboard only exists in a secure context, and
+// this GUI is usually reached over plain http on a LAN — so fall back to the old selection trick rather than
+// silently doing nothing while claiming "Copied".
+async function copyText(text        )                   {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+// Make an element copy some text when clicked, with the feedback that goes with it.
+function copyOnClick(node     , text        , label         ) {
+  node.style.cursor = 'pointer';
+  node.title = 'Click to copy';
+  node.onclick = async () => {
+    const ok = await copyText(text);
+    toast(ok ? `Copied: ${label || text}` : 'Could not copy — your browser blocked it (try selecting the text).', ok);
+  };
+  return node;
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 function slug(text        )         {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -278,10 +308,18 @@ function pruneEmpty(o     )      {
 function pathCopyCell(text        ) {
   const td = document.createElement('td');
   if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
-  const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
-  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px'; code.title = 'Click to copy';
-  code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
-  td.appendChild(code); return td;
+  const code = document.createElement('span'); code.textContent = text;
+  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px';
+  td.appendChild(copyOnClick(code, text)); return td;
+}
+
+// Every cell copies — the device, outlet and measurement names are as worth copying as the paths are
+// (they're what you type into an override, a filter or a template).
+function copyCell(text        ) {
+  const td = document.createElement('td');
+  if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+  const span = document.createElement('span'); span.textContent = text;
+  td.appendChild(copyOnClick(span, text)); return td;
 }
 
 // Build a paths table (Device / Outlet / Measurement / MQTT [/ Prometheus] [/ EmonCMS]).
@@ -294,7 +332,7 @@ function pathsTable(rows       , promOn         , emonOn         ) {
   const tb = document.createElement('tbody');
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    [r.device, r.source, r.type].forEach(c => tr.appendChild(copyCell(c)));
     tr.appendChild(pathCopyCell(r.mqtt));
     if (promOn) tr.appendChild(pathCopyCell(r.prometheus));
     if (emonOn) tr.appendChild(pathCopyCell(r.emoncms));
@@ -309,7 +347,7 @@ function addPathsSection(nav     , sections     ) {
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click a value to copy it.';
+  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click any value — path, device, outlet or measurement — to copy it.';
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
@@ -1085,6 +1123,57 @@ function openModbusExplorer(src     , onPick            ) {
   read.onclick(null);
 }
 
+/// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
+/// Parents map, and every downstream path derived from it — so this rewrites the references in the config and
+/// is honest about the ones it can't reach.
+function openRenameDialog(node     , flow     , existingIds             , onRenamed                      ) {
+  const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
+  const links        = ensure(flow, 'Links', []);
+  const parents      = ensure(flow, 'Parents', {});
+  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
+    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+
+  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+
+  // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
+  // rather than letting someone discover it when their history stops.
+  const warn = el('div', {
+    class: 'desc',
+    style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
+  });
+  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  body.appendChild(warn);
+
+  const row = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', value: node.Id, style: { width: '260px' } })                    ;
+  const apply = btn('Rename', 'primary');
+  const err = el('span', { class: 'desc', style: { margin: '0 0 0 8px', color: 'var(--bad)' } });
+  row.append(idIn, apply, err);
+  body.appendChild(row);
+
+  apply.onclick = () => {
+    const next = (idIn.value || '').trim();
+    if (!next) { err.textContent = 'An id is required.'; return; }
+    if (next === node.Id) { close(); return; }
+    if (existingIds.has(next)) { err.textContent = 'That id already exists.'; return; }
+
+    const from = node.Id;
+    node.Id = next;
+    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
+    Object.keys(parents).forEach(child => {
+      if (parents[child] === from) parents[child] = next;
+      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
+    });
+
+    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    close();
+    onRenamed(next);
+  };
+  idIn.onkeydown = (e     ) => { if (e.key === 'Enter') apply.onclick(null); };
+}
+
 // A labelled field (label above a control) for the node editor's form grid.
 function field(labelText        , control             , hint         ) {
   const f = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
@@ -1456,7 +1545,7 @@ function flowCandidates(lastGraph     , customNodes       ) {
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
 // node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
 // Deleting a node takes its bound sources with it (they live on the node).
-function renderNodeManager(customNodes       , links       , cand                  , editing                       , rerender                           ) {
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -1485,6 +1574,14 @@ function renderNodeManager(customNodes       , links       , cand               
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
     edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rename = btn('Rename');
+    rename.title = 'Change this node’s id, moving its wiring with it.';
+    rename.onclick = () => {
+      const taken = new Set        ([...cand.keys(), ...customNodes.map((x     ) => x.Id)]);
+      taken.delete(n.Id);
+      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+    };
+
     // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
     // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
     // since the copy usually feeds somewhere else.
@@ -1510,7 +1607,7 @@ function renderNodeManager(customNodes       , links       , cand               
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    actions.append(edit, ' ', copy, ' ', rm);
+    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     body.appendChild(tr);
   });
@@ -1979,7 +2076,7 @@ function addNodesSection(nav     , sections     ) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
   const load = async () => {
@@ -2017,7 +2114,7 @@ function addExportSection(nav     , sections     ) {
     const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
     ta.value = r.ok ? await r.text() : 'Unable to render.';
   };
-  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied to clipboard.', true); };
+  copy.onclick = async () => { ta.select(); const ok = await copyText(ta.value); toast(ok ? 'Copied to clipboard.' : 'Could not copy — your browser blocked it (the text is selected, so Ctrl+C works).', ok); };
   refresh.onclick = fill;
   fmt.onchange = fill;
   link.onclick = () => { activate(link, sec); fill(); };

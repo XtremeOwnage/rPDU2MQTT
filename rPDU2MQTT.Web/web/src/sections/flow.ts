@@ -266,6 +266,57 @@ function openModbusExplorer(src: any, onPick: () => void) {
   read.onclick(null);
 }
 
+/// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
+/// Parents map, and every downstream path derived from it — so this rewrites the references in the config and
+/// is honest about the ones it can't reach.
+function openRenameDialog(node: any, flow: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
+  const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
+  const links: any[] = ensure(flow, 'Links', []);
+  const parents: any = ensure(flow, 'Parents', {});
+  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
+    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+
+  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+
+  // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
+  // rather than letting someone discover it when their history stops.
+  const warn = el('div', {
+    class: 'desc',
+    style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
+  });
+  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  body.appendChild(warn);
+
+  const row = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', value: node.Id, style: { width: '260px' } }) as HTMLInputElement;
+  const apply = btn('Rename', 'primary');
+  const err = el('span', { class: 'desc', style: { margin: '0 0 0 8px', color: 'var(--bad)' } });
+  row.append(idIn, apply, err);
+  body.appendChild(row);
+
+  apply.onclick = () => {
+    const next = (idIn.value || '').trim();
+    if (!next) { err.textContent = 'An id is required.'; return; }
+    if (next === node.Id) { close(); return; }
+    if (existingIds.has(next)) { err.textContent = 'That id already exists.'; return; }
+
+    const from = node.Id;
+    node.Id = next;
+    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
+    Object.keys(parents).forEach(child => {
+      if (parents[child] === from) parents[child] = next;
+      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
+    });
+
+    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    close();
+    onRenamed(next);
+  };
+  idIn.onkeydown = (e: any) => { if (e.key === 'Enter') apply.onclick(null); };
+}
+
 // A labelled field (label above a control) for the node editor's form grid.
 function field(labelText: string, control: HTMLElement, hint?: string) {
   const f = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
@@ -637,7 +688,7 @@ function flowCandidates(lastGraph: any, customNodes: any[]) {
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
 // node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
 // Deleting a node takes its bound sources with it (they live on the node).
-function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
+function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -666,6 +717,14 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
     edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rename = btn('Rename');
+    rename.title = 'Change this node’s id, moving its wiring with it.';
+    rename.onclick = () => {
+      const taken = new Set<string>([...cand.keys(), ...customNodes.map((x: any) => x.Id)]);
+      taken.delete(n.Id);
+      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+    };
+
     // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
     // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
     // since the copy usually feeds somewhere else.
@@ -691,7 +750,7 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    actions.append(edit, ' ', copy, ' ', rm);
+    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     body.appendChild(tr);
   });
@@ -1160,7 +1219,7 @@ export function addNodesSection(nav: any, sections: any) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 
   const load = async () => {
