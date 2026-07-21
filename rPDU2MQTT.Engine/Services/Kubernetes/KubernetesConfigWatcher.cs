@@ -59,6 +59,7 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
                 if (RequiresRestart(config, reloaded))
                 {
                     Log.Information("RpduConfig spec changed in a way that needs a restart (connection/ports/auth); restarting to apply it.");
+                    rPDU2MQTT.Core.SelfRestart.Mark("config change requiring a restart");   // #192
                     lifetime.StopApplication();
                     return;
                 }

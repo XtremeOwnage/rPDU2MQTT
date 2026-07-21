@@ -172,6 +172,18 @@ public static class ServiceConfiguration
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();
 
+        // How this process restarts itself (#192). Under Kubernetes, ask the orchestrator to replace the pod:
+        // stopping the process instead exits 0, which shows as a "Completed" pod and comes back on the
+        // kubelet's backoff (minutes). Everywhere else, stopping is all there is — with a non-zero exit code
+        // so "restart me" isn't indistinguishable from "my work here is done".
+        services.AddSingleton<Hosting.StopProcessRestarter>();
+        if (configSource is KubernetesConfigSource)
+            services.AddSingleton<Core.IProcessRestarter>(sp => new Hosting.KubernetesPodRestarter(
+                (KubernetesConfigSource)sp.GetRequiredService<IConfigSource>(),
+                sp.GetRequiredService<Hosting.StopProcessRestarter>()));
+        else
+            services.AddSingleton<Core.IProcessRestarter>(sp => sp.GetRequiredService<Hosting.StopProcessRestarter>());
+
         // v3: each process registers itself with the cluster-wide ProcessRegistryGrain so the GUI can list
         // every role process in a split deployment — replaces the MQTT HeartbeatService beacons.
         if (roles != HostRole.All)

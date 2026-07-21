@@ -22,14 +22,16 @@ public sealed class RestartCommandService : IHostedService
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     private readonly IHostApplicationLifetime lifetime;
+    private readonly rPDU2MQTT.Core.IProcessRestarter? restarter;
     private readonly string[] roles;
     private readonly DateTime startedUtc = DateTime.UtcNow;
 
-    public RestartCommandService(IHiveMQClient mqtt, Config cfg, HostRole roles, IHostApplicationLifetime lifetime)
+    public RestartCommandService(IHiveMQClient mqtt, Config cfg, HostRole roles, IHostApplicationLifetime lifetime, rPDU2MQTT.Core.IProcessRestarter? restarter = null)
     {
         this.mqtt = (HiveMQClient)mqtt;
         this.cfg = cfg;
         this.lifetime = lifetime;
+        this.restarter = restarter;
         this.roles = new[] { HostRole.Worker, HostRole.Api, HostRole.Ui }
             .Where(r => roles.HasFlag(r)).Select(r => r.ToString().ToLowerInvariant()).ToArray();
     }
@@ -63,8 +65,16 @@ public sealed class RestartCommandService : IHostedService
         if (cmd.AtUtc < startedUtc.AddSeconds(-5)) return;
         if (!cmd.MatchesRoles(roles)) return;
 
-        Log.Warning($"Restart requested over the bus (target '{cmd.Target}'); stopping this process [{string.Join('+', roles)}].");
-        // Let any in-flight work / the broker ack settle before the host tears down.
-        _ = Task.Run(async () => { await Task.Delay(500); lifetime.StopApplication(); });
+        // #192: how we come back is the restarter's business — under Kubernetes it replaces the pod rather
+        // than exiting 0, which would show as "Completed" and return on the kubelet's backoff.
+        var why = $"bus request, target '{cmd.Target}' [{string.Join('+', roles)}]";
+        if (restarter is not null)
+            _ = Task.Run(async () => { await Task.Delay(500); await restarter.RestartAsync(why); });
+        else
+        {
+            Log.Warning($"Restart requested over the bus ({why}); stopping this process.");
+            rPDU2MQTT.Core.SelfRestart.Mark(why);
+            _ = Task.Run(async () => { await Task.Delay(500); lifetime.StopApplication(); });
+        }
     }
 }

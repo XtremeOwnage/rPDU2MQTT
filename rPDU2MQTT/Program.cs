@@ -88,4 +88,13 @@ for (int attempt = 1; ; attempt++)
 
 host.Run();
 
+// #192: exiting 0 says "my work here is done" — which is what puts a Kubernetes pod in Completed and makes
+// a deliberate restart indistinguishable from a clean finish. Say we want to come back.
+if (rPDU2MQTT.Core.SelfRestart.Requested)
+{
+    Log.Information("Exiting with {Code} so this process is started again ({Reason}).",
+        rPDU2MQTT.Core.SelfRestart.ExitCode, rPDU2MQTT.Core.SelfRestart.Reason);
+    return rPDU2MQTT.Core.SelfRestart.ExitCode;
+}
+
 return 0;

@@ -12,10 +12,15 @@ rules:
   - apiGroups: ["rpdu2mqtt.xtremeownage.com"]
     resources: ["rpduconfigs/status"]
     verbs: ["get", "patch", "update"]
-  # Lets the GUI Diagnostics page show this pod's logs + recent events.
+  # Lets the GUI Diagnostics page show this pod's logs + recent events, and lets a restart request delete
+  # this pod so Kubernetes replaces it immediately (#192) — stopping the process instead exits 0, shows as
+  # a "Completed" pod, and comes back on the kubelet's backoff. Namespaced; the app only deletes itself.
   - apiGroups: [""]
     resources: ["pods", "pods/log", "events"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
   # Lets the GUI Diagnostics page roll-restart this release's Deployment(s) (restart a tier / update image).
   - apiGroups: ["apps"]
     resources: ["deployments"]
