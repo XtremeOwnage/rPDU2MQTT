@@ -1231,8 +1231,41 @@ function addFlowSection(nav     , sections     ) {
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
+  const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph      = null;
+
+  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
+  // (measured leaves report their source, aggregates sum their children, residuals the remainder).
+  const renderTree = async () => {
+    treePanel.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Node-grain roll-up (distributed)';
+    head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; treePanel.appendChild(head);
+    let r     ; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
+    if (!r.body || !r.body.ok) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'Node tree unavailable' + (r.body && r.body.message ? ': ' + r.body.message : ' (single-node cluster or nothing provisioned yet).');
+      treePanel.appendChild(dd); return;
+    }
+    const nodes = r.body.nodes || [];
+    if (!nodes.length) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      treePanel.appendChild(dd); return;
+    }
+    const t = document.createElement('table'); t.className = 'ld';
+    const hr = document.createElement('tr'); ['Node', 'Rolled-up values'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    nodes.forEach((n     ) => {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.textContent = n.node;
+      const c2 = document.createElement('td'); c2.style.cssText = 'color:var(--muted);font-size:12px;';
+      c2.textContent = (n.metrics || []).map((m     ) => m.metric + ': ' + formatNum(m.value)).join(', ');
+      tr.appendChild(c1); tr.appendChild(c2); tb.appendChild(tr);
+    });
+    t.appendChild(tb); treePanel.appendChild(t);
+  };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph     ) => {
@@ -1498,6 +1531,7 @@ function addFlowSection(nav     , sections     ) {
     lastGraph = r.body;
     draw(r.body);
     renderEditor();
+    renderTree();
   };
   refresh.onclick = load;
   link.onclick = () => { activate(link, sec); load(); };
