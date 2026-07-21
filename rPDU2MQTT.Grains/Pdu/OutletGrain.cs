@@ -24,8 +24,6 @@ public sealed class OutletGrain : PduChildGrain, IOutletGrain
     private string deviceId = "";
     private int index;
 
-    public OutletGrain(IServiceProvider sp) : base(sp) { }
-
     /// <summary>The energy-flow node id for an outlet — the auto convention custom nodes can wire onto.</summary>
     public static string FlowNodeId(string deviceId, int index) => $"outlet:{deviceId}:{index}";
 
@@ -58,35 +56,19 @@ public sealed class OutletGrain : PduChildGrain, IOutletGrain
 
     public Task<RawOutlet?> Document() => Task.FromResult(document);
 
+    /// <summary>
+    /// The write. This grain owns the right to make it (single activation ⇒ exactly once, and serialized
+    /// per outlet); the PDU it belongs to makes the device call.
+    /// </summary>
     public async Task<string> Control(string action)
     {
-        var pdu = Pdu;   // the PDU this outlet is on, not whichever instance is primary
-        if (pdu is null) return "No PDU available to control this outlet.";
-        switch (action.Trim().ToLowerInvariant())
-        {
-            case "on": await pdu.SetOutletStateAsync(deviceId, index, true, CancellationToken.None); break;
-            case "off": await pdu.SetOutletStateAsync(deviceId, index, false, CancellationToken.None); break;
-            case "reboot": await pdu.ControlOutletAsync(deviceId, index, "reboot", CancellationToken.None); break;
-            case "resetstats": await pdu.ResetOutletStatsAsync(deviceId, index, CancellationToken.None); break;
-            default: return $"Unknown outlet action '{action}'.";
-        }
-        return $"{deviceId} outlet {index}: {action}.";
+        if (Parent is not { } pdu) return "No PDU available to control this outlet.";
+        return await pdu.ControlOutlet(deviceId, index, action);
     }
 
     public async Task<string> SetConfig(string field, string payload, bool isDelay)
     {
-        var pdu = Pdu;
-        if (pdu is null) return "";
-        object value;
-        if (isDelay)
-        {
-            // HA sends the number as text; the API wants an integer.
-            if (!double.TryParse(payload, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var num)) return "";
-            value = (long)Math.Round(num);
-        }
-        else value = payload;   // poaAction etc.: the selected option string
-
-        await pdu.SetOutletConfigAsync(deviceId, index, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
-        return value.ToString() ?? "";
+        if (Parent is not { } pdu) return "";
+        return await pdu.SetOutletConfig(deviceId, index, field, payload, isDelay);
     }
 }

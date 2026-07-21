@@ -1,83 +1,74 @@
-using rPDU2MQTT.Abstractions.Pdu;
-using rPDU2MQTT.Classes;
 using rPDU2MQTT.Grains.Abstractions.Pdu;
-using rPDU2MQTT.Grains.Pdu;
-using rPDU2MQTT.Models.Config;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// Which PDU a child grain writes through. The solution bridges any number of PDUs, so an outlet or group on
-/// the second PDU must not be actioned through the first — the owning instance is stamped by the parent
-/// PduGrain and honoured here.
+/// Which PDU a write reaches. The solution bridges any number of PDUs, so an outlet or group on the second
+/// PDU must never be actioned through the first. A child grain doesn't resolve a PDU for itself: it holds
+/// the instance its parent stamped on it and asks that parent — whose grain key <i>is</i> the instance id —
+/// to make the device call.
 /// </summary>
 public class PduOwnershipTests
 {
-    private static PduConfig Pdu(string host) { var c = new PduConfig(); c.Connection.Host = host; return c; }
-
-    private static PduInstanceRegistry Registry(params (string id, string host)[] pdus)
-    {
-        var cfg = new Config();
-        foreach (var (id, host) in pdus) cfg.Pdus[id] = Pdu(host);
-        return new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
-    }
-
     [Fact]
-    public void Child_WritesThrough_TheInstanceItBelongsTo()
-    {
-        var registry = Registry(("default", "10.0.0.1"), ("rack-b", "10.0.0.2"), ("rack-c", "10.0.0.3"));
-
-        Assert.Same(registry.Get("rack-b"), PduChildGrain.PduFor(registry, "rack-b"));
-        Assert.Same(registry.Get("rack-c"), PduChildGrain.PduFor(registry, "rack-c"));
-
-        // Not the primary — the whole point.
-        Assert.NotSame(registry.Primary, PduChildGrain.PduFor(registry, "rack-b"));
-
-        // Instance ids are matched the way config keys them, so casing can't strand a child.
-        Assert.Same(registry.Get("rack-b"), PduChildGrain.PduFor(registry, "RACK-B"));
-    }
-
-    [Fact]
-    public void Unbound_Or_RemovedInstance_FallsBackToThePrimary()
-    {
-        var registry = Registry(("default", "10.0.0.1"), ("rack-b", "10.0.0.2"));
-
-        // A child whose parent hasn't polled it yet has no owner stamped on it.
-        Assert.Same(registry.Primary, PduChildGrain.PduFor(registry, null));
-
-        // An instance that has since been removed from config must not strand the child either.
-        Assert.Same(registry.Primary, PduChildGrain.PduFor(registry, "rack-gone"));
-    }
-
-    [Fact]
-    public void SingleInstance_IsUnambiguous()
-    {
-        var registry = Registry(("only", "10.0.0.9"));
-        Assert.Same(registry.Get("only"), PduChildGrain.PduFor(registry, null));
-        Assert.Same(registry.Get("only"), PduChildGrain.PduFor(registry, "only"));
-    }
-}
-
-/// <summary>The PDU's child grains carry their owning instance, so a write can be routed back to it.</summary>
-public class PduChildOwnershipGrainTests
-{
-    [Fact]
-    public async Task Outlet_And_Group_Carry_TheirInstance()
+    public async Task PduGrain_OnlyEverTalksTo_ItsOwnInstance()
     {
         var cluster = await GrainTestCluster.StartAsync();
         try
         {
-            var outlet = cluster.GrainFactory.GetGrain<IOutletGrain>(IOutletGrain.KeyFor("pdu-b", 1));
+            // A grain keyed to an instance that isn't configured has no device to talk to, and says so —
+            // rather than falling back to some other PDU that happens to be registered.
+            var absent = cluster.GrainFactory.GetGrain<IPduGrain>("rack-b");
+            Assert.Contains("'rack-b' is not configured", await absent.ControlOutlet("pdu-b", 1, "on"));
+            Assert.Contains("'rack-b' is not configured", await absent.ControlGroup("rack-1", "on"));
+            Assert.Equal("", await absent.SetOutletConfig("pdu-b", 1, "onDelay", "5", isDelay: true));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task UnclaimedChild_WritesToNothing()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var f = cluster.GrainFactory;
+
+            // Nothing has polled these, so nothing knows which PDU they're on. The honest answer is to write
+            // to none of them — not to guess at the primary.
+            var outlet = f.GetGrain<IOutletGrain>(IOutletGrain.KeyFor("pdu-unknown", 1));
+            Assert.Contains("No PDU", await outlet.Control("off"));
+            Assert.Equal("", await outlet.SetConfig("onDelay", "5", isDelay: true));
+
+            var group = f.GetGrain<IOneViewGroupGrain>("group-unknown");
+            Assert.Contains("No PDU", await group.Control("on"));
+            Assert.Contains("Unknown group action", await group.Control("frobnicate"));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task Child_KeepsTheInstance_ItsParentStamped()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var f = cluster.GrainFactory;
+
+            var outlet = f.GetGrain<IOutletGrain>(IOutletGrain.KeyFor("pdu-b", 1));
             await outlet.Observe(OutletGrainTests.Outlet(1), "pdu-b", "rack-b", System.DateTime.UtcNow);
             Assert.Equal("rack-b", (await outlet.State())!.InstanceId);
 
-            // Binding a group is idempotent and doesn't need a PDU present; control still degrades cleanly
-            // in a bare cluster (no instance registry, no PDU).
-            var group = cluster.GrainFactory.GetGrain<IOneViewGroupGrain>("rack-1");
+            // Its writes now address rack-b's grain, which isn't configured in this cluster — so the failure
+            // names rack-b. That's the proof it didn't quietly write through the one PDU that does exist.
+            Assert.Contains("'rack-b' is not configured", await outlet.Control("off"));
+
+            // Binding a group is idempotent, and routes the same way.
+            var group = f.GetGrain<IOneViewGroupGrain>("rack-1");
             await group.Bind("rack-b");
             await group.Bind("rack-b");
-            Assert.Contains("No PDU", await group.Control("on"));
+            Assert.Contains("'rack-b' is not configured", await group.Control("on"));
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

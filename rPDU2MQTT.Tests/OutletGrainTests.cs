@@ -39,8 +39,7 @@ public class OutletGrainTests
             // It keeps the document it extracted that from, so nothing is lost by the parent not pre-picking.
             Assert.Equal(3, (await outlet.Document())!.Key);
 
-            // No PDU registered in the bare cluster → control reports unavailable instead of throwing.
-            Assert.Contains("No PDU", await outlet.Control("off"));
+            // (The write path — which PDU a control action reaches — is PduOwnershipTests.)
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

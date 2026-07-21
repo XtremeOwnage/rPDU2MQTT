@@ -28,12 +28,17 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
     private OperatorReport report = new() { Message = "No check yet." };
     private DateTime lastCheckUtc = DateTime.MinValue;
 
-    public OperatorGrain(Config cfg, IContainerRegistry registry, ILogger<OperatorGrain> log, IServiceProvider sp)
+    /// <param name="source">
+    /// The Kubernetes config source, when this deployment has one — declared as an optional dependency
+    /// rather than fished out of the container, so the grain's requirements are visible in its signature.
+    /// Null outside Kubernetes, where the operator is a no-op.
+    /// </param>
+    public OperatorGrain(Config cfg, IContainerRegistry registry, ILogger<OperatorGrain> log, KubernetesConfigSource? source = null)
     {
         this.cfg = cfg;
         this.registry = registry;
         this.log = log;
-        source = sp.GetService<KubernetesConfigSource>();
+        this.source = source;
     }
 
     public Task<OperatorReport> Status() => Task.FromResult(report);

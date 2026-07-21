@@ -23,12 +23,26 @@ public static class GrainTestCluster
         public Task<string?> ResolveDigestAsync(string h, string r, string reference, CancellationToken ct) => Task.FromResult<string?>(null);
     }
 
+    /// <summary>A registry holding the single instance <c>default</c>, on its own config (the DI one stays bare).</summary>
+    public const string KnownInstanceId = "default";
+
+    private static rPDU2MQTT.Classes.PduInstanceRegistry OneInstanceRegistry()
+    {
+        var cfg = new Config();
+        cfg.Pdus[KnownInstanceId] = new rPDU2MQTT.Models.Config.PduConfig();
+        cfg.Pdus[KnownInstanceId].Connection.Host = "10.255.255.1";   // never contacted by these tests
+        return new rPDU2MQTT.Classes.PduInstanceRegistry(cfg, new rPDU2MQTT.Classes.PduInstanceFactory(cfg));
+    }
+
     private sealed class Silo : ISiloConfigurator
     {
         public void Configure(ISiloBuilder silo)
         {
             silo.Services.AddSingleton(new Config());
             silo.Services.AddSingleton<rPDU2MQTT.Services.Operator.IContainerRegistry, FakeRegistry>();
+            // One known PDU instance so PduGrain can activate. Building a PDU opens no sockets — a grain
+            // keyed to any *other* instance finds nothing, which is what the ownership tests check.
+            silo.Services.AddSingleton(OneInstanceRegistry());
             silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: IsAbstraction));
         }
     }

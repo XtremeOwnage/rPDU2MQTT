@@ -12,8 +12,6 @@ public sealed class OneViewGroupGrain : PduChildGrain, IOneViewGroupGrain
 {
     private string groupKey = "";
 
-    public OneViewGroupGrain(IServiceProvider sp) : base(sp) { }
-
     public override Task OnActivateAsync(CancellationToken cancellationToken)
     {
         groupKey = this.GetPrimaryKeyString();
@@ -31,10 +29,8 @@ public sealed class OneViewGroupGrain : PduChildGrain, IOneViewGroupGrain
         var act = action.Trim().ToLowerInvariant();
         if (act is not ("on" or "off" or "reboot")) return $"Unknown group action '{action}'.";
 
-        var pdu = Pdu;
-        if (pdu is null) return "No PDU available to control this group.";
-
-        var count = await pdu.ControlGroupAsync(groupKey, act, CancellationToken.None);
-        return $"Group '{groupKey}' {act}: applied to {count} outlet(s).";
+        // The group's own PDU performs the fan-out; this grain's job is that it happens exactly once.
+        if (Parent is not { } pdu) return "No PDU available to control this group.";
+        return await pdu.ControlGroup(groupKey, act);
     }
 }
