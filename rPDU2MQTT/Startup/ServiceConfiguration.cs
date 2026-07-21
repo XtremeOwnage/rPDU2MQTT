@@ -151,6 +151,11 @@ public static class ServiceConfiguration
         if (worker)
             services.AddHostedService<Hosting.ModbusReconciler>();
 
+        // v3: provision the polymorphic node-grain tree from the energy-flow config — each node becomes the
+        // right grain type (measured leaf / aggregate / residual) owning exactly its configured children.
+        if (worker)
+            services.AddHostedService<Hosting.FlowReconciler>();
+
         // v3: a local mirror of the flow grain's live values (Modbus via the DeviceGrain, and later every
         // grain-fed source), synced by FlowGrainSyncService and read through the same IFlowValueSource seam.
         var grainSyncedFlow = new Core.Flow.FlowValueCache();
