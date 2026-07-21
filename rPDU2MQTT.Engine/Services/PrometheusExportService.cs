@@ -77,7 +77,7 @@ public class PrometheusExportService : baseMQTTService
             {
                 var tier = hierarchy is null ? string.Empty : HierarchyFor(hierarchy, r);
                 var values = PrometheusLabels.Values(labelNames, r, cfg, snapshot.InstanceId, tier);
-                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg), labelNames).WithLabels(values).Set(r.Value);
+                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg), labelNames, r).WithLabels(values).Set(r.Value);
             }
 
         return Task.CompletedTask;
@@ -111,11 +111,22 @@ public class PrometheusExportService : baseMQTTService
     }
 
     // Cached by the resolved metric name (the template may vary the name by device/source/units).
-    private Gauge GetGauge(string name, string[] labelNames)
+    /// <summary>
+    /// The gauge for a metric name, created on first use. Its HELP text is the measurement said in English
+    /// with its unit (#206) — "Real Power (W), measured by rPDU2MQTT" — so a series is readable in Grafana's
+    /// metric browser without knowing this project's vocabulary.
+    /// </summary>
+    private Gauge GetGauge(string name, string[] labelNames, MeasurementReading reading)
     {
         if (!gauges.TryGetValue(name, out var gauge))
         {
-            gauge = Metrics.CreateGauge(name, "rPDU2MQTT measurement", labelNames);
+            var friendly = MetricsHelper.FriendlyTypeName(reading.Type);
+            var units = string.IsNullOrWhiteSpace(reading.Units) ? "" : $" ({reading.Units})";
+            var help = string.IsNullOrWhiteSpace(friendly)
+                ? "Measured by rPDU2MQTT."
+                : $"{friendly}{units}, measured by rPDU2MQTT.";
+
+            gauge = Metrics.CreateGauge(name, help, labelNames);
             gauges[name] = gauge;
         }
         return gauge;

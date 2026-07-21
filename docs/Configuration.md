@@ -471,6 +471,30 @@ non-alphanumeric characters replaced by `_` (so pick a template that starts with
 default `rpdu2mqtt_{type}` and aggregate/filter by label (the idiomatic approach), or encode them into
 the name if you prefer.
 
+**Friendly names in labels.** The default labels are object-id forms (`device="rack_pdu_1"`,
+`source="outlet_10"`) — stable, but not what the thing is *called*. `Prometheus.Labels` can add the
+human forms alongside them:
+
+```yaml
+Prometheus:
+  Labels: [device, device_name, source, name, type, type_name, units]
+```
+
+| Label | Example | What it is |
+| --- | --- | --- |
+| `device` / `device_name` | `rack_pdu_1` / `Rack PDU 1` | the PDU's id form / its display name |
+| `source` / `name` | `outlet_10` / `Dell MD1200` | the outlet or entity's id form / its display name |
+| `type` / `type_name` | `realpower` / `Real Power` | the measurement type / said in English |
+| `number`, `units`, `instance`, `hierarchy` | `10`, `W`, `rack-b`, `Rack Circuit A` | outlet number, units, PDU instance key, the energy-flow tier feeding it |
+
+> The default set stays `[device, source, units]` on purpose: adding a label changes the identity of every
+> existing time series, which breaks continuity in dashboards that are already recording. Opt in when you
+> want it.
+
+Every gauge's **HELP** text is the measurement said in English with its unit
+(`Real Power (W), measured by rPDU2MQTT.`), so series are readable in Grafana's metric browser without
+adding any labels at all.
+
 You can also rename an individual measurement type via its **Measurements override ID**, which replaces
 `{type}`. For example, with the default template:
 

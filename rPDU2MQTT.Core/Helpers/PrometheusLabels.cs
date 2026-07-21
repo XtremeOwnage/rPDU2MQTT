@@ -10,7 +10,7 @@ namespace rPDU2MQTT.Helpers;
 public static class PrometheusLabels
 {
     /// <summary>Label names supported by <c>Prometheus.Labels</c>.</summary>
-    public static readonly string[] Supported = ["device", "source", "name", "number", "type", "units", "instance", "hierarchy"];
+    public static readonly string[] Supported = ["device", "device_name", "source", "name", "number", "type", "type_name", "units", "instance", "hierarchy"];
 
     /// <summary>The configured label names, filtered to the supported set (falls back to the defaults).</summary>
     public static string[] Names(Config config)
@@ -40,10 +40,14 @@ public static class PrometheusLabels
             values[i] = names[i] switch
             {
                 "device" => r.Device,
+                // The friendly forms (#206): what the PDU/outlet is *called*, so a dashboard doesn't have to
+                // decode object-ids. Falls back to the id form when a device has no display name.
+                "device_name" => string.IsNullOrWhiteSpace(r.DeviceName) ? r.Device : r.DeviceName,
                 "source" => r.Source,
                 "name" => r.SourceName ?? r.Source,
                 "number" => r.Number?.ToString() ?? string.Empty,
                 "type" => effectiveType,
+                "type_name" => MetricsHelper.FriendlyTypeName(effectiveType),
                 "units" => r.Units,
                 "instance" => instance,
                 "hierarchy" => hierarchy,

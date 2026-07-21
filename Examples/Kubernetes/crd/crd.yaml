@@ -382,7 +382,7 @@ spec:
                     type: array
                     items:
                       type: string
-                    description: "Labels attached to every exported metric. Available: device, source, name, number, type, units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set."
+                    description: "Labels attached to every exported metric. Available: device, device_name (the device's display name), source, name (the outlet/entity's display name), number, type, type_name (the measurement said in English, e.g. 'Real Power'), units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set."
                   Pushgateway:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true

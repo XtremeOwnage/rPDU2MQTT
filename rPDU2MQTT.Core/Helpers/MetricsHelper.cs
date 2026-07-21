@@ -8,7 +8,8 @@ namespace rPDU2MQTT.Helpers;
 /// <summary>A single numeric measurement, flattened for export to Prometheus / EmonCMS / etc.</summary>
 /// <param name="SourceName">The source's formatted display name (vs <paramref name="Source"/>'s object-id form).</param>
 /// <param name="Number">The 1-based outlet number, or null for non-outlet entities (circuits/phase/total).</param>
-public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number);
+/// <param name="DeviceName">The device's display name (vs <paramref name="Device"/>'s object-id form) (#206).</param>
+public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number, string DeviceName = "");
 
 public static class MetricsHelper
 {
@@ -21,20 +22,49 @@ public static class MetricsHelper
         foreach (var device in data.Devices)
         {
             foreach (var outlet in device.Outlets)
-                foreach (var reading in ToReadings(device.Entity_Name, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements))
                     yield return reading;
 
             foreach (var entity in device.Entity)
-                foreach (var reading in ToReadings(device.Entity_Name, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements))
                     yield return reading;
         }
     }
 
-    private static IEnumerable<MeasurementReading> ToReadings(string device, string source, string sourceName, int? number, IEnumerable<Measurement> measurements)
+    private static IEnumerable<MeasurementReading> ToReadings(string device, string deviceName, string source, string sourceName, int? number, IEnumerable<Measurement> measurements)
     {
         foreach (var m in measurements)
             if (double.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number);
+                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number, deviceName);
+    }
+
+    /// <summary>
+    /// A measurement type as a human would say it — "Real Power" for <c>realpower</c> (#206). Used for the
+    /// Prometheus gauge's HELP text and the optional <c>type_name</c> label, so a series is readable without
+    /// knowing this project's vocabulary. Unknown types are title-cased rather than dropped.
+    /// </summary>
+    public static string FriendlyTypeName(string? type)
+    {
+        var t = (type ?? "").Trim();
+        if (t.Length == 0) return "";
+
+        return t.ToLowerInvariant() switch
+        {
+            "realpower" => "Real Power",
+            "apparentpower" => "Apparent Power",
+            "powerfactor" => "Power Factor",
+            "energy" => "Energy",
+            "current" => "Current",
+            "voltage" => "Voltage",
+            "frequency" => "Frequency",
+            "temperature" => "Temperature",
+            "humidity" => "Humidity",
+            "accumulatedco2" => "Accumulated CO2",
+            "instantaneousco2" => "Instantaneous CO2",
+            "currentcrestfactor" => "Current Crest Factor",
+            "balance" => "Balance",
+            _ => char.ToUpperInvariant(t[0]) + t[1..],
+        };
     }
 
     /// <summary>
