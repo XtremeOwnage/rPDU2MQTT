@@ -1,11 +1,31 @@
-I would expect to see more grain instances....
+Branch feat/v3-pipeline-abstractions.
 
-For example- grains are intended to be lightswitch, and long-lived.
+1. Node editor — 05b1406
+    [x] New nodes default to Mode "none"; nothing is inferred/sized until you ask for it.
+    [x] "Current" column explains itself (header + empty cells): the value lands on the source's
+        next message/poll, and an unsaved binding isn't read at all. No page reload involved.
+    [x] "Invert" checkbox on power/current bindings — it's the sign of Scale.
+    [x] "Copy" per node (kind/mode/value/bindings; wiring not copied — rename then wire).
+    [x] Feeds / Fed by pickers have a search box; Enter takes the single match.
 
-So.... each "node" should itself, be a grain. And it should spin up children as it needs for its data, ie modbus grain, mqtt grain, etc.
+2. Multi-PDU — 2c1a0e5, a9a6eec, 8ea0864
+    [x] Outlet + group writes reach the PDU that owns them, never the primary. Writes go up the
+        tree: the child holds the instance its parent stamped and asks that parent (whose grain
+        key IS the instance id) to make the device call. No grain resolves a PDU for itself.
+    [x] Parent hands the whole document down: PduGrain -> RawDevice -> PduDeviceGrain ->
+        RawOutlet -> OutletGrain. Each child extracts what it needs (the outlet does its own
+        unit conversion and feeds its own flow node) and keeps the document it came from.
+    [x] Each OneView group is bound to its PDU on every poll; PduChildren lists groups too.
 
-Parents should own and manage their children.
+3. Same anti-pattern, found while sweeping for it — 8ea0864
+    [x] OperatorGrain fished KubernetesConfigSource out of IServiceProvider; now an optional
+        constructor dependency.
+    [x] PduGrain wrote poll success to the process-local HealthState, so every process that
+        didn't host the activation failed its readiness probe forever. PduSyncService records it
+        per-process now, only on a genuinely newer snapshot.
 
-Also, each instance... should be its own grain. Graints shouldn't be enumerating through lists of items to poll.... They should be their own grains.
-
-Next- There is SOMETHING FUCKING WRONG WITH FUCKING MODBUS. I HAVE FUCKING TOLD YOU 4 FFUCKING TIMES IT IS NOT FUCKING WORKING. IT STILL DOES NOT FUCKING WORK.
+Open — needs your call:
+    [ ] Two PDUs exposing the same OneView group key still collide: the command topic
+        (<parent>/Groups/<key>/control) has no instance segment, so the group grain is keyed by
+        the bare key and the last PDU to poll wins. Fixing it means changing that topic —
+        breaking change, so say the word.
