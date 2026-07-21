@@ -28,6 +28,12 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     /// </summary>
     protected virtual bool LeaderGated => true;
 
+    /// <summary>
+    /// When the data currently being published was read from the device (#205). A publishing loop sets this
+    /// per snapshot; null means "no better answer than now" (e.g. a state echo after a control action).
+    /// </summary>
+    protected DateTime? DataTimestampUtc { get; set; }
+
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
     protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.Primary.PollInterval) { }
@@ -176,6 +182,13 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     {
         if (cfg.Debug.PublishMessages == false)
             return Task.CompletedTask;
+
+        // #205: carry the moment the data was read. As a user property this is invisible to consumers that
+        // don't look for it, so it costs nothing to have on by default — and it's the poll time, not the
+        // publish time, which is what makes a stale republish distinguishable from a fresh reading.
+        if (cfg.MQTT.MessageTimestamp == Models.Config.MessageTimestampMode.UserProperty)
+            msg.UserProperties[Core.MessageTimestamps.PropertyName] =
+                Core.MessageTimestamps.Format(DataTimestampUtc ?? DateTime.UtcNow);
 
         // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
         // publish failures surface in tick(). No need to check connectivity per message.

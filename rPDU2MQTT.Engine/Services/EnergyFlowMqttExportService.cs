@@ -32,10 +32,16 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
         // The hierarchy spans every PDU, so build one graph from all fresh sources combined.
         var merged = new PduData();
-        foreach (var snapshot in FreshSnapshots())
-            merged.Devices.AddRange(snapshot.Devices);
+        DateTime? oldest = null;
+        foreach (var snapshot in FreshSnapshotsWithId())
+        {
+            merged.Devices.AddRange(snapshot.Data.Devices);
+            // A tier's roll-up is only as current as its stalest input, so report that rather than flatter it.
+            if (oldest is null || snapshot.TimestampUtc < oldest) oldest = snapshot.TimestampUtc;
+        }
         if (merged.Devices.Count == 0)
             return;
+        DataTimestampUtc = oldest;
 
         // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement, so
         // each tier gets a total (kWh) it can contribute to the Energy Dashboard.
@@ -68,6 +74,8 @@ public class EnergyFlowMqttExportService : baseMQTTService
                 label = node.Label,
                 kind = node.Kind,
                 parents,
+                // #205: this payload is already JSON, so the read time can just be a field — no mode needed.
+                timestamp = Core.MessageTimestamps.Format(oldest ?? DateTime.UtcNow),
             });
             await PublishString(topic, payload, retain: true, cancellationToken);
 

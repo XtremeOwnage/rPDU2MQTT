@@ -49,4 +49,14 @@ public class MQTTConfig
     [YamlMember(Alias = "LastWill", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
     [Display(Name = "Last Will / Availability", Description = "Publish a Last-Will message and set an availability topic on entities, so Home Assistant marks them unavailable immediately when the bridge disconnects. When off, entities instead rely on HomeAssistant.SensorExpireAfterSeconds (expire_after) to go unavailable.")]
     public bool LastWill { get; set; } = true;
+
+    /// <summary>
+    /// Whether published measurements carry the time they were read, and how (#205). The timestamp is the
+    /// poll time, so a consumer can tell a fresh reading from a republished one.
+    /// </summary>
+    [DefaultValue(MessageTimestampMode.UserProperty)]
+    [YamlMember(Alias = "MessageTimestamp", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Name = "Message Timestamp", Description = "Carry the time a measurement was read: 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone (default, safe for every existing consumer), 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically), 'None' carries no timestamp.")]
+    [AllowedValues("None", "UserProperty", "Payload")]
+    public MessageTimestampMode MessageTimestamp { get; set; } = MessageTimestampMode.UserProperty;
 }
