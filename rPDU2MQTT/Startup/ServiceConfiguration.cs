@@ -213,8 +213,9 @@ public static class ServiceConfiguration
 
             // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
             // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in
-            // the GUI takes effect without a restart.
-            services.AddHostedService<EmonCmsFeedProvisioner>();
+            // the GUI takes effect without a restart. v3: the writes to EmonCMS are owned by a single-
+            // activation grain, so this only pokes it; "once cluster-wide" is the grain, not a leader check.
+            services.AddHostedService<Hosting.EmonCmsReconciler>();
 
             if (cfg.HASS.DiscoveryEnabled)
             {

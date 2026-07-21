@@ -43,6 +43,11 @@ public static class GrainTestCluster
             // One known PDU instance so PduGrain can activate. Building a PDU opens no sockets — a grain
             // keyed to any *other* instance finds nothing, which is what the ownership tests check.
             silo.Services.AddSingleton(OneInstanceRegistry());
+            // What the EmonCMS grain needs to exist. Nothing here reaches the network: with EmonCMS off in
+            // the config, the grain refuses before it would call anything.
+            silo.Services.AddSingleton<rPDU2MQTT.Core.IMessageBus, rPDU2MQTT.Core.ChannelMessageBus>();
+            silo.Services.AddSingleton<rPDU2MQTT.Core.ISnapshotCache, rPDU2MQTT.Core.SnapshotCache>();
+            silo.Services.AddSingleton<rPDU2MQTT.Services.EmonCmsFeedSync>();
             silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: IsAbstraction));
         }
     }

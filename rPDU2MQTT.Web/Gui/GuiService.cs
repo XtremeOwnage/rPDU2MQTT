@@ -46,14 +46,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
-    private readonly EmonCmsFeedSync emonCmsFeeds;
     private readonly Core.Flow.IFlowValueSource? live;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
     {
         this.live = live;
         this.grains = grains;
@@ -71,7 +70,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
         this.haEnergy = haEnergy;
-        this.emonCmsFeeds = emonCmsFeeds;
     }
 
     /// <summary>
@@ -1053,20 +1051,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Manually run EmonCMS feed provisioning now (#163) and report what it did — so you can see it work
-        // (or why it's a no-op) without waiting for the periodic pass.
-        app.MapPost("/api/emoncms/provision-feeds", async (HttpContext ctx) =>
+        // (or why it's a no-op) without waiting for the periodic pass. v3: through the same single-activation
+        // grain the periodic pass uses, so a click can't race it into duplicate feeds.
+        app.MapPost("/api/emoncms/provision-feeds", async () =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
             try
             {
-                // Gather data across every instance the same resilient way the GUI does (snapshot cache,
-                // else a direct poll) so this works on a UI-only node whose cache is cold.
-                var merged = new Models.PDU.PduData();
-                foreach (var id in registry.All.Keys)
-                    merged.Devices.AddRange((await ResolveData(id, registry.Get(id), cts.Token)).Devices);
-                var r = await emonCmsFeeds.ReconcileAsync(merged, cts.Token);
-                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
+                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).Reconcile(force: true);
+                return Results.Json(new { ok = r.Ok, message = r.Message, feeds = r.FeedsCreated, processes = r.ProcessesSet, virtualFeeds = r.VirtualFeeds }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -1075,13 +1067,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Delete every EmonCMS feed rPDU2MQTT created (under its tag/node) — the "clean up" button.
-        app.MapPost("/api/emoncms/delete-feeds", async (HttpContext ctx) =>
+        app.MapPost("/api/emoncms/delete-feeds", async () =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(60));
             try
             {
-                var r = await emonCmsFeeds.DeleteAllAsync(cts.Token);
+                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).DeleteAll();
                 return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
             }
             catch (Exception ex)
