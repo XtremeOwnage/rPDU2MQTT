@@ -45,4 +45,21 @@ public sealed class OutletGrain : Grain, IOutletGrain
         }
         return $"{deviceId} outlet {index}: {action}.";
     }
+
+    public async Task<string> SetConfig(string field, string payload, bool isDelay)
+    {
+        var pdu = sp.GetService<PDU>();
+        if (pdu is null) return "";
+        object value;
+        if (isDelay)
+        {
+            // HA sends the number as text; the API wants an integer.
+            if (!double.TryParse(payload, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var num)) return "";
+            value = (long)Math.Round(num);
+        }
+        else value = payload;   // poaAction etc.: the selected option string
+
+        await pdu.SetOutletConfigAsync(deviceId, index, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+        return value.ToString() ?? "";
+    }
 }

@@ -20,4 +20,7 @@ public sealed class OutletGrainControl : IOutletControl
 
     public Task<string> ControlGroup(string groupKey, string action, CancellationToken cancellationToken = default)
         => grains.GetGrain<IOneViewGroupGrain>(groupKey).Control(action);
+
+    public Task<string> SetOutletConfig(string deviceId, int outletIndex, string field, string payload, bool isDelay, CancellationToken cancellationToken = default)
+        => grains.GetGrain<IOutletGrain>(IOutletGrain.KeyFor(deviceId, outletIndex)).SetConfig(field, payload, isDelay);
 }

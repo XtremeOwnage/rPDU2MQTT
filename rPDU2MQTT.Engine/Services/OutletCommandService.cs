@@ -179,26 +179,33 @@ public class OutletCommandService : IHostedService
         if (!ConfigFields.Contains(field))
             return;
 
-        object value;
-        if (DelayFields.Contains(field))
-        {
-            // HA number sends the value as text (e.g. "5" or "5.0"); the API expects an integer.
-            if (!double.TryParse(payload, System.Globalization.CultureInfo.InvariantCulture, out var num))
-                return;
-            value = (long)Math.Round(num);
-        }
+        var isDelay = DelayFields.Contains(field);
+
+        // Route the write through the per-outlet grain (single owner) when wired; else straight to the PDU.
+        // Both return the applied value string so we can echo it back.
+        string applied;
+        if (outletControl is not null)
+            applied = await outletControl.SetOutletConfig(deviceId, outletIndex, field, payload, isDelay);
         else
         {
-            value = payload; // poaAction: the selected option
+            object value;
+            if (isDelay)
+            {
+                if (!double.TryParse(payload, System.Globalization.CultureInfo.InvariantCulture, out var num)) return;
+                value = (long)Math.Round(num);
+            }
+            else value = payload;
+            await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+            applied = value.ToString() ?? string.Empty;
         }
 
-        await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+        if (string.IsNullOrEmpty(applied)) return;   // a bad value was rejected
 
         // Echo the new value back to the field's state topic so HA reflects it immediately.
         var stateTopic = topic[..topic.LastIndexOf('/')];
         await mqtt.PublishAsync(new MQTT5PublishMessage(stateTopic, QualityOfService.AtLeastOnceDelivery)
         {
-            PayloadAsString = value.ToString() ?? string.Empty,
+            PayloadAsString = applied,
         });
     }
 }

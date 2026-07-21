@@ -19,6 +19,12 @@ public interface IOutletGrain : IGrainWithStringKey
     /// <summary>Execute a write against this outlet: <c>on</c>, <c>off</c>, <c>reboot</c>, or <c>resetStats</c>.</summary>
     Task<string> Control(string action);
 
+    /// <summary>
+    /// Write one outlet config field (delay as an integer when <paramref name="isDelay"/>, else the raw
+    /// string). Returns the applied value (empty on a bad value) so the caller can echo it back.
+    /// </summary>
+    Task<string> SetConfig(string field, string payload, bool isDelay);
+
     /// <summary>The grain key for an outlet on a device.</summary>
     static string KeyFor(string deviceId, int outletIndex) => $"{deviceId}|{outletIndex}";
 }

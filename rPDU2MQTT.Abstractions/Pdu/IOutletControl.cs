@@ -12,4 +12,7 @@ public interface IOutletControl
 
     /// <summary>Action a OneView group (fans out to its member outlets): <c>on</c>, <c>off</c>, or <c>reboot</c>.</summary>
     Task<string> ControlGroup(string groupKey, string action, CancellationToken cancellationToken = default);
+
+    /// <summary>Write one outlet config field. Returns the applied value (empty on a bad value) for the echo.</summary>
+    Task<string> SetOutletConfig(string deviceId, int outletIndex, string field, string payload, bool isDelay, CancellationToken cancellationToken = default);
 }
