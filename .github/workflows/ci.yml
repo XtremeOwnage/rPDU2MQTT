@@ -41,6 +41,20 @@ jobs:
             echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }
           done
 
+      - name: helm template (scheduled restart)
+        run: |
+          # Off by default: no CronJob, and no RBAC granted for one.
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt)
+          echo "$out" | grep -q 'kind: CronJob' && { echo "CronJob should not render by default"; exit 1; }
+
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set autoRestart.enabled=true --set autoRestart.schedule='30 3 * * 0')
+          echo "$out" | grep -q 'kind: CronJob' || { echo "missing CronJob"; exit 1; }
+          echo "$out" | grep -q 'schedule: "30 3 \* \* 0"' || { echo "schedule not applied"; exit 1; }
+          # It must restart by label (this release only), never a bare 'rollout restart deployment'.
+          echo "$out" | grep -q 'app.kubernetes.io/instance=rpdu2mqtt' || { echo "restart must be scoped by label"; exit 1; }
+          # Its own ServiceAccount, not the app's.
+          echo "$out" | grep -q 'name: rpdu2mqtt-restart' || { echo "missing restart ServiceAccount/Role"; exit 1; }
+
       - name: helm template (CRD config source, unmanaged resource)
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt \

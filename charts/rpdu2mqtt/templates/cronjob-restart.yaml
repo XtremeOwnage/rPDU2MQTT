@@ -1,0 +1,105 @@
+{{- /*
+  Scheduled rollout restart (#216). Rolling-restarting the Deployment(s) on a schedule also re-pulls the
+  image when the tag is mutable (`stable`, `latest`) — which is the usual reason for wanting it.
+
+  It restarts exactly the Deployments this release renders (all-in-one, or each split tier, plus the
+  operator), found by label rather than by name, so it can't wander onto anything else in the namespace.
+  Its own ServiceAccount is granted only get/list/patch on Deployments — a rollout restart is a patch of
+  the pod template's annotations, nothing more.
+*/}}
+{{- if .Values.autoRestart.enabled }}
+{{- $name := printf "%s-restart" (include "rpdu2mqtt.fullname" .) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.autoRestart.schedule | quote }}
+  {{- with .Values.autoRestart.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  # A restart is only worth doing at its scheduled time: if the cluster was down, skip the missed run
+  # rather than restarting the moment it comes back.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.autoRestart.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.autoRestart.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.autoRestart.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.autoRestart.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "rpdu2mqtt.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: restart
+        spec:
+          serviceAccountName: {{ $name }}
+          restartPolicy: Never
+          {{- with .Values.autoRestart.image.pullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.autoRestart.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.autoRestart.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+          containers:
+            - name: restart
+              image: "{{ .Values.autoRestart.image.repository }}:{{ .Values.autoRestart.image.tag }}"
+              imagePullPolicy: {{ .Values.autoRestart.image.pullPolicy }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.autoRestart.resources | nindent 16 }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - >-
+                  kubectl rollout restart deployment
+                  -n {{ .Release.Namespace }}
+                  -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/name={{ include "rpdu2mqtt.name" . }}
+{{- end }}

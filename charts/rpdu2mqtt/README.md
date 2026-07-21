@@ -69,9 +69,20 @@ credentials:
 | `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
 | `networkPolicy.enabled` | `false` | Restrict pod access: GUI/API/metrics ingress only from `networkPolicy.guiIngressFrom` / `apiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |
+| `autoRestart.enabled` | `false` | Add a CronJob that rolling-restarts this release's Deployment(s) on a schedule. Also re-pulls the image when the tag is mutable (`stable`/`latest`), so it doubles as an update mechanism. |
+| `autoRestart.schedule` | `"0 4 * * *"` | When to restart (standard cron). |
+| `autoRestart.timeZone` | `""` | IANA zone for the schedule (Kubernetes 1.27+); empty uses the cluster's. |
+| `autoRestart.image.repository` / `.tag` | `bitnami/kubectl` / `1.34` | Image the restart job runs. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity` | `{}` / `[]` | Standard pod scheduling/limits. |
 
 ## Notes
+
+- **Scheduled restarts:** `autoRestart.enabled=true` adds a CronJob that runs
+  `kubectl rollout restart` against the Deployments *this release* renders — matched by label, so it can
+  never wander onto anything else in the namespace. It gets its own ServiceAccount with nothing but
+  `get`/`list`/`patch` on Deployments (a rollout restart is a patch of the pod template's annotations).
+  Missed runs are skipped rather than fired on recovery. With a mutable tag this is also how you get
+  updated images without a `helm upgrade`.
 
 - **GUI in Kubernetes:** by default the config is mounted read-only from a ConfigMap, so the GUI's
   *Save* is disabled — change config by editing values and running `helm upgrade`. To make the GUI
