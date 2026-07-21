@@ -109,6 +109,35 @@ serviceAccount:
   name: ""
   annotations: {}
 
+# Scheduled rollout restart (#216, Kubernetes only). Adds a CronJob that rolling-restarts this release's
+# Deployment(s) — which also re-pulls the image when the tag is mutable (`stable`, `latest`), so it doubles
+# as an update mechanism. The job restarts only the Deployments this release renders (matched by label) and
+# gets its own ServiceAccount with nothing but get/list/patch on Deployments.
+autoRestart:
+  enabled: false
+  # Standard cron, in the cluster's timezone unless timeZone is set. Default: 04:00 daily.
+  schedule: "0 4 * * *"
+  # IANA name (e.g. "America/Chicago"). Requires Kubernetes 1.27+; leave empty to use the cluster's zone.
+  timeZone: ""
+  # If the cluster was down at the scheduled time, skip the missed run rather than restarting on recovery.
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  backoffLimit: 2
+  image:
+    repository: bitnami/kubectl
+    tag: "1.34"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+
 # Store configuration in a Kubernetes RpduConfig custom resource instead of a ConfigMap.
 # When enabled: the chart creates the CR (from `config` above) and grants RBAC to read/write it,
 # the app reads config from the CR (RPDU2MQTT_CONFIG_SOURCE=k8s), and the GUI's Save writes back to
