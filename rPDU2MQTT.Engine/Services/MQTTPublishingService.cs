@@ -16,8 +16,12 @@ public class MQTTPublishingService : basePublishingService
     {
         // Publish every fresh source's data (a stale/absent source is skipped so a PDU outage surfaces
         // via expire_after instead of republishing old values).
-        foreach (var data in FreshSnapshots())
+        foreach (var snapshot in FreshSnapshotsWithId())
         {
+            // #205: everything published from this snapshot is stamped with when the PDU was actually read.
+            DataTimestampUtc = snapshot.TimestampUtc;
+            var data = snapshot.Data;
+
             // Run through each device.
             foreach (var device in data.Devices)
             {

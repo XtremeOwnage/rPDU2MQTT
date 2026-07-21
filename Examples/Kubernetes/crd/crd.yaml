@@ -97,6 +97,13 @@ spec:
                   LastWill:
                     type: boolean
                     description: Publish a Last-Will message and set an availability topic on entities, so Home Assistant marks them unavailable immediately when the bridge disconnects. When off, entities instead rely on HomeAssistant.SensorExpireAfterSeconds (expire_after) to go unavailable.
+                  MessageTimestamp:
+                    type: string
+                    enum:
+                    - None
+                    - UserProperty
+                    - Payload
+                    description: "Carry the time a measurement was read: 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone (default, safe for every existing consumer), 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically), 'None' carries no timestamp."
                 description: MQTT Configuration
               Pdus:
                 type: object

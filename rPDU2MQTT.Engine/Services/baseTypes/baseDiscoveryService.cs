@@ -33,7 +33,9 @@ public abstract class baseDiscoveryService : baseMQTTService
     /// Returns <see langword="null"/> if the measurement cannot be parsed.
     /// </summary>
     public baseEntity? BuildMeasurement(Measurement measurement, DiscoveryDevice Parent)
-        => BuildMeasurement((baseMeasurement)measurement, Parent, "{{ value }}");
+        // #205: the template has to match the payload shape the publisher is using, or Home Assistant reads
+        // the whole JSON document as the state.
+        => BuildMeasurement((baseMeasurement)measurement, Parent, Core.MessageTimestamps.ValueTemplate(cfg.MQTT.MessageTimestamp));
 
     public BinarySensorDiscovery BuildState<T>(T item, DiscoveryDevice Parent) where T : NamedEntity, IEntityWithState
     {

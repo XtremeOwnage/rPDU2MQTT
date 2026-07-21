@@ -25,7 +25,9 @@ public abstract class basePublishingService : baseMQTTService
         foreach (var measurement in Measurements)
         {
             var topic = measurement.GetTopicPath();
-            await PublishString(topic, measurement.Value, cancellationToken);
+            // #205: in Payload mode the reading is published as {"value": …, "timestamp": …}; otherwise it
+            // stays the bare value it has always been.
+            await PublishString(topic, Core.MessageTimestamps.Payload(measurement.Value, DataTimestampUtc, cfg.MQTT.MessageTimestamp), cancellationToken);
         }
     }
 
