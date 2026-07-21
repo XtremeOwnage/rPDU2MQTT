@@ -42,7 +42,12 @@ public sealed class FlowReconciler : BackgroundService
             .ToDictionary(g => g.Key, g => g.First(), cmp);
 
         static string TypeOf(EnergyFlowNode n) => Core.Flow.FlowNodeClassifier.TypeOf(n);
-        string TypeOfId(string id) => byId.TryGetValue(id, out var n) ? TypeOf(n) : "measured";  // unknown ref = a leaf
+        // Config nodes classify from their config; the auto PDU→outlet nodes the PduGrain provisions have a
+        // known shape (pdu: aggregates, outlet: measured); any other unknown ref is treated as a leaf.
+        string TypeOfId(string id)
+            => byId.TryGetValue(id, out var n) ? TypeOf(n)
+             : id.StartsWith("pdu:", StringComparison.OrdinalIgnoreCase) ? "aggregate"
+             : "measured";
 
         // Feeders: for each target, the nodes wired to feed it. Feeds: for each source, what it feeds into.
         // (Links + legacy Parents both mean From feeds To.)

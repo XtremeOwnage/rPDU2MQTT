@@ -14,11 +14,19 @@ public sealed class FlowGrain : Grain, IFlowGrain
     private readonly FlowMiddleware middleware;
     private readonly Config config;
     private long treeVersion;
+    // Runtime-derived nodes that aren't in config — the auto PDU→outlet tree the PduGrain feeds (id → type).
+    private readonly Dictionary<string, string> autoNodes = new(StringComparer.OrdinalIgnoreCase);
 
     public FlowGrain(Config config)
     {
         this.config = config;
         middleware = new FlowMiddleware(() => config.EnergyFlow);
+    }
+
+    public Task RegisterNodes(Dictionary<string, string> nodes)
+    {
+        foreach (var (id, type) in nodes) autoNodes[id] = type;
+        return Task.CompletedTask;
     }
 
     public async Task Ingest(MeasurementSnapshot measurements)
@@ -44,12 +52,15 @@ public sealed class FlowGrain : Grain, IFlowGrain
         // Gather each configured node's value straight from the distributed node-grain tree: measured leaves
         // report their source value, aggregates return the roll-up of their children, residuals the remainder.
         // This is the tree driving the flow output (vs the in-process middleware solve).
-        var values = new List<FlowNodeValue>();
+        // The whole tree: configured nodes (classified from config) plus the runtime auto PDU→outlet nodes.
+        var types = new Dictionary<string, string>(autoNodes, StringComparer.OrdinalIgnoreCase);
         foreach (var n in config.EnergyFlow.Nodes)
+            if (!string.IsNullOrWhiteSpace(n.Id)) types[n.Id.Trim()] = Core.Flow.FlowNodeClassifier.TypeOf(n);
+
+        var values = new List<FlowNodeValue>();
+        foreach (var (id, type) in types)
         {
-            if (string.IsNullOrWhiteSpace(n.Id)) continue;
-            var id = n.Id.Trim();
-            INodeGrain grain = Core.Flow.FlowNodeClassifier.TypeOf(n) switch
+            INodeGrain grain = type switch
             {
                 "measured" => GrainFactory.GetGrain<IMeasuredNodeGrain>(id),
                 "residual" => GrainFactory.GetGrain<IResidualNodeGrain>(id),

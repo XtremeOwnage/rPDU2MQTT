@@ -129,3 +129,33 @@ public class ResidualNodeGrainTests
         finally { await cluster.StopAllSilosAsync(); }
     }
 }
+
+/// <summary>TreeSnapshot gathers the whole tree — including the runtime auto PDU→outlet nodes the PduGrain registers.</summary>
+public class FlowTreeSnapshotTests
+{
+    [Fact]
+    public async Task TreeSnapshot_Includes_RegisteredAutoNodes_RolledUp()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var f = cluster.GrainFactory;
+            await f.GetGrain<IMeasuredNodeGrain>("outlet:pduA:1").Observe(Metric.RealPower, 100);
+            await f.GetGrain<IMeasuredNodeGrain>("outlet:pduA:2").Observe(Metric.RealPower, 150);
+            await f.GetGrain<IAggregateNodeGrain>("pdu:pduA").Configure(new NodeSpec("aggregate",
+                new() { new("measured", "outlet:pduA:1"), new("measured", "outlet:pduA:2") }));
+            await f.GetGrain<IFlowGrain>(0).RegisterNodes(new()
+            {
+                ["outlet:pduA:1"] = "measured",
+                ["outlet:pduA:2"] = "measured",
+                ["pdu:pduA"] = "aggregate",
+            });
+
+            var snap = await f.GetGrain<IFlowGrain>(0).TreeSnapshot();
+            var pdu = snap.Values.Single(v => v.NodeId == "pdu:pduA" && v.Metric == Metric.RealPower);
+            Assert.Equal(250, pdu.Value);   // the PDU aggregate summed its two outlet leaves
+            Assert.Contains(snap.Values, v => v.NodeId == "outlet:pduA:1" && v.Value == 100);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+}

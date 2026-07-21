@@ -27,4 +27,10 @@ public interface IFlowGrain : IGrainWithIntegerKey
     /// residuals report the remainder) — the tree-driven flow output, alongside the middleware solve.
     /// </summary>
     Task<FlowSnapshot> TreeSnapshot();
+
+    /// <summary>
+    /// Register runtime-derived (auto) nodes in the tree so <see cref="TreeSnapshot"/> includes them — the
+    /// PduGrain reports its auto PDU→outlet nodes (id → grain type) each poll.
+    /// </summary>
+    Task RegisterNodes(Dictionary<string, string> nodes);
 }
