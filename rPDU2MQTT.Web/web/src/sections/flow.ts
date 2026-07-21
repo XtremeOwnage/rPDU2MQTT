@@ -35,18 +35,25 @@ const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Each type renders its own fields
 // in the two source columns; adding an ingest is another entry here plus a branch in the row renderer.
 const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+
+// Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
+const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];
+
+// Why a "Current" cell can sit empty — the thing every new binding trips over.
+const LIVE_HINT = 'Live value from the running ingest. It appears when the source next reports: an MQTT binding when the publisher sends, a Modbus one on the worker’s next poll — and a new or edited binding is not read at all until you Save. Nothing here is missing because the page needs reloading.';
 const MODBUS_REGISTER_TYPES = ['holding', 'input'];
 const MODBUS_DATATYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32'];
 const MODBUS_WORDORDERS = ['big', 'little'];
 
 // How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
-// always wins; this only governs nodes the graph would otherwise infer.
+// always wins; this only governs nodes the graph would otherwise infer. 'None' leads because it's what a new
+// node gets: a node you haven't measured yet should read as nothing, not as an inferred figure.
 const NODE_MODES: [string, string, string][] = [
-  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['none', 'None (nothing inferred)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured node simply drops out instead of showing a fabricated figure. The default for a new node.'],
+  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover. Sizes the node from what’s left over, so it always shows something.'],
   ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
   ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
-  ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
 ];
 
 // A labelled field (label above a control) for the node editor's form grid.
@@ -110,13 +117,21 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
 
   // --- Live value bindings ---
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
   const sources: any[] = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Current', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    const colHint: any = {
+      Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
+      Current: LIVE_HINT,
+    };
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+      const th = el('th', { text: h });
+      if (colHint[h]) th.title = colHint[h];
+      head.appendChild(th);
+    });
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
@@ -190,9 +205,28 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
         tr.appendChild(el('td', {}, fieldIn));
       }
 
-      const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
-      scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
+      // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
+      // nothing downstream has to learn a second knob — the checkbox is just its sign, spelled out.
+      const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
+      const setScale = (magnitude: number, invert: boolean) => {
+        const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
+        src.Scale = v === 1 ? undefined : v;
+      };
+      scaleIn.onchange = () => setScale(+scaleIn.value, (src.Scale ?? 1) < 0);
       tr.appendChild(el('td', {}, scaleIn));
+
+      // Sign only means anything where the value has a direction — power and current, not voltage/energy.
+      const invCell = el('td', { style: { textAlign: 'center' } });
+      if (SIGNED_METRICS.includes(metric)) {
+        const inv = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        inv.checked = (src.Scale ?? 1) < 0;
+        inv.title = 'Flip the sign of this reading (e.g. solar/battery power the source publishes as export).';
+        inv.onchange = () => setScale(+scaleIn.value, inv.checked);
+        invCell.appendChild(inv);
+      } else {
+        invCell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Sign has no meaning for this metric.' }));
+      }
+      tr.appendChild(invCell);
 
       // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
       // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
@@ -213,7 +247,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
       const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
-        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
+        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || ('No live value yet. ' + LIVE_HINT); }
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
       // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
@@ -301,12 +335,30 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       x.onclick = () => { onRemove(other); rerender(); };
       chip.append(nm(other), x); row.appendChild(chip);
     });
-    const sel = el('select', { style: { width: 'auto' } });
-    sel.appendChild(el('option', { value: '', text: '+ add…' }));
-    [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
-      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets — so it
+    // comes with a search box that filters it as you type (Enter takes the single match).
+    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
+    const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
+    const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+    const matches = () => {
+      const f = (search.value || '').trim().toLowerCase();
+      return f ? options.filter(id => (id + ' ' + nm(id)).toLowerCase().includes(f)) : options;
+    };
+    const fill = () => {
+      const m = matches();
+      sel.innerHTML = '';
+      sel.appendChild(el('option', { value: '', text: m.length ? `+ add… (${m.length})` : 'no match' }));
+      m.forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    };
+    search.oninput = fill;
+    search.onkeydown = (e: any) => {
+      if (e.key !== 'Enter') return;
+      const m = matches();
+      if (m.length === 1) { onAdd(m[0]); rerender(); }
+    };
+    fill();
     sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
-    row.appendChild(sel);
+    row.append(search, sel);
     return row;
   };
   box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
@@ -378,6 +430,23 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
     edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
+    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
+    // since the copy usually feeds somewhere else.
+    const copy = btn('Copy');
+    copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
+    copy.onclick = () => {
+      const taken = (id: string) => customNodes.some((x: any) => x.Id === id);
+      let id = `${n.Id}-copy`;
+      for (let i = 2; taken(id); i++) id = `${n.Id}-copy-${i}`;
+      const clone = JSON.parse(JSON.stringify(n));
+      clone.Id = id;
+      clone.Label = `${n.Label || n.Id} (copy)`;
+      customNodes.splice(customNodes.indexOf(n) + 1, 0, clone);
+      editing.id = id;
+      toast(`Copied to '${id}' — rename it and set its feeders.`, true);
+      rerender();
+    };
     const rm = btn('Delete', 'danger');
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
@@ -386,7 +455,7 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    actions.append(edit, ' ', rm);
+    actions.append(edit, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     body.appendChild(tr);
   });
@@ -837,7 +906,9 @@ export function addNodesSection(nav: any, sections: any) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
-      const node: any = { Id: id, Label: (labIn.value || '').trim() || id };
+      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
+      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
+      const node: any = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
