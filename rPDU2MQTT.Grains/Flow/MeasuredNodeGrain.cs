@@ -10,6 +10,8 @@ namespace rPDU2MQTT.Grains.Flow;
 /// </summary>
 public sealed class MeasuredNodeGrain : NodeGrainBase, IMeasuredNodeGrain
 {
+    public MeasuredNodeGrain(Microsoft.Extensions.Logging.ILogger<MeasuredNodeGrain> log) : base(log) { }
+
     private readonly Dictionary<Metric, double> observed = new();
 
     protected override string NodeType => "measured";

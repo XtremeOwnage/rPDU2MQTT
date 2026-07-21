@@ -10,6 +10,8 @@ namespace rPDU2MQTT.Grains.Flow;
 /// </summary>
 public sealed class AggregateNodeGrain : NodeGrainBase, IAggregateNodeGrain
 {
+    public AggregateNodeGrain(Microsoft.Extensions.Logging.ILogger<AggregateNodeGrain> log) : base(log) { }
+
     protected override string NodeType => "aggregate";
 
     protected override double? Compute(Metric metric)

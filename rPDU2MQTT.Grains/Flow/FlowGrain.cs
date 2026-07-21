@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Orleans.Concurrency;
 using rPDU2MQTT.Abstractions.Flow;
 using rPDU2MQTT.Core.Flow;
@@ -30,19 +31,32 @@ public sealed class FlowGrain : Grain, IFlowGrain
 
     private long version;
 
+    private readonly ILogger<FlowGrain> log;
+
+    public FlowGrain(ILogger<FlowGrain> log) => this.log = log;
+
     public async Task Ingest(MeasurementSnapshot measurements)
     {
         // Order-tolerant per source: an older/duplicate version is ignored.
-        if (sourceVersions.TryGetValue(measurements.SourceId, out var seen) && measurements.Version <= seen) return;
+        if (sourceVersions.TryGetValue(measurements.SourceId, out var seen) && measurements.Version <= seen)
+        {
+            log.LogTrace("Flow ingest from {Source}: version {Version} <= {Seen}, ignored.", measurements.SourceId, measurements.Version, seen);
+            return;
+        }
         sourceVersions[measurements.SourceId] = measurements.Version;
 
         var now = DateTime.UtcNow;
         foreach (var r in measurements.Readings)
             raw.Set(r.NodeId, r.Metric.CanonicalName(), r.Value, r.StaleAfterSeconds, now);
 
+        log.LogDebug("Flow ingest from {Source} v{Version}: {Count} reading(s).", measurements.SourceId, measurements.Version, measurements.Readings.Count);
+
         // A source feeds a measured leaf; everything above it recomputes by subscription from there.
         foreach (var r in measurements.Readings)
+        {
+            log.LogTrace("Flow ingest: {Node} {Metric} = {Value}.", r.NodeId, r.Metric, r.Value);
             await GrainFactory.GetGrain<IMeasuredNodeGrain>(r.NodeId).Observe(r.Metric, r.Value);
+        }
     }
 
     public Task PublishNodeValue(string nodeId, Metric metric, double? value)

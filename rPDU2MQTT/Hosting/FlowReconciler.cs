@@ -108,9 +108,26 @@ public sealed class FlowReconciler : BackgroundService
         while (await SafeWait(timer, stoppingToken));
     }
 
+    // The provisioned shape, so a change to the graph is reported and a steady state stays quiet.
+    private string? lastShape;
+
     private async Task ReconcileAsync()
     {
-        foreach (var p in Plan(config.EnergyFlow))
+        var plans = Plan(config.EnergyFlow);
+
+        var shape = string.Join(",", plans.OrderBy(p => p.Id).Select(p => $"{p.Id}:{p.Type}:{p.Spec.Children.Count}"));
+        if (shape != lastShape)
+        {
+            var byType = plans.GroupBy(p => p.Type).OrderBy(g => g.Key).Select(g => $"{g.Count()} {g.Key}");
+            Serilog.Log.Information("Energy flow: provisioning {Count} node(s) — {Breakdown}.", plans.Count, string.Join(", ", byType));
+            foreach (var p in plans)
+                Serilog.Log.Debug("Energy flow: {Node} is {Type}, fed by [{Children}]{Parent}.",
+                    p.Id, p.Type, string.Join(", ", p.Spec.Children.Select(c => c.Id)),
+                    p.Spec.Parent is { } parent ? $", splitting {parent.Id}" : "");
+            lastShape = shape;
+        }
+
+        foreach (var p in plans)
         {
             INodeGrain grain = p.Type switch
             {

@@ -39,6 +39,13 @@ var host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
+// Say what this process decided to be, before it starts doing it — a process that silently does nothing
+// should not look like a process that's working.
+StartupSummary.Log(
+    host.Services.GetRequiredService<Config>(),
+    host.Services.GetRequiredService<rPDU2MQTT.Core.HostRole>(),
+    host.Services.GetRequiredService<rPDU2MQTT.Startup.ConfigSources.IConfigSource>());
+
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
 

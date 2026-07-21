@@ -11,6 +11,8 @@ namespace rPDU2MQTT.Grains.Flow;
 /// </summary>
 public sealed class ResidualNodeGrain : NodeGrainBase, IResidualNodeGrain
 {
+    public ResidualNodeGrain(Microsoft.Extensions.Logging.ILogger<ResidualNodeGrain> log) : base(log) { }
+
     protected override string NodeType => "residual";
 
     protected override double? Compute(Metric metric)

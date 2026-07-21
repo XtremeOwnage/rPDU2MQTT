@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Orleans.Concurrency;
 using rPDU2MQTT.Abstractions.Flow;
 using rPDU2MQTT.Grains.Abstractions.Flow;
@@ -40,6 +41,10 @@ public abstract class NodeGrainBase : Grain, INodeGrain
     private readonly Dictionary<Metric, double> published = new();
 
     private IGrainTimer? heartbeat;
+
+    protected readonly ILogger log;
+
+    protected NodeGrainBase(ILogger log) => this.log = log;
 
     /// <summary>Which grain type owns this node — what we hand upstreams so they can call us back.</summary>
     protected abstract string NodeType { get; }
@@ -129,6 +134,12 @@ public abstract class NodeGrainBase : Grain, INodeGrain
 
         if (next is { } v) published[metric] = v;
         else published.Remove(metric);
+
+        // Trace, because this is per node per metric per change — the whole roll-up, step by step, which is
+        // exactly what you want when a tier's number looks wrong and nothing else explains it.
+        if (log.IsEnabled(LogLevel.Trace))
+            log.LogTrace("Flow {Node} ({Type}): {Metric} {Previous} → {Value}, notifying {Subscribers} subscriber(s).",
+                Id, NodeType, metric, now, next, subscribers.Count);
 
         foreach (var s in subscribers.Values.ToList())
             await Ref(s).OnInputChanged(Id, metric, next);

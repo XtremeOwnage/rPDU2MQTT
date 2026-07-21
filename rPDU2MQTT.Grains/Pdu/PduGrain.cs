@@ -30,6 +30,9 @@ public sealed class PduGrain : Grain, IPduGrain
     private readonly List<string> deviceKeys = new();
     private readonly List<string> outletKeys = new();
     private readonly List<string> groupKeys = new();
+    // Only report the PDU's shape when it changes, and don't repeat an identical failure forever.
+    private string? lastShape;
+    private int failures;
 
     public PduGrain(Config config, PduInstanceRegistry registry, ILogger<PduGrain> log)
     {
@@ -48,14 +51,25 @@ public sealed class PduGrain : Grain, IPduGrain
 
     public async Task<string> ControlOutlet(string deviceId, int outletIndex, string action)
     {
-        if (Device is not { } pdu) return $"PDU instance '{this.GetPrimaryKeyString()}' is not configured.";
+        if (Device is not { } pdu)
+        {
+            log.LogWarning("Outlet write dropped: PDU instance '{Id}' is not configured ({Device} outlet {Outlet} {Action}).",
+                this.GetPrimaryKeyString(), deviceId, outletIndex, action);
+            return $"PDU instance '{this.GetPrimaryKeyString()}' is not configured.";
+        }
+
+        // Writes change the physical world, so they're worth an Information line whatever the log level.
+        log.LogInformation("PDU '{Id}': {Device} outlet {Outlet} → {Action}.", this.GetPrimaryKeyString(), deviceId, outletIndex, action);
         switch (action.Trim().ToLowerInvariant())
         {
             case "on": await pdu.SetOutletStateAsync(deviceId, outletIndex, true, CancellationToken.None); break;
             case "off": await pdu.SetOutletStateAsync(deviceId, outletIndex, false, CancellationToken.None); break;
             case "reboot": await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None); break;
             case "resetstats": await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None); break;
-            default: return $"Unknown outlet action '{action}'.";
+            default:
+                log.LogWarning("PDU '{Id}': unknown outlet action '{Action}' for {Device} outlet {Outlet}.",
+                    this.GetPrimaryKeyString(), action, deviceId, outletIndex);
+                return $"Unknown outlet action '{action}'.";
         }
         return $"{deviceId} outlet {outletIndex}: {action}.";
     }
@@ -72,6 +86,7 @@ public sealed class PduGrain : Grain, IPduGrain
         }
         else value = payload;   // poaAction etc.: the selected option string
 
+        log.LogInformation("PDU '{Id}': {Device} outlet {Outlet} {Field} = {Value}.", this.GetPrimaryKeyString(), deviceId, outletIndex, field, value);
         await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
         return value.ToString() ?? "";
     }
@@ -79,7 +94,10 @@ public sealed class PduGrain : Grain, IPduGrain
     public async Task<string> ControlGroup(string groupKey, string action)
     {
         if (Device is not { } pdu) return $"PDU instance '{this.GetPrimaryKeyString()}' is not configured.";
+
+        log.LogInformation("PDU '{Id}': group '{Group}' → {Action}.", this.GetPrimaryKeyString(), groupKey, action);
         var count = await pdu.ControlGroupAsync(groupKey, action, CancellationToken.None);
+        log.LogInformation("PDU '{Id}': group '{Group}' {Action} applied to {Count} outlet(s).", this.GetPrimaryKeyString(), groupKey, action, count);
         return $"Group '{groupKey}' {action}: applied to {count} outlet(s).";
     }
 
@@ -94,9 +112,11 @@ public sealed class PduGrain : Grain, IPduGrain
 
         try
         {
+            var started = DateTime.UtcNow;
             var data = await pdu.GetRootData_Public(CancellationToken.None);
             // Project onto the round-trippable wire form — the live PduData can't be re-serialized faithfully.
             latest = RawSnapshotMapper.ToWire(id, DateTime.UtcNow, data);
+            var elapsed = DateTime.UtcNow - started;
 
             // Supervise the children: hand each device its own document and let it take what it needs (and
             // pass its outlets' documents further down). This grain captures the poll; it doesn't pick fields
@@ -121,7 +141,31 @@ public sealed class PduGrain : Grain, IPduGrain
             foreach (var group in data.Groups)
                 if (!string.IsNullOrWhiteSpace(group.Key))
                     groupKeys.Add(group.Key);
+
+            // Every poll at Debug (the cadence and the latency are what you want when it feels slow); the
+            // shape of the PDU only when it changes, because that's news — and the first poll always is.
+            log.LogDebug("PDU '{Id}': polled in {Elapsed}ms — {Devices} device(s), {Outlets} outlet(s), {Groups} group(s).",
+                id, (int)elapsed.TotalMilliseconds, deviceKeys.Count, outletKeys.Count, groupKeys.Count);
+
+            var shape = $"{deviceKeys.Count}/{outletKeys.Count}/{groupKeys.Count}";
+            if (shape != lastShape)
+            {
+                log.LogInformation("PDU '{Id}': {Devices} device(s), {Outlets} outlet(s), {Groups} OneView group(s)"
+                    + (lastShape is null ? " on first poll." : " — changed from {Previous}."), id, deviceKeys.Count, outletKeys.Count, groupKeys.Count, lastShape);
+                lastShape = shape;
+            }
+
+            failures = 0;
         }
-        catch (Exception ex) { log.LogError(ex, "PduGrain '{Id}' poll failed.", id); }
+        catch (Exception ex)
+        {
+            // Don't bury the tenth identical timeout in the same wall of text as the first: say it loudly
+            // once, then keep counting at Debug so a persistent failure is still visible but not deafening.
+            failures++;
+            if (failures == 1 || failures % 20 == 0)
+                log.LogError(ex, "PDU '{Id}' poll failed ({Failures} consecutive).", id, failures);
+            else
+                log.LogDebug("PDU '{Id}' poll failed again ({Failures} consecutive): {Message}", id, failures, ex.Message);
+        }
     }
 }
