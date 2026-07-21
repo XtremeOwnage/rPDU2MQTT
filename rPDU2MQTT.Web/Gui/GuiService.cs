@@ -1441,6 +1441,36 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
+        // Import a pasted config.yaml / RpduConfig — merged into what's on screen, or replacing it whole
+        // (#214). Nothing is saved: the result comes back for the form to load, so it's reviewed (and the
+        // Save button pressed) like any other edit.
+        app.MapPost("/api/config/import", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var req = await System.Text.Json.JsonSerializer.DeserializeAsync<ConfigImportRequest>(
+                    ctx.Request.Body, ProbeJson, ctx.RequestAborted);
+                if (req is null)
+                    return Results.Json(new { ok = false, message = "Nothing to import." }, ConfigSchema.Json);
+
+                var mode = string.Equals(req.Mode, "replace", StringComparison.OrdinalIgnoreCase)
+                    ? Core.ConfigImportMode.Replace
+                    : Core.ConfigImportMode.Merge;
+
+                // Merge against what the form currently holds (which may be unsaved), not against the file.
+                var current = string.IsNullOrWhiteSpace(req.Current) ? config : ConfigSchema.FromJson(req.Current!);
+                var result = Core.ConfigImport.Apply(current, req.Yaml ?? "", mode);
+
+                return Results.Text(
+                    "{\"ok\":true,\"sections\":" + System.Text.Json.JsonSerializer.Serialize(result.Sections)
+                    + ",\"notes\":" + System.Text.Json.JsonSerializer.Serialize(result.Notes)
+                    + ",\"config\":" + ConfigSchema.ToJson(result.Config) + "}",
+                    "application/json");
+            }
+            catch (ArgumentException ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = $"Import failed: {ex.Message}" }, ConfigSchema.Json); }
+        });
+
         app.MapPost("/api/config/yaml", async (HttpContext ctx) =>
         {
             using var reader = new StreamReader(ctx.Request.Body);
@@ -1639,6 +1669,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
     private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, List<EnergyFlowSource>? Items);
+
+    /// <summary>Body of POST /api/config/import: the pasted YAML, how to apply it, and the form's current state.</summary>
+    private sealed record ConfigImportRequest(string? Yaml, string? Mode, string? Current);
 
     /// <summary>Body of POST /api/modbus/scan: a device to reach + the block of registers to browse.</summary>
     private sealed record ModbusScanRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, int Start, int Count, string? RegisterType);
