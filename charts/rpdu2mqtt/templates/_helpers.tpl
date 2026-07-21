@@ -115,3 +115,13 @@ Usage: include "rpdu2mqtt.backendService" (dict "root" $ "service" "api")
 true
 {{- end -}}
 {{- end -}}
+
+{{/*
+  True when more than one Orleans silo will exist, so Kubernetes cluster membership is needed: a scaled
+  all-in-one fleet (replicaCount > 1), the split worker/api/ui roles, or the separate operator process.
+*/}}
+{{- define "rpdu2mqtt.clustered" -}}
+{{- if or .Values.split.enabled .Values.operator.enabled (gt (int .Values.replicaCount) 1) -}}
+true
+{{- end -}}
+{{- end -}}

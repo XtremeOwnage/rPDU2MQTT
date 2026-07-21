@@ -18,15 +18,20 @@ public class OutletCommandService : IHostedService
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     private readonly PDU pdu;
+    private readonly Core.LeaderState? leader;
+    private readonly Abstractions.Pdu.IOutletControl? outletControl;
     private readonly string[] commandFilters;
 
-    public OutletCommandService(MQTTServiceDependencies deps)
+    public OutletCommandService(MQTTServiceDependencies deps, Abstractions.Pdu.IOutletControl? outletControl = null)
     {
         // OnMessageReceived lives on the concrete client, not the interface.
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for command handling.");
         cfg = deps.Cfg;
         pdu = deps.PDU;
+        leader = deps.Leader;
+        // When wired, outlet writes route to the per-outlet grain (single owner); else call the PDU directly.
+        this.outletControl = outletControl;
 
         // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
         // (<ParentTopic>/+/outlets/+/<field>/set).
@@ -75,6 +80,9 @@ public class OutletCommandService : IHostedService
 
     private async void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
+        // v3: every instance may be subscribed, but only the leader acts — so one command = one action.
+        if (leader is { IsLeader: false }) return;
+
         var topic = e.PublishMessage.Topic ?? string.Empty;
         try
         {
@@ -86,7 +94,10 @@ public class OutletCommandService : IHostedService
             {
                 var groupAction = (e.PublishMessage.PayloadAsString ?? string.Empty).Trim().ToLowerInvariant();
                 if (groupAction is "on" or "off" or "reboot")
-                    await pdu.ControlGroupAsync(parts[groupsIdx + 1], groupAction, CancellationToken.None);
+                {
+                    if (outletControl is not null) await outletControl.ControlGroup(parts[groupsIdx + 1], groupAction);
+                    else await pdu.ControlGroupAsync(parts[groupsIdx + 1], groupAction, CancellationToken.None);
+                }
                 return;
             }
 
@@ -118,19 +129,19 @@ public class OutletCommandService : IHostedService
 
             if (command.Equals(MqttPath.Reboot.ToJsonString(), StringComparison.OrdinalIgnoreCase))
             {
-                await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None);
+                await Exec(deviceId, outletIndex, "reboot");
                 return;
             }
 
             if (command.Equals(ResetStatsCommand, StringComparison.OrdinalIgnoreCase))
             {
-                await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None);
+                await Exec(deviceId, outletIndex, "resetStats");
                 return;
             }
 
             // Otherwise it's the on/off switch command ([set]).
             var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
-            await pdu.SetOutletStateAsync(deviceId, outletIndex, on, CancellationToken.None);
+            await Exec(deviceId, outletIndex, on ? "on" : "off");
 
             // Optimistically publish the new state so HA reflects it immediately instead of waiting
             // for the next poll. The regular poll will confirm/correct it shortly after.
@@ -146,32 +157,55 @@ public class OutletCommandService : IHostedService
         }
     }
 
+    /// <summary>
+    /// Action an outlet through the grain (single cluster-wide owner) when wired, else straight to the PDU.
+    /// Same underlying PDU calls either way — the grain just makes the write actor-owned.
+    /// </summary>
+    private async Task Exec(string deviceId, int outletIndex, string action)
+    {
+        if (outletControl is not null) { await outletControl.Control(deviceId, outletIndex, action); return; }
+        switch (action.ToLowerInvariant())
+        {
+            case "on": await pdu.SetOutletStateAsync(deviceId, outletIndex, true, CancellationToken.None); break;
+            case "off": await pdu.SetOutletStateAsync(deviceId, outletIndex, false, CancellationToken.None); break;
+            case "reboot": await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None); break;
+            case "resetstats": await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None); break;
+        }
+    }
+
     /// <summary>Write a single outlet config field (delay as a number, power-on action as a string).</summary>
     private async Task HandleConfigSet(string deviceId, int outletIndex, string field, string payload, string topic)
     {
         if (!ConfigFields.Contains(field))
             return;
 
-        object value;
-        if (DelayFields.Contains(field))
-        {
-            // HA number sends the value as text (e.g. "5" or "5.0"); the API expects an integer.
-            if (!double.TryParse(payload, System.Globalization.CultureInfo.InvariantCulture, out var num))
-                return;
-            value = (long)Math.Round(num);
-        }
+        var isDelay = DelayFields.Contains(field);
+
+        // Route the write through the per-outlet grain (single owner) when wired; else straight to the PDU.
+        // Both return the applied value string so we can echo it back.
+        string applied;
+        if (outletControl is not null)
+            applied = await outletControl.SetOutletConfig(deviceId, outletIndex, field, payload, isDelay);
         else
         {
-            value = payload; // poaAction: the selected option
+            object value;
+            if (isDelay)
+            {
+                if (!double.TryParse(payload, System.Globalization.CultureInfo.InvariantCulture, out var num)) return;
+                value = (long)Math.Round(num);
+            }
+            else value = payload;
+            await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+            applied = value.ToString() ?? string.Empty;
         }
 
-        await pdu.SetOutletConfigAsync(deviceId, outletIndex, new Dictionary<string, object> { [field] = value }, CancellationToken.None);
+        if (string.IsNullOrEmpty(applied)) return;   // a bad value was rejected
 
         // Echo the new value back to the field's state topic so HA reflects it immediately.
         var stateTopic = topic[..topic.LastIndexOf('/')];
         await mqtt.PublishAsync(new MQTT5PublishMessage(stateTopic, QualityOfService.AtLeastOnceDelivery)
         {
-            PayloadAsString = value.ToString() ?? string.Empty,
+            PayloadAsString = applied,
         });
     }
 }

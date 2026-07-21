@@ -26,9 +26,11 @@ public static class ConfigureLoggingExtension
                     ThrowError.TestRequiredConfigurationSection(cfg.Logging.File.Path, "Config.Logging.File.Path");
                 }
 
+                // The file sink's own level and format — it used to be given the console's, which made the
+                // one combination people actually want (quiet console, full detail on disk) impossible.
                 o.WriteTo.File(path: cfg.Logging.File.Path
-                    , restrictedToMinimumLevel: cfg.Logging.Console.Severity
-                    , outputTemplate: cfg.Logging.Console.Format
+                    , restrictedToMinimumLevel: cfg.Logging.File.Severity
+                    , outputTemplate: cfg.Logging.File.Format
                     , rollingInterval: cfg.Logging.File.FileRollover
                     , retainedFileCountLimit: cfg.Logging.File.FileRetention);
 

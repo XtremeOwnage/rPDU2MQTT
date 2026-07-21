@@ -19,6 +19,14 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     protected Config cfg { get; }
     protected PDU pdu { get; }
     private readonly Core.ISnapshotCache snapshotCache;
+    private readonly Core.LeaderState? leader;
+
+    /// <summary>
+    /// v3: run-once-cluster-wide work. When true (the default), <see cref="Execute"/> only runs on the leader
+    /// instance, so a homogeneous fleet doesn't publish/export duplicates. Override to false for per-instance
+    /// work that every process must do (e.g. serving its own metrics endpoint).
+    /// </summary>
+    protected virtual bool LeaderGated => true;
 
     protected System.Text.Json.JsonSerializerOptions jsonOptions { get; init; }
 
@@ -29,6 +37,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         cfg = dependencies.Cfg;
         pdu = dependencies.PDU;
         snapshotCache = dependencies.SnapshotCache;
+        leader = dependencies.Leader;
 
         // If the interval is 0, don't create a timer.
         if (Interval <= 0)
@@ -89,6 +98,13 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     {
         try
         {
+            // v3: only the leader runs the run-once work; other instances no-op this tick (null leader = tests).
+            if (LeaderGated && leader is { IsLeader: false })
+            {
+                Log.Verbose($"{GetType().Name} - skipped (not cluster leader).");
+                return;
+            }
+
             Log.Debug($"{GetType().Name} - start.");
             await Execute(cancellationToken);
             Log.Debug($"{GetType().Name} - finish.");

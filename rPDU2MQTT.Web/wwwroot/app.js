@@ -38,6 +38,36 @@ function svgEl(tag        , attrs      )      {
 
 function toast(msg        , good          ) { const t      = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// Copy text, and say honestly whether it worked. navigator.clipboard only exists in a secure context, and
+// this GUI is usually reached over plain http on a LAN — so fall back to the old selection trick rather than
+// silently doing nothing while claiming "Copied".
+async function copyText(text        )                   {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+// Make an element copy some text when clicked, with the feedback that goes with it.
+function copyOnClick(node     , text        , label         ) {
+  node.style.cursor = 'pointer';
+  node.title = 'Click to copy';
+  node.onclick = async () => {
+    const ok = await copyText(text);
+    toast(ok ? `Copied: ${label || text}` : 'Could not copy — your browser blocked it (try selecting the text).', ok);
+  };
+  return node;
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 function slug(text        )         {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -278,10 +308,18 @@ function pruneEmpty(o     )      {
 function pathCopyCell(text        ) {
   const td = document.createElement('td');
   if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
-  const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
-  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px'; code.title = 'Click to copy';
-  code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
-  td.appendChild(code); return td;
+  const code = document.createElement('span'); code.textContent = text;
+  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px';
+  td.appendChild(copyOnClick(code, text)); return td;
+}
+
+// Every cell copies — the device, outlet and measurement names are as worth copying as the paths are
+// (they're what you type into an override, a filter or a template).
+function copyCell(text        ) {
+  const td = document.createElement('td');
+  if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+  const span = document.createElement('span'); span.textContent = text;
+  td.appendChild(copyOnClick(span, text)); return td;
 }
 
 // Build a paths table (Device / Outlet / Measurement / MQTT [/ Prometheus] [/ EmonCMS]).
@@ -294,7 +332,7 @@ function pathsTable(rows       , promOn         , emonOn         ) {
   const tb = document.createElement('tbody');
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    [r.device, r.source, r.type].forEach(c => tr.appendChild(copyCell(c)));
     tr.appendChild(pathCopyCell(r.mqtt));
     if (promOn) tr.appendChild(pathCopyCell(r.prometheus));
     if (emonOn) tr.appendChild(pathCopyCell(r.emoncms));
@@ -309,7 +347,7 @@ function addPathsSection(nav     , sections     ) {
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click a value to copy it.';
+  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click any value — path, device, outlet or measurement — to copy it.';
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
@@ -375,7 +413,47 @@ function addDiagnosticsSection(nav     , sections     ) {
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
+  const grainsWrap = document.createElement('div'); grainsWrap.style.margin = '14px 0 0'; sec.appendChild(grainsWrap);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
+
+  // The live grain tree (v3): every silo (pod), the grain types active on each, and the current leader.
+  const shortSilo = (s        ) => (s || '').split('@')[0];
+  const renderGrains = (g     ) => {
+    grainsWrap.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Grains'; head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; grainsWrap.appendChild(head);
+    if (!g || !g.ok) {
+      const d = document.createElement('div'); d.className = 'desc';
+      d.textContent = 'Grain diagnostics unavailable' + (g && g.message ? ': ' + g.message : ' (single-node cluster or management grain not ready).');
+      grainsWrap.appendChild(d); return;
+    }
+    const silos = g.silos || [];
+    const sub = document.createElement('div'); sub.className = 'desc'; sub.style.margin = '0 0 8px';
+    sub.textContent = silos.length + ' silo' + (silos.length === 1 ? '' : 's') + ' · leader: ' + (g.leader || 'none');
+    grainsWrap.appendChild(sub);
+
+    // Only show the per-silo placement column when there's more than one silo — otherwise it's the same
+    // address on every row and just noise.
+    const multiSilo = silos.length > 1;
+    const cols = multiSilo ? ['Grain', 'Active', 'Placement'] : ['Grain', 'Active'];
+    const t = document.createElement('table'); t.className = 'ld';
+    const hr = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    (g.grains || []).forEach((row     ) => {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.textContent = row.type; c1.title = row.fullType || '';
+      const c2 = document.createElement('td'); c2.textContent = row.activations;
+      tr.appendChild(c1); tr.appendChild(c2);
+      if (multiSilo) {
+        const c3 = document.createElement('td'); c3.style.cssText = 'color:var(--muted);font-size:12px;';
+        c3.textContent = (row.silos || []).map((s     ) => shortSilo(s.silo) + ' ×' + s.count).join(', ');
+        tr.appendChild(c3);
+      }
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); grainsWrap.appendChild(t);
+    if (!(g.grains || []).length) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'No active grains.'; grainsWrap.appendChild(d); }
+  };
 
   // A "Components" panel: which roles this node runs, MQTT transport, and whether PDU data is flowing.
   const compLine = (dotClass        , label        ) => {
@@ -433,6 +511,7 @@ function addDiagnosticsSection(nav     , sections     ) {
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
     info.appendChild(row('Kubernetes', b.kubernetes ? (b.ns + ' / ' + (b.pod || '?')) : 'no'));
+    try { const gr = await api('/api/grains'); renderGrains(gr.body); } catch { renderGrains(null); }
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
@@ -813,19 +892,287 @@ const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Each type renders its own fields
 // in the two source columns; adding an ingest is another entry here plus a branch in the row renderer.
 const SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+
+// Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
+const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];
+
+// Why a "Current" cell can sit empty — the thing every new binding trips over.
+const LIVE_HINT = 'Live value from the running ingest. It appears when the source next reports: an MQTT binding when the publisher sends, a Modbus one on the worker’s next poll — and a new or edited binding is not read at all until you Save. Nothing here is missing because the page needs reloading.';
 const MODBUS_REGISTER_TYPES = ['holding', 'input'];
 const MODBUS_DATATYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32'];
 const MODBUS_WORDORDERS = ['big', 'little'];
 
 // How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
-// always wins; this only governs nodes the graph would otherwise infer.
+// always wins; this only governs nodes the graph would otherwise infer. 'None' leads because it's what a new
+// node gets: a node you haven't measured yet should read as nothing, not as an inferred figure.
 const NODE_MODES                             = [
-  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['none', 'None (nothing inferred)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured node simply drops out instead of showing a fabricated figure. The default for a new node.'],
+  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover. Sizes the node from what’s left over, so it always shows something.'],
   ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
   ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
-  ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
 ];
+
+// --- Browsing what's out there: MQTT topics, and a Modbus device's registers ----------------------
+//
+// The topic index behind these only exists while we're asking for it — every call renews a short lease and
+// the broker subscription is dropped when nobody is browsing (see ITopicIndexGrain). So autocomplete costs a
+// subscription while this editor is open and nothing at all afterwards; there's no background indexer.
+
+let pickerSeq = 0;
+
+/// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
+function overlay(title        )                                   {
+  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
+  const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
+  head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
+  const x = btn('Close');
+  head.appendChild(x);
+  const body = el('div');
+  panel.append(head, body);
+  back.appendChild(panel);
+  document.body.appendChild(back);
+
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e     ) => { if (e.key === 'Escape') close(); };
+  x.onclick = close;
+  back.onclick = (e     ) => { if (e.target === back) close(); };
+  document.addEventListener('keydown', onKey);
+  return { body, close };
+}
+
+async function fetchTopics(q        , limit = 50)               {
+  const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}`);
+  return (r.body && r.body.ok) ? r.body : { topics: [], listening: false, indexed: 0 };
+}
+
+async function fetchTopicDetail(topic        )                      {
+  if (!topic) return null;
+  const r = await api(`/api/mqtt/topic?topic=${encodeURIComponent(topic)}`);
+  return (r.body && r.body.ok) ? r.body : null;
+}
+
+/// Inline autocomplete for a topic input: a datalist kept in step with what you've typed.
+function topicSuggester(input     , onExactPick            ) {
+  const list = el('datalist', { id: 'topics-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  let timer      = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const body = await fetchTopics(input.value.trim());
+      list.innerHTML = '';
+      (body.topics || []).forEach((t     ) => list.appendChild(el('option', { value: t.topic })));
+      // Picking from the dropdown fires 'input', not 'change', so treat an exact hit as a choice.
+      if ((body.topics || []).some((t     ) => t.topic === input.value.trim())) onExactPick();
+    }, 250);
+  });
+  return { list };
+}
+
+/// Inline autocomplete for the JSON field, read from the chosen topic's own payload.
+function jsonFieldSuggester(input     , topicOf              ) {
+  const list = el('datalist', { id: 'fields-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  const fill = async () => {
+    const detail = await fetchTopicDetail(topicOf());
+    list.innerHTML = '';
+    ((detail && detail.fields) || []).forEach((f     ) => list.appendChild(el('option', { value: f.field })));
+  };
+  input.addEventListener('focus', fill);
+  return list;
+}
+
+/// Fill in what the payload tells us about a freshly chosen topic — without overwriting deliberate choices.
+async function applyTopicHint(src     , topic        , fieldIn     , rerender            ) {
+  const detail = await fetchTopicDetail(topic);
+  if (!detail) return;
+
+  const notes           = [];
+  // Only infer where the user hasn't already decided: an untouched binding still reads 'realpower'.
+  if (detail.metric && (!src.Metric || src.Metric === 'realpower') && detail.metric !== src.Metric) {
+    src.Metric = detail.metric; src.Unit = undefined; notes.push(metricLabel(detail.metric));
+  }
+  if (detail.unit && !src.Unit && detail.unit !== metricMeta(src.Metric || 'realpower')[2]) {
+    src.Unit = detail.unit; notes.push(detail.unit);
+  }
+  if (detail.isJson && !src.JsonField && (detail.fields || []).length === 1) {
+    src.JsonField = detail.fields[0].field;
+    if (fieldIn) fieldIn.value = src.JsonField;
+    notes.push('field ' + src.JsonField);
+  }
+
+  const sample = detail.value != null ? `${formatNum(detail.value)}` : (detail.payload || '').slice(0, 40);
+  toast(notes.length ? `Read ${sample} — set ${notes.join(', ')}.` : `Last value: ${sample}`, true);
+  if (notes.length) rerender();
+}
+
+/// The topic browser: search what's on the broker, see each topic's last value, click to bind it.
+function openTopicPicker(current        , onPick                         ) {
+  const { body, close } = overlay('Browse broker topics');
+  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter topics…', style: { width: '320px' } })                    ;
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(search, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Topic', 'Last value', 'Looks like', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const load = async () => {
+    const b = await fetchTopics(search.value.trim(), 100);
+    tbody.innerHTML = '';
+    status.textContent = b.listening
+      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed`
+      : 'waiting for the broker subscription to come up…';
+    (b.topics || []).forEach((t     ) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: t.topic })));
+      tr.appendChild(el('td', { class: 'num', text: t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48) }));
+      tr.appendChild(el('td', { text: t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—') }));
+      const use = btn('Use', 'primary');
+      use.onclick = () => { onPick(t.topic); close(); };
+      tr.appendChild(el('td', {}, use));
+      tbody.appendChild(tr);
+    });
+  };
+
+  let timer      = null;
+  search.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+  // Keep the index's lease alive (and the list fresh) for as long as the window is open.
+  const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } load(); }, 5000);
+}
+
+/// The Modbus explorer: read a block of registers off the device and pick the one that looks right.
+function openModbusExplorer(src     , onPick            ) {
+  const conns        = (state.data?.Modbus?.Connections) || [];
+  const conn = conns.find(c => c.Id === src.Connection);
+  const { body } = overlay('Modbus explorer' + (conn ? ` · ${conn.Name || conn.Id}` : ''));
+
+  if (!conn) {
+    body.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Pick a Modbus connection for this binding first (they are defined in the Modbus section).' }));
+    return;
+  }
+
+  body.appendChild(el('div', { class: 'desc', text: 'One read per click — a gateway usually accepts a single client, and the worker is already polling it. Each register is decoded every way that makes sense; click the value that matches what the device should be reporting.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const startIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'First register', style: { width: '90px' } })                    ;
+  const countIn = el('input', { type: 'number', value: 32, title: 'How many', style: { width: '70px' } })                    ;
+  const bankSel = el('select', { style: { width: 'auto' } })                     ;
+  MODBUS_REGISTER_TYPES.forEach(t => bankSel.appendChild(el('option', { value: t, text: t })));
+  bankSel.value = src.RegisterType || 'holding';
+  const read = btn('Read', 'primary');
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(startIn, countIn, bankSel, read, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Register', 'uint16', 'int16', 'uint32', 'float32'].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const pick = (register        , dataType        ) => {
+    src.Register = register;
+    src.RegisterType = bankSel.value === 'holding' ? undefined : bankSel.value;
+    src.DataType = dataType === 'uint16' ? undefined : dataType;
+    toast(`Bound register ${register} as ${dataType}.`, true);
+    onPick();
+  };
+
+  const cell = (row     , key        ) => {
+    const td = el('td', { class: 'num' });
+    if (row[key] == null) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+    const link = el('span', { text: formatNum(row[key]), style: { cursor: 'pointer', color: 'var(--accent, #4f8cff)' }, title: `Use register ${row.register} as ${key}` });
+    link.onclick = () => pick(row.register, key);
+    td.appendChild(link);
+    return td;
+  };
+
+  read.onclick = async () => {
+    status.textContent = 'reading…';
+    const r = await api('/api/modbus/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs,
+        Start: parseInt(startIn.value) || 0, Count: parseInt(countIn.value) || 32, RegisterType: bankSel.value,
+      }),
+    });
+    status.textContent = (r.body && r.body.message) || (r.body?.ok ? '' : 'read failed');
+    status.style.color = r.body?.ok ? 'var(--muted)' : 'var(--bad)';
+    tbody.innerHTML = '';
+    ((r.body && r.body.rows) || []).forEach((row     ) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: String(row.register) })));
+      tr.append(cell(row, 'uint16'), cell(row, 'int16'), cell(row, 'uint32'), cell(row, 'float32'));
+      tbody.appendChild(tr);
+    });
+  };
+  read.onclick(null);
+}
+
+/// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
+/// Parents map, and every downstream path derived from it — so this rewrites the references in the config and
+/// is honest about the ones it can't reach.
+function openRenameDialog(node     , flow     , existingIds             , onRenamed                      ) {
+  const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
+  const links        = ensure(flow, 'Links', []);
+  const parents      = ensure(flow, 'Parents', {});
+  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
+    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+
+  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+
+  // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
+  // rather than letting someone discover it when their history stops.
+  const warn = el('div', {
+    class: 'desc',
+    style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
+  });
+  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  body.appendChild(warn);
+
+  const row = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', value: node.Id, style: { width: '260px' } })                    ;
+  const apply = btn('Rename', 'primary');
+  const err = el('span', { class: 'desc', style: { margin: '0 0 0 8px', color: 'var(--bad)' } });
+  row.append(idIn, apply, err);
+  body.appendChild(row);
+
+  apply.onclick = () => {
+    const next = (idIn.value || '').trim();
+    if (!next) { err.textContent = 'An id is required.'; return; }
+    if (next === node.Id) { close(); return; }
+    if (existingIds.has(next)) { err.textContent = 'That id already exists.'; return; }
+
+    const from = node.Id;
+    node.Id = next;
+    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
+    Object.keys(parents).forEach(child => {
+      if (parents[child] === from) parents[child] = next;
+      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
+    });
+
+    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    close();
+    onRenamed(next);
+  };
+  idIn.onkeydown = (e     ) => { if (e.key === 'Enter') apply.onclick(null); };
+}
 
 // A labelled field (label above a control) for the node editor's form grid.
 function field(labelText        , control             , hint         ) {
@@ -888,13 +1235,21 @@ function renderNodeEditor(node     , links       , cand                  , reren
 
   // --- Live value bindings ---
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
   const sources        = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Current', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    const colHint      = {
+      Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
+      Current: LIVE_HINT,
+    };
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+      const th = el('th', { text: h });
+      if (colHint[h]) th.title = colHint[h];
+      head.appendChild(th);
+    });
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
@@ -956,21 +1311,66 @@ function renderNodeEditor(node     , links       , cand                  , reren
         const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
         woSel.disabled = !is32();
         dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
-        details.append(regIn, regTypeSel, dtSel, woSel);
+
+        // Rather than guessing a register from a PDF, read the device and pick the value that looks right.
+        const explore = btn('Browse…');
+        explore.title = 'Read a block of registers from the device and choose one.';
+        explore.onclick = () => openModbusExplorer(src, rerender);
+
+        details.append(regIn, regTypeSel, dtSel, woSel, explore);
         tr.appendChild(el('td', {}, details));
       } else {
-        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
-        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
-        tr.appendChild(el('td', {}, topicIn));
+        // Source = the topic, with autocomplete off what the broker is actually carrying, and a Browse
+        // button for picking one by eye. Details = the JSON field, itself autocompleted from the payload.
+        const topicCell = el('td');
+        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } })                    ;
+        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } })                    ;
 
-        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } });
+        const suggest = topicSuggester(topicIn, () => {
+          src.Topic = topicIn.value.trim();
+          applyTopicHint(src, topicIn.value.trim(), fieldIn, rerender);
+        });
+        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); applyTopicHint(src, src.Topic, fieldIn, rerender); };
+
+        const browse = btn('Browse');
+        browse.title = 'Browse the topics currently on the broker and pick one.';
+        browse.onclick = () => openTopicPicker(topicIn.value.trim(), picked => {
+          topicIn.value = picked;
+          src.Topic = picked;
+          applyTopicHint(src, picked, fieldIn, rerender);
+        });
+
+        topicCell.append(topicIn, suggest.list, ' ', browse);
+        tr.appendChild(topicCell);
+
         fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
-        tr.appendChild(el('td', {}, fieldIn));
+        const fieldCell = el('td');
+        fieldCell.append(fieldIn, jsonFieldSuggester(fieldIn, () => src.Topic || ''));
+        tr.appendChild(fieldCell);
       }
 
-      const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
-      scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
+      // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
+      // nothing downstream has to learn a second knob — the checkbox is just its sign, spelled out.
+      const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
+      const setScale = (magnitude        , invert         ) => {
+        const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
+        src.Scale = v === 1 ? undefined : v;
+      };
+      scaleIn.onchange = () => setScale(+scaleIn.value, (src.Scale ?? 1) < 0);
       tr.appendChild(el('td', {}, scaleIn));
+
+      // Sign only means anything where the value has a direction — power and current, not voltage/energy.
+      const invCell = el('td', { style: { textAlign: 'center' } });
+      if (SIGNED_METRICS.includes(metric)) {
+        const inv = el('input', { type: 'checkbox' })                    ;
+        inv.checked = (src.Scale ?? 1) < 0;
+        inv.title = 'Flip the sign of this reading (e.g. solar/battery power the source publishes as export).';
+        inv.onchange = () => setScale(+scaleIn.value, inv.checked);
+        invCell.appendChild(inv);
+      } else {
+        invCell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Sign has no meaning for this metric.' }));
+      }
+      tr.appendChild(invCell);
 
       // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
       // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
@@ -991,7 +1391,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
       const setCell = (cell     , value               , err         , metric         ) => {
-        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
+        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || ('No live value yet. ' + LIVE_HINT); }
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
       // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
@@ -1009,7 +1409,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
             if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
             try {
               const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
+                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs, Items: cells.map(lc => lc.src) }) });
               if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
               const readings = r.body.readings || [];
               cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
@@ -1079,12 +1479,30 @@ function renderNodeEditor(node     , links       , cand                  , reren
       x.onclick = () => { onRemove(other); rerender(); };
       chip.append(nm(other), x); row.appendChild(chip);
     });
-    const sel = el('select', { style: { width: 'auto' } });
-    sel.appendChild(el('option', { value: '', text: '+ add…' }));
-    [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
-      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets — so it
+    // comes with a search box that filters it as you type (Enter takes the single match).
+    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
+    const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } })                    ;
+    const sel = el('select', { style: { width: 'auto' } })                     ;
+    const matches = () => {
+      const f = (search.value || '').trim().toLowerCase();
+      return f ? options.filter(id => (id + ' ' + nm(id)).toLowerCase().includes(f)) : options;
+    };
+    const fill = () => {
+      const m = matches();
+      sel.innerHTML = '';
+      sel.appendChild(el('option', { value: '', text: m.length ? `+ add… (${m.length})` : 'no match' }));
+      m.forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    };
+    search.oninput = fill;
+    search.onkeydown = (e     ) => {
+      if (e.key !== 'Enter') return;
+      const m = matches();
+      if (m.length === 1) { onAdd(m[0]); rerender(); }
+    };
+    fill();
     sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
-    row.appendChild(sel);
+    row.append(search, sel);
     return row;
   };
   box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
@@ -1127,7 +1545,7 @@ function flowCandidates(lastGraph     , customNodes       ) {
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
 // node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
 // Deleting a node takes its bound sources with it (they live on the node).
-function renderNodeManager(customNodes       , links       , cand                  , editing                       , rerender                           ) {
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -1156,6 +1574,31 @@ function renderNodeManager(customNodes       , links       , cand               
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
     edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rename = btn('Rename');
+    rename.title = 'Change this node’s id, moving its wiring with it.';
+    rename.onclick = () => {
+      const taken = new Set        ([...cand.keys(), ...customNodes.map((x     ) => x.Id)]);
+      taken.delete(n.Id);
+      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+    };
+
+    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
+    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
+    // since the copy usually feeds somewhere else.
+    const copy = btn('Copy');
+    copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
+    copy.onclick = () => {
+      const taken = (id        ) => customNodes.some((x     ) => x.Id === id);
+      let id = `${n.Id}-copy`;
+      for (let i = 2; taken(id); i++) id = `${n.Id}-copy-${i}`;
+      const clone = JSON.parse(JSON.stringify(n));
+      clone.Id = id;
+      clone.Label = `${n.Label || n.Id} (copy)`;
+      customNodes.splice(customNodes.indexOf(n) + 1, 0, clone);
+      editing.id = id;
+      toast(`Copied to '${id}' — rename it and set its feeders.`, true);
+      rerender();
+    };
     const rm = btn('Delete', 'danger');
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
@@ -1164,7 +1607,7 @@ function renderNodeManager(customNodes       , links       , cand               
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    actions.append(edit, ' ', rm);
+    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     body.appendChild(tr);
   });
@@ -1190,8 +1633,41 @@ function addFlowSection(nav     , sections     ) {
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
+  const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph      = null;
+
+  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
+  // (measured leaves report their source, aggregates sum their children, residuals the remainder).
+  const renderTree = async () => {
+    treePanel.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Node-grain roll-up (distributed)';
+    head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; treePanel.appendChild(head);
+    let r     ; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
+    if (!r.body || !r.body.ok) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'Node tree unavailable' + (r.body && r.body.message ? ': ' + r.body.message : ' (single-node cluster or nothing provisioned yet).');
+      treePanel.appendChild(dd); return;
+    }
+    const nodes = r.body.nodes || [];
+    if (!nodes.length) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      treePanel.appendChild(dd); return;
+    }
+    const t = document.createElement('table'); t.className = 'ld';
+    const hr = document.createElement('tr'); ['Node', 'Rolled-up values'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    nodes.forEach((n     ) => {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.textContent = n.node;
+      const c2 = document.createElement('td'); c2.style.cssText = 'color:var(--muted);font-size:12px;';
+      c2.textContent = (n.metrics || []).map((m     ) => m.metric + ': ' + formatNum(m.value)).join(', ');
+      tr.appendChild(c1); tr.appendChild(c2); tb.appendChild(tr);
+    });
+    t.appendChild(tb); treePanel.appendChild(t);
+  };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph     ) => {
@@ -1457,6 +1933,7 @@ function addFlowSection(nav     , sections     ) {
     lastGraph = r.body;
     draw(r.body);
     renderEditor();
+    renderTree();
   };
   refresh.onclick = load;
   link.onclick = () => { activate(link, sec); load(); };
@@ -1581,7 +2058,9 @@ function addNodesSection(nav     , sections     ) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n     ) => n.Id === id) || (lastGraph?.nodes || []).some((n     ) => n.id === id)) { toast('That id already exists.', false); return; }
-      const node      = { Id: id, Label: (labIn.value || '').trim() || id };
+      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
+      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
+      const node      = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
@@ -1597,7 +2076,7 @@ function addNodesSection(nav     , sections     ) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
   const load = async () => {
@@ -1635,7 +2114,7 @@ function addExportSection(nav     , sections     ) {
     const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
     ta.value = r.ok ? await r.text() : 'Unable to render.';
   };
-  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied to clipboard.', true); };
+  copy.onclick = async () => { ta.select(); const ok = await copyText(ta.value); toast(ok ? 'Copied to clipboard.' : 'Could not copy — your browser blocked it (the text is selected, so Ctrl+C works).', ok); };
   refresh.onclick = fill;
   fmt.onchange = fill;
   link.onclick = () => { activate(link, sec); fill(); };
@@ -1699,6 +2178,8 @@ function addHaEnergySection(nav     , sections     ) {
 
 // ── sections/home.ts ────────────────────────────────────────────
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
+// v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
+// what "stale" or "waiting" means lives with the component that knows, not in the browser.
 
 function addHomeSection(nav     , sections     ) {
   const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
@@ -1711,6 +2192,9 @@ function addHomeSection(nav     , sections     ) {
   bar.appendChild(refresh); sec.appendChild(bar);
   const grid = el('div', { class: 'status-grid' }); sec.appendChild(grid);
 
+  // The dot/badge class per level; 'off' has no class (grey is the default).
+  const dotClass      = { good: 'good', warn: 'warn', bad: 'bad', off: '' };
+
   const card = (cls        , title        , stateText        , detail                ) => {
     const c = el('div', { class: 'status-card' });
     const head = el('div', { class: 'status-head' });
@@ -1722,54 +2206,30 @@ function addHomeSection(nav     , sections     ) {
     return c;
   };
 
-  const age = (s        ) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
-  const uptime = (s        ) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  const ago = (s        ) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
+  const uptime = (s        ) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return 'up ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+
+  // A card's detail is the static part plus, where the grain asked for it, the aged instant it carries.
+  const detailOf = (c     ) => {
+    const parts           = [];
+    if (c.detail) parts.push(c.detail);
+    if (c.eventUtc && c.age && c.age !== 'none') {
+      const secs = Math.max(0, (Date.now() - new Date(c.eventUtc).getTime()) / 1000);
+      parts.push(c.age === 'uptime' ? uptime(secs) : ago(Math.round(secs)));
+    }
+    return parts.join(' ');
+  };
 
   const load = async () => {
-    const r = await api('/api/diagnostics');
-    const b      = r.body || {};
-    const cfg      = state.data || {};
+    const r = await api('/api/status/board');
+    const cards = (r.body && r.body.cards) || [];
     grid.innerHTML = '';
 
-    grid.appendChild(card(b.mqttConnected ? 'good' : 'bad', 'MQTT', b.mqttConnected ? 'Connected' : 'Disconnected', b.mqttHost));
-
-    // One card per PDU: fresh data = green, stale = red, nothing yet = amber.
-    const sources = b.dataSources || [];
-    if (!sources.length) {
-      const worker = (b.roles || []).includes('worker');
-      grid.appendChild(card('warn', 'PDUs', 'No data yet', worker ? 'Waiting for the first poll' : 'Waiting on a worker node'));
-    } else {
-      sources.forEach((s     ) => grid.appendChild(card(s.stale ? 'bad' : 'good', 'PDU · ' + s.instance,
-        s.stale ? 'Stale' : 'Polling', 'Updated ' + age(s.ageSeconds))));
+    if (!cards.length) {
+      grid.appendChild(card('warn', 'Status', 'Waiting', 'No component has reported yet'));
+      return;
     }
-
-    const e      = b.emoncms || {};
-    if (!e.enabled) grid.appendChild(card('', 'EmonCMS', 'Disabled'));
-    else {
-      const st      = e.status || {};
-      const transport = e.transport ? e.transport.toUpperCase() : '';
-      if (st.ok === false) grid.appendChild(card('bad', 'EmonCMS', 'Error', st.lastError || 'Last export failed'));
-      else if (st.ok === true) grid.appendChild(card('good', 'EmonCMS', 'Exporting', transport + (st.count ? ' · ' + st.count + ' values' : '')));
-      else grid.appendChild(card('warn', 'EmonCMS', 'Waiting', transport + ' · no export attempted yet'));
-    }
-
-    const ha      = cfg.HomeAssistant || {};
-    grid.appendChild(ha.DiscoveryEnabled
-      ? card('good', 'Home Assistant', 'Discovery on', 'Topic: ' + (ha.DiscoveryTopic || '—'))
-      : card('', 'Home Assistant', 'Discovery off'));
-
-    const prom      = cfg.Prometheus || {};
-    grid.appendChild(prom.Exporter
-      ? card('good', 'Prometheus', 'Exporter on', ':' + (prom.Port || 9184) + '/metrics')
-      : card('', 'Prometheus', 'Exporter off'));
-
-    // Other role processes on the bus (split deployments only).
-    (b.processes || []).forEach((p     ) => grid.appendChild(card(p.stale ? 'bad' : 'good',
-      'Process · ' + ((p.roles || []).join('+') || '?'), p.stale ? 'Stale' : 'Alive',
-      (p.host || '') + ' · seen ' + age(p.ageSeconds))));
-
-    grid.appendChild(card('good', 'This node', (b.roles || []).join(', ') || 'all',
-      'v' + (b.version || '?') + ' · up ' + uptime(b.uptimeSeconds)));
+    cards.forEach((c     ) => grid.appendChild(card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c))));
   };
 
   refresh.onclick = () => load();

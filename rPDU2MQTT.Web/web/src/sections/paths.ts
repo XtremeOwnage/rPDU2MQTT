@@ -1,14 +1,22 @@
 // Integration Paths section + the shared paths-table builders (also used by the overrides preview).
-import { api, btn, activate, toast } from '../helpers.js';
+import { api, btn, activate, copyOnClick } from '../helpers.js';
 
 // A click-to-copy monospace table cell (used by the path tables).
 export function pathCopyCell(text: string) {
   const td = document.createElement('td');
   if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
-  const code = document.createElement('span'); code.textContent = text; code.style.cursor = 'pointer';
-  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px'; code.title = 'Click to copy';
-  code.onclick = () => { navigator.clipboard?.writeText(text); toast('Copied: ' + text, true); };
-  td.appendChild(code); return td;
+  const code = document.createElement('span'); code.textContent = text;
+  code.style.fontFamily = 'ui-monospace,Consolas,monospace'; code.style.fontSize = '12px';
+  td.appendChild(copyOnClick(code, text)); return td;
+}
+
+// Every cell copies — the device, outlet and measurement names are as worth copying as the paths are
+// (they're what you type into an override, a filter or a template).
+function copyCell(text: string) {
+  const td = document.createElement('td');
+  if (!text) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+  const span = document.createElement('span'); span.textContent = text;
+  td.appendChild(copyOnClick(span, text)); return td;
 }
 
 // Build a paths table (Device / Outlet / Measurement / MQTT [/ Prometheus] [/ EmonCMS]).
@@ -21,7 +29,7 @@ export function pathsTable(rows: any[], promOn: boolean, emonOn: boolean) {
   const tb = document.createElement('tbody');
   rows.forEach(r => {
     const tr = document.createElement('tr');
-    [r.device, r.source, r.type].forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    [r.device, r.source, r.type].forEach(c => tr.appendChild(copyCell(c)));
     tr.appendChild(pathCopyCell(r.mqtt));
     if (promOn) tr.appendChild(pathCopyCell(r.prometheus));
     if (emonOn) tr.appendChild(pathCopyCell(r.emoncms));
@@ -36,7 +44,7 @@ export function addPathsSection(nav: any, sections: any) {
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click a value to copy it.';
+  d.textContent = 'The MQTT topic, Prometheus metric, and EmonCMS key generated for each measurement (reflecting your overrides). Click any value — path, device, outlet or measurement — to copy it.';
   sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';

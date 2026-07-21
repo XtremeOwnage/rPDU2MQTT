@@ -32,6 +32,36 @@ export function svgEl(tag: string, attrs?: any): any {
 
 export function toast(msg: string, good?: boolean) { const t: any = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
 
+// Copy text, and say honestly whether it worked. navigator.clipboard only exists in a secure context, and
+// this GUI is usually reached over plain http on a LAN — so fall back to the old selection trick rather than
+// silently doing nothing while claiming "Copied".
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the fallback */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+// Make an element copy some text when clicked, with the feedback that goes with it.
+export function copyOnClick(node: any, text: string, label?: string) {
+  node.style.cursor = 'pointer';
+  node.title = 'Click to copy';
+  node.onclick = async () => {
+    const ok = await copyText(text);
+    toast(ok ? `Copied: ${label || text}` : 'Could not copy — your browser blocked it (try selecting the text).', ok);
+  };
+  return node;
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 export function slug(text: string): string {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

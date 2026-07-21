@@ -10,12 +10,15 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Single instance: the bridge holds per-PDU state and has no leader election.
+# v3: a homogeneous Orleans fleet — raise this to run N identical all-in-one replicas. They form one silo
+# cluster (Kubernetes membership turns on automatically when >1), single-owner work (the PDU session) is a
+# single-activation grain, and the publishers/exporters are leader-gated, so replicas never duplicate output.
+# Scale for HA/throughput by replica count; no roles to juggle.
 replicaCount: 1
 
-# Split the app's roles into separate Deployments so they scale independently (#179): worker (polls the
-# PDUs, publishes MQTT, serves /metrics), api (REST API), ui (config GUI). Off by default — one
-# Deployment runs every role. The worker owns the single PDU session, so keep it at one replica.
+# Legacy tiering (#179): split the app's roles into separate Deployments — worker (polls the PDUs,
+# publishes MQTT, serves /metrics), api (REST API), ui (config GUI). Off by default; prefer raising
+# replicaCount above (a homogeneous fleet) over this. Kept for anyone who wants dedicated tiers.
 split:
   enabled: false
   worker:

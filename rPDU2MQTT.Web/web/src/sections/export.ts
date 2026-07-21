@@ -1,5 +1,5 @@
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest.
-import { btn, activate, toast } from '../helpers.js';
+import { btn, activate, toast, copyText } from '../helpers.js';
 import { exportData } from '../overrides.js';
 
 export function addExportSection(nav: any, sections: any) {
@@ -24,7 +24,7 @@ export function addExportSection(nav: any, sections: any) {
     const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
     ta.value = r.ok ? await r.text() : 'Unable to render.';
   };
-  copy.onclick = () => { ta.select(); navigator.clipboard?.writeText(ta.value); toast('Copied to clipboard.', true); };
+  copy.onclick = async () => { ta.select(); const ok = await copyText(ta.value); toast(ok ? 'Copied to clipboard.' : 'Could not copy — your browser blocked it (the text is selected, so Ctrl+C works).', ok); };
   refresh.onclick = fill;
   fmt.onchange = fill;
   link.onclick = () => { activate(link, sec); fill(); };

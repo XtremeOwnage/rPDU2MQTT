@@ -30,6 +30,7 @@ Log.Logger = new LoggerConfiguration()
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration(o => { o.AddEnvironmentVariables(); })
+    .UseOrleans(rPDU2MQTT.Startup.SiloConfiguration.Configure)
     .ConfigureServices(ServiceConfiguration.Configure)
     .ConfigureLogging(logging =>
     {
@@ -37,6 +38,13 @@ var host = Host.CreateDefaultBuilder(args)
         logging.AddConsole();
     })
     .Build();
+
+// Say what this process decided to be, before it starts doing it — a process that silently does nothing
+// should not look like a process that's working.
+StartupSummary.Log(
+    host.Services.GetRequiredService<Config>(),
+    host.Services.GetRequiredService<rPDU2MQTT.Core.HostRole>(),
+    host.Services.GetRequiredService<rPDU2MQTT.Startup.ConfigSources.IConfigSource>());
 
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();

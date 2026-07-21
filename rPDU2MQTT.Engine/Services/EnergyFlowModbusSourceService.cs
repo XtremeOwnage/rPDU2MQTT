@@ -81,11 +81,27 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         // poll on a device that only speaks RTU-over-TCP.
         var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
 
-        ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, forConn.Select(f => f.Source).ToList(),
+        ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, conn.TimeoutMs, forConn.Select(f => f.Source).ToList(),
             onValue: (src, value) => latest.Set(nodeOf[src], src.Metric, value, src.StaleAfterSeconds, nowUtc),
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
             onResolved: f => resolvedFraming[conn.Id] = f);
     }
+
+    /// <summary>
+    /// Turn a read exception into a cause the user can act on. The three failure modes are very different:
+    /// a Modbus <em>exception response</em> means the device answered but rejected the request (wrong
+    /// register/type), a <em>timeout</em> means it never answered (wrong unit id, gateway serial settings, or
+    /// framing), and a socket error means the connection itself dropped.
+    /// </summary>
+    internal static string Explain(Exception ex) => ex switch
+    {
+        ModbusException me => $"device rejected the request ({me.Message.Trim()}) — check the register address and type (holding vs input)",
+        System.Net.Sockets.SocketException se => $"socket error ({se.SocketErrorCode})",
+        TimeoutException => "device did not respond (timeout) — check the unit/slave id, the gateway's serial settings (baud/parity/stop bits), and the framing",
+        _ when ex.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            => "device did not respond (timeout) — check the unit/slave id, the gateway's serial settings (baud/parity/stop bits), and the framing",
+        _ => ex.Message,
+    };
 
     /// <summary>True for the RTU-over-TCP framing most RS485-to-Ethernet gateways / serial dongles use.</summary>
     private static bool IsRtuOverTcp(string? framing)
@@ -112,15 +128,15 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         return ModbusDecode.Decode(regs, src.DataType, src.WordOrder) * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
     }
 
-    private static ModbusClient Connect(IPEndPoint endpoint, string framing)
+    private static ModbusClient Connect(IPEndPoint endpoint, string framing, int timeoutMs)
     {
         if (IsRtuOverTcp(framing))
         {
-            var c = new ModbusRtuOverTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+            var c = new ModbusRtuOverTcpClient { ReadTimeout = timeoutMs, WriteTimeout = timeoutMs };
             c.Connect(endpoint, ModbusEndianness.BigEndian);
             return c;
         }
-        var t = new ModbusTcpClient { ReadTimeout = 3000, WriteTimeout = 3000 };
+        var t = new ModbusTcpClient { ReadTimeout = timeoutMs, WriteTimeout = timeoutMs };
         t.Connect(endpoint, ModbusEndianness.BigEndian);
         return t;
     }
@@ -133,7 +149,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// gateway's stream misaligned, so the following reads would return another register's data). Throws only
     /// if no framing can even connect the socket (so callers can report "unreachable").
     /// </summary>
-    private static void ReadBatch(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource> items,
+    private static void ReadBatch(string host, int port, int unitId, string? framing, int timeoutMs, IReadOnlyList<EnergyFlowSource> items,
         Action<EnergyFlowSource, double> onValue, Action<EnergyFlowSource, string>? onError = null, Action<string>? onResolved = null)
     {
         var endpoint = new IPEndPoint(ResolveHost(host), port);
@@ -145,7 +161,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         {
             if (candidates.Count == 1 || items.Count == 0)
             {
-                client = Connect(endpoint, chosen);   // pinned framing (or nothing to probe): connect-failure propagates
+                client = Connect(endpoint, chosen, timeoutMs);   // pinned framing (or nothing to probe): connect-failure propagates
             }
             else
             {
@@ -154,7 +170,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 foreach (var f in candidates)
                 {
                     ModbusClient c;
-                    try { c = Connect(endpoint, f); anyConnected = true; }
+                    try { c = Connect(endpoint, f, timeoutMs); anyConnected = true; }
                     catch (Exception ex) { connectErr = ex; continue; }
                     try { _ = ReadValue(c, unitId, items[0]); client = c; chosen = f; break; }
                     catch (Exception ex) { readErr = ex; (c as IDisposable)?.Dispose(); }
@@ -163,7 +179,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 {
                     if (!anyConnected) throw connectErr!;   // truly unreachable
                     // Connected but nothing readable with either framing — report per item, don't throw.
-                    foreach (var src in items) onError?.Invoke(src, readErr?.Message ?? "no readable framing");
+                    var reason = readErr is not null ? Explain(readErr) : "no readable framing";
+                    foreach (var src in items) onError?.Invoke(src, reason);
                     return;
                 }
             }
@@ -176,9 +193,9 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                     try { onValue(src, ReadValue(client!, unitId, src)); break; }
                     catch (Exception ex)
                     {
-                        if (attempt >= 1) { onError?.Invoke(src, ex.Message); break; }
-                        try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen); }
-                        catch { onError?.Invoke(src, ex.Message); break; }  // reconnect + retry once
+                        if (attempt >= 1) { onError?.Invoke(src, Explain(ex)); break; }
+                        try { (client as IDisposable)?.Dispose(); client = Connect(endpoint, chosen, timeoutMs); }
+                        catch { onError?.Invoke(src, Explain(ex)); break; }  // reconnect + retry once
                     }
                 }
             }
@@ -194,13 +211,13 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// connection" button and the live per-binding value display, so a mapping can be verified before it's
     /// wired into the flow. Read-only; opens and closes a throwaway connection.
     /// </summary>
-    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, IReadOnlyList<EnergyFlowSource>? items)
+    public static (bool Ok, string Message, List<ModbusReading> Readings) Probe(string host, int port, int unitId, string? framing, int timeoutMs, IReadOnlyList<EnergyFlowSource>? items)
     {
         var readings = new List<ModbusReading>();
         string? usedFraming = null;
         try
         {
-            ReadBatch(host, port, unitId, framing, items ?? Array.Empty<EnergyFlowSource>(),
+            ReadBatch(host, port, unitId, framing, timeoutMs <= 0 ? 1500 : timeoutMs, items ?? Array.Empty<EnergyFlowSource>(),
                 onValue: (src, value) => readings.Add(new ModbusReading(src.Register, src.Metric, value, null)),
                 onError: (src, msg) => readings.Add(new ModbusReading(src.Register, src.Metric, null, msg)),
                 onResolved: f => usedFraming = f);
@@ -210,7 +227,12 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var okCount = readings.Count(r => r.Error is null);
         var via = usedFraming is not null ? $" via {usedFraming}" : "";
         var suffix = readings.Count > 0 ? $" Read {okCount}/{readings.Count} register(s)." : "";
-        return (true, $"Connected to {host}:{port}{via}.{suffix}", readings);
+        // Connected but nothing read: surface the first cause right in the summary so the user isn't left with
+        // a bare "Connected." that looks fine while no data flows.
+        var hint = okCount == 0 && readings.Count > 0
+            ? " " + (readings.FirstOrDefault(r => r.Error is not null)?.Error ?? "no data")
+            : "";
+        return (true, $"Connected to {host}:{port}{via}.{suffix}{hint}", readings);
     }
 
     private static IPAddress ResolveHost(string host)

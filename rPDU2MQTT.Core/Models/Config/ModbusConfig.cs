@@ -45,6 +45,11 @@ public class ModbusConnection
     [Description("How often to poll this device, in seconds.")]
     public int PollIntervalSeconds { get; set; } = 10;
 
+    [DefaultValue(1500)]
+    [Range(200, 30000, ErrorMessage = "TimeoutMs must be between 200 and 30000.")]
+    [Description("Read/write timeout per Modbus request, in milliseconds. Lower it to fail faster on an unresponsive device; raise it for a slow gateway.")]
+    public int TimeoutMs { get; set; } = 1500;
+
     [DefaultValue(true)]
     [Description("Poll this device. Turn off to disable it without deleting the connection.")]
     public bool Enabled { get; set; } = true;

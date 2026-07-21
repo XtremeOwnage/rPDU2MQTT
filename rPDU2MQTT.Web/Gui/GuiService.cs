@@ -45,16 +45,17 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
-    private readonly HeartbeatService heartbeats;
     private readonly HaEnergyDashboardSync haEnergy;
-    private readonly EmonCmsFeedSync emonCmsFeeds;
     private readonly Core.Flow.IFlowValueSource? live;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HeartbeatService heartbeats, HaEnergyDashboardSync haEnergy, EmonCmsFeedSync emonCmsFeeds, Core.Flow.IFlowValueSource? live = null)
+    private readonly Orleans.IGrainFactory grains;
+
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null)
     {
         this.live = live;
+        this.grains = grains;
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
@@ -68,9 +69,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.emonCmsStatus = emonCmsStatus;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
-        this.heartbeats = heartbeats;
         this.haEnergy = haEnergy;
-        this.emonCmsFeeds = emonCmsFeeds;
     }
 
     /// <summary>
@@ -411,13 +410,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Update checks are only available with the Kubernetes config source." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.CheckAction, DateTime.UtcNow);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = "Update check requested." }, ConfigSchema.Json);
+                var report = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).CheckNow(force: true);
+                return Results.Json(new { ok = true, message = report.Message ?? "Checked.", update = report }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -455,13 +449,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "A tag is required." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.SetTagAction, DateTime.UtcNow, tag);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = $"Switching to '{tag}'. The Deployment will roll — watch the header/Diagnostics for the new version." }, ConfigSchema.Json);
+                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).SetTag(tag);
+                return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -474,13 +463,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Force update needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
             try
             {
-                var cmd = new Core.OperatorCommand(Core.OperatorCommand.RedeployAction, DateTime.UtcNow);
-                await ((HiveMQClient)mqtt).PublishAsync(new MQTT5PublishMessage(Core.OperatorCommand.TopicFor(config.MQTT.ParentTopic), QualityOfService.AtLeastOnceDelivery)
-                {
-                    PayloadAsString = System.Text.Json.JsonSerializer.Serialize(cmd, ConfigSchema.Json),
-                    Retain = false,
-                });
-                return Results.Json(new { ok = true, message = "Force update requested — re-pulling the current tag and rolling the Deployment." }, ConfigSchema.Json);
+                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Redeploy();
+                return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
         });
@@ -503,6 +487,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
 
+        // The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
+        // connected/stale/waiting, and what colour that is — belong to the components, so this endpoint just
+        // hands the board over. One grain call, one cluster-wide answer, whichever replica serves the request.
+        app.MapGet("/api/status/board", async () =>
+        {
+            try
+            {
+                var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
+                var cards = board.Select(c => new
+                {
+                    id = c.Id,
+                    title = c.Title,
+                    level = c.Level.ToString().ToLowerInvariant(),
+                    state = c.State,
+                    detail = c.Detail,
+                    eventUtc = c.EventUtc,
+                    age = c.Age.ToString().ToLowerInvariant(),
+                }).ToArray();
+                return Results.Json(new { ok = true, cards }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {
@@ -511,17 +518,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // Operator update report (#210), if the operator has written one to the CR status.
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
-            // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the
-            // local status has never attempted an export — fall back to the worker's status carried on its
-            // heartbeat, so the Status board shows the true state instead of a misleading "waiting".
+            // The cluster-wide process list (v3: the ProcessRegistryGrain, replacing the MQTT heartbeat).
+            var processList = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+
+            // EmonCMS export health. The exporter runs only on the worker, so on a split API/UI node the local
+            // status has never attempted an export — fall back to the worker's status carried on its process
+            // registration, so the Status board shows the true state instead of a misleading "waiting".
             object? emonStatus = null;
             if (config.EmonCMS.Enabled)
             {
                 if (emonCmsStatus.HasAttempted)
                     emonStatus = emonCmsStatus.Snapshot();
                 else
-                    emonStatus = heartbeats.Processes
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Heartbeat.StaleAfterSeconds)
+                    emonStatus = processList
+                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds)
                         .OrderByDescending(p => p.TimestampUtc)
                         .Select(p => (object?)p.EmonCms)
                         .FirstOrDefault() ?? emonCmsStatus.Snapshot();
@@ -560,8 +570,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         };
                     })
                     .ToArray(),
-                // Other role processes seen on the bus (split deployments). Empty for a single-node "all".
-                processes = heartbeats.Processes
+                // Other role processes in the cluster (split deployments). Empty for a single-node "all".
+                processes = processList
                     .OrderBy(p => string.Join(',', p.Roles)).ThenBy(p => p.Host)
                     .Select(p =>
                     {
@@ -572,7 +582,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             roles = p.Roles,
                             host = p.Host,
                             ageSeconds = age,
-                            stale = age > Core.Heartbeat.StaleAfterSeconds,
+                            stale = age > Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds,
                         };
                     })
                     .ToArray(),
@@ -583,6 +593,68 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonStatus }
                     : new { enabled = false, transport = (string?)null, status = (object?)null },
             }, ConfigSchema.Json);
+        });
+
+        // Grain diagnostics (v3): the live grain tree — every silo (pod), the grain types active on each, and
+        // the current cluster leader. Uses Orleans' IManagementGrain, so it reflects the whole cluster from
+        // whichever process serves the GUI. Fails soft (ok:false) if the management grain is unavailable.
+        app.MapGet("/api/grains", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var mgmt = grains.GetGrain<Orleans.Runtime.IManagementGrain>(0);
+                var stats = await mgmt.GetSimpleGrainStatistics();
+                var hosts = await mgmt.GetHosts(onlyActive: true);
+                var leader = await grains.GetGrain<Grains.Abstractions.Cluster.ILeaderGrain>(0).CurrentLeader();
+
+                var silos = hosts
+                    .OrderBy(h => h.Key.ToParsableString())
+                    .Select(h => new { silo = h.Key.ToParsableString(), status = h.Value.ToString() })
+                    .ToArray();
+
+                // Grain types → total activations + per-silo placement (the tree the Diagnostics page renders).
+                // Drop Orleans' own system grains (management/reminders/etc.) — only the app's grains matter here.
+                var grainTypes = stats
+                    .Where(s => !s.GrainType.StartsWith("Orleans.", StringComparison.Ordinal))
+                    .GroupBy(s => s.GrainType)
+                    .Select(g => new
+                    {
+                        type = FriendlyGrainType(g.Key),
+                        fullType = g.Key,
+                        activations = g.Sum(x => x.ActivationCount),
+                        silos = g.GroupBy(x => x.SiloAddress.ToParsableString())
+                                 .Select(sg => new { silo = sg.Key, count = sg.Sum(x => x.ActivationCount) })
+                                 .OrderBy(x => x.silo)
+                                 .ToArray(),
+                    })
+                    .Where(t => t.activations > 0)
+                    .OrderByDescending(t => t.activations).ThenBy(t => t.type)
+                    .ToArray();
+
+                return Results.Json(new { ok = true, leader, silos, grains = grainTypes }, ConfigSchema.Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
+            }
+        });
+
+        // The energy-flow tree computed by the distributed node grains (v3): each node computes its own value
+        // and publishes it to the flow grain, which serves the projection here. Reads cost one grain call —
+        // nothing walks the tree.
+        app.MapGet("/api/flow/tree", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).Current();
+                var nodes = snap.Values
+                    .GroupBy(v => v.NodeId)
+                    .OrderBy(g => g.Key)
+                    .Select(g => new { node = g.Key, metrics = g.Select(v => new { metric = v.Metric.ToString(), value = v.Value }).ToArray() })
+                    .ToArray();
+                return Results.Json(new { ok = true, version = snap.Version, nodes }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
         // Restart a tier — or everything. In Kubernetes this is a rollout restart of the matching
@@ -645,9 +717,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = true, method = "rollout", targets }, ConfigSchema.Json);
             }
 
-            // Non-Kubernetes: offer whole roles seen on the bus (split deployment), else just this process.
-            var roles = heartbeats.Processes.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
-            if (heartbeats.Processes.Count > 1 && roles.Count > 0)
+            // Non-Kubernetes: offer whole roles seen in the cluster (split deployment), else just this process.
+            var procs = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            var roles = procs.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
+            if (procs.Count > 1 && roles.Count > 0)
             {
                 var targets = new List<object> { new { id = "all", label = "Everything" } };
                 targets.AddRange(roles.Select(r => (object)new { id = r, label = r }));
@@ -740,6 +813,125 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // Browse what's on the broker, for the Nodes editor's topic autocomplete. Asking is what keeps the
+        // index alive: the grain leases itself to readers and the subscription only exists while someone is
+        // browsing (see ITopicIndexGrain), so this endpoint both queries and renews.
+        app.MapGet("/api/mqtt/topics", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var state = await index.Renew();
+                var q = ctx.Request.Query["q"].FirstOrDefault();
+                var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
+
+                var topics = (await index.Search(q, limit)).Select(t =>
+                {
+                    var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
+                    return new
+                    {
+                        topic = t.Topic,
+                        payload = t.Payload,
+                        seenUtc = t.SeenUtc,
+                        metric = hint.Metric,
+                        unit = hint.Unit,
+                        value = hint.Value,
+                        isJson = hint.IsJson,
+                        fields = hint.Fields,
+                    };
+                }).ToArray();
+
+                // "listening" tells the editor whether anything is feeding the index yet, so it can say
+                // "waiting for the broker" instead of looking broken on the first keystroke.
+                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, topics }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // One topic's last payload and what it implies — the metric/unit to bind, and for a JSON payload the
+        // fields you can pick from. Used when a topic is chosen, to fill the rest of the binding in.
+        app.MapGet("/api/mqtt/topic", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                await index.Renew();
+                var sample = await index.Get(topic);
+                if (sample is null)
+                    return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);
+
+                var hint = Core.Flow.TopicSampleAnalyzer.Analyze(sample.Topic, sample.Payload);
+                var fields = hint.Fields.Select(f => new { field = f, metric = Core.Flow.TopicSampleAnalyzer.MetricForField(sample.Topic, f) }).ToArray();
+                return Results.Json(new
+                {
+                    ok = true,
+                    topic = sample.Topic,
+                    payload = sample.Payload,
+                    seenUtc = sample.SeenUtc,
+                    metric = hint.Metric,
+                    unit = hint.Unit,
+                    value = hint.Value,
+                    isJson = hint.IsJson,
+                    fields,
+                }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // Read a block of registers off a Modbus device — the explorer behind "Browse registers". One
+        // deliberate read per click (a gateway usually allows a single client, and the worker is already
+        // polling it), decoded every way that makes sense so you can see which one looks right.
+        app.MapPost("/api/modbus/scan", async (HttpContext ctx) =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                var req = await System.Text.Json.JsonSerializer.DeserializeAsync<ModbusScanRequest>(ctx.Request.Body, ProbeJson, cts.Token);
+                if (req is null || string.IsNullOrWhiteSpace(req.Host))
+                    return Results.Json(new { ok = false, message = "A host is required." }, ConfigSchema.Json);
+
+                var start = Math.Max(0, req.Start);
+                var count = Math.Clamp(req.Count <= 0 ? 32 : req.Count, 1, 125);   // Modbus caps a read at 125 registers
+                var bank = string.IsNullOrWhiteSpace(req.RegisterType) ? "holding" : req.RegisterType!;
+
+                // Each register is read as uint16 and int16, and each pair additionally as float32/int32, so
+                // the answer to "which decoding is this device using?" is visible rather than guessed.
+                var items = new List<EnergyFlowSource>();
+                for (var i = 0; i < count; i++)
+                {
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "uint16" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "int16" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "uint32" });
+                    items.Add(new EnergyFlowSource { Type = "modbus", Register = start + i, RegisterType = bank, DataType = "float32" });
+                }
+
+                var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
+                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.TimeoutMs, items), cts.Token);
+
+                // Fold the four decodings of each register back into one row.
+                var rows = new List<object>();
+                for (var i = 0; i < count; i++)
+                {
+                    var at = i * 4;
+                    rows.Add(new
+                    {
+                        register = start + i,
+                        uint16 = at < readings.Count ? readings[at].Value : null,
+                        int16 = at + 1 < readings.Count ? readings[at + 1].Value : null,
+                        uint32 = at + 2 < readings.Count ? readings[at + 2].Value : null,
+                        float32 = at + 3 < readings.Count ? readings[at + 3].Value : null,
+                        error = at < readings.Count ? readings[at].Error : "not read",
+                    });
+                }
+
+                return Results.Json(new { ok, message, registerType = bank, rows }, ConfigSchema.Json);
+            }
+            catch (OperationCanceledException) { return Results.Json(new { ok = false, message = "Modbus scan timed out." }, ConfigSchema.Json); }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Probe a Modbus TCP device: connect, and optionally read a set of register specs, returning the
         // decoded values. Powers the "Test connection" button and the live per-binding value display in the
         // Flow editor. Read-only; uses a throwaway connection so it works before the config is saved.
@@ -755,7 +947,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     return Results.Json(new { ok = false, message = "A host is required." }, ConfigSchema.Json);
 
                 var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
-                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.Items), cts.Token);
+                    req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.TimeoutMs, req.Items), cts.Token);
                 return Results.Json(new { ok, message, readings }, ConfigSchema.Json);
             }
             catch (OperationCanceledException) { return Results.Json(new { ok = false, message = "Modbus probe timed out." }, ConfigSchema.Json); }
@@ -859,20 +1051,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Manually run EmonCMS feed provisioning now (#163) and report what it did — so you can see it work
-        // (or why it's a no-op) without waiting for the periodic pass.
-        app.MapPost("/api/emoncms/provision-feeds", async (HttpContext ctx) =>
+        // (or why it's a no-op) without waiting for the periodic pass. v3: through the same single-activation
+        // grain the periodic pass uses, so a click can't race it into duplicate feeds.
+        app.MapPost("/api/emoncms/provision-feeds", async () =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
             try
             {
-                // Gather data across every instance the same resilient way the GUI does (snapshot cache,
-                // else a direct poll) so this works on a UI-only node whose cache is cold.
-                var merged = new Models.PDU.PduData();
-                foreach (var id in registry.All.Keys)
-                    merged.Devices.AddRange((await ResolveData(id, registry.Get(id), cts.Token)).Devices);
-                var r = await emonCmsFeeds.ReconcileAsync(merged, cts.Token);
-                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
+                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).Reconcile(force: true);
+                return Results.Json(new { ok = r.Ok, message = r.Message, feeds = r.FeedsCreated, processes = r.ProcessesSet, virtualFeeds = r.VirtualFeeds }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -881,13 +1067,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Delete every EmonCMS feed rPDU2MQTT created (under its tag/node) — the "clean up" button.
-        app.MapPost("/api/emoncms/delete-feeds", async (HttpContext ctx) =>
+        app.MapPost("/api/emoncms/delete-feeds", async () =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(60));
             try
             {
-                var r = await emonCmsFeeds.DeleteAllAsync(cts.Token);
+                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).DeleteAll();
                 return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
             }
             catch (Exception ex)
@@ -1335,6 +1519,23 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
+    /// <summary>
+    /// Short, readable grain name from Orleans' grain-type string. That string is the assembly-qualified CLR
+    /// name (e.g. "rPDU2MQTT.Grains.Modbus.ModbusGrain, rPDU2MQTT.Grains"), so strip the ", Assembly" tail and
+    /// any generic/nested markers first, then take the class name and drop the "Grain" suffix.
+    /// </summary>
+    private static string FriendlyGrainType(string grainType)
+    {
+        if (string.IsNullOrWhiteSpace(grainType)) return grainType;
+        var s = grainType;
+        var comma = s.IndexOf(',');   if (comma >= 0) s = s[..comma];        // drop ", AssemblyName"
+        var bracket = s.IndexOf('[');  if (bracket >= 0) s = s[..bracket];    // drop generic args
+        var last = s.Split('.', '+', '/').Last().Trim();                       // class name (+ = nested type)
+        if (last.EndsWith("grain", StringComparison.OrdinalIgnoreCase))
+            last = last[..^"grain".Length];                                    // "ModbusGrain" -> "Modbus"
+        return last.Length == 0 ? grainType : char.ToUpperInvariant(last[0]) + last[1..];
+    }
+
     /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
     private static string BuildManifest(Config config)
     {
@@ -1370,19 +1571,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none. Bounded
     /// by a short timeout so a slow/unreachable API server can never hang the header's /api/status call.
     /// </summary>
-    private static async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
+    private async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
-        if (k8s is null) return null;
-        try
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(4));
-            var status = await k8s.ReadStatusAsync(cts.Token);
-            if (status is { } s && s.TryGetProperty("update", out var u))
-                return System.Text.Json.JsonSerializer.Deserialize<object>(u.GetRawText());
-        }
-        catch (Exception ex) { Log.Debug($"Could not read operator update status: {ex.Message}"); }
-        return null;
+        if (k8s is null) return null;   // operator only runs with the Kubernetes config source
+        try { return await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Status(); }
+        catch (Exception ex) { Log.Debug($"Could not read operator status from grain: {ex.Message}"); return null; }
     }
 
     // --- Kubernetes rollout restart ------------------------------------------------------------
@@ -1445,7 +1638,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private static readonly System.Text.Json.JsonSerializerOptions ProbeJson = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
-    private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, List<EnergyFlowSource>? Items);
+    private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, List<EnergyFlowSource>? Items);
+
+    /// <summary>Body of POST /api/modbus/scan: a device to reach + the block of registers to browse.</summary>
+    private sealed record ModbusScanRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, int Start, int Count, string? RegisterType);
 
     /// <summary>One (node, metric) whose current live value the Nodes editor wants.</summary>
     private sealed record LiveValueQuery(string? Node, string? Metric);

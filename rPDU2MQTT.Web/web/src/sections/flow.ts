@@ -35,19 +35,287 @@ const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type. Each type renders its own fields
 // in the two source columns; adding an ingest is another entry here plus a branch in the row renderer.
 const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+
+// Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
+const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];
+
+// Why a "Current" cell can sit empty — the thing every new binding trips over.
+const LIVE_HINT = 'Live value from the running ingest. It appears when the source next reports: an MQTT binding when the publisher sends, a Modbus one on the worker’s next poll — and a new or edited binding is not read at all until you Save. Nothing here is missing because the page needs reloading.';
 const MODBUS_REGISTER_TYPES = ['holding', 'input'];
 const MODBUS_DATATYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32'];
 const MODBUS_WORDORDERS = ['big', 'little'];
 
 // How an unmeasured node is valued — mirrors [AllowedValues] on EnergyFlowNode.Mode. A live/static value
-// always wins; this only governs nodes the graph would otherwise infer.
+// always wins; this only governs nodes the graph would otherwise infer. 'None' leads because it's what a new
+// node gets: a node you haven't measured yet should read as nothing, not as an inferred figure.
 const NODE_MODES: [string, string, string][] = [
-  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover — the default.'],
+  ['none', 'None (nothing inferred)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured node simply drops out instead of showing a fabricated figure. The default for a new node.'],
+  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover. Sizes the node from what’s left over, so it always shows something.'],
   ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
   ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
-  ['none', 'None (leave unset)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured source simply drops out instead of showing a fabricated figure.'],
 ];
+
+// --- Browsing what's out there: MQTT topics, and a Modbus device's registers ----------------------
+//
+// The topic index behind these only exists while we're asking for it — every call renews a short lease and
+// the broker subscription is dropped when nobody is browsing (see ITopicIndexGrain). So autocomplete costs a
+// subscription while this editor is open and nothing at all afterwards; there's no background indexer.
+
+let pickerSeq = 0;
+
+/// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
+function overlay(title: string): { body: any, close: () => void } {
+  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
+  const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
+  head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
+  const x = btn('Close');
+  head.appendChild(x);
+  const body = el('div');
+  panel.append(head, body);
+  back.appendChild(panel);
+  document.body.appendChild(back);
+
+  const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e: any) => { if (e.key === 'Escape') close(); };
+  x.onclick = close;
+  back.onclick = (e: any) => { if (e.target === back) close(); };
+  document.addEventListener('keydown', onKey);
+  return { body, close };
+}
+
+async function fetchTopics(q: string, limit = 50): Promise<any> {
+  const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}`);
+  return (r.body && r.body.ok) ? r.body : { topics: [], listening: false, indexed: 0 };
+}
+
+async function fetchTopicDetail(topic: string): Promise<any | null> {
+  if (!topic) return null;
+  const r = await api(`/api/mqtt/topic?topic=${encodeURIComponent(topic)}`);
+  return (r.body && r.body.ok) ? r.body : null;
+}
+
+/// Inline autocomplete for a topic input: a datalist kept in step with what you've typed.
+function topicSuggester(input: any, onExactPick: () => void) {
+  const list = el('datalist', { id: 'topics-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  let timer: any = null;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const body = await fetchTopics(input.value.trim());
+      list.innerHTML = '';
+      (body.topics || []).forEach((t: any) => list.appendChild(el('option', { value: t.topic })));
+      // Picking from the dropdown fires 'input', not 'change', so treat an exact hit as a choice.
+      if ((body.topics || []).some((t: any) => t.topic === input.value.trim())) onExactPick();
+    }, 250);
+  });
+  return { list };
+}
+
+/// Inline autocomplete for the JSON field, read from the chosen topic's own payload.
+function jsonFieldSuggester(input: any, topicOf: () => string) {
+  const list = el('datalist', { id: 'fields-' + (++pickerSeq) });
+  input.setAttribute('list', list.id);
+  const fill = async () => {
+    const detail = await fetchTopicDetail(topicOf());
+    list.innerHTML = '';
+    ((detail && detail.fields) || []).forEach((f: any) => list.appendChild(el('option', { value: f.field })));
+  };
+  input.addEventListener('focus', fill);
+  return list;
+}
+
+/// Fill in what the payload tells us about a freshly chosen topic — without overwriting deliberate choices.
+async function applyTopicHint(src: any, topic: string, fieldIn: any, rerender: () => void) {
+  const detail = await fetchTopicDetail(topic);
+  if (!detail) return;
+
+  const notes: string[] = [];
+  // Only infer where the user hasn't already decided: an untouched binding still reads 'realpower'.
+  if (detail.metric && (!src.Metric || src.Metric === 'realpower') && detail.metric !== src.Metric) {
+    src.Metric = detail.metric; src.Unit = undefined; notes.push(metricLabel(detail.metric));
+  }
+  if (detail.unit && !src.Unit && detail.unit !== metricMeta(src.Metric || 'realpower')[2]) {
+    src.Unit = detail.unit; notes.push(detail.unit);
+  }
+  if (detail.isJson && !src.JsonField && (detail.fields || []).length === 1) {
+    src.JsonField = detail.fields[0].field;
+    if (fieldIn) fieldIn.value = src.JsonField;
+    notes.push('field ' + src.JsonField);
+  }
+
+  const sample = detail.value != null ? `${formatNum(detail.value)}` : (detail.payload || '').slice(0, 40);
+  toast(notes.length ? `Read ${sample} — set ${notes.join(', ')}.` : `Last value: ${sample}`, true);
+  if (notes.length) rerender();
+}
+
+/// The topic browser: search what's on the broker, see each topic's last value, click to bind it.
+function openTopicPicker(current: string, onPick: (topic: string) => void) {
+  const { body, close } = overlay('Browse broker topics');
+  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter topics…', style: { width: '320px' } }) as HTMLInputElement;
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(search, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Topic', 'Last value', 'Looks like', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const load = async () => {
+    const b = await fetchTopics(search.value.trim(), 100);
+    tbody.innerHTML = '';
+    status.textContent = b.listening
+      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed`
+      : 'waiting for the broker subscription to come up…';
+    (b.topics || []).forEach((t: any) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: t.topic })));
+      tr.appendChild(el('td', { class: 'num', text: t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48) }));
+      tr.appendChild(el('td', { text: t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—') }));
+      const use = btn('Use', 'primary');
+      use.onclick = () => { onPick(t.topic); close(); };
+      tr.appendChild(el('td', {}, use));
+      tbody.appendChild(tr);
+    });
+  };
+
+  let timer: any = null;
+  search.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  load();
+  // Keep the index's lease alive (and the list fresh) for as long as the window is open.
+  const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } load(); }, 5000);
+}
+
+/// The Modbus explorer: read a block of registers off the device and pick the one that looks right.
+function openModbusExplorer(src: any, onPick: () => void) {
+  const conns: any[] = (state.data?.Modbus?.Connections) || [];
+  const conn = conns.find(c => c.Id === src.Connection);
+  const { body } = overlay('Modbus explorer' + (conn ? ` · ${conn.Name || conn.Id}` : ''));
+
+  if (!conn) {
+    body.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Pick a Modbus connection for this binding first (they are defined in the Modbus section).' }));
+    return;
+  }
+
+  body.appendChild(el('div', { class: 'desc', text: 'One read per click — a gateway usually accepts a single client, and the worker is already polling it. Each register is decoded every way that makes sense; click the value that matches what the device should be reporting.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const startIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'First register', style: { width: '90px' } }) as HTMLInputElement;
+  const countIn = el('input', { type: 'number', value: 32, title: 'How many', style: { width: '70px' } }) as HTMLInputElement;
+  const bankSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+  MODBUS_REGISTER_TYPES.forEach(t => bankSel.appendChild(el('option', { value: t, text: t })));
+  bankSel.value = src.RegisterType || 'holding';
+  const read = btn('Read', 'primary');
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(startIn, countIn, bankSel, read, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Register', 'uint16', 'int16', 'uint32', 'float32'].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const pick = (register: number, dataType: string) => {
+    src.Register = register;
+    src.RegisterType = bankSel.value === 'holding' ? undefined : bankSel.value;
+    src.DataType = dataType === 'uint16' ? undefined : dataType;
+    toast(`Bound register ${register} as ${dataType}.`, true);
+    onPick();
+  };
+
+  const cell = (row: any, key: string) => {
+    const td = el('td', { class: 'num' });
+    if (row[key] == null) { td.textContent = '—'; td.style.color = 'var(--muted)'; return td; }
+    const link = el('span', { text: formatNum(row[key]), style: { cursor: 'pointer', color: 'var(--accent, #4f8cff)' }, title: `Use register ${row.register} as ${key}` });
+    link.onclick = () => pick(row.register, key);
+    td.appendChild(link);
+    return td;
+  };
+
+  read.onclick = async () => {
+    status.textContent = 'reading…';
+    const r = await api('/api/modbus/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs,
+        Start: parseInt(startIn.value) || 0, Count: parseInt(countIn.value) || 32, RegisterType: bankSel.value,
+      }),
+    });
+    status.textContent = (r.body && r.body.message) || (r.body?.ok ? '' : 'read failed');
+    status.style.color = r.body?.ok ? 'var(--muted)' : 'var(--bad)';
+    tbody.innerHTML = '';
+    ((r.body && r.body.rows) || []).forEach((row: any) => {
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('code', { text: String(row.register) })));
+      tr.append(cell(row, 'uint16'), cell(row, 'int16'), cell(row, 'uint32'), cell(row, 'float32'));
+      tbody.appendChild(tr);
+    });
+  };
+  read.onclick(null);
+}
+
+/// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
+/// Parents map, and every downstream path derived from it — so this rewrites the references in the config and
+/// is honest about the ones it can't reach.
+function openRenameDialog(node: any, flow: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
+  const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
+  const links: any[] = ensure(flow, 'Links', []);
+  const parents: any = ensure(flow, 'Parents', {});
+  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
+    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+
+  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+
+  // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
+  // rather than letting someone discover it when their history stops.
+  const warn = el('div', {
+    class: 'desc',
+    style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
+  });
+  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  body.appendChild(warn);
+
+  const row = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', value: node.Id, style: { width: '260px' } }) as HTMLInputElement;
+  const apply = btn('Rename', 'primary');
+  const err = el('span', { class: 'desc', style: { margin: '0 0 0 8px', color: 'var(--bad)' } });
+  row.append(idIn, apply, err);
+  body.appendChild(row);
+
+  apply.onclick = () => {
+    const next = (idIn.value || '').trim();
+    if (!next) { err.textContent = 'An id is required.'; return; }
+    if (next === node.Id) { close(); return; }
+    if (existingIds.has(next)) { err.textContent = 'That id already exists.'; return; }
+
+    const from = node.Id;
+    node.Id = next;
+    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
+    Object.keys(parents).forEach(child => {
+      if (parents[child] === from) parents[child] = next;
+      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
+    });
+
+    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    close();
+    onRenamed(next);
+  };
+  idIn.onkeydown = (e: any) => { if (e.key === 'Enter') apply.onclick(null); };
+}
 
 // A labelled field (label above a control) for the node editor's form grid.
 function field(labelText: string, control: HTMLElement, hint?: string) {
@@ -110,13 +378,21 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
 
   // --- Live value bindings ---
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved.', style: { margin: '0 0 8px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
   const sources: any[] = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Current', ''].forEach(h => head.appendChild(el('th', { text: h })));
+    const colHint: any = {
+      Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
+      Current: LIVE_HINT,
+    };
+    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+      const th = el('th', { text: h });
+      if (colHint[h]) th.title = colHint[h];
+      head.appendChild(th);
+    });
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
@@ -178,21 +454,66 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
         const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
         woSel.disabled = !is32();
         dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
-        details.append(regIn, regTypeSel, dtSel, woSel);
+
+        // Rather than guessing a register from a PDF, read the device and pick the value that looks right.
+        const explore = btn('Browse…');
+        explore.title = 'Read a block of registers from the device and choose one.';
+        explore.onclick = () => openModbusExplorer(src, rerender);
+
+        details.append(regIn, regTypeSel, dtSel, woSel, explore);
         tr.appendChild(el('td', {}, details));
       } else {
-        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } });
-        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); };
-        tr.appendChild(el('td', {}, topicIn));
+        // Source = the topic, with autocomplete off what the broker is actually carrying, and a Browse
+        // button for picking one by eye. Details = the JSON field, itself autocompleted from the payload.
+        const topicCell = el('td');
+        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } }) as HTMLInputElement;
+        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } }) as HTMLInputElement;
 
-        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } });
+        const suggest = topicSuggester(topicIn, () => {
+          src.Topic = topicIn.value.trim();
+          applyTopicHint(src, topicIn.value.trim(), fieldIn, rerender);
+        });
+        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); applyTopicHint(src, src.Topic, fieldIn, rerender); };
+
+        const browse = btn('Browse');
+        browse.title = 'Browse the topics currently on the broker and pick one.';
+        browse.onclick = () => openTopicPicker(topicIn.value.trim(), picked => {
+          topicIn.value = picked;
+          src.Topic = picked;
+          applyTopicHint(src, picked, fieldIn, rerender);
+        });
+
+        topicCell.append(topicIn, suggest.list, ' ', browse);
+        tr.appendChild(topicCell);
+
         fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
-        tr.appendChild(el('td', {}, fieldIn));
+        const fieldCell = el('td');
+        fieldCell.append(fieldIn, jsonFieldSuggester(fieldIn, () => src.Topic || ''));
+        tr.appendChild(fieldCell);
       }
 
-      const scaleIn = el('input', { type: 'number', step: 'any', value: src.Scale ?? 1, style: { width: '80px' } });
-      scaleIn.onchange = () => { const v = +scaleIn.value; src.Scale = (scaleIn.value !== '' && !isNaN(v) && v !== 1) ? v : undefined; };
+      // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
+      // nothing downstream has to learn a second knob — the checkbox is just its sign, spelled out.
+      const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
+      const setScale = (magnitude: number, invert: boolean) => {
+        const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
+        src.Scale = v === 1 ? undefined : v;
+      };
+      scaleIn.onchange = () => setScale(+scaleIn.value, (src.Scale ?? 1) < 0);
       tr.appendChild(el('td', {}, scaleIn));
+
+      // Sign only means anything where the value has a direction — power and current, not voltage/energy.
+      const invCell = el('td', { style: { textAlign: 'center' } });
+      if (SIGNED_METRICS.includes(metric)) {
+        const inv = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        inv.checked = (src.Scale ?? 1) < 0;
+        inv.title = 'Flip the sign of this reading (e.g. solar/battery power the source publishes as export).';
+        inv.onchange = () => setScale(+scaleIn.value, inv.checked);
+        invCell.appendChild(inv);
+      } else {
+        invCell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Sign has no meaning for this metric.' }));
+      }
+      tr.appendChild(invCell);
 
       // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
       // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
@@ -213,7 +534,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
       const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
-        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || 'no live value yet'; }
+        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || ('No live value yet. ' + LIVE_HINT); }
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
       // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
@@ -231,7 +552,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
             if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
             try {
               const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, Items: cells.map(lc => lc.src) }) });
+                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs, Items: cells.map(lc => lc.src) }) });
               if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
               const readings = r.body.readings || [];
               cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
@@ -301,12 +622,30 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       x.onclick = () => { onRemove(other); rerender(); };
       chip.append(nm(other), x); row.appendChild(chip);
     });
-    const sel = el('select', { style: { width: 'auto' } });
-    sel.appendChild(el('option', { value: '', text: '+ add…' }));
-    [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
-      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets — so it
+    // comes with a search box that filters it as you type (Enter takes the single match).
+    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
+    const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
+    const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+    const matches = () => {
+      const f = (search.value || '').trim().toLowerCase();
+      return f ? options.filter(id => (id + ' ' + nm(id)).toLowerCase().includes(f)) : options;
+    };
+    const fill = () => {
+      const m = matches();
+      sel.innerHTML = '';
+      sel.appendChild(el('option', { value: '', text: m.length ? `+ add… (${m.length})` : 'no match' }));
+      m.forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    };
+    search.oninput = fill;
+    search.onkeydown = (e: any) => {
+      if (e.key !== 'Enter') return;
+      const m = matches();
+      if (m.length === 1) { onAdd(m[0]); rerender(); }
+    };
+    fill();
     sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
-    row.appendChild(sel);
+    row.append(search, sel);
     return row;
   };
   box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
@@ -349,7 +688,7 @@ function flowCandidates(lastGraph: any, customNodes: any[]) {
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
 // node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
 // Deleting a node takes its bound sources with it (they live on the node).
-function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
+function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -378,6 +717,31 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
     edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rename = btn('Rename');
+    rename.title = 'Change this node’s id, moving its wiring with it.';
+    rename.onclick = () => {
+      const taken = new Set<string>([...cand.keys(), ...customNodes.map((x: any) => x.Id)]);
+      taken.delete(n.Id);
+      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+    };
+
+    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
+    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
+    // since the copy usually feeds somewhere else.
+    const copy = btn('Copy');
+    copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
+    copy.onclick = () => {
+      const taken = (id: string) => customNodes.some((x: any) => x.Id === id);
+      let id = `${n.Id}-copy`;
+      for (let i = 2; taken(id); i++) id = `${n.Id}-copy-${i}`;
+      const clone = JSON.parse(JSON.stringify(n));
+      clone.Id = id;
+      clone.Label = `${n.Label || n.Id} (copy)`;
+      customNodes.splice(customNodes.indexOf(n) + 1, 0, clone);
+      editing.id = id;
+      toast(`Copied to '${id}' — rename it and set its feeders.`, true);
+      rerender();
+    };
     const rm = btn('Delete', 'danger');
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
@@ -386,7 +750,7 @@ function renderNodeManager(customNodes: any[], links: any[], cand: Map<string, a
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
     };
-    actions.append(edit, ' ', rm);
+    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     body.appendChild(tr);
   });
@@ -412,8 +776,41 @@ export function addFlowSection(nav: any, sections: any) {
   const count = document.createElement('span'); count.className = 'ld-count';
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
+  const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph: any = null;
+
+  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
+  // (measured leaves report their source, aggregates sum their children, residuals the remainder).
+  const renderTree = async () => {
+    treePanel.innerHTML = '';
+    const head = document.createElement('div'); head.textContent = 'Node-grain roll-up (distributed)';
+    head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; treePanel.appendChild(head);
+    let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
+    if (!r.body || !r.body.ok) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'Node tree unavailable' + (r.body && r.body.message ? ': ' + r.body.message : ' (single-node cluster or nothing provisioned yet).');
+      treePanel.appendChild(dd); return;
+    }
+    const nodes = r.body.nodes || [];
+    if (!nodes.length) {
+      const dd = document.createElement('div'); dd.className = 'desc';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      treePanel.appendChild(dd); return;
+    }
+    const t = document.createElement('table'); t.className = 'ld';
+    const hr = document.createElement('tr'); ['Node', 'Rolled-up values'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
+    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement('tbody');
+    nodes.forEach((n: any) => {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'); c1.textContent = n.node;
+      const c2 = document.createElement('td'); c2.style.cssText = 'color:var(--muted);font-size:12px;';
+      c2.textContent = (n.metrics || []).map((m: any) => m.metric + ': ' + formatNum(m.value)).join(', ');
+      tr.appendChild(c1); tr.appendChild(c2); tb.appendChild(tr);
+    });
+    t.appendChild(tb); treePanel.appendChild(t);
+  };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph: any) => {
@@ -679,6 +1076,7 @@ export function addFlowSection(nav: any, sections: any) {
     lastGraph = r.body;
     draw(r.body);
     renderEditor();
+    renderTree();
   };
   refresh.onclick = load;
   link.onclick = () => { activate(link, sec); load(); };
@@ -803,7 +1201,9 @@ export function addNodesSection(nav: any, sections: any) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
-      const node: any = { Id: id, Label: (labIn.value || '').trim() || id };
+      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
+      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
+      const node: any = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
@@ -819,7 +1219,7 @@ export function addNodesSection(nav: any, sections: any) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderNodeManager(customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 
   const load = async () => {

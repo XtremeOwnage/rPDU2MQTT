@@ -12,11 +12,13 @@ public sealed class HaEnergyDashboardService : BackgroundService
 {
     private readonly Config config;
     private readonly HaEnergyDashboardSync sync;
+    private readonly Core.LeaderState? leader;
 
-    public HaEnergyDashboardService(Config config, HaEnergyDashboardSync sync)
+    public HaEnergyDashboardService(Config config, HaEnergyDashboardSync sync, Core.LeaderState? leader = null)
     {
         this.config = config;
         this.sync = sync;
+        this.leader = leader;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,6 +28,8 @@ public sealed class HaEnergyDashboardService : BackgroundService
         do
         {
             var ed = config.HASS.EnergyDashboard;
+            // v3: run-once cluster-wide — only the leader pushes to HA.
+            if (leader is { IsLeader: false }) continue;
             if (ed.Enabled && !string.IsNullOrWhiteSpace(ed.Url) && !string.IsNullOrWhiteSpace(ed.Token))
             {
                 try { await sync.SyncAsync(ed.Url!, ed.Token!, stoppingToken); }

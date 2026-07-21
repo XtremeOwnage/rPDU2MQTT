@@ -343,6 +343,30 @@ Debug:
 
 ## Logging Configuration
 
+### What each level tells you
+
+Every sink below takes its own `Severity`, so you can keep the console quiet and send the detail to a file or
+syslog instead. What you get at each level:
+
+| Level | What it covers |
+| --- | --- |
+| `Information` | The default. What the process decided to be at startup (roles, config source, every PDU/Modbus source, every destination that's on or off), each PDU's shape when it changes, and **every write** — outlet on/off/reboot, config field changes, group actions. Anything that changes the physical world or the topology. |
+| `Debug` | Why nothing is happening. Each poll with its latency and counts, the energy-flow graph as it's provisioned (each node's type and feeders), flow ingest batches, feed provisioning passes, subscription reconciliation, and failures that are repeats of one already reported. |
+| `Verbose` (trace) | The roll-up, step by step: every node's value change and who it notified, every ingested reading, every topic sample. This is what to turn on when a tier's number looks wrong and nothing else explains it — it is very chatty, so prefer a file sink. |
+
+A useful troubleshooting combination — normal console, full detail on disk:
+
+```yaml
+Logging:
+  Console:
+    Enabled: true
+    Severity: Information
+  File:
+    Enabled: true
+    Severity: Verbose
+    Path: /config/rpdu2mqtt.log
+```
+
 ### Console Logging
 Customize how messages are logged to the console (stdout).
 

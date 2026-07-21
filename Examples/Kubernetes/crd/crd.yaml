@@ -932,6 +932,11 @@ spec:
                           description: How often to poll this device, in seconds.
                           minimum: 1
                           maximum: 86400
+                        TimeoutMs:
+                          type: integer
+                          description: Read/write timeout per Modbus request, in milliseconds. Lower it to fail faster on an unresponsive device; raise it for a slow gateway.
+                          minimum: 200
+                          maximum: 30000
                         Enabled:
                           type: boolean
                           description: Poll this device. Turn off to disable it without deleting the connection.
