@@ -14,18 +14,17 @@ namespace rPDU2MQTT.Grains.Pdu;
 /// Its device grain hands it its own document each poll; the outlet extracts what it needs from it: its
 /// observed state, and its measurements, which it converts to canonical units and publishes to its measured
 /// flow node. It is also the single cluster-wide owner of writes to the outlet, so a control action runs
-/// exactly once — through the PDU instance the outlet actually lives on (see <see cref="PduOwner"/>).
+/// exactly once — through the PDU instance the outlet actually lives on (see <see cref="PduChildGrain"/>).
 /// </para>
 /// </summary>
-public sealed class OutletGrain : Grain, IOutletGrain
+public sealed class OutletGrain : PduChildGrain, IOutletGrain
 {
-    private readonly IServiceProvider sp;
     private RawOutlet? document;
     private OutletState? state;
     private string deviceId = "";
     private int index;
 
-    public OutletGrain(IServiceProvider sp) => this.sp = sp;
+    public OutletGrain(IServiceProvider sp) : base(sp) { }
 
     /// <summary>The energy-flow node id for an outlet — the auto convention custom nodes can wire onto.</summary>
     public static string FlowNodeId(string deviceId, int index) => $"outlet:{deviceId}:{index}";
@@ -43,6 +42,7 @@ public sealed class OutletGrain : Grain, IOutletGrain
         deviceId = device;
         index = outlet.Key;
         document = outlet;
+        BindOwner(instanceId);
         state = new OutletState(device, outlet.Key, outlet.Name, outlet.DisplayName, outlet.State, atUtc, instanceId);
 
         // This outlet's measurements are its own: it decides which ones are metrics, converts them to the
@@ -60,8 +60,7 @@ public sealed class OutletGrain : Grain, IOutletGrain
 
     public async Task<string> Control(string action)
     {
-        // Write through the PDU this outlet is actually on, not whichever instance is primary.
-        var pdu = PduOwner.Resolve(sp, state?.InstanceId);
+        var pdu = Pdu;   // the PDU this outlet is on, not whichever instance is primary
         if (pdu is null) return "No PDU available to control this outlet.";
         switch (action.Trim().ToLowerInvariant())
         {
@@ -76,7 +75,7 @@ public sealed class OutletGrain : Grain, IOutletGrain
 
     public async Task<string> SetConfig(string field, string payload, bool isDelay)
     {
-        var pdu = PduOwner.Resolve(sp, state?.InstanceId);
+        var pdu = Pdu;
         if (pdu is null) return "";
         object value;
         if (isDelay)

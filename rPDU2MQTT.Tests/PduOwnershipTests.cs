@@ -28,15 +28,14 @@ public class PduOwnershipTests
     {
         var registry = Registry(("default", "10.0.0.1"), ("rack-b", "10.0.0.2"), ("rack-c", "10.0.0.3"));
 
-        Assert.Equal("rack-b", PduOwner.Choose("rack-b", registry.All.Keys, registry.PrimaryId));
-        Assert.Equal("rack-c", PduOwner.Choose("rack-c", registry.All.Keys, registry.PrimaryId));
-        Assert.Equal("default", PduOwner.Choose("default", registry.All.Keys, registry.PrimaryId));
+        Assert.Same(registry.Get("rack-b"), PduChildGrain.PduFor(registry, "rack-b"));
+        Assert.Same(registry.Get("rack-c"), PduChildGrain.PduFor(registry, "rack-c"));
 
-        // The bound id is the PDU's own, whatever case the topic/config used.
-        Assert.Equal("rack-b", PduOwner.Choose("RACK-B", registry.All.Keys, registry.PrimaryId));
+        // Not the primary — the whole point.
+        Assert.NotSame(registry.Primary, PduChildGrain.PduFor(registry, "rack-b"));
 
-        // And it resolves to a *different* PDU object than the primary — the whole point.
-        Assert.NotSame(registry.Primary, registry.Get(PduOwner.Choose("rack-b", registry.All.Keys, registry.PrimaryId)!));
+        // Instance ids are matched the way config keys them, so casing can't strand a child.
+        Assert.Same(registry.Get("rack-b"), PduChildGrain.PduFor(registry, "RACK-B"));
     }
 
     [Fact]
@@ -44,19 +43,19 @@ public class PduOwnershipTests
     {
         var registry = Registry(("default", "10.0.0.1"), ("rack-b", "10.0.0.2"));
 
-        // A child that hasn't been polled yet has nothing stamped on it.
-        Assert.Equal("default", PduOwner.Choose(null, registry.All.Keys, registry.PrimaryId));
+        // A child whose parent hasn't polled it yet has no owner stamped on it.
+        Assert.Same(registry.Primary, PduChildGrain.PduFor(registry, null));
 
-        // An instance that has since been removed from config must not strand the child.
-        Assert.Equal("default", PduOwner.Choose("rack-gone", registry.All.Keys, registry.PrimaryId));
+        // An instance that has since been removed from config must not strand the child either.
+        Assert.Same(registry.Primary, PduChildGrain.PduFor(registry, "rack-gone"));
     }
 
     [Fact]
-    public void SingleInstance_IsUnambiguous_EvenWithNoPrimary()
+    public void SingleInstance_IsUnambiguous()
     {
-        Assert.Equal("only", PduOwner.Choose(null, new[] { "only" }, null));
-        Assert.Null(PduOwner.Choose(null, new[] { "a", "b" }, null));
-        Assert.Null(PduOwner.Choose(null, System.Array.Empty<string>(), "default"));
+        var registry = Registry(("only", "10.0.0.9"));
+        Assert.Same(registry.Get("only"), PduChildGrain.PduFor(registry, null));
+        Assert.Same(registry.Get("only"), PduChildGrain.PduFor(registry, "only"));
     }
 }
 
