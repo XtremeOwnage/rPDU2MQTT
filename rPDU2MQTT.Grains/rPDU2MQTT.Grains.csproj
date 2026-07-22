@@ -8,7 +8,7 @@
     <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Orleans.Sdk" Version="10.2.1" />
+    <PackageReference Include="Microsoft.Orleans.Sdk" Version="10.2.2" />
     <ProjectReference Include="..\rPDU2MQTT.Grains.Abstractions\rPDU2MQTT.Grains.Abstractions.csproj" />
     <ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
     <ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />

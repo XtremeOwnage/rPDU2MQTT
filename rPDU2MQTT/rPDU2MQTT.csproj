@@ -35,9 +35,9 @@
 
 	<ItemGroup>
 		<!-- Host composition (DI wiring) + logging setup use HiveMQ + Serilog directly. -->
-		<PackageReference Include="HiveMQtt" Version="0.45.0" />
-		<PackageReference Include="Microsoft.Orleans.Serialization.SystemTextJson" Version="10.2.1" />
-		<PackageReference Include="Microsoft.Orleans.Server" Version="10.2.1" />
+		<PackageReference Include="HiveMQtt" Version="0.45.1" />
+		<PackageReference Include="Microsoft.Orleans.Serialization.SystemTextJson" Version="10.2.2" />
+		<PackageReference Include="Microsoft.Orleans.Server" Version="10.2.2" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
 		<PackageReference Include="Orleans.Clustering.Kubernetes" Version="10.0.1" />
 		<PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
