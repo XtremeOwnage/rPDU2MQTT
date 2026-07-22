@@ -1,7 +1,26 @@
 # v3 — Orleans migration plan (RFC)
 
-Status: **proposal.** This is a plan, not a commitment. It exists to make the trade-offs concrete before any
-code moves.
+Status: **landed** (#225). This was written as a proposal — a plan, not a commitment, to make the trade-offs
+concrete before any code moved. It is kept as the record of *why* v3 looks the way it does; the sections
+below are the reasoning at the time of writing, not a description of the current code.
+
+What actually shipped, against the plan:
+
+- **Single-activation ownership** — as proposed, and it went further than the plan: a `PduGrain` per
+  instance that hands each child its own document, one grain per outlet and per OneView group owning that
+  thing's writes, and single-owner grains for EmonCMS provisioning and the Modbus devices. The `if (worker)`
+  gating for single-owner work is gone; it's a property of the topology now.
+- **Energy flow as actors** — this is the part the plan got wrong. It said the graph math should stay
+  centralised ("node *state* may be distributed; node *computation* is centralised"). It didn't: each node
+  is a grain that subscribes to the nodes it depends on, recomputes on a push, and publishes onward, so a
+  change touches only the path from the node that moved to the root. `Value()` is a cached read rather than
+  a tree walk.
+- **Membership replaced the heartbeat** — `HeartbeatService`'s retained-topic beacons are gone; the Status
+  board is component grains that publish their own verdicts.
+- **Location-transparent reads** replaced `MqttBusBridge`'s MQTT mirroring of PDU snapshots.
+
+Caveats worth re-reading below: the "not free" section held up, particularly around serialization at the
+grain boundary and the cost of a chatty grain call in a hot path.
 
 ## Why
 
