@@ -1,0 +1,96 @@
+# Orleans Kubernetes clustering membership CRDs.
+#
+# The silos store cluster membership in these two custom resources instead of an external database
+# (Orleans.Clustering.Kubernetes, `silo.UseKubeMembership()`). Without them every silo fails to read
+# membership — "Failure reading all silo entries for cluster id … 404 page not found" from
+# KubeMembershipTable.GetClusterVersion() — and the process exits, so every pod crash-loops.
+#
+# They ship here, in crds/, rather than being created by the app at runtime: they're static, they belong in
+# version control, and creating them at runtime would mean granting the app cluster-scoped write access to
+# CustomResourceDefinitions for the life of the deployment.
+#
+# Copied verbatim from the provider's own definitions
+# (orleans.clustering.kubernetes/<version>/lib/Definitions/{ClusterVersionCRD,SiloEntryCRD}.yaml).
+#
+# NOTE: Helm applies crds/ on install only, never on upgrade. Upgrading a release that predates this file
+# needs them applied once by hand:
+#   kubectl apply -f https://raw.githubusercontent.com/XtremeOwnage/rPDU2MQTT/main/charts/rpdu2mqtt/crds/orleans-membership.yaml
+# Argo CD renders with --include-crds, so it applies them on every sync and needs nothing extra.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterversions.orleans.dot.net
+spec:
+  group: orleans.dot.net
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+            type: object
+            properties:
+                clusterId:
+                    type: string
+                clusterVersion:
+                    type: integer
+  scope: Namespaced
+  names:
+    plural: clusterversions
+    singular: clusterversion
+    kind: OrleansClusterVersion
+    shortNames:
+    - ocv
+    - oc
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: silos.orleans.dot.net
+spec:
+  group: orleans.dot.net
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+            required: [ address, port, generation, hostname, status, siloName ]
+            type: object
+            properties:
+                clusterId:
+                    type: string
+                address:
+                    type: string
+                port:
+                    type: integer
+                generation:
+                    type: integer
+                hostname:
+                    type: string
+                status:
+                    type: string
+                proxyPort:
+                    type: integer
+                siloName:
+                    type: string
+                suspectingSilos:
+                    type: array
+                    items:
+                        type: string
+                suspectingTimes:
+                    type: array
+                    items:
+                        type: string
+                startTime:
+                    type: string
+                iAmAliveTime:
+                    type: string
+  scope: Namespaced
+  names:
+    plural: silos
+    singular: silo
+    kind: OrleansSilo
+    shortNames:
+    - oso
+    - os

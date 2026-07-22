@@ -77,6 +77,13 @@ credentials:
 
 ## Notes
 
+- **Orleans membership CRDs:** the chart ships `crds/orleans-membership.yaml`
+  (`clusterversions.orleans.dot.net`, `silos.orleans.dot.net`). The silos store cluster membership in those
+  resources instead of an external database, and without them **every pod crash-loops** on *"Failure reading
+  all silo entries"*. Helm applies `crds/` on **install only, never on upgrade** — so a release that predates
+  them needs a one-off `kubectl apply -f charts/rpdu2mqtt/crds/orleans-membership.yaml`. Argo CD renders with
+  `--include-crds` and applies them on every sync, so it needs nothing extra.
+
 - **Scheduled restarts:** `autoRestart.enabled=true` adds a CronJob that runs
   `kubectl rollout restart` against the Deployments *this release* renders — matched by label, so it can
   never wander onto anything else in the namespace. It gets its own ServiceAccount with nothing but
