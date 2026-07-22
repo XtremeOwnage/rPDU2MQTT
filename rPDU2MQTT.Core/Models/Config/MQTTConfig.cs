@@ -54,9 +54,9 @@ public class MQTTConfig
     /// Whether published measurements carry the time they were read, and how (#205). The timestamp is the
     /// poll time, so a consumer can tell a fresh reading from a republished one.
     /// </summary>
-    [DefaultValue(MessageTimestampMode.UserProperty)]
+    [DefaultValue(MessageTimestampMode.None)]
     [YamlMember(Alias = "MessageTimestamp", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
-    [Display(Name = "Message Timestamp", Description = "Carry the time a measurement was read: 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone (default, safe for every existing consumer), 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically), 'None' carries no timestamp.")]
+    [Display(Name = "Message Timestamp", Description = "Carry the time a measurement was read. 'None' (default) publishes exactly as before. 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone — verify it against your broker first, since a broker or client that mishandles user properties on PUBLISH can drop the connection. 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically).")]
     [AllowedValues("None", "UserProperty", "Payload")]
-    public MessageTimestampMode MessageTimestamp { get; set; } = MessageTimestampMode.UserProperty;
+    public MessageTimestampMode MessageTimestamp { get; set; } = MessageTimestampMode.None;
 }
