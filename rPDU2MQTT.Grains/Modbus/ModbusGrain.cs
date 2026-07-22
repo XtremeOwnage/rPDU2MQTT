@@ -13,6 +13,7 @@ namespace rPDU2MQTT.Grains.Modbus;
 /// scan. Single activation + single-threaded, so the device connection is never contended. Blocking device
 /// I/O runs off the grain turn via <c>Task.Run</c>.
 /// </summary>
+[rPDU2MQTT.Grains.Placement.DevicePlacement]
 public sealed class ModbusGrain : Grain, IModbusGrain
 {
     private readonly ILogger<ModbusGrain> log;
