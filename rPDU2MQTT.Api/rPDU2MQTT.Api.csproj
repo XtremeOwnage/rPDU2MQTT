@@ -14,7 +14,10 @@
 	<ItemGroup>
 		<PackageReference Include="HiveMQtt" Version="0.45.0" />
 		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
-		<!-- Pinned over the 2.0.0 that AspNetCore.OpenApi 10.0.9 resolves: GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5. -->
+		<!-- Pinned over the 2.0.0 that AspNetCore.OpenApi 10.0.9 resolves: GHSA-v5pm-xwqc-g5wc is fixed in 2.7.5.
+		     Stay on the 2.x line: 3.x is a breaking major that AspNetCore.OpenApi 10 cannot consume — its own
+		     source generator assigns IOpenApiMediaType.Example, read-only in 3.x, so the build fails inside
+		     generated code (#227). Dependabot is told to skip the major; revisit when ASP.NET ships against 3.x. -->
 		<PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
 		<PackageReference Include="Scalar.AspNetCore" Version="2.16.11" />
 	</ItemGroup>
