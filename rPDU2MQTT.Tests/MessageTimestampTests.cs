@@ -69,10 +69,12 @@ public class MessageTimestampTests
     }
 
     [Fact]
-    public void DefaultMode_IsTheInvisibleOne()
+    public void DefaultMode_ChangesNothingOnTheWire()
     {
-        // #205 asked for timestamps; shipping them off by default would not answer the request, and shipping
-        // them in the payload by default would break every consumer that reads a bare value.
-        Assert.Equal(MessageTimestampMode.UserProperty, new Config().MQTT.MessageTimestamp);
+        // This shipped defaulting to UserProperty on the reasoning that a user property is invisible to
+        // consumers that don't read it — which is true of readers and irrelevant to the wire. It broke
+        // publishing outright on a real broker. A mode that changes the packet has to be opted into by
+        // someone who can watch their own broker while they do it.
+        Assert.Equal(MessageTimestampMode.None, new Config().MQTT.MessageTimestamp);
     }
 }

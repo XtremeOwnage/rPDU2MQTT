@@ -103,7 +103,7 @@ spec:
                     - None
                     - UserProperty
                     - Payload
-                    description: "Carry the time a measurement was read: 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone (default, safe for every existing consumer), 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically), 'None' carries no timestamp."
+                    description: "Carry the time a measurement was read. 'None' (default) publishes exactly as before. 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone — verify it against your broker first, since a broker or client that mishandles user properties on PUBLISH can drop the connection. 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically)."
                 description: MQTT Configuration
               Pdus:
                 type: object

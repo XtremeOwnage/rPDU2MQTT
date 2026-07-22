@@ -96,14 +96,17 @@ consumer can tell a fresh reading from a republished one.
 
 ```yaml
 Mqtt:
-  MessageTimestamp: UserProperty   # UserProperty (default) | Payload | None
+  MessageTimestamp: None   # None (default) | UserProperty | Payload
 ```
+
+> Both non-`None` modes change what goes on the wire, so neither is on by default: turn one on deliberately
+> and watch the next poll land before you walk away from it.
 
 | Mode | What a measurement looks like |
 | --- | --- |
-| `UserProperty` | The payload is unchanged (a bare value); the time rides along as an MQTT v5 `timestamp` user property. Invisible to consumers that don't look for it, so Home Assistant and every existing subscription keep working exactly as before. **Default.** |
+| `UserProperty` | The payload is unchanged (a bare value); the time rides along as an MQTT v5 `timestamp` user property. **Test this against your broker before relying on it** — the payload being unchanged doesn't mean the packet is, and a broker or client that mishandles user properties on PUBLISH can drop the connection, which looks like everything stopping at once. |
 | `Payload` | The payload becomes `{"value": "123.4", "timestamp": "2026-07-21T18:30:15.250Z"}`. Home Assistant discovery adapts automatically (the sensors get `value_template: {{ value_json.value }}`), but anything reading these topics by hand needs updating — which is why it isn't the default. |
-| `None` | No timestamp at all — the behaviour before this option existed. |
+| `None` | No timestamp at all — the behaviour before this option existed. **Default.** |
 
 The timestamp is ISO-8601 UTC to milliseconds. The value stays a **string** in `Payload` mode, because that's
 how the PDU reports it — re-typing it as a number would turn `0.00` into `0` and lose the device's precision.
