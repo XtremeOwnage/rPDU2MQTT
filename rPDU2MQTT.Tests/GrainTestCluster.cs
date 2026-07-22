@@ -49,6 +49,9 @@ public static class GrainTestCluster
             silo.Services.AddSingleton<rPDU2MQTT.Core.ISnapshotCache, rPDU2MQTT.Core.SnapshotCache>();
             silo.Services.AddSingleton<rPDU2MQTT.Services.EmonCmsFeedSync>();
             silo.Services.AddSerializer(s => s.AddJsonSerializer(isSupported: IsAbstraction));
+            // Placement is configured exactly as production does it — every silo must register the device
+            // placement director, or a grain that asks for the strategy can't be placed at all.
+            rPDU2MQTT.Startup.SiloConfiguration.ConfigurePlacement(silo);
         }
     }
 

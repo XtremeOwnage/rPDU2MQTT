@@ -19,6 +19,7 @@ namespace rPDU2MQTT.Grains.Pdu;
 /// which is what let a write reach the wrong device when several PDUs are bridged.
 /// </para>
 /// </summary>
+[rPDU2MQTT.Grains.Placement.DevicePlacement]
 public sealed class PduGrain : Grain, IPduGrain
 {
     private readonly Config config;

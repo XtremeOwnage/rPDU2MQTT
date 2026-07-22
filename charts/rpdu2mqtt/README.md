@@ -77,6 +77,14 @@ credentials:
 
 ## Notes
 
+- **Where the device work runs (`split.enabled`):** roles decide which *background services* start in each
+  pod — they don't decide where grains live. The grains that hold a device open (the PDU session, a Modbus
+  device) now use a placement strategy that **prefers a silo running the `worker` role**, so in a split
+  deployment that work lands in the worker pod rather than wherever Orleans happened to put it. It's a
+  preference, not a requirement: with no worker silo available it falls back to any silo and logs a warning,
+  because a grain that can't be placed is worse than one placed in the wrong pod. In the default
+  single-Deployment fleet every silo runs every role, so nothing changes.
+
 - **Orleans membership CRDs:** the chart ships `crds/orleans-membership.yaml`
   (`clusterversions.orleans.dot.net`, `silos.orleans.dot.net`). The silos store cluster membership in those
   resources instead of an external database, and without them **every pod crash-loops** on *"Failure reading
