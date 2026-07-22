@@ -41,6 +41,18 @@ jobs:
             echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }
           done
 
+      - name: helm template (Orleans membership CRDs)
+        run: |
+          # The silos store membership in these CRDs; without them every pod crash-loops on
+          # "Failure reading all silo entries". They must ship with the chart, not be created at runtime.
+          out=$(helm template rpdu2mqtt charts/rpdu2mqtt --include-crds --set split.enabled=true)
+          for crd in clusterversions.orleans.dot.net silos.orleans.dot.net; do
+            echo "$out" | grep -q "name: $crd" || { echo "chart must ship the $crd CRD"; exit 1; }
+          done
+          # ...and because they ship, nothing needs cluster-scoped write access to CRDs.
+          echo "$out" | grep -q 'customresourcedefinitions' && { echo "app should not be granted CRD permissions"; exit 1; }
+          exit 0
+
       - name: helm template (scheduled restart)
         run: |
           # Off by default: no CronJob, and no RBAC granted for one.
