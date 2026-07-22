@@ -12,6 +12,18 @@ updates:
     labels:
       - "area/dependency"
     open-pull-requests-limit: 10
+    ignore:
+      # Microsoft.OpenApi is pinned here only to lift the 2.0.0 that Microsoft.AspNetCore.OpenApi resolves
+      # to a version with GHSA-v5pm-xwqc-g5wc fixed — it isn't a dependency we use directly (the API project
+      # only calls AddOpenApi/MapOpenApi). The 3.x line is a breaking major that ASP.NET Core 10's OpenApi
+      # package cannot consume: its own source generator assigns IOpenApiMediaType.Example, which is
+      # read-only in 3.x, so the build fails inside generated code we don't own (#227).
+      #
+      # Stay on 2.x until Microsoft.AspNetCore.OpenApi ships a build against 3.x, then drop this and bump
+      # both together. Minor/patch updates are deliberately still allowed, since that's how the security
+      # pin keeps moving.
+      - dependency-name: "Microsoft.OpenApi"
+        update-types: ["version-update:semver-major"]
     groups:
       actions:
         update-types:
