@@ -235,10 +235,11 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void Build_DiamondPaths_SplitDemandAmongFeeders_NoDoubleCount()
+    public void Build_DiamondPaths_AreUnknown_UntilOnePathIsDesignated()
     {
-        // A panel reachable from the boss both directly AND via a sub-panel (a diamond). The 100W of real
-        // load must not be counted twice: the panel's two feeder links carry 50W each, and the boss totals 100W.
+        // A panel reachable from the boss both directly AND via a sub-panel. The 100W of load is real, but
+        // *how much arrives by each path* is not measured — so neither link may claim a number. This used to
+        // split it 50/50, which reads on the diagram as though someone metered it.
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
         var flow = new EnergyFlowConfig
         {
@@ -259,11 +260,49 @@ public class FlowGraphTests
 
         var graph = FlowGraphBuilder.Build(data, flow);
 
-        Assert.Equal(50, graph.Links.Single(l => l.Source == "boss" && l.Target == "panel").Value);
-        Assert.Equal(50, graph.Links.Single(l => l.Source == "sub" && l.Target == "panel").Value);
+        // Both paths into the panel are flagged unknown and carry nothing.
+        Assert.False(graph.Links.Single(l => l.Source == "boss" && l.Target == "panel").Known);
+        Assert.False(graph.Links.Single(l => l.Source == "sub" && l.Target == "panel").Known);
+        Assert.Equal(0, graph.Links.Where(l => l.Target == "panel").Sum(l => l.Value));
+
+        // The real, measured part is untouched: the panel really does supply 100W downstream.
         Assert.Equal(100, graph.Links.Single(l => l.Source == "panel" && l.Target == "pdu:pdu1").Value);
-        // The boss carries the real load once: 50 (direct) + 50 (via sub) = 100, not 200.
-        Assert.Equal(100, graph.Links.Where(l => l.Source == "boss").Sum(l => l.Value));
+        Assert.Equal(100, graph.Nodes.Single(n => n.Id == "panel").Value);
+
+        // ...and the nodes whose value nothing determines say so, rather than showing a plausible figure.
+        Assert.Null(graph.Nodes.Single(n => n.Id == "boss").Value);
+        Assert.Null(graph.Nodes.Single(n => n.Id == "sub").Value);
+    }
+
+    [Fact]
+    public void Build_DiamondPaths_ResolveWhenAPathIsMarkedResidual()
+    {
+        // Saying which path carries the remainder is the supported way to attribute a diamond — an explicit
+        // instruction, so the number is the user's, not ours.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "boss", Label = "Boss" },
+                new EnergyFlowNode { Id = "panel", Label = "Panel" },
+                new EnergyFlowNode { Id = "sub", Label = "Sub", Mode = "residual" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "boss", To = "panel" },
+                new EnergyFlowLink { From = "boss", To = "sub" },
+                new EnergyFlowLink { From = "sub", To = "panel" },
+                new EnergyFlowLink { From = "panel", To = "pdu:pdu1" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        // The designated path carries the load; the direct one carries nothing, and both are *determined*.
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "sub" && l.Target == "panel").Value);
+        Assert.True(graph.Links.Single(l => l.Source == "sub" && l.Target == "panel").Known);
+        Assert.DoesNotContain(graph.Links, l => l.Source == "boss" && l.Target == "panel" && l.Value > 0);
     }
 
     [Fact]
@@ -293,7 +332,10 @@ public class FlowGraphTests
 
         Assert.Equal(6000, graph.Links.Single(l => l.Source == "solar").Value); // measured generation shown as-is
         Assert.DoesNotContain(graph.Links, l => l.Source == "grid");            // no fabricated grid draw
-        Assert.DoesNotContain(graph.Nodes, n => n.Id == "grid");
+
+        // The grid node itself stays on the diagram with no value: it is configured, so hiding it reads as
+        // "my wiring is broken" rather than "nothing measures this".
+        Assert.Null(graph.Nodes.Single(n => n.Id == "grid").Value);
     }
 
     [Fact]
@@ -374,7 +416,13 @@ public class FlowGraphTests
         var graph = FlowGraphBuilder.Build(data, flow);
 
         Assert.Equal(100, graph.Links.Single(l => l.Source == "untracked").Value);
-        Assert.DoesNotContain(graph.Links, l => l.Source == "spare");
+
+        // 'spare' supplies nothing — but it is still unmeasured, so it reads as "no data" rather than as a
+        // measured 0 W. Designating a residual says where the remainder went, not what its siblings did.
+        var spare = graph.Links.Single(l => l.Source == "spare");
+        Assert.False(spare.Known);
+        Assert.Equal(0, spare.Value);
+        Assert.Null(graph.Nodes.Single(n => n.Id == "spare").Value);
     }
 
     [Fact]

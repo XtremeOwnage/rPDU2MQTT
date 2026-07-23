@@ -93,8 +93,10 @@ public class EnergyFlowNode
     /// <see cref="Value"/> always wins regardless — this only governs nodes the graph would otherwise have
     /// to infer:
     /// <list type="bullet">
-    /// <item><c>auto</c> (default): aggregate children, and as an upstream feeder take a share of what's
-    /// left after measured siblings — the historical behaviour.</item>
+    /// <item><c>auto</c> (default): aggregate children. As an upstream feeder it carries a node's unmet
+    /// demand only when it is the <i>single</i> unmeasured path into that node, where conservation leaves no
+    /// other answer. Several unmeasured feeders into one node is a genuine unknown, and none of them are
+    /// given a value — splitting the load between them would state a figure nobody supplied.</item>
     /// <item><c>static</c>: a fixed leaf valued at <see cref="Value"/> (still superseded by a live source).
     /// This is the mode that gives the fixed value meaning; with no value set it contributes nothing.</item>
     /// <item><c>residual</c>: the designated "untracked" absorber on the <em>feeder</em> side — takes the
@@ -110,7 +112,7 @@ public class EnergyFlowNode
     /// </list>
     /// </summary>
     [DefaultValue("auto")]
-    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate / share the remainder), 'static' (a fixed leaf at Value), 'residual' (absorb untracked remaining demand of what it feeds), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.")]
+    [Description("How to value this node when it has no direct measurement: 'auto' (aggregate children; carries unmet demand only when it is the single path into a node — never splits a load between several unmeasured feeders), 'static' (a fixed leaf at Value), 'residual' (the designated absorber of what its target still needs — this is how you say where unaccounted power comes from), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.")]
     [AllowedValues("auto", "static", "residual", "untracked", "none")]
     public string Mode { get; set; } = "auto";
 

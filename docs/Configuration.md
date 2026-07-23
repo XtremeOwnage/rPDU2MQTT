@@ -433,6 +433,30 @@ Logging:
 ```
 
 
+### Accuracy: what the flow will and won't infer
+
+The diagram never states a number nobody supplied. A node's value comes from one of:
+
+1. **A measurement** — a live source bound to it, or a static `Value`.
+2. **Its children**, summed.
+3. **Conservation**, when it is the *single* unmeasured path into a node whose demand is measured. The load
+   is really being drawn and there is exactly one way for it to arrive, so the figure is derived, not guessed.
+
+If none of those apply the node reads **"no data"** on the diagram, publishes nothing to MQTT / Home
+Assistant / EmonCMS, and is reported as `null` by the API — deliberately *not* `0`, because 0 is a claim
+(solar at night really is 0 W) and a fabricated zero recorded into history is worse than a gap.
+
+In particular, **several unmeasured feeders into one node all read "no data"**. If solar, battery and grid
+all feed an inverter and none of them is metered, nothing indicates which supplied the load, so none of them
+is given a share of it. To say where unaccounted power comes from, mark that feeder's `Mode: residual` — the
+designated absorber carries the remainder after every measured feeder has supplied its part.
+
+> Before this rule existed, that case split the load equally between them: three unmeasured sources under a
+> 553 W load each showed 184.3 W, which is indistinguishable on the diagram from a real measurement.
+
+A configured node always appears on the diagram even when it has no value, so a gap in your metering is
+visible as a gap rather than as a missing node.
+
 ## Metric Exporters (Optional)
 
 In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled

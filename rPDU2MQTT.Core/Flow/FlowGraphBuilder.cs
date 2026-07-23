@@ -165,6 +165,49 @@ public static class FlowGraphBuilder
         double DemandShare(string child, HashSet<string> path)
             => Need(child, path) / Math.Max(1, incoming.TryGetValue(child, out var f) ? f.Count : 1);
 
+        // A 'none' node never infers a value, and a 'static' node with no value here (a valued one is
+        // already a leaf above) has nothing to give — both contribute zero rather than absorbing demand.
+        static bool Inert(string m) => m is "none" or "static";
+
+        // Which unmeasured feeders may supply what a node still needs after its measured feeders have
+        // supplied their real figures. This is the line between inference and invention:
+        //
+        //  - An explicit 'residual' feeder was designated for exactly this, so it absorbs the remainder.
+        //  - Otherwise a SINGLE unmeasured feeder conveys it. That isn't a guess: the load downstream is
+        //    really being drawn, and the topology leaves it exactly one path to arrive by.
+        //  - Several unmeasured feeders is a genuine unknown. Nothing says whether the load came from the
+        //    solar, the battery or the grid, so NONE of them carry anything. Dividing it between them —
+        //    which is what this used to do — states a number the user never supplied, on the diagram whose
+        //    whole purpose is to be accurate. Mark one 'residual' to say where the remainder actually goes.
+        List<string> Absorbers(string to)
+        {
+            var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+            var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
+            if (residual.Count > 0) return residual;
+            return unmeasured.Count == 1 ? unmeasured : new List<string>();
+        }
+
+        // Is the flow along this link determined by measurements at all? False when several unmeasured
+        // feeders compete to supply the same node — the link exists, but its share is unknowable, and it
+        // must be shown as "no data" rather than as zero flow.
+        bool Knowable(string from, string to)
+        {
+            if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
+            if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
+
+            var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+
+            // A designated residual is told what it carries, so its own flow is determined. Its unmeasured
+            // siblings are not: "the residual takes the remainder" says nothing about how much solar was
+            // generating, so reporting 0 W for them would be a claim we can't support either.
+            if (unmeasured.Any(f => Mode(f) == "residual")) return Mode(from) == "residual";
+
+            // One unmeasured path is determined by conservation. Several is a real unknown.
+            return unmeasured.Count <= 1;
+        }
+
         // EdgeFlow(from -> to): how much flows along one link.
         //  - A producer (a measured leaf feeding others) supplies its generation, divided across the things
         //    it powers in proportion to their downstream demand (equal split if none draw anything) — so a
@@ -198,38 +241,64 @@ public static class FlowGraphBuilder
                 return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
             }
 
-            // A 'none' node never infers a value, and a 'static' node with no value here (a valued one is
-            // already a leaf above) has nothing to give — both contribute zero rather than absorbing demand.
-            static bool Inert(string m) => m is "none" or "static";
             if (Inert(Mode(from))) return 0;
+
+            var absorbers = Absorbers(to);
+            if (!absorbers.Contains(from, StringComparer.OrdinalIgnoreCase)) return 0;
 
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
             var measured = feeders.Where(leaf.ContainsKey).Sum(f => EdgeFlow(f, to, path));
             var remainder = Math.Max(0, Need(to, path) - measured);
-
-            // Unmeasured feeders that may absorb the remainder. If any is 'residual', only those share it;
-            // otherwise the 'auto' feeders split it (back-compat when nothing is measured).
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
-            var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
-            var absorbers = residual.Count > 0 ? residual : unmeasured;
-            if (absorbers.Count == 0 || !absorbers.Contains(from, StringComparer.OrdinalIgnoreCase)) return 0;
             return remainder / absorbers.Count;
         }
 
-        // Emit one link per edge, valued by the flow it carries.
+        // Emit one link per edge, valued by the flow it carries. A link whose flow is *unknowable* is still
+        // emitted — carrying 0 and flagged — because the wiring is real even when the number isn't, and
+        // silently dropping it hides a node the user deliberately configured.
         var links = new List<FlowLink>();
-        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Every node the topology wires up, whether or not its link survives the filter below. Deriving the
+        // node set from the surviving links is what made a configured node disappear.
+        var wired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
             foreach (var to in kids)
             {
-                var value = EdgeFlow(from, to, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-                if (value <= 0) continue;
-                links.Add(new FlowLink(from, to, value));
-                used.Add(from); used.Add(to);
+                wired.Add(from); wired.Add(to);
+
+                var known = Knowable(from, to);
+                var value = known ? EdgeFlow(from, to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) : 0;
+
+                // A known-but-zero link carries nothing and is left off the diagram, as before. An *unknown*
+                // link is kept — it draws as "no data" rather than implying zero flow.
+                if (known && value <= 0) continue;
+
+                links.Add(new FlowLink(from, to, value, known));
             }
 
-        var nodes = used
-            .Select(id => new FlowNode(id, label.TryGetValue(id, out var l) ? l : id, kind.TryGetValue(id, out var k) ? k : "node"))
+        // A node's own value: its measurement if it has one, else what its known links determine (a root
+        // only has outflow, a leaf only inflow). No measurement and no known link means genuinely unknown —
+        // reported as null rather than 0, so nothing downstream can mistake "we don't know" for "it's zero".
+        double? ValueOf(string id)
+        {
+            if (leaf.TryGetValue(id, out var measured)) return measured;
+
+            double inflow = 0, outflow = 0;
+            var anyKnown = false;
+            foreach (var l in links)
+            {
+                if (!l.Known) continue;
+                if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyKnown = true; }
+                if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyKnown = true; }
+            }
+            return anyKnown ? Math.Max(inflow, outflow) : null;
+        }
+
+        // Every node the user declared, plus every auto (pdu/outlet) node that reported a measurement —
+        // whether or not a value could be determined for it. A configured node that silently disappears is
+        // its own kind of inaccuracy: it reads as "my config is broken" rather than "nothing measures this".
+        var nodes = label.Keys
+            .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
+            .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node", ValueOf(id)))
+            .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new FlowGraph(nodes, links, metric, units);
