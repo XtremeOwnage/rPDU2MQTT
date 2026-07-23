@@ -11,18 +11,39 @@ namespace rPDU2MQTT.Core.Flow;
 public static class FlowExport
 {
     /// <summary>
-    /// A node's rolled-up value: the larger of what flows in vs. what flows out (a root only has outflow,
-    /// a leaf only inflow, a balanced tier has equal in/out). Matches the value shown in the GUI.
+    /// A node's rolled-up value, or 0 when the graph could not determine one.
+    /// <para>
+    /// The builder computes this now (see <see cref="FlowNode.Value"/>), so exports agree with the diagram
+    /// instead of re-deriving it. Callers that must distinguish "unknown" from "zero" — anything that
+    /// publishes a reading — should read <see cref="FlowNode.Value"/> and skip nulls; see
+    /// <see cref="TryNodeValue"/>.
+    /// </para>
     /// </summary>
     public static double NodeValue(FlowGraph graph, string id)
+        => TryNodeValue(graph, id, out var value) ? value : 0;
+
+    /// <summary>
+    /// The node's value when the graph actually determined one. False means nothing measures this node and
+    /// nothing downstream determines it — publishing a number for it would be inventing one.
+    /// </summary>
+    public static bool TryNodeValue(FlowGraph graph, string id, out double value)
     {
+        var node = graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (node?.Value is { } known) { value = known; return true; }
+
+        // No value on the node: derive it from the links whose flow is known (the larger of in vs. out).
+        // A node the builder marked unknown has only unknown links, so this correctly finds nothing —
+        // while a graph assembled by hand, whose nodes carry no values, still resolves.
         double inflow = 0, outflow = 0;
+        var anyKnown = false;
         foreach (var l in graph.Links)
         {
-            if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) inflow += l.Value;
-            if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) outflow += l.Value;
+            if (!l.Known) continue;
+            if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyKnown = true; }
+            if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyKnown = true; }
         }
-        return Math.Max(inflow, outflow);
+        value = anyKnown ? Math.Max(inflow, outflow) : 0;
+        return anyKnown;
     }
 
     /// <summary>The ids of a node's feeders (the sources of links pointing into it) — its upstream parents.</summary>

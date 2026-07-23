@@ -50,9 +50,9 @@ const MODBUS_WORDORDERS = ['big', 'little'];
 // node gets: a node you haven't measured yet should read as nothing, not as an inferred figure.
 const NODE_MODES: [string, string, string][] = [
   ['none', 'None (nothing inferred)', 'Never inferred — contributes nothing unless it has a real value or children, so an unmeasured node simply drops out instead of showing a fabricated figure. The default for a new node.'],
-  ['auto', 'Auto (aggregate / share)', 'Sums its children, and as a feeder takes a share of whatever load measured siblings don’t cover. Sizes the node from what’s left over, so it always shows something.'],
+  ['auto', 'Auto (aggregate)', 'Sums its children. As a feeder it carries a node’s unmet demand only when it is the single path into it — where conservation leaves no other answer. It never splits a load between several unmeasured feeders: that would be inventing a number. Mark one feeder “residual” to say where the remainder actually comes from.'],
   ['static', 'Static (fixed value)', 'A fixed leaf valued at the number you enter (still superseded by a bound live source). Reveals the Fixed value field.'],
-  ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part.'],
+  ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part. This is how you tell the diagram where unaccounted power comes from — without it, competing unmeasured feeders all read “no data”.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
 ];
 
@@ -823,8 +823,13 @@ export function addFlowSection(nav: any, sections: any) {
     const incoming: any = {}, outgoing: any = {};
     nodes.forEach((n: any) => { incoming[n.id] = []; outgoing[n.id] = []; });
     links.forEach((l: any) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
-    const sumv = (arr: any[]) => (arr || []).reduce((s, l) => s + l.value, 0);
-    const nodeValue = (id: string) => Math.max(sumv(incoming[id]), sumv(outgoing[id]));
+    // The server decides a node's value and, crucially, whether one is known at all — null means nothing
+    // measures it and nothing downstream determines it. Never substitute 0 for that: 0 is a claim (solar at
+    // night really is 0 W) and showing it for an unmeasured node is exactly the fabrication we removed.
+    const byId: any = {};
+    nodes.forEach((n: any) => { byId[n.id] = n; });
+    const known = (id: string) => byId[id] && byId[id].value != null;
+    const nodeValue = (id: string) => known(id) ? byId[id].value : 0;
 
     // Column index = longest path from a root (a node with no incoming links).
     const colMemo: any = {};
@@ -859,7 +864,13 @@ export function addFlowSection(nav: any, sections: any) {
       if (c === 0) cn.sort((a: any, b: any) => nodeValue(b.id) - nodeValue(a.id));
       else cn.sort((a: any, b: any) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       let y = padTop;
-      cn.forEach((n: any) => { const h = Math.max(2, nodeValue(n.id) * pxPerUnit); pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 }; y += h + gap; });
+      // An unknown node gets a fixed placeholder height so it stays visible on the diagram — it's
+      // configured, and hiding it reads as "my wiring is broken" rather than "nothing measures this yet".
+      cn.forEach((n: any) => {
+        const h = known(n.id) ? Math.max(2, nodeValue(n.id) * pxPerUnit) : 10;
+        pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 };
+        y += h + gap;
+      });
     });
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
@@ -871,11 +882,17 @@ export function addFlowSection(nav: any, sections: any) {
     links.sort((a: any, b: any) => pos[a.target].y - pos[b.target].y).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
-      const h = Math.max(1, l.value * pxPerUnit);
+      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
+      const unknownLink = l.known === false;
+      const h = unknownLink ? 1.5 : Math.max(1, l.value * pxPerUnit);
       const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
-      svg.appendChild(svgEl('path', { d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`, fill: color, 'fill-opacity': '0.3' }));
+      svg.appendChild(svgEl('path', {
+        d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`,
+        fill: unknownLink ? 'var(--muted)' : color,
+        'fill-opacity': unknownLink ? '0.25' : '0.3',
+      }));
       s.outOff += h; t.inOff += h;
     });
 
@@ -883,16 +900,35 @@ export function addFlowSection(nav: any, sections: any) {
     // where they cross a ribbon).
     nodes.forEach((n: any) => {
       const p = pos[n.id]; if (!p) return;
-      svg.appendChild(svgEl('rect', { x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2, fill: colors[colMemo[n.id] % colors.length] }));
+      const unknownNode = !known(n.id);
+      svg.appendChild(svgEl('rect', {
+        x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
+        fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
+        'fill-opacity': unknownNode ? '0.45' : '1',
+      }));
       const lab = svgEl('text', {
         x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
       });
-      lab.textContent = `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
+      lab.textContent = unknownNode ? `${n.label} · no data` : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
+      if (unknownNode) {
+        lab.setAttribute('fill', 'var(--muted)');
+        lab.setAttribute('font-style', 'italic');
+        const why = svgEl('title');
+        why.textContent = 'Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.';
+        lab.appendChild(why);
+      }
       svg.appendChild(lab);
     });
 
-    count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`;
+    // Surface the unknowns rather than leaving them to be spotted: a node with no data is a gap in the
+    // measurement, and the point of this diagram is knowing which parts of the house are actually covered.
+    const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
+    count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
+      + (unknownCount ? ` · ${unknownCount} with no data` : '');
+    count.title = unknownCount
+      ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
+      : '';
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
     attachZoom(scroll, svg, W, totalH);  // scroll-into-view container is replaced on each draw(), so no leak.

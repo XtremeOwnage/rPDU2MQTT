@@ -58,8 +58,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
         foreach (var node in graph.Nodes)
         {
+            // Nothing determines this tier's power — no measurement, and no single path that conservation
+            // pins down. Publishing it would put a fabricated 0 W into Home Assistant's history, which is
+            // worse than the sensor going unavailable: one is a gap, the other is a lie that gets recorded.
+            if (!FlowExport.TryNodeValue(graph, node.Id, out var power))
+                continue;
+
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
-            var power = FlowExport.NodeValue(graph, node.Id);
             var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
             var parents = FlowExport.Parents(graph, node.Id);          // the tiers that feed this one
 
