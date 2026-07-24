@@ -1714,24 +1714,31 @@ function addFlowSection(nav     , sections     ) {
     const colX = (c        ) => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
     const pos      = {};
+    // Every node's label needs a full text line, whatever its bar height — otherwise a stack of small
+    // "0 W" / "no data" nodes collides its labels into an unreadable smear. So a node occupies a *row* at
+    // least this tall (its bar is centered inside it), while the bar itself stays proportional.
+    const labelRow = 15;
     // Barycenter: a node's preferred y is the value-weighted mean of its (already positioned) feeders.
     const bary = (id        ) => { let w = 0, s = 0; (incoming[id] || []).forEach((l     ) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
+    let bottom = padTop;
     cols.forEach((cn, c) => {
       // Roots stack by size; downstream columns follow their feeder's order (groups children, avoids crossings).
       if (c === 0) cn.sort((a     , b     ) => nodeValue(b.id) - nodeValue(a.id));
       else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       let y = padTop;
-      // An unknown node gets a fixed placeholder height so it stays visible on the diagram — it's
-      // configured, and hiding it reads as "my wiring is broken" rather than "nothing measures this yet".
       cn.forEach((n     ) => {
-        const h = known(n.id) ? Math.max(2, nodeValue(n.id) * pxPerUnit) : 10;
-        pos[n.id] = { x: colX(c), y, h, outOff: 0, inOff: 0 };
-        y += h + gap;
+        // Bar height is proportional; an unknown or measured-zero node is a thin marker (it has no
+        // magnitude to show) rather than a fixed slab. The row it sits in is what guarantees label spacing.
+        const h = known(n.id) ? Math.max(2, nodeValue(n.id) * pxPerUnit) : 3;
+        const rowH = Math.max(h, labelRow);
+        pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
+        y += rowH + gap;
       });
+      bottom = Math.max(bottom, y);
     });
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
-    const totalH = Math.ceil(Math.max(padTop + usableH, ...nodes.map((n     ) => pos[n.id] ? pos[n.id].y + pos[n.id].h : 0))) + padTop;
+    const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
 
