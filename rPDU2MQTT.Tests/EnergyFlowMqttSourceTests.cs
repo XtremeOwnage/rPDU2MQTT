@@ -458,6 +458,35 @@ public class EnergyFlowMqttSourceTests
     }
 
     [Fact]
+    public void Build_MidChainNodeReadingZero_KeepsTheWiredLink_SoDownstreamStaysConnected()
+    {
+        // A real setup: Solar (PV) → inverter → GridBoss, a live source bound to each. The inverter's "load
+        // output" register reads 0 (its PV feeds straight through to the grid), which used to zero the
+        // inverter→gridboss link and drop it — detaching GridBoss into a root and breaking the wired chain.
+        var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
+        var flow = new EnergyFlowConfig();
+        flow.Nodes.Add(new EnergyFlowNode { Id = "solar", Label = "Solar" });
+        flow.Nodes.Add(new EnergyFlowNode { Id = "inverter", Label = "Inverter" });
+        flow.Nodes.Add(new EnergyFlowNode { Id = "gridboss", Label = "GridBoss" });
+        flow.Links.Add(new EnergyFlowLink { From = "solar", To = "inverter" });
+        flow.Links.Add(new EnergyFlowLink { From = "inverter", To = "gridboss" });
+        flow.Links.Add(new EnergyFlowLink { From = "gridboss", To = "outlet:pdu1:0" });
+
+        var live = new FakeLive().Set("solar", "realpower", 4916).Set("inverter", "realpower", 0).Set("gridboss", "realpower", 3322);
+        var graph = FlowGraphBuilder.Build(data, flow, "realpower", live);
+
+        // The wired inverter→gridboss link survives (a hairline 0), so GridBoss keeps its feeder and the chain
+        // renders solar → inverter → gridboss instead of GridBoss floating off as a root.
+        var link = Assert.Single(graph.Links, l => l.Source == "inverter" && l.Target == "gridboss");
+        Assert.Equal(0, link.Value);
+        Assert.True(link.Known);
+        // Contrast: a *pure* zero-producing source (no inflow) still drops — solar reading 0 has no link.
+        var night = FlowGraphBuilder.Build(data, flow, "realpower",
+            new FakeLive().Set("solar", "realpower", 0).Set("inverter", "realpower", 0).Set("gridboss", "realpower", 3322));
+        Assert.DoesNotContain(night.Links, l => l.Source == "solar");
+    }
+
+    [Fact]
     public void Build_WithoutALiveSourceIsUnchanged()
     {
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
