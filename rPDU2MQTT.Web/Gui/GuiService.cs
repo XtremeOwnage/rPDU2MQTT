@@ -127,6 +127,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{gui.Port}");
+        // Kestrel's default 32 KB request-header cap returns 431 once cookies pile up — OIDC session/nonce
+        // cookies, plus anything set across sibling *.<domain> subdomains that all get sent here. Give it room
+        // so a browser carrying a fat cookie jar can still reach the GUI.
+        builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestHeadersTotalSize = 64 * 1024);
 
         if (UseOidc)
             ConfigureOidc(builder, gui.Oidc);
