@@ -2739,7 +2739,7 @@ function renderConfigSection(node     , nav     , sections     ) {
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
-    else if (node.key === 'Operator') wireOperatorSwitch(sec);
+    else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
   }
   return link;
@@ -2874,6 +2874,45 @@ function wireApiDocs(sec     ) {
   enabled?.addEventListener('change', apply);
   apply();
   sec.appendChild(box);
+}
+
+// Operator page: an on-demand update check. Asks the operator to query the registry now and says plainly
+// whether a newer eligible version (bounded by Policy) is available — read-only, never touches the Deployment.
+function wireOperatorCheck(sec     ) {
+  const box = document.createElement('fieldset');
+  const lg = document.createElement('legend'); lg.textContent = 'Update check'; box.appendChild(lg);
+  box.appendChild(el('div', { class: 'desc', text: 'Check the registry now and report whether a newer eligible version (bounded by Policy) is available. Read-only — this never changes the Deployment.' }));
+  const row = el('div', { class: 'sec-actions' });
+  const check = btn('Check now', 'primary');
+  const result = el('div', { class: 'desc', style: { margin: '4px 0 0', fontSize: '13px' } });
+  row.append(check); box.append(row, result);
+  sec.appendChild(box);
+
+  const show = (u     ) => {
+    // Available / up-to-date / no-info — colour-coded so the answer reads at a glance.
+    if (u?.available) {
+      result.style.color = 'var(--warn, #fa4)';
+      let s = `↑ Update available: ${u.latest || '?'}` + (u.current ? ` (currently ${u.current})` : '');
+      if (u.applied) s += ` — auto-update rolled to ${u.applied}`;
+      result.textContent = s;
+    } else if (u?.current) {
+      result.style.color = 'var(--good)';
+      result.textContent = `✓ Up to date — ${u.current} is the newest ${u.policy ? u.policy.toLowerCase() + '-eligible ' : ''}release`;
+    } else {
+      result.style.color = 'var(--muted)';
+      result.textContent = u?.message || 'No update information returned.';
+    }
+    if (u?.checkedAt) result.textContent += ` · checked ${new Date(u.checkedAt).toLocaleTimeString()}`;
+  };
+
+  check.onclick = async () => {
+    check.disabled = true;
+    result.style.color = 'var(--muted)'; result.textContent = 'Checking the registry…';
+    const r = await api('/api/operator/check', { method: 'POST' });
+    check.disabled = false;
+    if (!r.body?.ok) { result.style.color = 'var(--bad)'; result.textContent = r.body?.message || 'Check failed.'; return; }
+    show(r.body.update);
+  };
 }
 
 // Operator page: a channel/version switcher — roll the Deployment to stable/edge/dev or a specific release (#210).
