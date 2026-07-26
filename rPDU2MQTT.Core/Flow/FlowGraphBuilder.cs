@@ -120,12 +120,19 @@ public static class FlowGraphBuilder
         // Custom directed links (From feeds To) plus legacy Parents (parent feeds child) — only when both
         // endpoints are known nodes. A node may gather several feeders (multi-parent) and a producer is
         // simply a link pointing into what it powers (e.g. solar → inverter).
+        // Track which edges the user wired by hand: unlike the auto PDU → outlet links, these must stay on
+        // the diagram even when their computed flow is zero, so the topology someone deliberately drew (e.g.
+        // Solar → inverter → GridBoss) always renders as a connected chain — a mid-chain node that happens to
+        // read 0 W must not silently detach everything downstream of it.
+        var wiredEdges = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static string EdgeKey(string from, string to) => from + "␟" + to;
         foreach (var l in flow.Links)
             if (!string.IsNullOrEmpty(l.From) && !string.IsNullOrEmpty(l.To) && label.ContainsKey(l.From) && label.ContainsKey(l.To))
-                AddEdgeSafe(l.From, l.To);
+                if (AddEdgeSafe(l.From, l.To)) wiredEdges.Add(EdgeKey(l.From, l.To));
         foreach (var (child, parent) in flow.Parents)
             if (!string.IsNullOrEmpty(child) && !string.IsNullOrEmpty(parent) && label.ContainsKey(child) && label.ContainsKey(parent))
-                AddEdgeSafe(parent, child);
+                if (AddEdgeSafe(parent, child)) wiredEdges.Add(EdgeKey(parent, child));
+        bool Wired(string from, string to) => wiredEdges.Contains(EdgeKey(from, to));
 
         // Which feeders point into each node — used to split a node's demand across them (so a node
         // reachable by several paths isn't counted multiple times) and, crucially, to let measured feeders
@@ -267,9 +274,15 @@ public static class FlowGraphBuilder
                 var known = Knowable(from, to);
                 var value = known ? EdgeFlow(from, to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) : 0;
 
-                // A known-but-zero link carries nothing and is left off the diagram, as before. An *unknown*
-                // link is kept — it draws as "no data" rather than implying zero flow.
-                if (known && value <= 0) continue;
+                // A known-but-zero link is normally left off the diagram (an idle outlet, or a pure source
+                // generating nothing — solar at night correctly drops out). But when the zero sits on a link
+                // the user wired *out of a node that itself has incoming flow*, dropping it would detach the
+                // whole chain below a mid-chain node that happens to read 0 W (e.g. an inverter whose "load"
+                // register is 0 while its PV feeds straight through to the grid). Keep those, so the wired
+                // topology always renders — the zero just draws as a hairline — while a zero-producing source
+                // still drops as before.
+                var passThroughZero = Wired(from, to) && incoming.TryGetValue(from, out var upstream) && upstream.Count > 0;
+                if (known && value <= 0 && !passThroughZero) continue;
 
                 links.Add(new FlowLink(from, to, value, known));
             }
