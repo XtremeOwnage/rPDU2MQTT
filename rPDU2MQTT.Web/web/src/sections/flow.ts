@@ -1516,6 +1516,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, instSel.wrap, status); sec.appendChild(bar);
 
+  const flowWrap = el('div', { class: 'energy-flow' }); sec.appendChild(flowWrap);
   const grid = el('div', { class: 'energy-grid' }); sec.appendChild(grid);
   const summary = el('div', { class: 'energy-summary' }); sec.appendChild(summary);
 
@@ -1531,6 +1532,54 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return t;
   };
 
+  // The animated flow diagram: a central hub with Solar (top), Grid (left), Battery (right) and Home (bottom),
+  // particles streaming along each arm in the real direction of flow — toward the hub when a source supplies,
+  // away when it draws (charge/export/consumption). Speed and particle count scale with power; an unknown or
+  // idle arm just shows a dim static line, never invented motion.
+  const HUB = { x: 220, y: 150 };
+  const NODEPOS: Record<string, { x: number, y: number }> = {
+    solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
+  };
+  const drawFlow = (arms: { key: string, icon: string, label: string, text: string, color: string, flow: number | null }[]) => {
+    flowWrap.innerHTML = '';
+    const svg = svgEl('svg', { viewBox: '0 0 440 300', width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg' });
+    const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
+    svg.append(lines, dots, nodes);
+
+    arms.forEach(a => {
+      const p = NODEPOS[a.key];
+      // Base connector (always visible, dim) between the node and the hub.
+      lines.appendChild(svgEl('line', { x1: p.x, y1: p.y, x2: HUB.x, y2: HUB.y, class: 'energy-arm' }));
+
+      // Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node). Home only ever consumes.
+      const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
+      const mag = Math.abs(a.flow ?? 0);
+      if (a.flow != null && mag > 1) {
+        const [sx, sy, ex, ey] = toHub ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
+        const kw = mag / 1000;
+        const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
+        const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
+        for (let i = 0; i < count; i++) {
+          const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
+          dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
+          dots.appendChild(dot);
+        }
+      }
+
+      // Node: a coloured ring with its icon, a label and the live figure.
+      const g = svgEl('g', { class: 'energy-node' + (a.flow != null && mag > 1 ? ' live' : '') });
+      g.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 26, class: 'energy-node-ring', style: `stroke:${a.color}` }));
+      const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
+      const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
+      const val = svgEl('text', { x: p.x, y: p.y + 57, class: 'energy-node-val' }); val.textContent = a.text; g.appendChild(val);
+      nodes.appendChild(g);
+    });
+
+    // A small hub dot where the arms meet.
+    nodes.appendChild(svgEl('circle', { cx: HUB.x, cy: HUB.y, r: 5, class: 'energy-hub' }));
+    flowWrap.appendChild(svg);
+  };
+
   // Sum a kind's out-direction (graph) values. Returns present (any nodes of this kind) and the known sum
   // (null when nodes exist but none has a value) so we can tell "no grid" from "grid, value unknown".
   const sumKind = (nodes: any[], kind: string) => {
@@ -1542,7 +1591,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
   const load = async () => {
     let r: any; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
-    grid.innerHTML = ''; summary.innerHTML = '';
+    grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (r.body && r.body.message) || 'Could not load energy data.' }));
       status.textContent = ''; return;
@@ -1582,6 +1631,26 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     const battNet = net(batt, battIn);
     const gridNet = net(gridK, gridIn);
 
+    // Home load: prefer explicitly-tagged load nodes; otherwise derive from the balance, but only when every
+    // present source is known (an unknown feeder would make the balance a guess — so it shows "—" instead).
+    let home: number | null = null, homeSub = '';
+    if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
+    else {
+      const unknownFeeder = (solar.present && solar.value == null) || (batt.present && batt.value == null) || (gridK.present && gridK.value == null);
+      if (!unknownFeeder && (solar.present || batt.present || gridK.present)) {
+        home = (solar.value || 0) + (battNet || 0) + (gridNet || 0);
+        homeSub = 'balance of measured sources';
+      }
+    }
+
+    // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
+    const arms: any[] = [];
+    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmtPower(solar.value), color: 'var(--warn)', flow: solar.value });
+    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmtPower(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet });
+    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmtPower(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet });
+    if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmtPower(home), color: 'var(--muted)', flow: home });
+    if (arms.length) drawFlow(arms);
+
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
@@ -1607,17 +1676,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls));
     }
 
-    // Home load: prefer explicitly-tagged load nodes; otherwise derive from the balance, but only when every
-    // present source is known (an unknown feeder would make the balance a guess — so it shows "—" instead).
-    let home: number | null = null, homeSub = '';
-    if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
-    else {
-      const unknownFeeder = (solar.present && solar.value == null) || (batt.present && batt.value == null) || (gridK.present && gridK.value == null);
-      if (!unknownFeeder && (solar.present || batt.present || gridK.present)) {
-        home = (solar.value || 0) + (battNet || 0) + (gridNet || 0);
-        homeSub = 'balance of measured sources';
-      }
-    }
+    // Home load (computed above with the flow arms).
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), homeSub || 'no reading yet'));
 

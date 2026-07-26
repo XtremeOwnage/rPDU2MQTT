@@ -90,6 +90,18 @@
   .status-card .desc { margin:6px 0 0; font-size:12px; }
   .status-card .desc:empty { display:none; }
 
+  /* --- Energy flow diagram ---------------------------------------------------------------------- */
+  .energy-flow { max-width:520px; margin:var(--sp-4) auto 0; }
+  .energy-flow-svg { display:block; width:100%; height:auto; }
+  .energy-arm { stroke:var(--line); stroke-width:2; }
+  .energy-hub { fill:var(--muted); }
+  .energy-dot { opacity:.95; }
+  .energy-node-ring { fill:var(--panel); stroke-width:2; opacity:.5; transition:opacity .2s; }
+  .energy-node.live .energy-node-ring { opacity:1; }
+  .energy-node-icon { font-size:20px; text-anchor:middle; dominant-baseline:central; }
+  .energy-node-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; fill:var(--muted); text-anchor:middle; }
+  .energy-node-val { font-size:13px; font-weight:680; fill:var(--fg); text-anchor:middle; }
+
   /* --- Energy overview tiles -------------------------------------------------------------------- */
   .energy-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:var(--sp-3); margin-top:var(--sp-4); }
   .energy-tile {
