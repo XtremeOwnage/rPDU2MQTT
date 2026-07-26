@@ -1634,16 +1634,21 @@ function collapseGraph(nodes       , links       )                              
   const groupNode                      = {};
   flowGroups().forEach((g     ) => {
     if (!collapsedGroups.has(g.Id)) return;
+    const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
     let sum = 0, known = false;
     (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
-    groupNode[g.Id] = { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
+    groupNode[g.Id] = anchor
+      // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
+      ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
+      : { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
   });
 
   const remap = (id        ) => (memberOf[id] ? memberOf[id].Id : id);
   // Drop the collapsed members, keep everyone else, add the group nodes (only groups that actually have a
   // member present in this graph).
   const present = new Set        ();
-  const outNodes = nodes.filter(n => !memberOf[n.id]);
+  // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
+  const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
   const merged                      = {};
   links.forEach(l => {
     const s = remap(l.source), t = remap(l.target);
@@ -1654,7 +1659,8 @@ function collapseGraph(nodes       , links       )                              
     merged[k].value += (l.value || 0);
     if (l.known === false) merged[k].known = false;
   });
-  Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id)) outNodes.push(gn); });
+  // An anchor group always appears (its node was already in the graph); a synthetic group only if a member was.
+  Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id) || byId[gn.id]) outNodes.push(gn); });
   return { nodes: outNodes, links: Object.values(merged) };
 }
 
@@ -1691,7 +1697,7 @@ function renderGroupManager(flow     , cand                  , rerender         
   const groups = ensure(flow, 'Groups', []);
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs — e.g. three MPPTs as one “Incoming PV”. Members keep their own wiring and exports; the group also publishes its summed total. Collapse/expand each group from the toggles above either graph.' }));
+  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs. Either make a new group (its value is the members’ sum), or turn an existing node into a group — e.g. make “Solar PV” a group over its three MPPTs: collapsed, the flow chart shows only Solar PV reporting its own value; click it to expand the strings. Collapse/expand from the toggles above either graph, or by clicking the node.' }));
 
   const nm = (id        ) => (cand.get(id) || {}).label || id;
 
@@ -1712,6 +1718,23 @@ function renderGroupManager(flow     , cand                  , rerender         
   };
   addBar.append(idIn, labIn, kindSel, addBtn);
   box.appendChild(addBar);
+
+  // Anchor a group on an existing node: that node becomes the group (keeping its own value), and its members
+  // fold into it. This is the "make Solar PV a group over its MPPTs" path.
+  const anchorRow = el('div', { class: 'ld-toolbar' });
+  anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
+  const anchorSel = el('select', { style: { width: 'auto' } })                     ;
+  anchorSel.appendChild(el('option', { value: '', text: '— pick a node —' }));
+  [...cand.keys()].filter(id => !groups.some((g     ) => g.Id === id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+    .forEach(id => anchorSel.appendChild(el('option', { value: id, text: nm(id) })));
+  anchorSel.onchange = () => {
+    const id = anchorSel.value; if (!id) return;
+    groups.push({ Id: id, Label: nm(id), Members: [] });
+    toast(`“${nm(id)}” is now a group — add its members below.`, true);
+    rerender();
+  };
+  anchorRow.appendChild(anchorSel);
+  box.appendChild(anchorRow);
 
   if (!groups.length) { box.appendChild(el('div', { class: 'desc', text: 'No groups yet — add one above, then pick its members.' })); return box; }
 
