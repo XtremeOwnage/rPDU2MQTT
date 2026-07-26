@@ -2128,9 +2128,10 @@ function addFlowSection(nav     , sections     ) {
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px', marginTop: '10px', maxHeight: '72vh' } });
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node’s ● onto another to link.' }));
     const detachZoom = attachZoom(scroll, svg, W, H);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
-    [['fh-arrow', 'var(--line)'], ['fh-arrow-c', '#5ab0ff']].forEach(([id, fill]) => {
+    [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
       const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
       mk.appendChild(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill })); defs.appendChild(mk);
     });
@@ -2140,10 +2141,10 @@ function addFlowSection(nav     , sections     ) {
     const edgeD = (a     , b     ) => { const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
     edges.forEach(e => {
       const a = pos[e.from], b = pos[e.to];
-      edgeLayer.appendChild(svgEl('path', { d: edgeD(a, b), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--line)', 'stroke-width': e.custom ? 2 : 1.5, 'stroke-dasharray': e.custom ? '' : '4 3', 'marker-end': `url(#${e.custom ? 'fh-arrow-c' : 'fh-arrow'})`, 'pointer-events': 'none' }));
+      edgeLayer.appendChild(svgEl('path', { d: edgeD(a, b), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--faint)', 'stroke-width': e.custom ? 3.5 : 2, 'stroke-opacity': e.custom ? '0.95' : '0.7', 'stroke-dasharray': e.custom ? '' : '5 4', 'marker-end': `url(#${e.custom ? 'fh-arrow-c' : 'fh-arrow'})`, 'pointer-events': 'none' }));
       if (e.custom) {
         // Drifting dashes along the link, hinting at flow direction.
-        edgeLayer.appendChild(svgEl('path', { class: 'flow-line', d: edgeD(a, b), fill: 'none', stroke: '#cfe8ff', 'stroke-opacity': '0.85', 'stroke-width': '2.6', 'stroke-linecap': 'round', 'stroke-dasharray': '7 11', 'pointer-events': 'none' }));
+        edgeLayer.appendChild(svgEl('path', { class: 'flow-line', d: edgeD(a, b), fill: 'none', stroke: '#eaf5ff', 'stroke-opacity': '0.95', 'stroke-width': '3.4', 'stroke-linecap': 'round', 'stroke-dasharray': '8 10', 'pointer-events': 'none' }));
         const mx = (a.x + NW + b.x) / 2, my = (a.y + b.y) / 2 + NH / 2;
         const del = svgEl('text', { x: mx, y: my, 'text-anchor': 'middle', 'dominant-baseline': 'middle', fill: 'var(--bad)', 'font-size': '15', style: 'cursor:pointer' });
         del.textContent = '✕'; del.onclick = () => { const i = links.indexOf(e.ref); if (i >= 0) links.splice(i, 1); toast(`${nm(e.from)} → ${nm(e.to)} removed.`, true); renderEditor(); };
@@ -2181,6 +2182,10 @@ function addFlowSection(nav     , sections     ) {
     // coords through the SVG CTM so the drag line stays correct under zoom/scroll.
     const toUser = (cx        , cy        ) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
     let linkFrom      = null, tempLine      = null, hovered      = null;
+    // Drag the empty canvas to pan (engages past a small threshold, so a click/double-click on a node or the
+    // ✕ still registers). A port-drag creates a link instead — that path sets linkFrom and never pans.
+    let panStart      = null, panning = false;
+    scroll.style.cursor = 'grab';
     const highlight = (id     ) => {
       if (id === hovered) return;
       if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', colors[col(hovered) % colors.length]); rc.setAttribute('stroke-width', '2'); }
@@ -2192,15 +2197,27 @@ function addFlowSection(nav     , sections     ) {
       const portId = e.target.getAttribute && e.target.getAttribute('data-port');
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
       if (rmId) { const i = customNodes.findIndex((n     ) => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
-      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); }
+      if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
+      // Anything else (background, a node body, a label): a potential pan.
+      panStart = { x: e.clientX, y: e.clientY, sl: scroll.scrollLeft, st: scroll.scrollTop };
+      e.preventDefault();   // don't rubber-band-select node labels while dragging
     };
     const onMove = (e     ) => {
+      if (panStart && !linkFrom) {
+        const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
+        if (panning || Math.hypot(dx, dy) > 4) {
+          panning = true; scroll.style.cursor = 'grabbing';
+          scroll.scrollLeft = panStart.sl - dx; scroll.scrollTop = panStart.st - dy;
+        }
+        return;
+      }
       if (!linkFrom) return;
       const u = toUser(e.clientX, e.clientY), a = pos[linkFrom];
       tempLine.setAttribute('d', `M${a.x + NW},${a.y + NH / 2} L${u.x},${u.y}`);
       highlight(targetUnder(e.clientX, e.clientY));
     };
     const onUp = (e     ) => {
+      if (panStart) { const wasPanning = panning; panStart = null; panning = false; scroll.style.cursor = 'grab'; if (wasPanning) return; }
       if (!linkFrom) return;
       const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
       if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
