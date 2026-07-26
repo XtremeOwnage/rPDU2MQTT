@@ -1,6 +1,24 @@
 namespace rPDU2MQTT.Grains.Abstractions.Operator;
 
 /// <summary>
+/// How a report should read at a glance. The grain knows its state exactly when it writes the message, so it
+/// says so here rather than leaving the GUI to guess a colour by keyword-matching the prose (which drifts the
+/// moment a message is reworded). <see cref="Info"/> is first so a blank/initial report is neutral, not falsely
+/// green. Serialized as its name via <c>JsonStringEnumConverter</c>, e.g. <c>"updateAvailable"</c>.
+/// </summary>
+public enum OperatorSeverity
+{
+    /// <summary>Neutral — checking, disabled, or couldn't determine (muted).</summary>
+    Info,
+    /// <summary>Running the latest eligible build (good).</summary>
+    Ok,
+    /// <summary>A newer build is available, or one was just applied (attention).</summary>
+    UpdateAvailable,
+    /// <summary>The check itself failed (muted/error).</summary>
+    Error,
+}
+
+/// <summary>
 /// The operator's update report — held in the grain and returned to callers, replacing the round-trip
 /// through the CR <c>status</c> the GUI used to poll. Property names are the camelCase the GUI already reads.
 /// </summary>
@@ -15,6 +33,7 @@ public sealed record OperatorReport
     [Id(5)] public string? Applied { get; init; }
     [Id(6)] public string? CheckedAt { get; init; }
     [Id(7)] public string? Message { get; init; }
+    [Id(8)] public OperatorSeverity Severity { get; init; }
 }
 
 /// <summary>

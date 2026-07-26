@@ -2910,14 +2910,14 @@ function wireOperatorCheck(sec     ) {
   sec.appendChild(box);
 
   const show = (u     ) => {
-    // The operator's message is authoritative and correct for both releases and moving channels
-    // (e.g. "A newer 'unstable' build is available" vs "Running the latest 'unstable' build"), so drive the
-    // display from it rather than re-deriving — the old re-derivation called 'unstable' a "release".
+    // The operator reports both the message and a Severity, so the colour comes straight from that severity —
+    // no re-deriving from wording (the old code called 'unstable' a "release", then keyword-sniffed the prose).
+    // Fall back to `available` only for a legacy report that predates the severity field.
     const msg = u?.message || (u?.available ? 'Update available.' : 'Up to date.');
-    const iffy = /couldn.?t|couldn't|unknown|failed|error|disabled|needs|not a release/i.test(msg);
-    if (u?.available) { result.style.color = 'var(--warn, #fa4)'; result.textContent = '↑ ' + msg; }
-    else if (iffy) { result.style.color = 'var(--muted)'; result.textContent = msg; }
-    else { result.style.color = 'var(--good)'; result.textContent = '✓ ' + msg; }
+    const sev = u?.severity ?? (u?.available ? 'UpdateAvailable' : 'Ok');
+    if (sev === 'UpdateAvailable') { result.style.color = 'var(--warn, #fa4)'; result.textContent = '↑ ' + msg; }
+    else if (sev === 'Ok') { result.style.color = 'var(--good)'; result.textContent = '✓ ' + msg; }
+    else { result.style.color = 'var(--muted)'; result.textContent = msg; }   // Info / Error
     if (u?.checkedAt) result.textContent += ` · checked ${new Date(u.checkedAt).toLocaleTimeString()}`;
   };
 
