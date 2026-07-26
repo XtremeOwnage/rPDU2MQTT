@@ -49,6 +49,8 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{cfg.Api.Port}");
+        // Match the GUI: don't 431 on a large cookie jar carried across sibling subdomains (default is 32 KB).
+        builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestHeadersTotalSize = 64 * 1024);
         builder.Services.AddOpenApi();
 
         app = builder.Build();
