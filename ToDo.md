@@ -82,3 +82,64 @@ Branch feat/v3-pipeline-abstractions.
         whole story.
 
 Nothing open.
+
+
+
+- in the energy flow chart- clicking a node, which hilight its path back to the root nodes, and dim everything else
+
+Click it again, to restore.
+
+- Energy Flow Chart- ability to display Power.... Or Energy.
+
+- Need to aggregate energy data, using the collected power data. Will need redis broker to support
+    Helm chart will need redis broker. Docker compse example, will need redis.
+    For those wanting simple install, should offer a simple sqlite database or mabye an inmemory cache or something.
+    Cache will be responsible for aggregating Power into Energy.
+
+- Putting a "None" node between populated nodes, causing the chart to get extremely weird.
+
+The None nodes are removed form the chart, instead of displaying between the nodes.
+
+- Nodes without energy, explain extremely weird.
+
+In this case- MPPTs 1-3 feeds a aggregate node named Solar/PV, which feeds the inverter.
+
+WELL..... since its night time, they have zero output. And... fubar.
+
+![alt text](image.png)
+
+-----------
+
+- Hierarchy diagram, small bug-
+
+![alt text](image-1.png)
+
+battery feeds the Flexboss/Inverter, but, is positioned to the left of Solar which also feeds the flexboss.
+
+It should, ideally be positioned below, or above Solar/PV.... since it connects to a node to the right of it. Instead, its displayed on the left side.
+
+-----------------------
+
+Need some units created for percentages. Ie- Battery Percent, Load Percent... etc.. Temperature, might be a good metric to create as well.
+
+------------------------
+
+Need either a page, or dashboard, to allow display lots of the data we are collecting, Currently, kind of limited to whatever the chat displays. 
+
+Extra page just for displaying data would be handy.
+
+In addition, overing over items in the flow chart, SHOULD yield a hover-over popup, displaying node details, and data.
+
+----------------------------
+
+Should add a button to the emoncms page, which  opens a webpage/tab to emoncms.
+
+Prob should do the same for home assistant. And promehteus. And the PDUs.
+
+URLs should be optional, and button only display if populated.
+
+-----------------------------
+
+Minor- should add a button / badge somewhere on the web interface linking back to our github page. Ability to disable in the options too, but, default enabled.
+
+Under diagnostics page, prob put a button linking to our discord for support. https://static.xtremeownage.com/discord
