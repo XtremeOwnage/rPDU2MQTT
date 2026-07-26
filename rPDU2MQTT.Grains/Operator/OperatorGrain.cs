@@ -45,16 +45,20 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
 
     public async Task<OperatorReport> CheckNow(bool force)
     {
-        if (source is null) return report = report with { Message = "Operator needs the Kubernetes config source." };
+        if (source is null) return report = report with { Message = "Operator needs the Kubernetes config source.", Severity = OperatorSeverity.Info };
         if (!cfg.Operator.Enabled || !cfg.Operator.CheckForUpdates)
-            return report = report with { Message = "Update checks are disabled (Operator.Enabled / CheckForUpdates)." };
+            return report = report with { Message = "Update checks are disabled (Operator.Enabled / CheckForUpdates).", Severity = OperatorSeverity.Info };
 
         var interval = TimeSpan.FromHours(Math.Max(1, cfg.Operator.CheckIntervalHours));
         if (!force && DateTime.UtcNow - lastCheckUtc < interval) return report;   // throttle unless forced
         lastCheckUtc = DateTime.UtcNow;
 
         try { await CheckOnceAsync(CancellationToken.None); }
-        catch (Exception ex) { log.LogWarning("Operator: check failed: {Msg}", ex.Message); }
+        catch (Exception ex)
+        {
+            log.LogWarning("Operator: check failed: {Msg}", ex.Message);
+            report = report with { CheckedAt = NowIso(), Message = $"Update check failed: {ex.Message}", Severity = OperatorSeverity.Error };
+        }
         return report;
     }
 
@@ -69,7 +73,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         try
         {
             var patched = await SetImageAsync(repository, newImage, newImage, CancellationToken.None);
-            await Report(report with { Available = false, Current = tag, Latest = tag, Applied = tag, CheckedAt = NowIso(), Message = $"Switched to {tag}." });
+            await Report(report with { Available = false, Current = tag, Latest = tag, Applied = tag, CheckedAt = NowIso(), Message = $"Switched to {tag}.", Severity = OperatorSeverity.Ok });
             return $"Switching to {tag}: rolled {(patched.Count > 0 ? string.Join(", ", patched) : "no")} deployment(s).";
         }
         catch (Exception ex) { return $"Switch to {tag} failed: {ex.Message}"; }
@@ -85,10 +89,10 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         try
         {
             var digest = await registry.ResolveDigestAsync(registryHost, repository, image.Tag, CancellationToken.None);
-            var newImage = digest is not null ? $"{image.Registry}/{repository}:{image.Tag}@{digest}" : image.WithTag(image.Tag);
+            var newImage = digest is not null ? Pinned(image, repository, digest) : image.WithTag(image.Tag);
             // Container image may carry the @digest to force the re-pull; RPDU2MQTT_IMAGE stays the clean tag.
             var patched = await SetImageAsync(repository, newImage, image.WithTag(image.Tag), CancellationToken.None);
-            await Report(report with { Current = image.Tag, CheckedAt = NowIso(), Message = $"Redeploying {image.Tag}." });
+            await Report(report with { Current = image.Tag, CheckedAt = NowIso(), Message = $"Redeploying {image.Tag}.", Severity = OperatorSeverity.Ok });
             return $"Force update: rolled {(patched.Count > 0 ? string.Join(", ", patched) : "no")} deployment(s) to {newImage}.";
         }
         catch (Exception ex) { return $"Redeploy failed: {ex.Message}"; }
@@ -100,7 +104,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
     {
         if (!ImageReference.TryParse(Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"), out var image))
         {
-            await Report(report with { CheckedAt = NowIso(), Message = "Deployed image is unknown (RPDU2MQTT_IMAGE)." });
+            await Report(report with { CheckedAt = NowIso(), Message = "Deployed image is unknown (RPDU2MQTT_IMAGE).", Severity = OperatorSeverity.Info });
             return;
         }
 
@@ -111,28 +115,36 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
 
         if (!check.Applicable)
         {
+            if (string.IsNullOrEmpty(image.Tag))
+            {
+                await Report(report with { CheckedAt = NowIso(), Message = "The deployed image has no tag to track.", Severity = OperatorSeverity.Info });
+                return;
+            }
+
             // A moving channel (unstable/edge/latest/stable) has no version to compare — but its digest moves
             // as new builds publish. Compare what the tag points to in the registry now against the digest
             // this process is actually running, so "Check now" can say a newer build is waiting instead of a
-            // misleading "up to date".
-            var registryDigest = await registry.ResolveDigestAsync(registryHost, repository, image.Tag, ct);
-            var runningDigest = await RunningDigestAsync(ct);
-            var newer = registryDigest is not null && runningDigest is not null && !DigestsEqual(registryDigest, runningDigest);
+            // misleading "up to date". The two reads hit different services (registry vs the k8s API) and don't
+            // depend on each other, so run them together.
+            var digestTask = registry.ResolveDigestAsync(registryHost, repository, image.Tag, ct);
+            var runningTask = RunningDigestAsync(ct);
+            var registryDigest = await digestTask;
+            var runningDigest = await runningTask;
+            var newer = registryDigest is not null && runningDigest is not null && !ImageDigest.Equal(registryDigest, runningDigest);
 
-            string message = registryDigest is null
-                ? $"Tracking the moving '{image.Tag}' channel — couldn't read its digest from the registry."
+            var (message, severity) = registryDigest is null
+                ? ($"Tracking the moving '{image.Tag}' channel — couldn't read its digest from the registry.", OperatorSeverity.Info)
                 : runningDigest is null
-                    ? $"Tracking the moving '{image.Tag}' channel — couldn't determine the running digest to compare."
+                    ? ($"Tracking the moving '{image.Tag}' channel — couldn't determine the running digest to compare.", OperatorSeverity.Info)
                     : newer
-                        ? $"A newer '{image.Tag}' build is available — use Force update to pull it."
-                        : $"Running the latest '{image.Tag}' build.";
+                        ? ($"A newer '{image.Tag}' build is available — use Force update to pull it.", OperatorSeverity.UpdateAvailable)
+                        : ($"Running the latest '{image.Tag}' build.", OperatorSeverity.Ok);
 
             var appliedChannel = (string?)null;
             if (newer && cfg.Operator.AutoUpdate)
             {
                 // AutoUpdate on a channel means "keep pulling its latest build": re-pull, pinning the digest.
-                var pinned = $"{image.Registry}/{repository}:{image.Tag}@{registryDigest}";
-                if ((await SetImageAsync(repository, pinned, image.WithTag(image.Tag), ct)).Count > 0)
+                if ((await SetImageAsync(repository, Pinned(image, repository, registryDigest!), image.WithTag(image.Tag), ct)).Count > 0)
                 {
                     appliedChannel = image.Tag;
                     message = $"A newer '{image.Tag}' build was available — auto-updated (rolling now).";
@@ -149,6 +161,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
                 Applied = appliedChannel,
                 CheckedAt = NowIso(),
                 Message = message,
+                Severity = severity,
             });
             return;
         }
@@ -172,8 +185,14 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
             Applied = applied,
             CheckedAt = NowIso(),
             Message = check.UpdateAvailable ? (applied is not null ? $"Auto-updated to {applied}." : $"Update available: {latest}.") : "Up to date.",
+            Severity = check.UpdateAvailable ? OperatorSeverity.UpdateAvailable : OperatorSeverity.Ok,
         });
     }
+
+    /// <summary>A digest-pinned <c>registry/repo:tag@sha256:…</c> pull reference — honours the operator's
+    /// repository override, so it can't use <see cref="ImageReference.ToString"/>.</summary>
+    private static string Pinned(ImageReference image, string repository, string digest)
+        => $"{image.Registry}/{repository}:{image.Tag}@{digest}";
 
     private string ResolveRegistryHost(ImageReference image)
     {
@@ -199,8 +218,6 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         }
         catch (Exception ex) { log.LogDebug("Operator: could not read running digest: {Msg}", ex.Message); return null; }
     }
-
-    private static bool DigestsEqual(string a, string b) => ImageDigest.Equal(a, b);
 
     /// <summary>Store the report in-grain and mirror it to the CR status for kubectl visibility.</summary>
     private async Task Report(OperatorReport r)
