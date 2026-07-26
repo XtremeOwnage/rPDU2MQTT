@@ -122,6 +122,9 @@ public class EnergyFlowMqttExportService : baseMQTTService
         foreach (var g in flow.Groups ?? new())
         {
             if (string.IsNullOrWhiteSpace(g.Id)) continue;
+            // An anchor group's id IS a real node (e.g. Solar PV over its MPPTs); that node already published
+            // its own tier in the loop above, so publishing a group tier under the same id would duplicate it.
+            if (graph.Nodes.Any(n => string.Equals(n.Id, g.Id, StringComparison.OrdinalIgnoreCase))) continue;
 
             var total = FlowGroups.Total(graph, g);
             if (total.Value is not { } power) continue;
