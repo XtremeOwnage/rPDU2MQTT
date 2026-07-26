@@ -138,7 +138,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         {
             if (topic == removedTopic) continue;
             foreach (var (nodeId, src) in list)
-                if (nodeId == key.Node && string.Equals(src.Metric, key.Metric, StringComparison.OrdinalIgnoreCase))
+                if (nodeId == key.Node && string.Equals(FlowMetricKey.For(src.Metric, src.Direction), key.Metric, StringComparison.OrdinalIgnoreCase))
                     return false;
         }
         return true;
@@ -210,8 +210,12 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // Normalise to the metric's canonical unit (kW -> W, Wh -> kWh, …) so the roll-up and exports are
             // consistent, then apply the manual Scale (sign flips / oddball adjustments) on top.
             var value = raw * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
-            cache.Set(nodeId, src.Metric, value, src.StaleAfterSeconds, nowUtc);
-            onReading?.Invoke(nodeId, src.Metric, value, src.StaleAfterSeconds);
+            // An 'in' (charge/export) reading is stored under a direction-qualified key so it doesn't overwrite
+            // the 'out' supply value the roll-up reads — and, being a non-metric key, is skipped by the grain
+            // measurement sink below (Metrics.TryParse fails), keeping charge/export out of the power flow.
+            var key = FlowMetricKey.For(src.Metric, src.Direction);
+            cache.Set(nodeId, key, value, src.StaleAfterSeconds, nowUtc);
+            onReading?.Invoke(nodeId, key, value, src.StaleAfterSeconds);
         }
     }
 

@@ -674,6 +674,24 @@ public class FlowGraphTests
         var root = FlowExport.DiscoveryDocument(new FlowNode("grid_power", "Grid", "node"), null, "t", "kWh", "W", null);
         Assert.Null(root["device"]!["via_device"]);
         Assert.Null(root["availability_topic"]);
+
+        // No energy_in sensor unless the node is bidirectional.
+        Assert.False(doc["components"]!.AsObject().ContainsKey("energyflow_outlet_rack_pdu_10_energy_in"));
+    }
+
+    [Fact]
+    public void FlowExport_DiscoveryDocument_AddsEnergyInSensor_ForABidirectionalNode()
+    {
+        // A battery/grid node exposes its in-direction (charge/export) energy as a second total_increasing
+        // sensor, whose unique_id matches EnergyInUniqueId so the dashboard sync can resolve it to stat_energy_to.
+        var doc = FlowExport.DiscoveryDocument(new FlowNode("battery", "Battery", "battery"),
+            null, "rpdu2mqtt/energyflow/battery", "kWh", "W", null, includeEnergyIn: true);
+
+        var energyIn = doc["components"]!["energyflow_battery_energy_in"]!;
+        Assert.Equal(FlowExport.EnergyInUniqueId("battery"), (string?)energyIn["unique_id"]);
+        Assert.Equal("energy", (string?)energyIn["device_class"]);
+        Assert.Equal("total_increasing", (string?)energyIn["state_class"]);
+        Assert.Equal("{{ value_json.energy_in }}", (string?)energyIn["value_template"]);
     }
 
     [Fact]
