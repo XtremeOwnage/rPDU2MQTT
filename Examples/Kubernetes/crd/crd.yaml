@@ -752,7 +752,8 @@ spec:
                                 - voltage
                                 - frequency
                                 - powerfactor
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                                - soc
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
                               Direction:
                                 type: string
                                 enum:
@@ -832,7 +833,8 @@ spec:
                                 - voltage
                                 - frequency
                                 - powerfactor
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                                - soc
+                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
                               Direction:
                                 type: string
                                 enum:

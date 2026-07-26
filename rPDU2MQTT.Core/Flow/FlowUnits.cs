@@ -19,6 +19,9 @@ public static class FlowUnits
             ["voltage"] = ("V", new(StringComparer.OrdinalIgnoreCase) { ["mV"] = 0.001, ["V"] = 1, ["kV"] = 1_000 }),
             ["frequency"] = ("Hz", new(StringComparer.OrdinalIgnoreCase) { ["Hz"] = 1 }),
             ["powerfactor"] = ("", new(StringComparer.OrdinalIgnoreCase) { [""] = 1 }),
+            // Battery state of charge — a percentage, not a roll-up quantity: it's read for display (the
+            // Energy tile), never summed across nodes. Fraction inputs (0–1) scale to a percentage.
+            ["soc"] = ("%", new(StringComparer.OrdinalIgnoreCase) { ["%"] = 1, ["fraction"] = 100 }),
         };
 
     /// <summary>The unit the flow/exports express <paramref name="metric"/> in (blank for the unitless power factor).</summary>

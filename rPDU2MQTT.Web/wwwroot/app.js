@@ -871,6 +871,7 @@ const METRICS                                       = [
   ['voltage', 'Voltage', 'V', ['mV', 'V', 'kV']],
   ['frequency', 'Frequency', 'Hz', ['Hz']],
   ['powerfactor', 'Power factor', '', ['']],
+  ['soc', 'State of charge', '%', ['%', 'fraction']],
 ];
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
@@ -885,7 +886,7 @@ const NODE_KINDS                               = [
   ['node', 'Virtual node', SOURCE_METRICS],
   ['panel', 'Electrical panel', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
   ['inverter', 'Inverter', SOURCE_METRICS],
-  ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage']],
+  ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage', 'soc']],
   ['solar', 'Solar / PV', ['realpower', 'energy', 'current', 'voltage']],
   ['grid', 'Grid', SOURCE_METRICS],
   ['load', 'Load', ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'powerfactor']],
@@ -2405,18 +2406,25 @@ function addEnergyOverviewSection(nav     , sections     ) {
     }
     const nodes = r.body.nodes || [];
 
-    // Charge / export power (the in-direction) for battery and grid nodes, from the direction-qualified cache.
+    // Live cache reads: the in-direction (charge/export) power for battery/grid nodes, plus battery state of
+    // charge — none of which the flow graph carries. Keyed by node|metric so one round-trip covers them all.
     const battIds = nodes.filter((n     ) => n.kind === 'battery').map((n     ) => n.id);
     const gridIds = nodes.filter((n     ) => n.kind === 'grid').map((n     ) => n.id);
-    const inByNode                         = {};
-    const inQ = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' }));
-    if (inQ.length) {
+    const liveBy                         = {};
+    const q = [
+      ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
+      ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
+    ];
+    if (q.length) {
       try {
-        const lr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(inQ) });
-        (lr.body?.values || []).forEach((v     ) => { if (typeof v.value === 'number') inByNode[v.node] = (inByNode[v.node] || 0) + v.value; });
-      } catch { /* no live cache — in-direction just stays absent */ }
+        const lr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+        (lr.body?.values || []).forEach((v     ) => { if (typeof v.value === 'number') liveBy[`${v.node}|${v.metric}`] = v.value; });
+      } catch { /* no live cache — these reads just stay absent */ }
     }
-    const sumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { if (id in inByNode) { s += inByNode[id]; known = true; } }); return known ? s : null; };
+    const sumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|realpower#in`; if (k in liveBy) { s += liveBy[k]; known = true; } }); return known ? s : null; };
+    // Battery SoC: average across battery nodes that report it (a bank reads as one figure).
+    const socVals = battIds.map(id => liveBy[`${id}|soc`]).filter((v)              => typeof v === 'number');
+    const soc = socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null;
 
     const solar = sumKind(nodes, 'solar');
     const batt = sumKind(nodes, 'battery');   // out = discharge
@@ -2436,11 +2444,17 @@ function addEnergyOverviewSection(nav     , sections     ) {
       grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
         solar.value == null ? 'no reading yet' : solar.value > 1 ? 'producing' : 'idle', solar.value && solar.value > 1 ? 'supply' : ''));
 
-    // Battery — sign tells charge vs discharge; magnitude is what's shown.
+    // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
-      const sub = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
+      const dir = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
-      grid.appendChild(tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), sub, cls));
+      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), soc == null ? dir : `${soc}% · ${dir}`, cls);
+      // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
+      if (soc != null) {
+        const g = el('div', { class: 'energy-soc-bar', title: `${soc}% state of charge` }, el('span', { style: { width: soc + '%' } }));
+        t.appendChild(g);
+      }
+      grid.appendChild(t);
     }
 
     // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).

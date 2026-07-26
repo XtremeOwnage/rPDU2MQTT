@@ -183,8 +183,8 @@ public class EnergyFlowSource
     public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
-    [Description("Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.")]
-    [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
+    [Description("Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).")]
+    [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor", "soc")]
     public string Metric { get; set; } = "realpower";
 
     /// <summary>

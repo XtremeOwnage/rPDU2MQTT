@@ -112,6 +112,9 @@
   .energy-sub.supply { color:var(--good); }
   .energy-sub.draw   { color:var(--warn); }
 
+  .energy-soc-bar { height:6px; border-radius:100px; background:var(--panel3); overflow:hidden; margin-top:8px; }
+  .energy-soc-bar span { display:block; height:100%; background:var(--good); border-radius:100px; transition:width .3s; }
+
   .energy-summary { margin-top:var(--sp-4); }
   .energy-selfsuff { max-width:520px; }
   .energy-ss-label { font-size:13px; font-weight:650; margin-bottom:6px; }
