@@ -35,6 +35,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     // sink — event-driven, no polling bridge. Null in tests / if not wired.
     private readonly ISnapshotSink<MeasurementSnapshot>? sink;
     private long version;
+    private long received;
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null)
     {
@@ -50,6 +51,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        Log.Information("Energy-flow MQTT ingest started — reconciling broker subscriptions from EnergyFlow.Nodes.");
         mqtt.OnMessageReceived += OnMessageReceived;
         try
         {
@@ -67,10 +69,21 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     }
 
     /// <summary>Bring the broker subscriptions in line with the current config (added/removed topics).</summary>
+    private long lastDesiredCount = -1;
+
     private async Task Reconcile(CancellationToken ct)
     {
         var desired = BuildBindings(cfg.EnergyFlow.Nodes);
         bindings = desired;
+
+        // Make "did it find any bindings" visible without turning on Debug — the silent failure mode is a
+        // reconcile that quietly finds zero MQTT sources and subscribes to nothing.
+        var bindingCount = desired.Values.Sum(v => v.Count);
+        if (bindingCount != lastDesiredCount)
+        {
+            Log.Information($"Energy-flow MQTT ingest: {bindingCount} binding(s) across {desired.Count} topic(s) from {cfg.EnergyFlow.Nodes.Count} node(s).");
+            lastDesiredCount = bindingCount;
+        }
 
         foreach (var topic in desired.Keys)
         {
@@ -79,8 +92,22 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             {
                 // AtLeastOnce so a value isn't silently dropped; retained messages arrive immediately, which
                 // is what makes a restarted process pick up e.g. Solar Assistant's last reading at once.
-                await mqtt.SubscribeAsync(topic, QualityOfService.AtLeastOnceDelivery);
-                Log.Information($"Energy-flow: subscribed to {topic}.");
+                var result = await mqtt.SubscribeAsync(topic, QualityOfService.AtLeastOnceDelivery);
+
+                // A broker can *deny* a subscription (ACL) and the client reports it in the SUBACK, not as an
+                // exception. Treating that as success is how the ingest dies silently — check it, like the
+                // outlet command handler does, and let a denied topic retry rather than sticking.
+                var granted = result.Subscriptions.All(sub => (int)sub.SubscribeReasonCode <= 2);
+                if (granted)
+                {
+                    Log.Information($"Energy-flow: subscribed to {topic}.");
+                }
+                else
+                {
+                    subscribed.Remove(topic);
+                    var codes = string.Join(", ", result.Subscriptions.Select(sub => sub.SubscribeReasonCode.ToString()));
+                    Log.Error($"Energy-flow: subscription to {topic} was NOT granted ({codes}). The MQTT account likely lacks read permission on this topic — no values will arrive for the nodes bound to it.");
+                }
             }
             catch (Exception ex)
             {
@@ -130,7 +157,11 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             });
 
         if (sink is not null && readings is { Count: > 0 })
+        {
             _ = sink.EmitAsync(new MeasurementSnapshot("mqtt", now, System.Threading.Interlocked.Increment(ref version), readings));
+            if (System.Threading.Interlocked.Increment(ref received) is var n && (n == 1 || n % 100 == 0))
+                Log.Information($"Energy-flow MQTT ingest: received {n} message(s); latest from '{e.PublishMessage.Topic}' → {readings.Count} reading(s).");
+        }
     }
 
     /// <summary>
