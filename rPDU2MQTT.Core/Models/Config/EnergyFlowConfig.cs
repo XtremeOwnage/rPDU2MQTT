@@ -27,6 +27,16 @@ public class EnergyFlowConfig
     public List<EnergyFlowLink> Links { get; set; } = new();
 
     /// <summary>
+    /// Named groups of nodes shown as a single collapsible node on the flow graphs (e.g. three MPPTs shown
+    /// as one "Incoming PV"). Purely presentational for the members — they keep their own links and their own
+    /// exports — but the group itself has a rolled-up total (the sum of its members) that is exported like any
+    /// other tier when <see cref="MqttExport"/> is on. Collapse/expand is a per-viewer UI state; this only
+    /// defines which nodes belong together.
+    /// </summary>
+    [Description("Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.")]
+    public List<EnergyFlowGroup> Groups { get; set; } = new();
+
+    /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
     /// load (each entry behaves like a link parent → child) so older configs keep working.
     /// </summary>
@@ -43,6 +53,28 @@ public class EnergyFlowConfig
     [Description("Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'.")]
     [TemplateVariables("parent", "id", "label", "kind", "metric", "units")]
     public string MqttTopicTemplate { get; set; } = "{parent}/energyflow/{id}";
+}
+
+/// <summary>
+/// A named group of flow nodes, shown as one collapsible node on the graphs and exported as their sum
+/// (#groups). The members are unchanged — they keep their links and export individually; the group is an
+/// overlay plus a rolled-up total.
+/// </summary>
+public class EnergyFlowGroup
+{
+    [Description("Stable unique id for the group (used in the group's exported topic/metric).")]
+    public string Id { get; set; } = "";
+
+    [Description("Human-readable label shown on the flow diagram when the group is collapsed.")]
+    public string Label { get; set; } = "";
+
+    [DefaultValue("node")]
+    [Description("What the group represents, for diagram styling: 'node', 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'.")]
+    [AllowedValues("node", "panel", "inverter", "battery", "solar", "grid", "load")]
+    public string Kind { get; set; } = "node";
+
+    [Description("The ids of the member nodes this group aggregates.")]
+    public List<string> Members { get; set; } = new();
 }
 
 /// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>

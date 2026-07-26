@@ -888,6 +888,36 @@ spec:
                           type: string
                           description: Target node id — energy flows into here.
                     description: Directed energy-flow links (From feeds To). Allows multiple feeders per node and producer inputs.
+                  Groups:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id for the group (used in the group's exported topic/metric).
+                        Label:
+                          type: string
+                          description: Human-readable label shown on the flow diagram when the group is collapsed.
+                        Kind:
+                          type: string
+                          enum:
+                          - ''
+                          - node
+                          - panel
+                          - inverter
+                          - battery
+                          - solar
+                          - grid
+                          - load
+                          description: "What the group represents, for diagram styling: 'node', 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'."
+                        Members:
+                          type: array
+                          items:
+                            type: string
+                          description: The ids of the member nodes this group aggregates.
+                    description: Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.
                   Parents:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true

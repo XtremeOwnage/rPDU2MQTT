@@ -457,6 +457,14 @@ designated absorber carries the remainder after every measured feeder has suppli
 A configured node always appears on the diagram even when it has no value, so a gap in your metering is
 visible as a gap rather than as a missing node.
 
+**Grouping nodes.** Several nodes can be shown as one collapsible node on both flow graphs — e.g. three MPPTs
+as one "Incoming PV". Add a group on the **Nodes** tab (give it an id, label and members); the flow diagram
+and the node roll-up then show the group as a single node whose value is the **sum of its members**, with a
+toggle above each graph to expand it back to the members. The members are unchanged — they keep their own
+wiring and still export individually — and the group itself also publishes its summed total (`{id}` on the
+MQTT tier topic, its own Home Assistant sensor) when `EnergyFlow.MqttExport` is on. A group is the sum of the
+members that have data, and is itself "no data" when none of them do — never a fabricated zero.
+
 ## Metric Exporters (Optional)
 
 In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled
