@@ -85,11 +85,17 @@ function activate(link     , sec     ) {
 
 // Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
 // we scale by setting its width/height and keep the point under the cursor fixed. Returns a detach fn.
-function attachZoom(scroll     , svg     , baseW        , baseH        ) {
+// Zoom + (optionally) pan a large SVG inside a scroll container. Plain wheel scrolls the container the way
+// any overflow does; only Ctrl/⌘+wheel zooms. The old version preventDefault-ed *every* wheel to zoom, which
+// left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
+// background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
+function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false) {
   let z = 1; const min = 0.25, max = 6;
   const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
   apply();
+
   const onWheel = (e     ) => {
+    if (!(e.ctrlKey || e.metaKey)) return;   // plain wheel: let the container scroll normally
     e.preventDefault();
     const r = scroll.getBoundingClientRect();
     const cx = scroll.scrollLeft + (e.clientX - r.left), cy = scroll.scrollTop + (e.clientY - r.top);
@@ -102,7 +108,26 @@ function attachZoom(scroll     , svg     , baseW        , baseH        ) {
     scroll.scrollTop = cy * k - (e.clientY - r.top);
   };
   scroll.addEventListener('wheel', onWheel, { passive: false });
-  return () => scroll.removeEventListener('wheel', onWheel);
+  const cleanups = [() => scroll.removeEventListener('wheel', onWheel)];
+
+  if (pan) {
+    let dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
+    scroll.style.cursor = 'grab';
+    const onDown = (e     ) => {
+      if (e.button !== 0) return;
+      dragging = true; sx = e.clientX; sy = e.clientY; sl = scroll.scrollLeft; st = scroll.scrollTop;
+      scroll.style.cursor = 'grabbing';
+    };
+    // Track on window so a drag that runs past the container edge keeps panning until release.
+    const onMove = (e     ) => { if (!dragging) return; scroll.scrollLeft = sl - (e.clientX - sx); scroll.scrollTop = st - (e.clientY - sy); };
+    const onUp = () => { if (!dragging) return; dragging = false; scroll.style.cursor = 'grab'; };
+    scroll.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    cleanups.push(() => { scroll.removeEventListener('pointerdown', onDown); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); });
+  }
+
+  return () => cleanups.forEach(f => f());
 }
 
 // --- Multi-PDU: per-tab instance selector ---
@@ -2016,7 +2041,8 @@ function addFlowSection(nav     , sections     ) {
       : '';
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
-    attachZoom(scroll, svg, W, totalH);  // scroll-into-view container is replaced on each draw(), so no leak.
+    wrap.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag to pan · scroll to move · Ctrl/⌘ + scroll to zoom.' }));
+    attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
