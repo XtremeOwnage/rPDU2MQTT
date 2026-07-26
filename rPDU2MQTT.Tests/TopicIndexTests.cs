@@ -117,7 +117,7 @@ public class TopicIndexGrainTests
         {
             var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
 
-            var state = await index.Renew();
+            var state = await index.Renew(null);
             Assert.False(state.Listening);        // nothing has reported yet
             Assert.True(await index.Wanted());    // ...but the subscriber is now asked to
 
@@ -128,7 +128,7 @@ public class TopicIndexGrainTests
                 Sample("tele/plug/SENSOR", """{"ENERGY":{"Power":12}}"""),
             });
 
-            Assert.True((await index.Renew()).Listening);
+            Assert.True((await index.Renew(null)).Listening);
 
             var solar = await index.Search("pv_power", 10);
             Assert.Equal("solar_assistant/inverter_1/pv_power/state", Assert.Single(solar).Topic);
@@ -150,14 +150,74 @@ public class TopicIndexGrainTests
         try
         {
             var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
-            await index.Renew();
+            await index.Renew(null);
 
             var flood = new List<TopicSample>();
             for (var i = 0; i < 2500; i++) flood.Add(Sample($"noisy/{i}/state", i.ToString()));
             await index.Observe(flood);
 
-            var state = await index.Renew();
+            var state = await index.Renew(null);
             Assert.Equal(state.Capacity, state.Topics);   // held at the cap, not at 2500
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task Filter_DefaultsToWildcard_Narrows_AndBlankKeepsIt()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+
+            // Default is the bare wildcard, and that's what the subscriber is told to subscribe to.
+            Assert.Equal("#", (await index.Renew(null)).Filter);
+            Assert.Equal("#", await index.DesiredFilter());
+
+            // Narrowing to a prefix re-subscribes and drops what was held for the old filter.
+            await index.Observe(new List<TopicSample> { Sample("anything/1", "x") });
+            var narrowed = await index.Renew("solar_assistant/#");
+            Assert.Equal("solar_assistant/#", narrowed.Filter);
+            Assert.Equal(0, narrowed.Topics);   // cleared on the filter change
+            Assert.Equal("solar_assistant/#", await index.DesiredFilter());
+
+            // A blank renew keeps the current filter (the detail lookups renew this way; they must not reset it).
+            Assert.Equal("solar_assistant/#", (await index.Renew(null)).Filter);
+            Assert.Equal("solar_assistant/#", (await index.Renew("  ")).Filter);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task DeniedSubscription_IsVisible_AsGrantedFalse()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+            await index.Renew(null);
+
+            // Before the subscriber reports, grant is unknown (null) — not a silent "false".
+            Assert.Null((await index.Renew(null)).Granted);
+
+            // The subscriber reports the SUBACK outcome; a denial surfaces so the browser can explain it.
+            await index.ReportSubscription(false);
+            Assert.False((await index.Renew(null)).Granted);
+
+            await index.ReportSubscription(true);
+            Assert.True((await index.Renew(null)).Granted);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task NobodyBrowsing_HasNoDesiredFilter()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            // Un-leased: the subscriber must be told to subscribe to nothing.
+            Assert.Equal("", await cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0).DesiredFilter());
         }
         finally { await cluster.StopAllSilosAsync(); }
     }

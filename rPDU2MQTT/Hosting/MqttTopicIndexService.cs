@@ -31,7 +31,7 @@ public sealed class MqttTopicIndexService : BackgroundService
     private readonly HiveMQClient mqtt;
     private readonly IGrainFactory grains;
     private readonly ConcurrentDictionary<string, TopicSample> buffer = new(StringComparer.Ordinal);
-    private bool subscribed;
+    private string? subscribedFilter;   // the filter currently subscribed on the broker, or null
 
     public MqttTopicIndexService(MQTTServiceDependencies deps, IGrainFactory grains)
     {
@@ -52,18 +52,26 @@ public sealed class MqttTopicIndexService : BackgroundService
         }
         while (await SafeWait(timer, stoppingToken));
 
-        if (subscribed) await StopListening();
+        if (subscribedFilter is not null) await StopListening();
     }
 
     private async Task PumpAsync()
     {
         var index = grains.GetGrain<ITopicIndexGrain>(0);
-        var wanted = await index.Wanted();
+        var wanted = await index.DesiredFilter();   // the filter to browse, or "" when nobody is browsing
 
-        if (wanted && !subscribed) await StartListening();
-        else if (!wanted && subscribed) await StopListening();
-
-        if (!subscribed) return;
+        // Re-subscribe when the wanted filter changes (the user narrowed it, e.g. to solar_assistant/#).
+        if (string.IsNullOrEmpty(wanted))
+        {
+            if (subscribedFilter is not null) await StopListening();
+            return;
+        }
+        if (subscribedFilter != wanted)
+        {
+            if (subscribedFilter is not null) await StopListening();
+            await StartListening(wanted, index);
+        }
+        if (subscribedFilter is null) return;
 
         // Hand over what we've seen (an empty batch still says "the subscription is open").
         var batch = buffer.Keys.Take(MaxBuffered).ToList();
@@ -74,30 +82,41 @@ public sealed class MqttTopicIndexService : BackgroundService
         await index.Observe(samples);
     }
 
-    private async Task StartListening()
+    private async Task StartListening(string filter, ITopicIndexGrain index)
     {
         try
         {
             mqtt.OnMessageReceived += OnMessageReceived;
-            await mqtt.SubscribeAsync("#", QualityOfService.AtMostOnceDelivery);
-            subscribed = true;
-            Serilog.Log.Information("Topic index: subscribed to # while the Nodes editor is browsing.");
+            var result = await mqtt.SubscribeAsync(filter, QualityOfService.AtMostOnceDelivery);
+            subscribedFilter = filter;
+
+            // A broker can *deny* the subscription (an ACL that forbids the wildcard) and report it in the
+            // SUBACK, not as an exception. Unchecked, that's a silently-empty browser on a working broker.
+            var granted = result.Subscriptions.All(sub => (int)sub.SubscribeReasonCode <= 2);
+            await index.ReportSubscription(granted);
+            if (granted)
+                Serilog.Log.Information($"Topic index: subscribed to '{filter}' while the Nodes editor is browsing.");
+            else
+                Serilog.Log.Warning($"Topic index: the broker DENIED the subscription to '{filter}' — the MQTT account likely lacks read permission on it. The topic browser will stay empty; grant it, or browse a narrower prefix.");
         }
         catch (Exception ex)
         {
             mqtt.OnMessageReceived -= OnMessageReceived;
-            Serilog.Log.Warning($"Topic index: could not subscribe: {ex.Message}");
+            subscribedFilter = null;
+            Serilog.Log.Warning($"Topic index: could not subscribe to '{filter}': {ex.Message}");
         }
     }
 
     private async Task StopListening()
     {
-        subscribed = false;
+        var filter = subscribedFilter;
+        subscribedFilter = null;
         mqtt.OnMessageReceived -= OnMessageReceived;
         buffer.Clear();
+        if (filter is null) return;
         try
         {
-            await mqtt.UnsubscribeAsync("#");
+            await mqtt.UnsubscribeAsync(filter);
             Serilog.Log.Information("Topic index: nobody is browsing; unsubscribed.");
         }
         catch (Exception ex) { Serilog.Log.Debug($"Topic index: unsubscribe failed: {ex.Message}"); }
