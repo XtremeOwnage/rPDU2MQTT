@@ -789,6 +789,9 @@ function groupToggles(onToggle: () => void): HTMLElement | null {
     chip.onclick = () => { on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle(); };
     row.appendChild(chip);
   });
+  // Where membership is edited — the toggles only collapse/expand; you add or remove a group's nodes on the
+  // Nodes tab (this is the “how do I add a node to a group?” signpost).
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
   return row;
 }
 
@@ -1124,16 +1127,22 @@ export function addFlowSection(nav: any, sections: any) {
       s.outOff += h; t.inOff += h;
     });
 
+    // Each member node -> its group, so a group reads like a node: click the collapsed group node to expand
+    // it, or click any of its expanded members to fold it back — the toggles above stay as an alternative.
+    const memberGroup: Record<string, any> = {};
+    flowGroups().forEach((g: any) => (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }));
+
     // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
     // where they cross a ribbon).
     nodes.forEach((n: any) => {
       const p = pos[n.id]; if (!p) return;
       const unknownNode = !known(n.id);
-      svg.appendChild(svgEl('rect', {
+      const rect = svgEl('rect', {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
         fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
         'fill-opacity': unknownNode ? '0.45' : '1',
-      }));
+      });
+      svg.appendChild(rect);
       const lab = svgEl('text', {
         x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
@@ -1147,6 +1156,18 @@ export function addFlowSection(nav: any, sections: any) {
         lab.appendChild(why);
       }
       svg.appendChild(lab);
+
+      // Group node (collapsed) or a member of one (expanded): make the node itself the expand/collapse control.
+      const grp = n.group ? n : memberGroup[n.id];
+      if (grp) {
+        const gid = n.group ? n.id : grp.Id;
+        const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
+        [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
+        const hint = svgEl('title');
+        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand` : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        rect.appendChild(hint);
+        if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
+      }
     });
 
     // Surface the unknowns rather than leaving them to be spotted: a node with no data is a gap in the
