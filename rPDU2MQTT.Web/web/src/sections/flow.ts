@@ -18,6 +18,9 @@ const METRICS: [string, string, string, string[]][] = [
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key?: string) => METRICS.find(m => m[0] === key) || METRICS[0];
 const metricLabel = (key?: string) => metricMeta(key)[1];
+// The live-cache key a source reads under, given its direction — mirrors FlowMetricKey (Core): an 'in'
+// (charge/export) reading is stored under a '#in' suffix so it doesn't collide with the 'out' supply value.
+const sourceMetricKey = (src: any) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
 
 // What a virtual node represents — mirrors [AllowedValues] on EnergyFlowNode.Kind. Each kind offers only
 // the metrics that make sense for it (a battery has no frequency); 'battery' also gets a storage field.
@@ -399,15 +402,24 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
+  // Battery and grid flow both ways, so their sources carry a Direction: 'out' (the supply value the roll-up
+  // reads) vs 'in' (charge/export, exported as the energy_in sensor HA's dashboard picks up). Other kinds only
+  // ever flow one way, so the column stays hidden for them. Labels are role-specific so the choice reads plainly.
+  const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
+  const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge (out)', in: 'Charge (in)' }
+    : node.Kind === 'grid' ? { out: 'Import (out)', in: 'Export (in)' }
+    : { out: 'Out', in: 'In' };
+
   const sources: any[] = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
     const colHint: any = {
+      Direction: 'Which way energy flows for this source. The out direction (discharge/import) is the supply value; the in direction (charge/export) is published as a second energy sensor so Home Assistant’s Energy Dashboard can show it.',
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
-    ['Type', 'Metric', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
       const th = el('th', { text: h });
       if (colHint[h]) th.title = colHint[h];
       head.appendChild(th);
@@ -434,6 +446,15 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       metricSel.value = metric;
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
       tr.appendChild(el('td', {}, metricSel));
+
+      // Direction (battery/grid only): bind discharge/import as 'out' and charge/export as 'in' on the same node.
+      if (bidirectional) {
+        const dirSel = el('select', { style: { width: 'auto' } });
+        (['out', 'in'] as const).forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
+        dirSel.value = src.Direction === 'in' ? 'in' : 'out';
+        dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : 'in'; rerender(); };
+        tr.appendChild(el('td', {}, dirSel));
+      }
 
       // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.
       const [, , canonical, units] = metricMeta(metric);
@@ -586,7 +607,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
         if (cached.length) {
           try {
             const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(cached.map(lc => ({ Node: node.Id, Metric: lc.src.Metric || 'realpower' }))) });
+              body: JSON.stringify(cached.map(lc => ({ Node: node.Id, Metric: sourceMetricKey(lc.src) }))) });
             const vals = (r.body && r.body.values) || [];
             cached.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
           } catch (e: any) { cached.forEach(lc => setCell(lc.cell, null, 'err')); }
