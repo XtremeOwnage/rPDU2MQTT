@@ -44,4 +44,24 @@ public class OperatorGrainTests
         Assert.Equal("RPDU2MQTT_IMAGE", env.GetProperty("name").GetString());
         Assert.Equal("ghcr.io/xtremeownage/rpdu2mqtt:unstable", env.GetProperty("value").GetString());
     }
+
+    [Theory]
+    // A pod's ImageID is a full pull reference; the registry gives a bare digest. Same build → equal.
+    [InlineData("ghcr.io/xtremeownage/rpdu2mqtt@sha256:ABC123", "sha256:abc123", true)]
+    [InlineData("docker-pullable://ghcr.io/xtremeownage/rpdu2mqtt@sha256:abc123", "sha256:abc123", true)]
+    // Different builds of the same moving tag → a newer build is waiting.
+    [InlineData("ghcr.io/xtremeownage/rpdu2mqtt@sha256:aaa", "sha256:bbb", false)]
+    // Nothing to compare → never claim equality (the operator says "couldn't determine" instead).
+    [InlineData("", "sha256:abc", false)]
+    [InlineData("ghcr.io/xtremeownage/rpdu2mqtt:unstable", "sha256:abc", false)]
+    public void ImageDigest_EqualsWhenSameBuild_RegardlessOfReferenceShape(string a, string b, bool expected)
+        => Assert.Equal(expected, rPDU2MQTT.Grains.Operator.ImageDigest.Equal(a, b));
+
+    [Fact]
+    public void ImageDigest_Normalize_ExtractsShaFromAnyReference()
+    {
+        Assert.Equal("sha256:abc", rPDU2MQTT.Grains.Operator.ImageDigest.Normalize("repo@SHA256:ABC"));
+        Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize("repo:unstable"));
+        Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize(null));
+    }
 }

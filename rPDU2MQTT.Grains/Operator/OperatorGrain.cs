@@ -111,7 +111,45 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
 
         if (!check.Applicable)
         {
-            await Report(report with { Available = false, Current = image.Tag, Latest = null, Policy = cfg.Operator.Policy.ToString(), CheckedAt = NowIso(), Message = "Deployed tag is not a release version; tracking a moving channel." });
+            // A moving channel (unstable/edge/latest/stable) has no version to compare — but its digest moves
+            // as new builds publish. Compare what the tag points to in the registry now against the digest
+            // this process is actually running, so "Check now" can say a newer build is waiting instead of a
+            // misleading "up to date".
+            var registryDigest = await registry.ResolveDigestAsync(registryHost, repository, image.Tag, ct);
+            var runningDigest = await RunningDigestAsync(ct);
+            var newer = registryDigest is not null && runningDigest is not null && !DigestsEqual(registryDigest, runningDigest);
+
+            string message = registryDigest is null
+                ? $"Tracking the moving '{image.Tag}' channel — couldn't read its digest from the registry."
+                : runningDigest is null
+                    ? $"Tracking the moving '{image.Tag}' channel — couldn't determine the running digest to compare."
+                    : newer
+                        ? $"A newer '{image.Tag}' build is available — use Force update to pull it."
+                        : $"Running the latest '{image.Tag}' build.";
+
+            var appliedChannel = (string?)null;
+            if (newer && cfg.Operator.AutoUpdate)
+            {
+                // AutoUpdate on a channel means "keep pulling its latest build": re-pull, pinning the digest.
+                var pinned = $"{image.Registry}/{repository}:{image.Tag}@{registryDigest}";
+                if ((await SetImageAsync(repository, pinned, image.WithTag(image.Tag), ct)).Count > 0)
+                {
+                    appliedChannel = image.Tag;
+                    message = $"A newer '{image.Tag}' build was available — auto-updated (rolling now).";
+                }
+            }
+
+            await Report(report with
+            {
+                Available = newer,
+                Current = image.Tag,
+                Latest = image.Tag,
+                Policy = cfg.Operator.Policy.ToString(),
+                AutoUpdate = cfg.Operator.AutoUpdate,
+                Applied = appliedChannel,
+                CheckedAt = NowIso(),
+                Message = message,
+            });
             return;
         }
 
@@ -142,6 +180,27 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         var registryName = cfg.Operator.Registry ?? image.Registry;
         return registryName == ImageReference.DefaultRegistry ? "registry-1.docker.io" : registryName;
     }
+
+    /// <summary>
+    /// The image digest this process is actually running — from the operator pod's own container status
+    /// (it runs the very image being tracked). Null when it can't be read; the caller then says so rather
+    /// than guessing.
+    /// </summary>
+    private async Task<string?> RunningDigestAsync(CancellationToken ct)
+    {
+        var pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
+        if (source is null || string.IsNullOrWhiteSpace(pod)) return null;
+        try
+        {
+            var p = await source.Client.CoreV1.ReadNamespacedPodAsync(pod, source.Namespace, cancellationToken: ct);
+            var imageId = p.Status?.ContainerStatuses?.FirstOrDefault(c => c.Name == ContainerName)?.ImageID
+                       ?? p.Status?.ContainerStatuses?.FirstOrDefault()?.ImageID;
+            return ImageDigest.Normalize(imageId);
+        }
+        catch (Exception ex) { log.LogDebug("Operator: could not read running digest: {Msg}", ex.Message); return null; }
+    }
+
+    private static bool DigestsEqual(string a, string b) => ImageDigest.Equal(a, b);
 
     /// <summary>Store the report in-grain and mirror it to the CR status for kubectl visibility.</summary>
     private async Task Report(OperatorReport r)

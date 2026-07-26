@@ -2910,19 +2910,14 @@ function wireOperatorCheck(sec     ) {
   sec.appendChild(box);
 
   const show = (u     ) => {
-    // Available / up-to-date / no-info — colour-coded so the answer reads at a glance.
-    if (u?.available) {
-      result.style.color = 'var(--warn, #fa4)';
-      let s = `↑ Update available: ${u.latest || '?'}` + (u.current ? ` (currently ${u.current})` : '');
-      if (u.applied) s += ` — auto-update rolled to ${u.applied}`;
-      result.textContent = s;
-    } else if (u?.current) {
-      result.style.color = 'var(--good)';
-      result.textContent = `✓ Up to date — ${u.current} is the newest ${u.policy ? u.policy.toLowerCase() + '-eligible ' : ''}release`;
-    } else {
-      result.style.color = 'var(--muted)';
-      result.textContent = u?.message || 'No update information returned.';
-    }
+    // The operator's message is authoritative and correct for both releases and moving channels
+    // (e.g. "A newer 'unstable' build is available" vs "Running the latest 'unstable' build"), so drive the
+    // display from it rather than re-deriving — the old re-derivation called 'unstable' a "release".
+    const msg = u?.message || (u?.available ? 'Update available.' : 'Up to date.');
+    const iffy = /couldn.?t|couldn't|unknown|failed|error|disabled|needs|not a release/i.test(msg);
+    if (u?.available) { result.style.color = 'var(--warn, #fa4)'; result.textContent = '↑ ' + msg; }
+    else if (iffy) { result.style.color = 'var(--muted)'; result.textContent = msg; }
+    else { result.style.color = 'var(--good)'; result.textContent = '✓ ' + msg; }
     if (u?.checkedAt) result.textContent += ` · checked ${new Date(u.checkedAt).toLocaleTimeString()}`;
   };
 
