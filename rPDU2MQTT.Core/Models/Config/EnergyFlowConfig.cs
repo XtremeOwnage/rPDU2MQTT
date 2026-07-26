@@ -188,6 +188,25 @@ public class EnergyFlowSource
     public string Metric { get; set; } = "realpower";
 
     /// <summary>
+    /// Which way energy flows for this source, so a bidirectional role (battery, grid) can bind both
+    /// directions on the same node (#energy-rollup). Framed relative to the node itself:
+    /// <list type="bullet">
+    /// <item><c>out</c> (default): energy leaving this node toward the home — battery <em>discharge</em>,
+    /// grid <em>import</em>, solar <em>production</em>. This is the supply direction and the only one older
+    /// single-direction configs ever meant.</item>
+    /// <item><c>in</c>: energy flowing back into this node from the home — battery <em>charge</em>,
+    /// grid <em>export</em>.</item>
+    /// </list>
+    /// Home Assistant's Energy Dashboard uses exactly this split: a battery's <c>out</c> becomes
+    /// <c>stat_energy_from</c> and its <c>in</c> becomes <c>stat_energy_to</c>; a grid's <c>out</c> is
+    /// <c>flow_from</c> (consumption) and its <c>in</c> is <c>flow_to</c> (return).
+    /// </summary>
+    [DefaultValue("out")]
+    [Description("Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production; the supply direction) or 'in' (battery charge, grid export). Lets a battery/grid node bind both directions.")]
+    [AllowedValues("out", "in")]
+    public string Direction { get; set; } = "out";
+
+    /// <summary>
     /// The unit the source publishes this value in (e.g. <c>kW</c>, <c>Wh</c>). The reading is converted to
     /// the metric's canonical unit (W, kWh, V, …) on ingest so every export stays consistent. Blank assumes
     /// the value is already canonical. See <see cref="rPDU2MQTT.Core.Flow.FlowUnits"/>.

@@ -54,6 +54,28 @@ public sealed class HaEnergyDashboardSync
         return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
     }
 
+    /// <summary>
+    /// The Energy-Dashboard <c>energy_sources</c> (grid/solar/battery buckets) the kind-tagged flow nodes map
+    /// to — the roll-up on top of the individual-device list. Directions resolve through HA's authoritative
+    /// unique_id → entity_id map (Out = the native/energyflow supply sensor; In = the energyflow return
+    /// sensor), so a bucket only appears once its stat actually exists in HA.
+    /// </summary>
+    public List<JsonObject> BuildEnergySources(IReadOnlyDictionary<string, string> entityByUniqueId)
+    {
+        var merged = new PduData();
+        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
+        if (merged.Devices.Count == 0) return new();
+
+        var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
+        var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
+        var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
+
+        string? Resolve(string uid) => entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
+        return EnergyDashboardSync.BuildEnergySources(graph, (id, dir) => dir == Core.Flow.EnergyDirection.Out
+            ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
+            : Resolve(FlowExport.EnergyInUniqueId(id)));
+    }
+
     /// <summary>Merge our hierarchy devices into HA's energy prefs (preserving the user's own). Returns the count synced.</summary>
     public async Task<int> SyncAsync(string url, string token, CancellationToken ct)
     {
@@ -80,11 +102,25 @@ public sealed class HaEnergyDashboardSync
             keep.Add(JsonSerializer.SerializeToNode(d, Json)!);
         prefs["device_consumption"] = keep;
 
+        // Roll the grid/solar/battery buckets into energy_sources too, preserving any the user set up
+        // themselves — an entry is "ours" only when it references a stat we produced (matched by entity_id,
+        // not by type), so a hand-added second grid/solar survives.
+        var sources = BuildEnergySources(entityByUniqueId);
+        var ourStats = sources.SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keepSources = new JsonArray();
+        foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
+            if (existing is JsonObject o && !EnergyDashboardSync.StatsOf(o).Any(ourStats.Contains))
+                keepSources.Add(o.DeepClone());
+        foreach (var src in sources)
+            keepSources.Add(src.DeepClone());
+        prefs["energy_sources"] = keepSources;
+
         await SavePrefs(call, prefs);
         return devices.Count;
     }
 
-    /// <summary>Remove every device from HA's Energy-Dashboard device list. Returns how many were cleared.</summary>
+    /// <summary>Remove every device from HA's Energy-Dashboard device list, and the grid/solar/battery sources
+    /// we added (but not the user's own). Returns how many devices were cleared.</summary>
     public async Task<int> ClearAsync(string url, string token, CancellationToken ct)
     {
         using var ws = await ConnectAuth(url, token, ct);
@@ -94,6 +130,20 @@ public sealed class HaEnergyDashboardSync
             ?? throw new Exception("Could not read HA energy preferences.");
         var cleared = prefs["device_consumption"]?.AsArray()?.Count ?? 0;
         prefs["device_consumption"] = new JsonArray();
+
+        // Strip only the energy_sources whose stats we produced — a user's hand-configured grid/solar stays.
+        var registry = (await call("config/entity_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
+        var entityByUniqueId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in registry)
+            if ((string?)e?["unique_id"] is { Length: > 0 } uid && (string?)e?["entity_id"] is { Length: > 0 } eid)
+                entityByUniqueId[uid] = eid;
+
+        var ourStats = BuildEnergySources(entityByUniqueId).SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keepSources = new JsonArray();
+        foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
+            if (existing is JsonObject o && !EnergyDashboardSync.StatsOf(o).Any(ourStats.Contains))
+                keepSources.Add(o.DeepClone());
+        prefs["energy_sources"] = keepSources;
 
         await SavePrefs(call, prefs);
         return cleared;

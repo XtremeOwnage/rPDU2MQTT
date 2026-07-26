@@ -76,8 +76,15 @@ public static class FlowExport
     /// <summary>The Home Assistant device identifier for a tier ("energyflow_&lt;key&gt;").</summary>
     public static string DeviceId(string nodeId) => "energyflow_" + NodeKey(nodeId);
 
-    /// <summary>The HA unique_id / entity object_id of a tier's energy sensor ("energyflow_&lt;key&gt;_energy").</summary>
+    /// <summary>The HA unique_id / entity object_id of a tier's energy sensor ("energyflow_&lt;key&gt;_energy").
+    /// This is the <c>out</c> (supply) direction — discharge/import/production — the sensor every tier already
+    /// carries.</summary>
     public static string EnergyUniqueId(string nodeId) => DeviceId(nodeId) + "_energy";
+
+    /// <summary>The HA unique_id of a tier's <c>in</c>-direction energy sensor ("energyflow_&lt;key&gt;_energy_in")
+    /// — battery charge / grid export. Distinct from <see cref="EnergyUniqueId"/> so both directions can map to
+    /// Home Assistant's battery/grid split.</summary>
+    public static string EnergyInUniqueId(string nodeId) => DeviceId(nodeId) + "_energy_in";
 
     /// <summary>
     /// Flow node id -> the unique_id of the native PDU-discovery energy sensor it already has (#177): PDU

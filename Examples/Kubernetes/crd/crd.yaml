@@ -753,6 +753,13 @@ spec:
                                 - frequency
                                 - powerfactor
                                 description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Direction:
+                                type: string
+                                enum:
+                                - ''
+                                - out
+                                - in
+                                description: "Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production; the supply direction) or 'in' (battery charge, grid export). Lets a battery/grid node bind both directions."
                               Unit:
                                 type: string
                                 description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
@@ -826,6 +833,13 @@ spec:
                                 - frequency
                                 - powerfactor
                                 description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, or powerfactor.'
+                              Direction:
+                                type: string
+                                enum:
+                                - ''
+                                - out
+                                - in
+                                description: "Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production; the supply direction) or 'in' (battery charge, grid export). Lets a battery/grid node bind both directions."
                               Unit:
                                 type: string
                                 description: Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.
