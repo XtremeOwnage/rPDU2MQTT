@@ -1159,7 +1159,8 @@ export function addFlowSection(nav: any, sections: any) {
       : '';
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
-    attachZoom(scroll, svg, W, totalH);  // scroll-into-view container is replaced on each draw(), so no leak.
+    wrap.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag to pan · scroll to move · Ctrl/⌘ + scroll to zoom.' }));
+    attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
