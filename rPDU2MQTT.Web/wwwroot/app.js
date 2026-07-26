@@ -1534,12 +1534,152 @@ async function saveConfig(onSaved            ) {
   if (r.ok && r.body.ok) onSaved();
 }
 
+// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
+//     state is per-viewer (this session), defaulting to collapsed so a group de-clutters until you open it.
+const collapsedGroups = new Set        ();
+let groupsInitialized = false;
+
+function flowGroups()        {
+  return (state.data?.EnergyFlow?.Groups || []).filter((g     ) => g && g.Id);
+}
+
+// Start every group collapsed the first time we see it (a group exists to tidy the diagram; opening it is
+// the deliberate act). Newly-added groups also start collapsed.
+function ensureGroupState() {
+  flowGroups().forEach((g     ) => { if (!groupsInitialized || !collapsedGroups.has(g.Id)) collapsedGroups.add(g.Id); });
+  groupsInitialized = true;
+}
+
+// A member's owning group id, only when that group is currently collapsed.
+function collapsedMemberMap()                      {
+  const map                      = {};
+  flowGroups().forEach((g     ) => { if (collapsedGroups.has(g.Id)) (g.Members || []).forEach((m        ) => { map[m] = g; }); });
+  return map;
+}
+
+// Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
+// members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
+// group is only as known as its members (the same never-fabricate rule the server uses).
+function collapseGraph(nodes       , links       )                                 {
+  const memberOf = collapsedMemberMap();
+  if (!Object.keys(memberOf).length) return { nodes, links };
+
+  const byId      = {}; nodes.forEach(n => { byId[n.id] = n; });
+  const groupNode                      = {};
+  flowGroups().forEach((g     ) => {
+    if (!collapsedGroups.has(g.Id)) return;
+    let sum = 0, known = false;
+    (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
+    groupNode[g.Id] = { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
+  });
+
+  const remap = (id        ) => (memberOf[id] ? memberOf[id].Id : id);
+  // Drop the collapsed members, keep everyone else, add the group nodes (only groups that actually have a
+  // member present in this graph).
+  const present = new Set        ();
+  const outNodes = nodes.filter(n => !memberOf[n.id]);
+  const merged                      = {};
+  links.forEach(l => {
+    const s = remap(l.source), t = remap(l.target);
+    if (s === t) return;                       // a link fully inside one collapsed group
+    present.add(s); present.add(t);
+    const k = s + ' ' + t;
+    if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
+    merged[k].value += (l.value || 0);
+    if (l.known === false) merged[k].known = false;
+  });
+  Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id)) outNodes.push(gn); });
+  return { nodes: outNodes, links: Object.values(merged) };
+}
+
+// The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
+function groupToggles(onToggle            )                     {
+  const groups = flowGroups();
+  if (!groups.length) return null;
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
+  groups.forEach((g     ) => {
+    const on = collapsedGroups.has(g.Id);
+    const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id}`);
+    chip.title = on ? 'Collapsed — click to expand its members' : 'Expanded — click to collapse into one node';
+    chip.onclick = () => { on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle(); };
+    row.appendChild(chip);
+  });
+  return row;
+}
+
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
 function flowCandidates(lastGraph     , customNodes       ) {
   const cand = new Map             ();
   (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
   customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
   return cand;
+}
+
+// Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
+// export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
+function renderGroupManager(flow     , cand                  , rerender            ) {
+  const groups = ensure(flow, 'Groups', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs — e.g. three MPPTs as one “Incoming PV”. Members keep their own wiring and exports; the group also publishes its summed total. Collapse/expand each group from the toggles above either graph.' }));
+
+  const nm = (id        ) => (cand.get(id) || {}).label || id;
+
+  const addBar = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', placeholder: 'group id (e.g. incoming_pv)' })                    ;
+  const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Incoming PV)' })                    ;
+  const kindSel = el('select', { style: { width: 'auto' } });
+  NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+  const addBtn = btn('Add group', 'primary');
+  addBtn.onclick = () => {
+    const id = (idIn.value || '').trim();
+    if (!id) { toast('A group id is required.', false); return; }
+    if (groups.some((g     ) => g.Id === id) || cand.has(id)) { toast('That id already exists.', false); return; }
+    const g      = { Id: id, Label: (labIn.value || '').trim() || id, Members: [] };
+    if (kindSel.value !== 'node') g.Kind = kindSel.value;
+    groups.push(g);
+    rerender();
+  };
+  addBar.append(idIn, labIn, kindSel, addBtn);
+  box.appendChild(addBar);
+
+  if (!groups.length) { box.appendChild(el('div', { class: 'desc', text: 'No groups yet — add one above, then pick its members.' })); return box; }
+
+  groups.forEach((g     ) => {
+    const card = el('div', { style: { border: '1px solid var(--line)', borderRadius: '6px', padding: '10px', margin: '8px 0', background: 'var(--panel2)' } });
+    const head = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } });
+    const labEdit = el('input', { type: 'text', value: g.Label || g.Id, style: { width: '200px' } })                    ;
+    labEdit.onchange = () => { g.Label = labEdit.value.trim() || g.Id; };
+    const kindEdit = el('select', { style: { width: 'auto' } });
+    NODE_KINDS.forEach(([v, label]) => kindEdit.appendChild(el('option', { value: v, text: label })));
+    kindEdit.value = g.Kind || 'node';
+    kindEdit.onchange = () => { g.Kind = kindEdit.value === 'node' ? undefined : kindEdit.value; };
+    const del = btn('Delete', 'danger');
+    del.onclick = () => { groups.splice(groups.indexOf(g), 1); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
+    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, del);
+    card.appendChild(head);
+
+    // Members as removable chips, plus a picker of candidates not already in the group.
+    const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
+    memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
+    (g.Members || []).forEach((m        ) => {
+      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
+      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
+      x.onclick = () => { g.Members.splice(g.Members.indexOf(m), 1); rerender(); };
+      chip.append(nm(m), x); memRow.appendChild(chip);
+    });
+    const sel = el('select', { style: { width: 'auto' } })                     ;
+    sel.appendChild(el('option', { value: '', text: '+ add member…' }));
+    [...cand.keys()].filter(id => id !== g.Id && !(g.Members || []).includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    sel.onchange = () => { if (sel.value) { ensure(g, 'Members', []).push(sel.value); rerender(); } };
+    memRow.appendChild(sel);
+    card.appendChild(memRow);
+    box.appendChild(card);
+  });
+
+  return box;
 }
 
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
@@ -1637,6 +1777,9 @@ function addFlowSection(nav     , sections     ) {
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph      = null;
 
+  // Collapsing/expanding a group must move both graphs together (they share the collapse state).
+  const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
+
   // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
   // (measured leaves report their source, aggregates sum their children, residuals the remainder).
   const renderTree = async () => {
@@ -1655,25 +1798,62 @@ function addFlowSection(nav     , sections     ) {
       dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
       treePanel.appendChild(dd); return;
     }
+
+    ensureGroupState();
+    const toggles = groupToggles(redrawBoth);
+    if (toggles) treePanel.appendChild(toggles);
+
     const t = document.createElement('table'); t.className = 'ld';
     const hr = document.createElement('tr'); ['Node', 'Rolled-up values'].forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
     const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
     const tb = document.createElement('tbody');
-    nodes.forEach((n     ) => {
+
+    const metricsText = (metrics       ) => (metrics || []).map((m     ) => m.metric + ': ' + formatNum(m.value)).join(', ');
+    const byNode      = {}; nodes.forEach((n     ) => { byNode[n.node] = n; });
+
+    const row = (label        , metrics       , opts                                       ) => {
       const tr = document.createElement('tr');
-      const c1 = document.createElement('td'); c1.textContent = n.node;
+      const c1 = document.createElement('td'); c1.textContent = label;
+      if (opts?.indent) c1.style.paddingLeft = '24px';
+      if (opts?.head) c1.style.fontWeight = '600';
       const c2 = document.createElement('td'); c2.style.cssText = 'color:var(--muted);font-size:12px;';
-      c2.textContent = (n.metrics || []).map((m     ) => m.metric + ': ' + formatNum(m.value)).join(', ');
+      c2.textContent = metricsText(metrics);
       tr.appendChild(c1); tr.appendChild(c2); tb.appendChild(tr);
+    };
+
+    // Sum a group's members per metric — only members that actually have a value, so a group is never a
+    // fabricated total (matches the diagram and the server export).
+    const groupMetrics = (g     ) => {
+      const sums                         = {};
+      (g.Members || []).forEach((m        ) => (byNode[m]?.metrics || []).forEach((mm     ) => { sums[mm.metric] = (sums[mm.metric] || 0) + mm.value; }));
+      return Object.entries(sums).map(([metric, value]) => ({ metric, value }));
+    };
+
+    // Members are shown under their group (summed when collapsed, listed when expanded), never twice.
+    const allMembers = new Set        ();
+    flowGroups().forEach((g     ) => (g.Members || []).forEach((m        ) => allMembers.add(m)));
+
+    nodes.forEach((n     ) => { if (!allMembers.has(n.node)) row(n.node, n.metrics); });
+
+    flowGroups().forEach((g     ) => {
+      row((g.Label || g.Id) + '  (group)', groupMetrics(g), { head: true });
+      if (!collapsedGroups.has(g.Id))
+        (g.Members || []).forEach((m        ) => { if (byNode[m]) row(byNode[m].node, byNode[m].metrics, { indent: true }); });
     });
+
     t.appendChild(tb); treePanel.appendChild(t);
   };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph     ) => {
     wrap.innerHTML = '';
-    const links = (graph.links || []).slice();
-    const nodes = graph.nodes || [];
+    ensureGroupState();
+    // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
+    const folded = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const toggles = groupToggles(redrawBoth);
+    if (toggles) wrap.appendChild(toggles);
+    const links = folded.links;
+    const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
@@ -2120,6 +2300,7 @@ function addNodesSection(nav     , sections     ) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+    ed.appendChild(renderGroupManager(flow, cand, render));
   };
 
   const load = async () => {

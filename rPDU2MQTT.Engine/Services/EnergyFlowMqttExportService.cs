@@ -100,5 +100,42 @@ public class EnergyFlowMqttExportService : baseMQTTService
                 await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
             }
         }
+
+        // Node groups (#groups): each group publishes its own summed tier alongside its members, so a
+        // dashboard can chart "Incoming PV" as one series. Skipped when no member has a known value — never a
+        // fabricated zero, the same rule as the nodes.
+        foreach (var g in flow.Groups ?? new())
+        {
+            if (string.IsNullOrWhiteSpace(g.Id)) continue;
+
+            var total = FlowGroups.Total(graph, g);
+            if (total.Value is not { } power) continue;
+
+            var energy = FlowGroups.Total(energyGraph, g).Value ?? 0;
+            var groupNode = new FlowNode(total.Id, total.Label, total.Kind, power);
+            var topic = FlowExport.Topic(groupNode, graph, cfg.MQTT.ParentTopic, flow);
+
+            var payload = JsonSerializer.Serialize(new
+            {
+                id = g.Id,
+                value = power,
+                power,
+                energy,
+                units = graph.Units,
+                energyUnits = energyGraph.Units,
+                label = total.Label,
+                kind = total.Kind,
+                group = true,
+                members = g.Members,
+                timestamp = Core.MessageTimestamps.Format(oldest ?? DateTime.UtcNow),
+            });
+            await PublishString(topic, payload, retain: true, cancellationToken);
+
+            if (!publishDiscovery) continue;
+
+            var configTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(g.Id)}/config";
+            var doc = FlowExport.DiscoveryDocument(groupNode, null, topic, energyGraph.Units, graph.Units, availability);
+            await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
+        }
     }
 }
