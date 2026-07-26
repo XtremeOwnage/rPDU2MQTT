@@ -5,10 +5,9 @@ namespace rPDU2MQTT.Grains.Discovery;
 /// <summary>
 /// The browsable topic index (singleton, key 0) — see <see cref="ITopicIndexGrain"/> for why it's leased.
 /// <para>
-/// Two bounds keep it from becoming the thing it must not be. In <b>time</b>: the index lives on a lease that
-/// readers renew, and when the lease lapses it drops everything and deactivates, so nothing survives the page
-/// being closed. In <b>size</b>: it holds at most <see cref="Capacity"/> topics and evicts the least recently
-/// seen, so even a firehose broker can't grow it without limit while someone is browsing.
+/// Two bounds keep it from becoming a standing background indexer. In <b>time</b>: the index lives on a lease
+/// that readers renew, and when the lease lapses it drops everything and deactivates. In <b>size</b>: it
+/// holds at most <see cref="Capacity"/> topics and evicts the least recently seen.
 /// </para>
 /// </summary>
 public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
@@ -28,10 +27,22 @@ public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
 
     private DateTime leaseUntilUtc = DateTime.MinValue;
     private DateTime lastObservedUtc = DateTime.MinValue;
+    private string filter = "#";
+    private bool? granted;
     private IGrainTimer? timer;
 
-    public Task<TopicIndexState> Renew()
+    public Task<TopicIndexState> Renew(string? filter)
     {
+        // A blank filter means "just renew, keep browsing what I'm browsing" (the detail lookups do this),
+        // so it never resets a narrowed filter back to '#'. A non-blank, different filter re-subscribes.
+        if (!string.IsNullOrWhiteSpace(filter) && filter!.Trim() != this.filter)
+        {
+            this.filter = filter.Trim();
+            topics.Clear();
+            granted = null;
+            lastObservedUtc = DateTime.MinValue;
+        }
+
         leaseUntilUtc = DateTime.UtcNow + Lease;
         // KeepAlive so the lease can actually expire on its own — that expiry is what frees everything.
         timer ??= this.RegisterGrainTimer(TickAsync, new GrainTimerCreationOptions(Tick, Tick) { KeepAlive = true });
@@ -39,6 +50,14 @@ public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
     }
 
     public Task<bool> Wanted() => Task.FromResult(DateTime.UtcNow < leaseUntilUtc);
+
+    public Task<string> DesiredFilter() => Task.FromResult(DateTime.UtcNow < leaseUntilUtc ? filter : "");
+
+    public Task ReportSubscription(bool granted)
+    {
+        this.granted = granted;
+        return Task.CompletedTask;
+    }
 
     public Task Observe(List<TopicSample> samples)
     {
@@ -80,6 +99,8 @@ public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
         Listening = DateTime.UtcNow - lastObservedUtc < ListeningWindow,
         Topics = topics.Count,
         Capacity = Capacity,
+        Filter = filter,
+        Granted = granted,
     };
 
     /// <summary>Hold the newest <see cref="Capacity"/> topics; the rest are someone else's traffic.</summary>
@@ -97,6 +118,8 @@ public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
 
         // Nobody is browsing any more: let go of everything and stop existing.
         topics.Clear();
+        granted = null;
+        lastObservedUtc = DateTime.MinValue;
         timer?.Dispose();
         timer = null;
         DeactivateOnIdle();

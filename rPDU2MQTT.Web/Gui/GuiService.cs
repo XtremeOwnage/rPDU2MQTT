@@ -830,7 +830,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                var state = await index.Renew();
+                // The filter to browse (default '#'); a restricted broker can narrow it, e.g. 'solar_assistant/#'.
+                var filter = ctx.Request.Query["filter"].FirstOrDefault();
+                var state = await index.Renew(filter);
                 var q = ctx.Request.Query["q"].FirstOrDefault();
                 var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
 
@@ -850,9 +852,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     };
                 }).ToArray();
 
-                // "listening" tells the editor whether anything is feeding the index yet, so it can say
-                // "waiting for the broker" instead of looking broken on the first keystroke.
-                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, topics }, ConfigSchema.Json);
+                // "listening" tells the editor whether anything is feeding the index yet; "granted" tells it
+                // whether the broker actually allowed the subscription, so a denied ACL reads as a clear
+                // message instead of a mysteriously empty list.
+                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
@@ -865,7 +868,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
                 var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                await index.Renew();
+                await index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
                 var sample = await index.Get(topic);
                 if (sample is null)
                     return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);

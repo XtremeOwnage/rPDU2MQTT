@@ -942,8 +942,9 @@ function overlay(title        )                                   {
   return { body, close };
 }
 
-async function fetchTopics(q        , limit = 50)               {
-  const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}`);
+async function fetchTopics(q        , limit = 50, filter         )               {
+  const f = filter ? `&filter=${encodeURIComponent(filter)}` : '';
+  const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}${f}`);
   return (r.body && r.body.ok) ? r.body : { topics: [], listening: false, indexed: 0 };
 }
 
@@ -1013,8 +1014,17 @@ function openTopicPicker(current        , onPick                         ) {
   const { body, close } = overlay('Browse broker topics');
   body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
 
+  // Which broker filter to subscribe to. Default '#' (everything); a broker whose ACL forbids the bare
+  // wildcard can narrow it, e.g. 'solar_assistant/#', and still browse under that prefix.
+  const filterBar = el('div', { class: 'ld-toolbar' });
+  const filterIn = el('input', { type: 'text', value: '#', placeholder: '# (everything)', style: { width: '220px' } })                    ;
+  filterIn.title = 'The topic filter to subscribe to while browsing. If the broker denies “#”, narrow it (e.g. solar_assistant/#).';
+  const applyFilter = btn('Browse this');
+  filterBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Subscribe to:' }), filterIn, applyFilter);
+  body.appendChild(filterBar);
+
   const bar = el('div', { class: 'ld-toolbar' });
-  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter topics…', style: { width: '320px' } })                    ;
+  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter the shown topics…', style: { width: '320px' } })                    ;
   const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
   bar.append(search, status);
   body.appendChild(bar);
@@ -1028,11 +1038,18 @@ function openTopicPicker(current        , onPick                         ) {
   body.appendChild(tbl);
 
   const load = async () => {
-    const b = await fetchTopics(search.value.trim(), 100);
+    const b = await fetchTopics(search.value.trim(), 100, filterIn.value.trim() || '#');
     tbody.innerHTML = '';
+    if (b.granted === false) {
+      // The broker refused the subscription — say so plainly instead of a mysterious empty list.
+      status.style.color = 'var(--bad)';
+      status.textContent = `The broker denied the subscription to “${b.filter || filterIn.value.trim()}”. Your MQTT account lacks read permission on it — grant it, or narrow the filter above to a prefix you can read (e.g. solar_assistant/#).`;
+      return;
+    }
+    status.style.color = 'var(--muted)';
     status.textContent = b.listening
-      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed`
-      : 'waiting for the broker subscription to come up…';
+      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed · subscribed to “${b.filter || '#'}”`
+      : `waiting for the broker subscription to “${b.filter || filterIn.value.trim()}” to come up…`;
     (b.topics || []).forEach((t     ) => {
       const tr = el('tr');
       tr.appendChild(el('td', {}, el('code', { text: t.topic })));
@@ -1047,6 +1064,8 @@ function openTopicPicker(current        , onPick                         ) {
 
   let timer      = null;
   search.oninput = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  applyFilter.onclick = () => load();
+  filterIn.onkeydown = (e     ) => { if (e.key === 'Enter') load(); };
   load();
   // Keep the index's lease alive (and the list fresh) for as long as the window is open.
   const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } load(); }, 5000);
@@ -2299,8 +2318,10 @@ function addNodesSection(nav     , sections     ) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+    // Groups first: the node manager appends the (tall) per-node editor beneath its table when one is open,
+    // which would otherwise bury the Groups section off the bottom of the page.
     ed.appendChild(renderGroupManager(flow, cand, render));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
   const load = async () => {
