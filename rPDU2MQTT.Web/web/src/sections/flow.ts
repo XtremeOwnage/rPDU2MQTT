@@ -1497,3 +1497,137 @@ export function addNodesSection(nav: any, sections: any) {
   };
   link.onclick = () => { activate(link, sec); load(); };
 }
+
+// The Energy overview (#energy-rollup C): an at-a-glance board of where power is flowing right now —
+// solar in, battery charging/discharging, grid import/export, and the house load — summed from the nodes
+// tagged solar/battery/grid. It reads the same live values everything else does; anything unmeasured shows
+// "—", never a fabricated zero (the whole flow's accuracy rule). Battery/grid net uses the in-direction
+// (charge/export) power from the #in cache key, so the arrows point the right way.
+export function addEnergyOverviewSection(nav: any, sections: any) {
+  const link = document.createElement('a'); link.textContent = 'Energy'; nav.appendChild(link);
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Energy Overview' }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
+
+  const bar = el('div', { class: 'sec-actions' });
+  const refresh = btn('Refresh');
+  const instSel = instanceSelector(() => load());
+  const status = el('span', { class: 'ld-count' });
+  bar.append(refresh, instSel.wrap, status); sec.appendChild(bar);
+
+  const grid = el('div', { class: 'energy-grid' }); sec.appendChild(grid);
+  const summary = el('div', { class: 'energy-summary' }); sec.appendChild(summary);
+
+  const fmtPower = (w: number | null) => w == null ? '—'
+    : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
+
+  // A tile: coloured accent, big power figure, a direction/idle sub-line.
+  const tile = (cls: string, icon: string, label: string, value: string, sub: string, subCls = '') => {
+    const t = el('div', { class: 'energy-tile' + (cls ? ' ' + cls : '') });
+    const head = el('div', { class: 'energy-head' });
+    head.append(el('span', { class: 'energy-icon', text: icon }), el('span', { class: 'energy-label', text: label }));
+    t.append(head, el('div', { class: 'energy-value', text: value }), el('div', { class: 'energy-sub' + (subCls ? ' ' + subCls : ''), text: sub }));
+    return t;
+  };
+
+  // Sum a kind's out-direction (graph) values. Returns present (any nodes of this kind) and the known sum
+  // (null when nodes exist but none has a value) so we can tell "no grid" from "grid, value unknown".
+  const sumKind = (nodes: any[], kind: string) => {
+    const ns = nodes.filter(n => (n.kind || 'node') === kind);
+    let sum = 0, known = false;
+    ns.forEach(n => { if (typeof n.value === 'number') { sum += n.value; known = true; } });
+    return { present: ns.length > 0, value: known ? sum : null };
+  };
+
+  const load = async () => {
+    let r: any; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
+    grid.innerHTML = ''; summary.innerHTML = '';
+    if (!r.body || !r.body.ok) {
+      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (r.body && r.body.message) || 'Could not load energy data.' }));
+      status.textContent = ''; return;
+    }
+    const nodes = r.body.nodes || [];
+
+    // Charge / export power (the in-direction) for battery and grid nodes, from the direction-qualified cache.
+    const battIds = nodes.filter((n: any) => n.kind === 'battery').map((n: any) => n.id);
+    const gridIds = nodes.filter((n: any) => n.kind === 'grid').map((n: any) => n.id);
+    const inByNode: Record<string, number> = {};
+    const inQ = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' }));
+    if (inQ.length) {
+      try {
+        const lr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(inQ) });
+        (lr.body?.values || []).forEach((v: any) => { if (typeof v.value === 'number') inByNode[v.node] = (inByNode[v.node] || 0) + v.value; });
+      } catch { /* no live cache — in-direction just stays absent */ }
+    }
+    const sumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { if (id in inByNode) { s += inByNode[id]; known = true; } }); return known ? s : null; };
+
+    const solar = sumKind(nodes, 'solar');
+    const batt = sumKind(nodes, 'battery');   // out = discharge
+    const gridK = sumKind(nodes, 'grid');     // out = import
+    const load_ = sumKind(nodes, 'load');
+    const battIn = sumIn(battIds);            // charge
+    const gridIn = sumIn(gridIds);            // export
+
+    // Net = out − in. Present-but-all-unknown stays null; a measured side alone still yields a net.
+    const net = (out: { present: boolean, value: number | null }, inV: number | null) =>
+      out.value == null && inV == null ? null : (out.value || 0) - (inV || 0);
+    const battNet = net(batt, battIn);
+    const gridNet = net(gridK, gridIn);
+
+    // Solar
+    if (solar.present)
+      grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
+        solar.value == null ? 'no reading yet' : solar.value > 1 ? 'producing' : 'idle', solar.value && solar.value > 1 ? 'supply' : ''));
+
+    // Battery — sign tells charge vs discharge; magnitude is what's shown.
+    if (batt.present || battIds.length) {
+      const sub = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
+      const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
+      grid.appendChild(tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), sub, cls));
+    }
+
+    // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
+    if (gridK.present || gridIds.length) {
+      const sub = gridNet == null ? 'no reading yet' : gridNet > 1 ? 'importing' : gridNet < -1 ? 'exporting' : 'idle';
+      const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
+      grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls));
+    }
+
+    // Home load: prefer explicitly-tagged load nodes; otherwise derive from the balance, but only when every
+    // present source is known (an unknown feeder would make the balance a guess — so it shows "—" instead).
+    let home: number | null = null, homeSub = '';
+    if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
+    else {
+      const unknownFeeder = (solar.present && solar.value == null) || (batt.present && batt.value == null) || (gridK.present && gridK.value == null);
+      if (!unknownFeeder && (solar.present || batt.present || gridK.present)) {
+        home = (solar.value || 0) + (battNet || 0) + (gridNet || 0);
+        homeSub = 'balance of measured sources';
+      }
+    }
+    if (home != null || load_.present)
+      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), homeSub || 'no reading yet'));
+
+    // Self-sufficiency: the share of the home load NOT drawn from the grid. Only when both are known and the
+    // house is actually using power — anything else would be dividing a guess.
+    if (home != null && home > 0 && gridNet != null) {
+      const fromGrid = Math.max(0, gridNet);                 // export doesn't count against self-sufficiency
+      const covered = Math.max(0, home - fromGrid);
+      const pct = Math.max(0, Math.min(100, Math.round((covered / home) * 100)));
+      const row = el('div', { class: 'energy-selfsuff' });
+      row.append(
+        el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
+        el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
+        el('div', { class: 'desc', text: `${fmtPower(covered)} of ${fmtPower(home)} covered by solar + battery.` }),
+      );
+      summary.appendChild(row);
+    }
+
+    if (!grid.children.length)
+      grid.appendChild(el('div', { class: 'desc', text: 'Nothing tagged yet. On the Nodes tab, set a node’s Kind to solar, battery, or grid and bind a source — it’ll show here.' }));
+    status.textContent = `updated ${new Date().toLocaleTimeString()}`;
+  };
+
+  refresh.onclick = () => load();
+  setInterval(() => { if (sec.classList.contains('active')) load(); }, 8000);
+  link.onclick = () => { activate(link, sec); load(); };
+}
