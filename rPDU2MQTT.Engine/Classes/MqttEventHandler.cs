@@ -39,10 +39,20 @@ public class MqttEventHandler
 
     }
 
+    // First connect vs reconnect: on the first connect nothing has subscribed yet, so there is nothing to
+    // restore. Every connect after that is a reconnect that dropped the broker-side subscriptions.
+    private bool hasConnected;
+
     private void Client_AfterConnect(object? sender, HiveMQtt.Client.Events.AfterConnectEventArgs e)
     {
         Log.Information("MQTT Client Connected");
         sendStatusOnline();
+
+        // A reconnect starts a fresh session (fresh client id), so re-establish subscriptions — otherwise
+        // outlet control and energy-flow ingest go silently deaf until the process restarts.
+        if (hasConnected)
+            _ = MqttSubscriptions.ResubscribeAllAsync(client);
+        hasConnected = true;
     }
 
 
