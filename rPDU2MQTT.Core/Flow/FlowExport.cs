@@ -118,7 +118,7 @@ public static class FlowExport
     /// these makes the whole hierarchy — not just leaf outlets — visible to HA and linkable in the dashboard.
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
-        string energyUnits, string powerUnits, string? availabilityTopic)
+        string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -155,6 +155,12 @@ public static class FlowExport
                 [$"{id}_power"] = Sensor($"{id}_power", "Power", "power", "measurement", string.IsNullOrWhiteSpace(powerUnits) ? "W" : powerUnits, "{{ value_json.power }}"),
             },
         };
+        // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export — as a
+        // second total_increasing sensor, which is what lets HA's Energy Dashboard show battery charge and
+        // grid return. Its unique_id matches EnergyInUniqueId so the dashboard sync can resolve it.
+        if (includeEnergyIn)
+            doc["components"]!.AsObject()[$"{id}_energy_in"] =
+                Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
         if (!string.IsNullOrEmpty(availabilityTopic))
             doc["availability_topic"] = availabilityTopic;
         return doc;

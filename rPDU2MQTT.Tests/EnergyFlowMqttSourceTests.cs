@@ -197,6 +197,37 @@ public class EnergyFlowMqttSourceTests
         Assert.Equal(812.5, v);
     }
 
+    [Fact]
+    public void Apply_KeepsInAndOutDirectionsSeparate()
+    {
+        // A battery binds discharge (out, default) and charge (in) on the same node/metric. Before the
+        // direction key they collided on (node, "energy") and one silently overwrote the other.
+        var nodes = new[]
+        {
+            NodeWith("battery",
+                new EnergyFlowSource { Topic = "sa/discharge", Metric = "energy" },                      // out (default)
+                new EnergyFlowSource { Topic = "sa/charge", Metric = "energy", Direction = "in" }),
+        };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/discharge", "12.5", DateTime.UtcNow);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/charge", "4.0", DateTime.UtcNow);
+
+        Assert.True(cache.TryGetValue("battery", "energy", out var discharge));     // the supply value the roll-up reads
+        Assert.Equal(12.5, discharge);
+        Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("energy", "in"), out var charge));
+        Assert.Equal(4.0, charge);
+    }
+
+    [Theory]
+    [InlineData("energy", "out", "energy")]
+    [InlineData("energy", "in", "energy#in")]
+    [InlineData("energy", null, "energy")]        // default is out
+    [InlineData("energy", "IN", "energy#in")]     // case-insensitive
+    public void FlowMetricKey_SuffixesOnlyTheInDirection(string metric, string? direction, string expected)
+        => Assert.Equal(expected, FlowMetricKey.For(metric, direction));
+
     [Theory]
     [InlineData("realpower", "kW", 1000)]        // 1 kW -> 1000 W
     [InlineData("energy", "Wh", 0.001)]          // 1 Wh -> 0.001 kWh

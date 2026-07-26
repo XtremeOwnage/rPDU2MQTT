@@ -56,6 +56,15 @@ public class EnergyFlowMqttExportService : baseMQTTService
         // hierarchy tiers (panels/circuits/grid/etc.) get an energyflow discovery device.
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
+        // Nodes that declare an in-direction (charge/export) energy source get a second energy sensor, fed
+        // from the direction-qualified cache key. This is what lights up HA's battery-charge / grid-export.
+        var energyInNodes = flow.Nodes
+            .Where(n => n.AllSources().Any(s =>
+                string.Equals(s.Metric, energyMetric, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(s.Direction, "in", StringComparison.OrdinalIgnoreCase)))
+            .Select(n => n.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var node in graph.Nodes)
         {
             // Nothing determines this tier's power — no measurement, and no single path that conservation
@@ -68,12 +77,18 @@ public class EnergyFlowMqttExportService : baseMQTTService
             var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
             var parents = FlowExport.Parents(graph, node.Id);          // the tiers that feed this one
 
+            // The in-direction (charge/export) energy, when this node declares one and a fresh value exists —
+            // null otherwise, so HA's energy_in sensor reads unavailable rather than a fabricated 0.
+            double? energyIn = energyInNodes.Contains(node.Id) && live is not null
+                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
+
             var payload = JsonSerializer.Serialize(new
             {
                 id = node.Id,
                 value = power,       // retained for #164 back-compat (== power)
                 power,
                 energy,
+                energy_in = energyIn,
                 units = graph.Units,
                 energyUnits = energyGraph.Units,
                 label = node.Label,
@@ -96,7 +111,7 @@ public class EnergyFlowMqttExportService : baseMQTTService
             }
             else
             {
-                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability);
+                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability, includeEnergyIn: energyInNodes.Contains(node.Id));
                 await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
             }
         }
