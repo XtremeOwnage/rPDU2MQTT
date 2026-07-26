@@ -247,6 +247,14 @@ public class EnergyFlowMqttSourceTests
     }
 
     [Fact]
+    public void FlowUnits_Soc_IsAPercentageWithFractionScaling()
+    {
+        Assert.Equal("%", FlowUnits.Canonical("soc"));
+        Assert.Equal(1, FlowUnits.ToCanonicalFactor("soc", "%"));      // already a percentage
+        Assert.Equal(100, FlowUnits.ToCanonicalFactor("soc", "fraction")); // 0.82 -> 82%
+    }
+
+    [Fact]
     public void Apply_ConvertsTheSourceUnitToCanonicalBeforeCaching()
     {
         // Solar Assistant publishing kW must land in the cache as W, so it lines up with the PDU's watts.
