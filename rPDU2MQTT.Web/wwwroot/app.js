@@ -1797,7 +1797,11 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Bindings', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Bindings', ''].forEach(h => {
+    const th = el('th', { text: h });
+    if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
+    head.appendChild(th);
+  });
   tbl.appendChild(el('thead', {}, head));
   const body = el('tbody');
   customNodes.forEach((n     ) => {
@@ -1808,8 +1812,18 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
     tr.appendChild(el('td', { text: n.Mode || 'auto' }));
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
-    const nb = (n.Sources || []).length;
-    tr.appendChild(el('td', { text: nb ? String(nb) : '—', class: nb ? '' : 'num' }));
+    // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
+    const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
+    const nb = srcs.length;
+    const hasEnergy = srcs.some((s     ) => String(s.Metric || 'realpower').toLowerCase() === 'energy');
+    const bindCell = el('td', { class: nb ? '' : 'num' });
+    bindCell.appendChild(el('span', { text: nb ? String(nb) : '—' }));
+    if (nb && !hasEnergy)
+      bindCell.appendChild(el('span', {
+        text: ' ⚠', style: { color: 'var(--warn)', fontWeight: '700', cursor: 'help' },
+        title: 'No energy (kWh) source bound — this node won’t appear on Home Assistant’s Energy Dashboard. Edit it and add a source with the “Energy” metric to include it.',
+      }));
+    tr.appendChild(bindCell);
 
     const actions = el('td', { style: { whiteSpace: 'nowrap' } });
     const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
