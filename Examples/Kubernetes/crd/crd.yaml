@@ -207,6 +207,11 @@ spec:
                       EnergyMeasurementType:
                         type: string
                         description: Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.
+                      ExcludeDeviceKinds:
+                        type: array
+                        items:
+                          type: string
+                        description: "Node kinds to leave OUT of the Energy Dashboard's individual-devices list (they're sources/storage/pass-through, shown as the dashboard's grid/solar/battery sources instead). Default: grid, solar, battery, inverter. Empty list = export every tier."
                     description: Auto-configure Home Assistant's Energy Dashboard 'devices' (with upstream relationships) from the energy-flow hierarchy, via HA's WebSocket API.
                 description: Home Assistant Configuration
               Overrides:

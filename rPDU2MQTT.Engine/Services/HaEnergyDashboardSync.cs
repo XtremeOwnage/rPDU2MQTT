@@ -36,7 +36,9 @@ public sealed class HaEnergyDashboardSync
     /// tiers whose sensor isn't in HA are skipped and their children link to the nearest ancestor that is —
     /// giving HA the full Grid → Panel → Circuit → PDU → outlet chain.
     /// </summary>
-    public List<HaDeviceConsumption> BuildDevices(IReadOnlyDictionary<string, string> entityByUniqueId)
+    /// <param name="excludeKinds">Node kinds to leave out; pass null to build the full set of tiers we manage
+    /// (used by the sync to retire devices we exported before an exclusion was added).</param>
+    public List<HaDeviceConsumption> BuildDevices(IReadOnlyDictionary<string, string> entityByUniqueId, IReadOnlyCollection<string>? excludeKinds)
     {
         var merged = new PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
@@ -51,7 +53,7 @@ public sealed class HaEnergyDashboardSync
             var uid = native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id);
             return entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         };
-        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver);
+        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver, excludeKinds);
     }
 
     /// <summary>
@@ -89,14 +91,18 @@ public sealed class HaEnergyDashboardSync
             if ((string?)e?["unique_id"] is { Length: > 0 } uid && (string?)e?["entity_id"] is { Length: > 0 } eid)
                 entityByUniqueId[uid] = eid;
 
-        var devices = BuildDevices(entityByUniqueId);
+        var devices = BuildDevices(entityByUniqueId, config.HASS.EnergyDashboard.ExcludeDeviceKinds);
         var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
             ?? throw new Exception("Could not read HA energy preferences.");
 
-        var ours = devices.Select(d => d.stat_consumption).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // "Managed" is every tier we *could* export (no exclusion). Dropping all of it before re-adding the
+        // kept devices means a tier we exported before an exclusion was configured (a grid/battery/inverter)
+        // is retired on the next sync, not left orphaned — while the user's own devices (never in this set)
+        // stay put.
+        var managed = BuildDevices(entityByUniqueId, null).Select(d => d.stat_consumption).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var keep = new JsonArray();
         foreach (var existingDevice in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
-            if (existingDevice is JsonObject o && !ours.Contains((string?)o["stat_consumption"] ?? ""))
+            if (existingDevice is JsonObject o && !managed.Contains((string?)o["stat_consumption"] ?? ""))
                 keep.Add(o.DeepClone());
         foreach (var d in devices)
             keep.Add(JsonSerializer.SerializeToNode(d, Json)!);

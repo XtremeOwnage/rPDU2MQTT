@@ -80,6 +80,42 @@ public class EnergyDashboardSourcesTests
     }
 
     [Fact]
+    public void DeviceConsumption_ExcludesSourceAndStorageKinds()
+    {
+        // grid/solar/battery/inverter belong in the dashboard's own buckets, not the individual-devices list.
+        var graph = Graph(
+            new FlowNode("grid", "Grid", "grid"),
+            new FlowNode("batt", "Battery", "battery"),
+            new FlowNode("inv", "Inverter", "inverter"),
+            new FlowNode("rack", "Rack PDU", "pdu"),
+            new FlowNode("srv", "Server", "outlet"));
+        string? stat(string id) => "sensor." + id + "_energy";   // everything has an energy stat
+
+        var all = EnergyDashboardSync.BuildDeviceConsumption(graph, stat);
+        Assert.Equal(5, all.Count);   // no exclusion -> every tier
+
+        var filtered = EnergyDashboardSync.BuildDeviceConsumption(graph, stat, new[] { "grid", "solar", "battery", "inverter" });
+        Assert.Equal(new[] { "sensor.rack_energy", "sensor.srv_energy" },
+            filtered.Select(d => d.stat_consumption).OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
+    public void DeviceConsumption_IncludedInStat_SkipsAnExcludedAncestor()
+    {
+        // A server behind an excluded inverter should link upstream to the next *kept* ancestor, not the
+        // inverter (which is no longer a device) — else included_in_stat dangles.
+        var graph = new FlowGraph(
+            new[] { new FlowNode("panel", "Panel", "panel"), new FlowNode("inv", "Inverter", "inverter"), new FlowNode("srv", "Server", "outlet") },
+            new[] { new FlowLink("panel", "inv", 100), new FlowLink("inv", "srv", 100) },
+            "realpower", "W");
+        string? stat(string id) => "sensor." + id + "_energy";
+
+        var srv = Assert.Single(EnergyDashboardSync.BuildDeviceConsumption(graph, stat, new[] { "inverter" }),
+            d => d.stat_consumption == "sensor.srv_energy");
+        Assert.Equal("sensor.panel_energy", srv.included_in_stat);   // skipped the inverter, linked to the panel
+    }
+
+    [Fact]
     public void StatsOf_ExtractsEveryReferencedEntity()
     {
         var grid = Assert.Single(EnergyDashboardSync.BuildEnergySources(

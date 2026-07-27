@@ -30,15 +30,23 @@ public enum EnergyDirection
 /// </summary>
 public static class EnergyDashboardSync
 {
-    public static List<HaDeviceConsumption> BuildDeviceConsumption(FlowGraph graph, Func<string, string?> statFor)
+    public static List<HaDeviceConsumption> BuildDeviceConsumption(FlowGraph graph, Func<string, string?> statFor,
+        IReadOnlyCollection<string>? excludeKinds = null)
     {
+        var excluded = excludeKinds is { Count: > 0 }
+            ? new HashSet<string>(excludeKinds, StringComparer.OrdinalIgnoreCase)
+            : null;
         var entries = new List<HaDeviceConsumption>();
         foreach (var node in graph.Nodes)
         {
+            // Sources/storage/pass-through (grid, solar, battery, inverter) aren't "device consumption" — they
+            // clutter the list and double-count against the dashboard's own grid/solar/battery buckets.
+            if (excluded is not null && excluded.Contains(node.Kind ?? "node"))
+                continue;
             var stat = statFor(node.Id);
             if (string.IsNullOrEmpty(stat))
                 continue;   // no energy sensor for this tier -> can't be an Energy-Dashboard device
-            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor), node.Label));
+            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor, excluded), node.Label));
         }
         return entries;
     }
@@ -104,10 +112,12 @@ public static class EnergyDashboardSync
                 }
     }
 
-    // Walk up the primary-feeder chain to the first ancestor that has an energy stat (skipping tiers that
-    // don't), so the upstream link stays valid even when an intermediate tier has no energy sensor.
-    private static string? NearestAncestorStat(FlowGraph graph, string id, Func<string, string?> statFor)
+    // Walk up the primary-feeder chain to the first ancestor that has an energy stat AND is itself a device
+    // (not an excluded source/storage tier), so a device's included_in_stat never points at a tier we left out
+    // of the list — and the link still spans intermediate tiers that have no sensor.
+    private static string? NearestAncestorStat(FlowGraph graph, string id, Func<string, string?> statFor, ISet<string>? excluded = null)
     {
+        var kindOf = graph.Nodes.ToDictionary(n => n.Id, n => n.Kind ?? "node", StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id };
         var current = id;
         while (true)
@@ -118,8 +128,9 @@ public static class EnergyDashboardSync
             var parent = parents[0];        // HA upstream is single-parent: follow the primary feeder
             if (!seen.Add(parent))
                 return null;                // cycle guard
+            var isExcluded = excluded is not null && excluded.Contains(kindOf.TryGetValue(parent, out var k) ? k : "node");
             var stat = statFor(parent);
-            if (!string.IsNullOrEmpty(stat))
+            if (!string.IsNullOrEmpty(stat) && !isExcluded)
                 return stat;
             current = parent;
         }

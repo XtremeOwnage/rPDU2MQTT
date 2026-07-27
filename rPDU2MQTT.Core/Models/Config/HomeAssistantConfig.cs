@@ -84,4 +84,13 @@ public class HomeAssistantEnergyDashboardConfig
     [DefaultValue("energy")]
     [Description("Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.")]
     public string EnergyMeasurementType { get; set; } = "energy";
+
+    /// <summary>
+    /// Node kinds kept OUT of the Energy Dashboard's "individual devices" list (#energy-rollup). Sources and
+    /// storage — grid, solar, battery — belong in the dashboard's own grid/solar/battery buckets (synced
+    /// separately), and an inverter is a pass-through, not a consumer; listing them as devices double-counts
+    /// and clutters. Defaults to those roles; set to an empty list to export every tier as a device.
+    /// </summary>
+    [Description("Node kinds to leave OUT of the Energy Dashboard's individual-devices list (they're sources/storage/pass-through, shown as the dashboard's grid/solar/battery sources instead). Default: grid, solar, battery, inverter. Empty list = export every tier.")]
+    public List<string> ExcludeDeviceKinds { get; set; } = new() { "grid", "solar", "battery", "inverter" };
 }
