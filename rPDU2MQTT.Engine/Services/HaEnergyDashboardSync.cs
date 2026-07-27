@@ -48,8 +48,13 @@ public sealed class HaEnergyDashboardSync
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
 
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
+        var energyGraph = FlowGraphBuilder.Build(merged, config.EnergyFlow, energyType, live);
         Func<string, string?> resolver = id =>
         {
+            // Only register a tier the bridge can actually give an energy (kWh) figure for. A node with no
+            // energy behind it (power-only outlets, an unmeasured tier) would resolve to an entity HA then
+            // marks "unavailable" — clutter, not data. Same never-fabricate rule as the diagram.
+            if (!FlowExport.TryNodeValue(energyGraph, id, out _)) return null;
             var uid = native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id);
             return entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         };
@@ -71,10 +76,15 @@ public sealed class HaEnergyDashboardSync
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
+        var energyGraph = FlowGraphBuilder.Build(merged, config.EnergyFlow, energyType, live);
 
         string? Resolve(string uid) => entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         return EnergyDashboardSync.BuildEnergySources(graph, (id, dir) => dir == Core.Flow.EnergyDirection.Out
-            ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
+            // Out (production/discharge/import): only when the bridge knows this node's energy, else HA gets an
+            // unavailable stat and the whole grid/solar/battery bucket reads broken.
+            ? (FlowExport.TryNodeValue(energyGraph, id, out _)
+                ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
+                : null)
             : Resolve(FlowExport.EnergyInUniqueId(id)));
     }
 
