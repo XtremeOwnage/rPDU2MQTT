@@ -105,16 +105,24 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
   const cleanups = [() => scroll.removeEventListener('wheel', onWheel)];
 
   if (pan) {
-    let dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
+    // `armed` on press, but only actually pan once the pointer passes a small threshold. Without that, a plain
+    // click nudged the scroll by a pixel, moved the target out from under the cursor, and the browser dropped
+    // the click — so clickable nodes (expand a group) never fired.
+    let armed = false, panning = false, sx = 0, sy = 0, sl = 0, st = 0;
     scroll.style.cursor = 'grab';
     const onDown = (e: any) => {
       if (e.button !== 0) return;
-      dragging = true; sx = e.clientX; sy = e.clientY; sl = scroll.scrollLeft; st = scroll.scrollTop;
-      scroll.style.cursor = 'grabbing';
+      armed = true; panning = false; sx = e.clientX; sy = e.clientY; sl = scroll.scrollLeft; st = scroll.scrollTop;
     };
     // Track on window so a drag that runs past the container edge keeps panning until release.
-    const onMove = (e: any) => { if (!dragging) return; scroll.scrollLeft = sl - (e.clientX - sx); scroll.scrollTop = st - (e.clientY - sy); };
-    const onUp = () => { if (!dragging) return; dragging = false; scroll.style.cursor = 'grab'; };
+    const onMove = (e: any) => {
+      if (!armed) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (!panning && Math.hypot(dx, dy) < 4) return;   // still within click tolerance — leave the click alone
+      panning = true; scroll.style.cursor = 'grabbing';
+      scroll.scrollLeft = sl - dx; scroll.scrollTop = st - dy;
+    };
+    const onUp = () => { if (!armed) return; armed = false; if (panning) { panning = false; scroll.style.cursor = 'grab'; } };
     scroll.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
