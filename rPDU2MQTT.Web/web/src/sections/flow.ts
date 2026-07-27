@@ -1150,10 +1150,12 @@ export function addFlowSection(nav: any, sections: any) {
       s.outOff += h; t.inOff += h;
     });
 
-    // Each member node -> its group, so a group reads like a node: click the collapsed group node to expand
-    // it, or click any of its expanded members to fold it back — the toggles above stay as an alternative.
+    // A group reads like a node: click the group node to toggle it, or click any expanded member to fold it
+    // back — the toggles above stay as an alternative. memberGroup maps a member to its group; groupById maps
+    // a group's id (including an anchor group, whose id is a real node) so the anchor toggles either way.
     const memberGroup: Record<string, any> = {};
-    flowGroups().forEach((g: any) => (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }));
+    const groupById: Record<string, any> = {};
+    flowGroups().forEach((g: any) => { groupById[g.Id] = g; (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }); });
 
     // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
     // where they cross a ribbon).
@@ -1180,14 +1182,16 @@ export function addFlowSection(nav: any, sections: any) {
       }
       svg.appendChild(lab);
 
-      // Group node (collapsed) or a member of one (expanded): make the node itself the expand/collapse control.
-      const grp = n.group ? n : memberGroup[n.id];
+      // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
+      const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
       if (grp) {
         const gid = n.group ? n.id : grp.Id;
         const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
         [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
         const hint = svgEl('title');
-        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand` : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand`
+          : grp.Id === n.id ? `Group of ${(grp.Members || []).length} node(s) — click to collapse`
+          : `In group “${grp.Label || grp.Id}” — click to collapse`;
         rect.appendChild(hint);
         if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
       }
