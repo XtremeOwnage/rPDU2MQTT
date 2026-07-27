@@ -95,6 +95,15 @@ export function addDiagnosticsSection(nav: any, sections: any) {
     const ds = b.dataSources || [];
     if (!ds.length) comp.appendChild(compLine('', 'PDU data — none yet' + (roles.length && !roles.includes('worker') ? ' (waiting on a worker)' : '')));
     else ds.forEach((s: any) => comp.appendChild(compLine(s.stale ? 'bad' : 'good', 'PDU data · ' + s.instance + ' — ' + (s.stale ? 'stale, ' : '') + 'updated ' + s.ageSeconds + 's ago')));
+    // Modbus sources (inverters/meters). This is where "everything's green but no solar/battery/grid data"
+    // gets diagnosed — a device that isn't answering shows red here instead of only in a log line.
+    (b.modbus || []).forEach((m: any) => {
+      const label = 'Modbus · ' + (m.name || m.id) + ' (' + (m.host || '?') + ')';
+      if (m.stale)
+        comp.appendChild(compLine('bad', label + ' — ' + (m.lastOkAgeSeconds == null ? 'no successful read yet' : 'stale, last read ' + m.lastOkAgeSeconds + 's ago') + (m.error ? ' · ' + m.error : '')));
+      else
+        comp.appendChild(compLine('good', label + ' — reading ' + m.values + ' value(s), ' + (m.lastOkAgeSeconds ?? 0) + 's ago' + (m.error ? ' · ' + m.error : '')));
+    });
     // Other role processes seen on the bus (split deployments only).
     (b.processes || []).forEach((p: any) => comp.appendChild(compLine(p.stale ? 'bad' : 'good', 'Process · ' + ((p.roles || []).join('+') || '?') + ' @ ' + (p.host || '?') + ' — ' + (p.stale ? 'last seen ' : 'alive, ') + p.ageSeconds + 's ago')));
   };

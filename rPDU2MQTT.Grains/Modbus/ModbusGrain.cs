@@ -26,6 +26,10 @@ public sealed class ModbusGrain : Grain, IModbusGrain
     private MeasurementSnapshot? latest;
     private long version;
     private DateTime lastConfiguredUtc;
+    // Poll health, surfaced via Health() so the GUI can show whether the device is actually being read.
+    private DateTime? lastAttemptUtc, lastOkUtc;
+    private int lastValueCount;
+    private string? lastError;
 
     public ModbusGrain(ILogger<ModbusGrain> log) => this.log = log;
 
@@ -38,6 +42,17 @@ public sealed class ModbusGrain : Grain, IModbusGrain
     }
 
     public Task<MeasurementSnapshot?> Latest() => Task.FromResult(latest);
+
+    public Task<ModbusHealth> Health() => Task.FromResult(new ModbusHealth
+    {
+        Key = key,
+        Bindings = config?.Bindings.Count ?? 0,
+        LastAttemptUtc = lastAttemptUtc,
+        LastOkUtc = lastOkUtc,
+        LastValueCount = lastValueCount,
+        LastError = lastError,
+        PollIntervalSeconds = config?.PollIntervalSeconds ?? 0,
+    });
 
     public Task Configure(ModbusDeviceConfig cfg)
     {
@@ -68,6 +83,7 @@ public sealed class ModbusGrain : Grain, IModbusGrain
         }
 
         if (config.Bindings.Count == 0) return;
+        lastAttemptUtc = DateTime.UtcNow;
 
         var sources = config.Bindings.Select(b => new EnergyFlowSource
         {
@@ -88,6 +104,7 @@ public sealed class ModbusGrain : Grain, IModbusGrain
         // Couldn't even open the socket — the gateway/device is unreachable at host:port.
         if (!ok)
         {
+            lastError = message;
             log.LogWarning("Modbus {Key}: {Msg}", key, message);
             return;
         }
@@ -113,9 +130,18 @@ public sealed class ModbusGrain : Grain, IModbusGrain
             log.LogWarning("Modbus {Key} ({Msg}): {Fail}/{Total} register(s) failed — {Details}",
                 key, message, failures.Count, readings.Count, string.Join("; ", failures));
 
-        if (mapped.Count == 0) return;
+        if (mapped.Count == 0)
+        {
+            // Socket opened but every register read failed — the device answered but gave us nothing usable.
+            lastError = failures.Count > 0 ? $"{failures.Count} register(s) failed: {failures[0]}" : "no values read";
+            return;
+        }
 
         log.LogInformation("Modbus {Key}: read {Count} value(s) ({Msg}).", key, mapped.Count, message);
+        lastOkUtc = DateTime.UtcNow;
+        lastValueCount = mapped.Count;
+        // A partial read still counts as reachable, but keep the failure note so the GUI can show "3 of 5 read".
+        lastError = failures.Count > 0 ? $"{failures.Count} of {readings.Count} register(s) failed" : null;
         latest = new MeasurementSnapshot(key, DateTimeOffset.UtcNow, ++version, mapped);
         await GrainFactory.GetGrain<IFlowGrain>(0).Ingest(latest);
     }

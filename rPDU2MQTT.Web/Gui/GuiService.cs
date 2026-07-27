@@ -543,12 +543,35 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         .FirstOrDefault() ?? emonCmsStatus.Snapshot();
             }
 
+            // Modbus source health: for each configured connection, ask its device grain whether it's actually
+            // being read — so "everything's green but no inverter data" is diagnosable, instead of the failure
+            // living only in a log line while solar/battery/grid quietly read null.
+            var modbus = new List<object>();
+            foreach (var conn in config.Modbus.Connections)
+            {
+                if (!conn.Enabled || string.IsNullOrWhiteSpace(conn.Host)) continue;
+                try
+                {
+                    var h = await grains.GetGrain<Grains.Abstractions.Modbus.IModbusGrain>(
+                        Grains.Abstractions.Modbus.IModbusGrain.KeyFor(conn.Host, conn.Port, conn.UnitId)).Health();
+                    long? okAge = h.LastOkUtc is { } okAt ? (long)Math.Max(0, (DateTime.UtcNow - okAt).TotalSeconds) : null;
+                    var stale = h.LastOkUtc is null || (h.PollIntervalSeconds > 0 && okAge > Math.Max(30, h.PollIntervalSeconds * 3));
+                    modbus.Add(new
+                    {
+                        id = conn.Id, name = conn.Name ?? conn.Id, host = $"{conn.Host}:{conn.Port}", unitId = conn.UnitId,
+                        bindings = h.Bindings, values = h.LastValueCount, lastOkAgeSeconds = okAge, error = h.LastError, stale,
+                    });
+                }
+                catch { /* device grain unreachable from here — leave it off rather than guess */ }
+            }
+
             return Results.Json(new
             {
                 ok = true,
                 version = Version,
                 image = Environment.GetEnvironmentVariable("RPDU2MQTT_IMAGE"),
                 update,
+                modbus,
                 dotnet = Environment.Version.ToString(),
                 os = RuntimeInformation.OSDescription,
                 startedUtc = health.StartedUtc,

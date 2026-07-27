@@ -17,6 +17,22 @@ public sealed record ModbusBinding
     [Id(8)] public int StaleAfterSeconds { get; init; } = 900;
 }
 
+/// <summary>
+/// A Modbus device's poll health, so the GUI can show whether a source (e.g. an inverter) is actually being
+/// read — the gap that made "everything's green but no data" impossible to diagnose. All times are UTC.
+/// </summary>
+[GenerateSerializer]
+public sealed record ModbusHealth
+{
+    [Id(0)] public string Key { get; init; } = "";        // host|port|unitId
+    [Id(1)] public int Bindings { get; init; }
+    [Id(2)] public DateTime? LastAttemptUtc { get; init; }
+    [Id(3)] public DateTime? LastOkUtc { get; init; }      // last poll that mapped ≥1 value
+    [Id(4)] public int LastValueCount { get; init; }       // values read on the last OK poll
+    [Id(5)] public string? LastError { get; init; }        // socket/read failure summary, or null when healthy
+    [Id(6)] public int PollIntervalSeconds { get; init; }
+}
+
 /// <summary>A device's whole configuration, pushed to the grain by the reconciler (host/port/unitId are the key).</summary>
 [GenerateSerializer]
 public sealed record ModbusDeviceConfig
@@ -42,6 +58,9 @@ public interface IModbusGrain : IGrainWithStringKey
 
     /// <summary>The most recent successful reading set from this device, or null if none yet.</summary>
     Task<MeasurementSnapshot?> Latest();
+
+    /// <summary>This device's poll health (last attempt/success, value count, last error) for the GUI.</summary>
+    Task<ModbusHealth> Health();
 
     /// <summary>The grain key for a device address.</summary>
     static string KeyFor(string host, int port, int unitId) => $"{host}|{port}|{unitId}";
