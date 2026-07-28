@@ -54,12 +54,15 @@ public class EnergyDashboardSourcesTests
     {
         var node = new FlowNode("grid", "Grid", "grid");
 
-        // Import only -> flow_from present, flow_to omitted (not null — HA rejects nulls).
+        // Import only -> flow_from has the entry; flow_to is present but empty (HA's grid schema requires both).
         var importOnly = Assert.Single(EnergyDashboardSync.BuildEnergySources(Graph(node),
             Stats(("grid", EnergyDirection.Out, "sensor.grid_import"))));
         Assert.Equal("grid", (string?)importOnly["type"]);
         Assert.Equal("sensor.grid_import", (string?)importOnly["flow_from"]!.AsArray()[0]!["stat_energy_from"]);
-        Assert.False(importOnly.ContainsKey("flow_to"));
+        Assert.Empty(importOnly["flow_to"]!.AsArray());
+        // Each flow entry carries the full key set (cost/price as null) — a bare entry fails HA's grid schema.
+        var entry = importOnly["flow_from"]!.AsArray()[0]!.AsObject();
+        Assert.True(entry.ContainsKey("stat_cost") && entry.ContainsKey("number_energy_price"));
 
         // Both -> flow_from (import) + flow_to (export).
         var both = Assert.Single(EnergyDashboardSync.BuildEnergySources(Graph(node),
