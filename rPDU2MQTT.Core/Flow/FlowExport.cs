@@ -86,6 +86,13 @@ public static class FlowExport
     /// Home Assistant's battery/grid split.</summary>
     public static string EnergyInUniqueId(string nodeId) => DeviceId(nodeId) + "_energy_in";
 
+    /// <summary>The HA unique_id of a tier's power sensor ("energyflow_&lt;key&gt;_power"). Signed for a
+    /// bidirectional node (grid/battery): positive supplying, negative drawing — what HA's stat_rate expects.</summary>
+    public static string PowerUniqueId(string nodeId) => DeviceId(nodeId) + "_power";
+
+    /// <summary>The HA unique_id of a battery tier's state-of-charge sensor ("energyflow_&lt;key&gt;_soc").</summary>
+    public static string SocUniqueId(string nodeId) => DeviceId(nodeId) + "_soc";
+
     /// <summary>
     /// Flow node id -> the unique_id of the native PDU-discovery energy sensor it already has (#177): PDU
     /// tiers (<c>pdu:{name}</c>) and outlets (<c>outlet:{name}:{key}</c>) that carry an energy measurement.
@@ -118,7 +125,7 @@ public static class FlowExport
     /// these makes the whole hierarchy — not just leaf outlets — visible to HA and linkable in the dashboard.
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
-        string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false)
+        string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -161,6 +168,10 @@ public static class FlowExport
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
                 Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
+        // A battery tier with a state-of-charge source publishes it too, so HA's battery source can show %.
+        if (includeSoc)
+            doc["components"]!.AsObject()[$"{id}_soc"] =
+                Sensor($"{id}_soc", "State of charge", "battery", "measurement", "%", "{{ value_json.soc }}");
         if (!string.IsNullOrEmpty(availabilityTopic))
             doc["availability_topic"] = availabilityTopic;
         return doc;

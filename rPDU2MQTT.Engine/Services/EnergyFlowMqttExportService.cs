@@ -61,7 +61,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
         var energyInNodes = flow.Nodes
             .Where(n => n.AllSources().Any(s =>
                 string.Equals(s.Metric, energyMetric, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(s.Direction, "in", StringComparison.OrdinalIgnoreCase)))
+                (string.Equals(s.Direction, "in", StringComparison.OrdinalIgnoreCase) || FlowMetricKey.IsSplit(s.Direction))))
+            .Select(n => n.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Nodes with a state-of-charge source (battery %) get an extra SoC sensor HA's battery source can use.
+        var socNodes = flow.Nodes
+            .Where(n => n.AllSources().Any(s => string.Equals(s.Metric, "soc", StringComparison.OrdinalIgnoreCase)))
             .Select(n => n.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -82,13 +88,20 @@ public class EnergyFlowMqttExportService : baseMQTTService
             double? energyIn = energyInNodes.Contains(node.Id) && live is not null
                 && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
 
+            // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export), so the
+            // published power sensor swings ± the way HA's stat_rate wants. A one-way node keeps its plain power.
+            double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
+            // Battery state of charge (%), when this node has a soc source with a fresh value.
+            double? soc = socNodes.Contains(node.Id) && live is not null && live.TryGetValue(node.Id, "soc", out var s) ? s : null;
+
             var payload = JsonSerializer.Serialize(new
             {
                 id = node.Id,
-                value = power,       // retained for #164 back-compat (== power)
-                power,
+                value = netPower,    // retained for #164 back-compat (== power)
+                power = netPower,
                 energy,
                 energy_in = energyIn,
+                soc,
                 units = graph.Units,
                 energyUnits = energyGraph.Units,
                 label = node.Label,
@@ -111,7 +124,7 @@ public class EnergyFlowMqttExportService : baseMQTTService
             }
             else
             {
-                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability, includeEnergyIn: energyInNodes.Contains(node.Id));
+                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability, includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id));
                 await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
             }
         }

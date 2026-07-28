@@ -11,7 +11,9 @@ namespace rPDU2MQTT.Core.Flow;
 public sealed record HaDeviceConsumption(
     string stat_consumption,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? included_in_stat,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? name);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? name,
+    // stat_rate = an optional power sensor for real-time monitoring (HA's "Device power consumption").
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? stat_rate = null);
 
 /// <summary>The direction of a node's energy stat, relative to the node — see <see cref="Models.Config.EnergyFlowSource.Direction"/>.</summary>
 public enum EnergyDirection
@@ -31,7 +33,7 @@ public enum EnergyDirection
 public static class EnergyDashboardSync
 {
     public static List<HaDeviceConsumption> BuildDeviceConsumption(FlowGraph graph, Func<string, string?> statFor,
-        IReadOnlyCollection<string>? excludeKinds = null)
+        IReadOnlyCollection<string>? excludeKinds = null, Func<string, string?>? powerFor = null)
     {
         var excluded = excludeKinds is { Count: > 0 }
             ? new HashSet<string>(excludeKinds, StringComparer.OrdinalIgnoreCase)
@@ -46,7 +48,9 @@ public static class EnergyDashboardSync
             var stat = statFor(node.Id);
             if (string.IsNullOrEmpty(stat))
                 continue;   // no energy sensor for this tier -> can't be an Energy-Dashboard device
-            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor, excluded), node.Label));
+            var power = powerFor?.Invoke(node.Id);   // optional real-time power sensor
+            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor, excluded), node.Label,
+                string.IsNullOrEmpty(power) ? null : power));
         }
         return entries;
     }
@@ -65,13 +69,15 @@ public static class EnergyDashboardSync
     /// appears with whichever flow directions resolve.
     /// </para>
     /// </summary>
-    public static List<JsonObject> BuildEnergySources(FlowGraph graph, Func<string, EnergyDirection, string?> statFor)
+    public static List<JsonObject> BuildEnergySources(FlowGraph graph, Func<string, EnergyDirection, string?> statFor,
+        Func<string, string?>? powerFor = null, Func<string, string?>? socFor = null)
     {
         var sources = new List<JsonObject>();
         foreach (var node in graph.Nodes)
         {
             var outStat = statFor(node.Id, EnergyDirection.Out);
             var inStat = statFor(node.Id, EnergyDirection.In);
+            var power = powerFor?.Invoke(node.Id);   // signed power sensor (positive supplying); optional
             switch (node.Kind?.ToLowerInvariant())
             {
                 case "solar" when !string.IsNullOrEmpty(outStat):
@@ -79,18 +85,24 @@ public static class EnergyDashboardSync
                     break;
 
                 // HA's battery source needs both a from (discharge) and a to (charge) stat; without the pair
-                // it can't be expressed, so we skip it rather than emit a half-source HA will reject.
+                // it can't be expressed, so we skip it rather than emit a half-source HA will reject. Power goes
+                // in power_config (Standard = one signed stat_rate); state of charge in stat_soc.
                 case "battery" when !string.IsNullOrEmpty(outStat) && !string.IsNullOrEmpty(inStat):
-                    sources.Add(new JsonObject { ["type"] = "battery", ["stat_energy_from"] = outStat, ["stat_energy_to"] = inStat });
+                    var battery = new JsonObject { ["type"] = "battery", ["stat_energy_from"] = outStat, ["stat_energy_to"] = inStat };
+                    if (!string.IsNullOrEmpty(power)) battery["power_config"] = new JsonObject { ["stat_rate"] = power };
+                    if (socFor?.Invoke(node.Id) is { Length: > 0 } socStat) battery["stat_soc"] = socStat;
+                    sources.Add(battery);
                     break;
 
                 // HA's grid source is FLAT: stat_energy_from = import, stat_energy_to = export, right on the
                 // object — NOT the flow_from/flow_to arrays older docs show (those are "extra keys" to the
-                // current schema, which is what save_prefs rejected). cost_adjustment_day is required.
+                // current schema, which is what save_prefs rejected). cost_adjustment_day is required; a signed
+                // power sensor goes in the top-level stat_rate.
                 case "grid" when !string.IsNullOrEmpty(outStat) || !string.IsNullOrEmpty(inStat):
                     var grid = new JsonObject { ["type"] = "grid", ["cost_adjustment_day"] = 0.0 };
                     if (!string.IsNullOrEmpty(outStat)) grid["stat_energy_from"] = outStat;
                     if (!string.IsNullOrEmpty(inStat)) grid["stat_energy_to"] = inStat;
+                    if (!string.IsNullOrEmpty(power)) grid["stat_rate"] = power;
                     sources.Add(grid);
                     break;
             }
