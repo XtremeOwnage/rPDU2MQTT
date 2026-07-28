@@ -21,4 +21,22 @@ public static class FlowMetricKey
     /// <summary>The storage key for <paramref name="metric"/> in the given <see cref="EnergyDirection"/>.</summary>
     public static string For(string metric, EnergyDirection direction)
         => direction == EnergyDirection.In ? metric + InSuffix : metric;
+
+    /// <summary>True for the <c>split</c> direction — one signed source fanned into both out and in.</summary>
+    public static bool IsSplit(string? direction) => string.Equals(direction, "split", System.StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The cache key(s) and value(s) a reading produces. Normally one — the metric under its direction. But a
+    /// <c>split</c> source carries a single signed number (a battery/grid power that swings ±) and fans into
+    /// both directions: the positive part is the out (discharge/import) reading, the magnitude of the negative
+    /// part is the in (charge/export) reading. So one topic/register drives both without needing two feeds.
+    /// </summary>
+    public static IEnumerable<(string Key, double Value)> Fan(string metric, string? direction, double value)
+        => IsSplit(direction)
+            ? new[] { (metric, System.Math.Max(0, value)), (metric + InSuffix, System.Math.Max(0, -value)) }
+            : new[] { (For(metric, direction), value) };
+
+    /// <summary>The cache key(s) a source writes, without values — for staleness/binding bookkeeping.</summary>
+    public static IEnumerable<string> Keys(string metric, string? direction)
+        => IsSplit(direction) ? new[] { metric, metric + InSuffix } : new[] { For(metric, direction) };
 }

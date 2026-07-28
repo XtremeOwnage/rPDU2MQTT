@@ -940,7 +940,12 @@ const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node
 const SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
 
 // Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
+// These are also the ones a single ± value can be *split* into out/in — an instantaneous quantity, unlike a
+// cumulative energy counter (which needs separate in/out totals, so it gets out/in but not split).
 const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];
+// Metrics where an in/out direction means anything at all. Voltage, frequency, power factor and state of
+// charge don't have a direction, so the Direction control is hidden for them entirely.
+const DIRECTIONAL_METRICS = [...SIGNED_METRICS, 'energy'];
 
 // Why a "Current" cell can sit empty — the thing every new binding trips over.
 const LIVE_HINT = 'Live value from the running ingest. It appears when the source next reports: an MQTT binding when the publisher sends, a Modbus one on the worker’s next poll — and a new or edited binding is not read at all until you Save. Nothing here is missing because the page needs reloading.';
@@ -1306,16 +1311,16 @@ function renderNodeEditor(node     , links       , cand                  , reren
   // reads) vs 'in' (charge/export, exported as the energy_in sensor HA's dashboard picks up). Other kinds only
   // ever flow one way, so the column stays hidden for them. Labels are role-specific so the choice reads plainly.
   const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
-  const dirLabels                         = node.Kind === 'battery' ? { out: 'Discharge (out)', in: 'Charge (in)' }
-    : node.Kind === 'grid' ? { out: 'Import (out)', in: 'Export (in)' }
-    : { out: 'Out', in: 'In' };
+  const dirLabels                         = node.Kind === 'battery' ? { out: 'Discharge (out)', in: 'Charge (in)', split: 'Split ± (dis/charge)' }
+    : node.Kind === 'grid' ? { out: 'Import (out)', in: 'Export (in)', split: 'Split ± (import/export)' }
+    : { out: 'Out', in: 'In', split: 'Split ±' };
 
   const sources        = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
     const colHint      = {
-      Direction: 'Which way energy flows for this source. The out direction (discharge/import) is the supply value; the in direction (charge/export) is published as a second energy sensor so Home Assistant’s Energy Dashboard can show it.',
+      Direction: 'Which way energy flows for this source. Out (discharge/import) is the supply value; In (charge/export) is a second sensor for HA’s Energy Dashboard. Split takes one ± value and fans it into both — positive as out, negative as in — for a single signed power/current topic. Hidden for metrics with no direction (voltage, frequency, power factor, state of charge).',
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
@@ -1347,13 +1352,22 @@ function renderNodeEditor(node     , links       , cand                  , reren
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
       tr.appendChild(el('td', {}, metricSel));
 
-      // Direction (battery/grid only): bind discharge/import as 'out' and charge/export as 'in' on the same node.
+      // Direction (battery/grid only, and only for a directional metric — voltage/soc have no direction, so
+      // their cell stays blank). A signed metric (power/current) also offers 'split': one ± value fanned into
+      // both out and in, so a single Solar-Assistant-style topic drives charge AND discharge.
       if (bidirectional) {
-        const dirSel = el('select', { style: { width: 'auto' } });
-        (['out', 'in']         ).forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
-        dirSel.value = src.Direction === 'in' ? 'in' : 'out';
-        dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : 'in'; rerender(); };
-        tr.appendChild(el('td', {}, dirSel));
+        const cell = el('td');
+        if (DIRECTIONAL_METRICS.includes(metric)) {
+          const opts = SIGNED_METRICS.includes(metric) ? ['out', 'in', 'split'] : ['out', 'in'];
+          const dirSel = el('select', { style: { width: 'auto' } });
+          opts.forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
+          dirSel.value = opts.includes(src.Direction) ? src.Direction : 'out';
+          dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : dirSel.value; rerender(); };
+          cell.appendChild(dirSel);
+        } else {
+          cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
+        }
+        tr.appendChild(cell);
       }
 
       // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.

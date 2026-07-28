@@ -54,7 +54,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var bindings = BuildBindings(cfg.EnergyFlow.Nodes);
 
         // Prune readings no longer produced by any current modbus binding (a removed/retyped source).
-        var live = bindings.Values.SelectMany(v => v).Select(b => (b.NodeId, FlowMetricKey.For(b.Source.Metric, b.Source.Direction))).ToHashSet();
+        var live = bindings.Values.SelectMany(v => v)
+            .SelectMany(b => FlowMetricKey.Keys(b.Source.Metric, b.Source.Direction).Select(k => (b.NodeId, Key: k))).ToHashSet();
         foreach (var key in latest.Keys.Where(k => !live.Contains((k.Node, k.Metric))).ToList())
             latest.Remove(key.Node, key.Metric);
 
@@ -82,7 +83,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
 
         ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, conn.TimeoutMs, forConn.Select(f => f.Source).ToList(),
-            onValue: (src, value) => latest.Set(nodeOf[src], FlowMetricKey.For(src.Metric, src.Direction), value, src.StaleAfterSeconds, nowUtc),
+            onValue: (src, value) => { foreach (var (key, v) in FlowMetricKey.Fan(src.Metric, src.Direction, value)) latest.Set(nodeOf[src], key, v, src.StaleAfterSeconds, nowUtc); },
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
             onResolved: f => resolvedFraming[conn.Id] = f);
     }
