@@ -411,17 +411,20 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
   // Battery and grid flow both ways, so their sources carry a Direction: 'out' (the supply value the roll-up
   // reads) vs 'in' (charge/export, exported as the energy_in sensor HA's dashboard picks up). Other kinds only
   // ever flow one way, so the column stays hidden for them. Labels are role-specific so the choice reads plainly.
+  // Label the direction by what it physically IS, not the internal out/in convention (which, relative to the
+  // node, makes grid *import* the "out" value — technically right but reads backwards). The user picks
+  // Import/Export or Charge/Discharge; the out/in mapping stays under the hood.
   const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
-  const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge (out)', in: 'Charge (in)', split: 'Split ± (dis/charge)' }
-    : node.Kind === 'grid' ? { out: 'Import (out)', in: 'Export (in)', split: 'Split ± (import/export)' }
-    : { out: 'Out', in: 'In', split: 'Split ±' };
+  const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge', in: 'Charge', split: 'Split: + discharge / − charge' }
+    : node.Kind === 'grid' ? { out: 'Import', in: 'Export', split: 'Split: + import / − export' }
+    : { out: 'Out', in: 'In', split: 'Split: + out / − in' };
 
   const sources: any[] = ensure(node, 'Sources', []);
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
     const colHint: any = {
-      Direction: 'Which way energy flows for this source. Out (discharge/import) is the supply value; In (charge/export) is a second sensor for HA’s Energy Dashboard. Split takes one ± value and fans it into both — positive as out, negative as in — for a single signed power/current topic. Hidden for metrics with no direction (voltage, frequency, power factor, state of charge).',
+      Direction: 'What this source measures: the node supplying (discharge / grid import / solar production) or drawing (battery charge / grid export). Charge and export are published as a second sensor HA’s Energy Dashboard can show. Split takes one signed power/current value and fans it into both at once — the positive part as the supply side, the magnitude of the negative part as the draw side. Hidden for metrics with no direction (voltage, frequency, power factor, state of charge).',
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
@@ -465,6 +468,12 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
           dirSel.value = opts.includes(src.Direction) ? src.Direction : 'out';
           dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : dirSel.value; rerender(); };
           cell.appendChild(dirSel);
+          // Split assumes the common Solar-Assistant sign convention; if the source is reversed, Invert flips it.
+          if (src.Direction === 'split')
+            cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', fontSize: '10px' },
+              text: node.Kind === 'grid' ? 'positive = import, negative = export — tick Invert if reversed'
+                : node.Kind === 'battery' ? 'positive = discharge, negative = charge — tick Invert if reversed'
+                : 'positive = out, negative = in — tick Invert if reversed' }));
         } else {
           cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
         }
