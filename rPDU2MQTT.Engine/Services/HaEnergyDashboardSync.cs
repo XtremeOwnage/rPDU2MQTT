@@ -62,6 +62,30 @@ public sealed class HaEnergyDashboardSync
     }
 
     /// <summary>
+    /// Every energy entity_id any flow tier maps to right now — ignoring the energy-known gate and the kind
+    /// exclusion. This is the full set the sync "owns" and may remove: dropping it before re-adding the kept
+    /// devices is what retires a tier once it's excluded (grid/battery/inverter) or once it stops being a
+    /// device, without ever touching an entity the user added themselves.
+    /// </summary>
+    private HashSet<string> ManagedStats(IReadOnlyDictionary<string, string> entityByUniqueId)
+    {
+        var stats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new PduData();
+        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
+        if (merged.Devices.Count == 0) return stats;
+
+        var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
+        var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
+        var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
+        foreach (var node in graph.Nodes)
+        {
+            var uid = native.TryGetValue(node.Id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(node.Id);
+            if (entityByUniqueId.TryGetValue(uid, out var e)) stats.Add(e);
+        }
+        return stats;
+    }
+
+    /// <summary>
     /// The Energy-Dashboard <c>energy_sources</c> (grid/solar/battery buckets) the kind-tagged flow nodes map
     /// to — the roll-up on top of the individual-device list. Directions resolve through HA's authoritative
     /// unique_id → entity_id map (Out = the native/energyflow supply sensor; In = the energyflow return
@@ -105,11 +129,12 @@ public sealed class HaEnergyDashboardSync
         var prefs = (await call("energy/get_prefs", null))?["result"]?.AsObject()
             ?? throw new Exception("Could not read HA energy preferences.");
 
-        // "Managed" is every tier we *could* export (no exclusion). Dropping all of it before re-adding the
-        // kept devices means a tier we exported before an exclusion was configured (a grid/battery/inverter)
-        // is retired on the next sync, not left orphaned — while the user's own devices (never in this set)
-        // stay put.
-        var managed = BuildDevices(entityByUniqueId, null).Select(d => d.stat_consumption).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // "Managed" is every energy entity any flow tier maps to — no kind exclusion AND no energy gate.
+        // Dropping all of it before re-adding the kept devices retires a tier we exported before it was
+        // excluded (grid/battery/inverter) OR before it lost a live value, instead of orphaning it. The gate
+        // must NOT apply here: a grid tier that's momentarily energy-unknown would otherwise fall through the
+        // gap — not in `managed` so never removed, not in `devices` so never re-added — and linger forever.
+        var managed = ManagedStats(entityByUniqueId);
         var keep = new JsonArray();
         foreach (var existingDevice in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
             if (existingDevice is JsonObject o && !managed.Contains((string?)o["stat_consumption"] ?? ""))
