@@ -46,6 +46,7 @@ public sealed class HaEnergyDashboardSync
 
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
+        var nativePower = FlowExport.NativeEnergyUniqueIds(merged, FlowGraphBuilder.DefaultMetric);   // realpower sensors
 
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
         var energyGraph = FlowGraphBuilder.Build(merged, config.EnergyFlow, energyType, live);
@@ -58,7 +59,17 @@ public sealed class HaEnergyDashboardSync
             var uid = native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id);
             return entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         };
-        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver, excludeKinds);
+        // Optional real-time power sensor: the outlet/PDU's native power entity, else the energyflow power sensor.
+        Func<string, string?> powerFor = id => PowerStat(id, nativePower, entityByUniqueId);
+        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver, excludeKinds, powerFor);
+    }
+
+    /// <summary>Resolve a node's power sensor entity — a native (PDU/outlet) power sensor if it has one, else
+    /// the energyflow power sensor the export publishes.</summary>
+    private static string? PowerStat(string id, IReadOnlyDictionary<string, string> nativePower, IReadOnlyDictionary<string, string> entityByUniqueId)
+    {
+        var uid = nativePower.TryGetValue(id, out var n) ? n : FlowExport.PowerUniqueId(id);
+        return entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
     }
 
     /// <summary>
@@ -99,6 +110,7 @@ public sealed class HaEnergyDashboardSync
 
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
+        var nativePower = FlowExport.NativeEnergyUniqueIds(merged, FlowGraphBuilder.DefaultMetric);   // realpower sensors
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
 
         // The three role buckets resolve purely on whether the energy ENTITY exists in HA — no live-value gate.
@@ -108,9 +120,12 @@ public sealed class HaEnergyDashboardSync
         // HA handles availability. (The dozens of individual devices keep their gate — that's where unavailable
         // clutter actually matters.)
         string? Resolve(string uid) => entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
-        return EnergyDashboardSync.BuildEnergySources(graph, (id, dir) => dir == Core.Flow.EnergyDirection.Out
-            ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
-            : Resolve(FlowExport.EnergyInUniqueId(id)));
+        return EnergyDashboardSync.BuildEnergySources(graph,
+            (id, dir) => dir == Core.Flow.EnergyDirection.Out
+                ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
+                : Resolve(FlowExport.EnergyInUniqueId(id)),
+            powerFor: id => PowerStat(id, nativePower, entityByUniqueId),   // grid/battery real-time power
+            socFor: id => Resolve(FlowExport.SocUniqueId(id)));             // battery state of charge
     }
 
     /// <summary>Merge our hierarchy devices into HA's energy prefs (preserving the user's own). Returns the count synced.</summary>

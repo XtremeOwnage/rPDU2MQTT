@@ -72,6 +72,41 @@ public class EnergyDashboardSourcesTests
     }
 
     [Fact]
+    public void Grid_And_Battery_CarryPowerAndSoc_WhenResolved()
+    {
+        var graph = Graph(new FlowNode("grid", "Grid", "grid"), new FlowNode("batt", "Battery", "battery"));
+        var stats = Stats(("grid", EnergyDirection.Out, "sensor.grid_import"), ("grid", EnergyDirection.In, "sensor.grid_export"),
+                          ("batt", EnergyDirection.Out, "sensor.batt_dis"), ("batt", EnergyDirection.In, "sensor.batt_chg"));
+        string? power(string id) => id == "grid" ? "sensor.grid_power" : id == "batt" ? "sensor.batt_power" : null;
+        string? soc(string id) => id == "batt" ? "sensor.batt_soc" : null;
+
+        var sources = EnergyDashboardSync.BuildEnergySources(graph, stats, power, soc);
+        var grid = Assert.Single(sources, s => (string?)s["type"] == "grid");
+        var batt = Assert.Single(sources, s => (string?)s["type"] == "battery");
+
+        // Grid power is a top-level stat_rate; battery power is nested under power_config; SoC is stat_soc.
+        Assert.Equal("sensor.grid_power", (string?)grid["stat_rate"]);
+        Assert.Equal("sensor.batt_power", (string?)batt["power_config"]!["stat_rate"]);
+        Assert.Equal("sensor.batt_soc", (string?)batt["stat_soc"]);
+        // Absent resolvers -> keys omitted, not null (HA rejects nulls / unknown keys).
+        var noExtras = EnergyDashboardSync.BuildEnergySources(graph, stats);
+        var gridBare = Assert.Single(noExtras, s => (string?)s["type"] == "grid");
+        Assert.False(gridBare.ContainsKey("stat_rate"));
+        Assert.False(Assert.Single(noExtras, s => (string?)s["type"] == "battery").ContainsKey("power_config"));
+    }
+
+    [Fact]
+    public void DeviceConsumption_CarriesPower_WhenResolved()
+    {
+        var graph = Graph(new FlowNode("rack", "Rack PDU", "pdu"));
+        var devices = EnergyDashboardSync.BuildDeviceConsumption(graph, _ => "sensor.rack_energy",
+            excludeKinds: null, powerFor: _ => "sensor.rack_power");
+        Assert.Equal("sensor.rack_power", Assert.Single(devices).stat_rate);
+        // No power resolver -> stat_rate null (omitted from JSON).
+        Assert.Null(Assert.Single(EnergyDashboardSync.BuildDeviceConsumption(graph, _ => "sensor.rack_energy")).stat_rate);
+    }
+
+    [Fact]
     public void NonRoleAndUnresolvedNodes_ProduceNothing()
     {
         var sources = EnergyDashboardSync.BuildEnergySources(
