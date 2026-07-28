@@ -39,10 +39,32 @@ public class FlowGrainTests
         try
         {
             var flow = cluster.GrainFactory.GetGrain<IFlowGrain>(0);
-            await flow.Ingest(new MeasurementSnapshot("s", DateTimeOffset.UtcNow, 5, new[] { new MeasurementReading("n", Metric.RealPower, 500, 900) }));
-            await flow.Ingest(new MeasurementSnapshot("s", DateTimeOffset.UtcNow, 3, new[] { new MeasurementReading("n", Metric.RealPower, 999, 900) })); // older, ignored
+            var t = DateTimeOffset.UtcNow;
+            await flow.Ingest(new MeasurementSnapshot("s", t, 5, new[] { new MeasurementReading("n", Metric.RealPower, 500, 900) }));
+            // Out-of-order within one source: a lower version created earlier (so an earlier timestamp) is ignored.
+            await flow.Ingest(new MeasurementSnapshot("s", t.AddSeconds(-1), 3, new[] { new MeasurementReading("n", Metric.RealPower, 999, 900) }));
 
             Assert.Equal(500, await flow.NodeValue("n", Metric.RealPower));
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task FlowGrain_AcceptsPostRestartSnapshot_WhenVersionResetButTimeAdvanced()
+    {
+        // A source process restarts: its version counter drops back to a low number, but wall-clock time has
+        // moved on. The grain (a singleton that outlived the source) must NOT reject the fresh data — the bug
+        // that silently froze MQTT after a rollout while the roll-up kept showing the last value.
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var flow = cluster.GrainFactory.GetGrain<IFlowGrain>(0);
+            var t = DateTimeOffset.UtcNow;
+            await flow.Ingest(new MeasurementSnapshot("mqtt", t, 5000, new[] { new MeasurementReading("grid", Metric.RealPower, 500, 900) }));
+            await flow.Ingest(new MeasurementSnapshot("mqtt", t.AddSeconds(5), 1, new[] { new MeasurementReading("grid", Metric.RealPower, 2058, 900) })); // restart
+
+            Assert.Equal(2058, await flow.NodeValue("grid", Metric.RealPower));
+            Assert.Equal(2058, Assert.Single(await flow.RawValues(), r => r.NodeId == "grid").Value);
         }
         finally { await cluster.StopAllSilosAsync(); }
     }
