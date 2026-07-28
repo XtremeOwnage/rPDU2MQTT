@@ -100,15 +100,16 @@ public sealed class HaEnergyDashboardSync
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
-        var energyGraph = FlowGraphBuilder.Build(merged, config.EnergyFlow, energyType, live);
 
+        // The three role buckets resolve purely on whether the energy ENTITY exists in HA — no live-value gate.
+        // That sensor is published from the node's discovery (off its power reading), so it exists even when the
+        // kWh value is momentarily absent; gating on the value here made grid/solar/battery vanish whenever the
+        // source ticked slowly. A bucket the user explicitly configured is worth showing when its sensor exists;
+        // HA handles availability. (The dozens of individual devices keep their gate — that's where unavailable
+        // clutter actually matters.)
         string? Resolve(string uid) => entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         return EnergyDashboardSync.BuildEnergySources(graph, (id, dir) => dir == Core.Flow.EnergyDirection.Out
-            // Out (production/discharge/import): only when the bridge knows this node's energy, else HA gets an
-            // unavailable stat and the whole grid/solar/battery bucket reads broken.
-            ? (FlowExport.TryNodeValue(energyGraph, id, out _)
-                ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
-                : null)
+            ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
             : Resolve(FlowExport.EnergyInUniqueId(id)));
     }
 
