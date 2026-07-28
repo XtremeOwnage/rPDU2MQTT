@@ -1665,6 +1665,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
   const fmtPower = (w: number | null) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
+  // Energy is cumulative (kWh); one decimal is plenty and the units come from the energy graph itself.
+  const fmtEnergy = (v: number | null, units: string) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} ${units || 'kWh'}`;
 
   // A tile: coloured accent, big power figure, a direction/idle sub-line.
   const tile = (cls: string, icon: string, label: string, value: string, sub: string, subCls = '') => {
@@ -1786,6 +1788,39 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       }
     }
 
+    // Self-sufficiency is a cumulative-ENERGY question, not an instantaneous-power one: over time, what share
+    // of the home's kWh came from solar + battery rather than the grid. Pull the same graph on the energy
+    // metric plus the in-direction (charge/export) energy, and compute the ratio from those totals — the
+    // power figures above only tell you this instant, which swings wildly and misreads a momentary grid draw
+    // as low self-sufficiency even on a house that's net-solar over the day.
+    let eHome: number | null = null, eFromGrid: number | null = null, eUnits = 'kWh';
+    try {
+      const er = await api(withInstance('/api/flow?metric=energy', instSel));
+      if (er.body?.ok) {
+        const enodes = er.body.nodes || [];
+        eUnits = er.body.units || 'kWh';
+        const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
+        // In-direction (charge/export) energy from the same live cache, keyed energy#in.
+        const eInBy: Record<string, number> = {};
+        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy#in' }));
+        if (eq.length) {
+          try {
+            const elr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(eq) });
+            (elr.body?.values || []).forEach((v: any) => { if (typeof v.value === 'number') eInBy[`${v.node}|${v.metric}`] = v.value; });
+          } catch { /* no live cache — energy#in just stays absent */ }
+        }
+        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
+        const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
+        // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
+        if (eLoad.present) eHome = eLoad.value;
+        else {
+          const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
+          if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridNet || 0);
+        }
+        if (eGridNet != null) eFromGrid = Math.max(0, eGridNet);   // export doesn't count against self-sufficiency
+      }
+    } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
+
     // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms: any[] = [];
     if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmtPower(solar.value), color: 'var(--warn)', flow: solar.value });
@@ -1803,7 +1838,9 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     if (batt.present || battIds.length) {
       const dir = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
-      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), soc == null ? dir : `${soc}% · ${dir}`, cls);
+      // SoC always leads the sub-line — "—" when no soc source is bound, so the state-of-charge slot is always
+      // shown (bind a soc source on the Nodes tab to fill it) rather than silently vanishing.
+      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), `${soc == null ? '—' : soc + '%'} · ${dir}`, cls);
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
         const g = el('div', { class: 'energy-soc-bar', title: `${soc}% state of charge` }, el('span', { style: { width: soc + '%' } }));
@@ -1823,17 +1860,17 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), homeSub || 'no reading yet'));
 
-    // Self-sufficiency: the share of the home load NOT drawn from the grid. Only when both are known and the
-    // house is actually using power — anything else would be dividing a guess.
-    if (home != null && home > 0 && gridNet != null) {
-      const fromGrid = Math.max(0, gridNet);                 // export doesn't count against self-sufficiency
-      const covered = Math.max(0, home - fromGrid);
-      const pct = Math.max(0, Math.min(100, Math.round((covered / home) * 100)));
+    // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
+    // figure, not this instant's power. Only when the home energy and grid import both resolve and the house
+    // has actually used energy; anything else would be dividing a guess.
+    if (eHome != null && eHome > 0 && eFromGrid != null) {
+      const covered = Math.max(0, eHome - eFromGrid);
+      const pct = Math.max(0, Math.min(100, Math.round((covered / eHome) * 100)));
       const row = el('div', { class: 'energy-selfsuff' });
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
         el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
-        el('div', { class: 'desc', text: `${fmtPower(covered)} of ${fmtPower(home)} covered by solar + battery.` }),
+        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} of lifetime energy covered by solar + battery.` }),
       );
       summary.appendChild(row);
     }
