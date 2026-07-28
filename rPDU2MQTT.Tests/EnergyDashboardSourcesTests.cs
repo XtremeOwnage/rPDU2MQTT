@@ -74,18 +74,21 @@ public class EnergyDashboardSourcesTests
     [Fact]
     public void Grid_And_Battery_CarryPowerAndSoc_WhenResolved()
     {
-        var graph = Graph(new FlowNode("grid", "Grid", "grid"), new FlowNode("batt", "Battery", "battery"));
+        var graph = Graph(new FlowNode("grid", "Grid", "grid"), new FlowNode("batt", "Battery", "battery"), new FlowNode("pv", "Solar", "solar"));
         var stats = Stats(("grid", EnergyDirection.Out, "sensor.grid_import"), ("grid", EnergyDirection.In, "sensor.grid_export"),
-                          ("batt", EnergyDirection.Out, "sensor.batt_dis"), ("batt", EnergyDirection.In, "sensor.batt_chg"));
-        string? power(string id) => id == "grid" ? "sensor.grid_power" : id == "batt" ? "sensor.batt_power" : null;
+                          ("batt", EnergyDirection.Out, "sensor.batt_dis"), ("batt", EnergyDirection.In, "sensor.batt_chg"),
+                          ("pv", EnergyDirection.Out, "sensor.pv_energy"));
+        string? power(string id) => id == "grid" ? "sensor.grid_power" : id == "batt" ? "sensor.batt_power" : id == "pv" ? "sensor.pv_power" : null;
         string? soc(string id) => id == "batt" ? "sensor.batt_soc" : null;
 
         var sources = EnergyDashboardSync.BuildEnergySources(graph, stats, power, soc);
         var grid = Assert.Single(sources, s => (string?)s["type"] == "grid");
         var batt = Assert.Single(sources, s => (string?)s["type"] == "battery");
+        var pv = Assert.Single(sources, s => (string?)s["type"] == "solar");
 
-        // Grid power is a top-level stat_rate; battery power is nested under power_config; SoC is stat_soc.
+        // Grid/solar power is a top-level stat_rate; battery power is nested under power_config; SoC is stat_soc.
         Assert.Equal("sensor.grid_power", (string?)grid["stat_rate"]);
+        Assert.Equal("sensor.pv_power", (string?)pv["stat_rate"]);
         Assert.Equal("sensor.batt_power", (string?)batt["power_config"]!["stat_rate"]);
         Assert.Equal("sensor.batt_soc", (string?)batt["stat_soc"]);
         // Absent resolvers -> keys omitted, not null (HA rejects nulls / unknown keys).

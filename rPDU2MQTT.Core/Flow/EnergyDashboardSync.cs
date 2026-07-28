@@ -81,7 +81,9 @@ public static class EnergyDashboardSync
             switch (node.Kind?.ToLowerInvariant())
             {
                 case "solar" when !string.IsNullOrEmpty(outStat):
-                    sources.Add(new JsonObject { ["type"] = "solar", ["stat_energy_from"] = outStat });
+                    var solar = new JsonObject { ["type"] = "solar", ["stat_energy_from"] = outStat };
+                    if (!string.IsNullOrEmpty(power)) solar["stat_rate"] = power;   // solar production power
+                    sources.Add(solar);
                     break;
 
                 // HA's battery source needs both a from (discharge) and a to (charge) stat; without the pair
