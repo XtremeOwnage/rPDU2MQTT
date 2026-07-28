@@ -625,14 +625,26 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
           }
         }
 
-        // Every binding not just device-probed reads the shared live cache the running ingests fill.
+        // Every binding not just device-probed reads the shared live cache the running ingests fill. A 'split'
+        // source is stored as two keys (out + in), so query both and show their signed sum (out − in) — the
+        // original ± value — rather than just the out key, which reads 0 whenever the flow is on the in side.
         const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
         if (cached.length) {
           try {
-            const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(cached.map(lc => ({ Node: node.Id, Metric: sourceMetricKey(lc.src) }))) });
+            const reqs: any[] = [];
+            const plan = cached.map(lc => {
+              const m = lc.src.Metric || 'realpower';
+              if (lc.src.Direction === 'split') { const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: m }, { Node: node.Id, Metric: m + '#in' }); return { lc, split: true, i0 }; }
+              const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: sourceMetricKey(lc.src) }); return { lc, split: false, i0 };
+            });
+            const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqs) });
             const vals = (r.body && r.body.values) || [];
-            cached.forEach((lc, i) => setCell(lc.cell, vals[i]?.value ?? null, undefined, lc.src.Metric));
+            plan.forEach(p => {
+              if (p.split) {
+                const o = vals[p.i0]?.value, iv = vals[p.i0 + 1]?.value;
+                setCell(p.lc.cell, (o == null && iv == null) ? null : (o || 0) - (iv || 0), undefined, p.lc.src.Metric);
+              } else setCell(p.lc.cell, vals[p.i0]?.value ?? null, undefined, p.lc.src.Metric);
+            });
           } catch (e: any) { cached.forEach(lc => setCell(lc.cell, null, 'err')); }
         }
         status.textContent = probeMsg || `updated ${new Date().toLocaleTimeString()}`;
@@ -644,8 +656,9 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       refreshBtn.onclick = () => refresh(true);
       box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
       refresh(false);
-      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
-      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 5000);
+      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops. Polls at
+      // 2s — the grain mirror updates about that fast, so a live power value shouldn't lag by 5+ seconds.
+      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 2000);
     }
   }
 
