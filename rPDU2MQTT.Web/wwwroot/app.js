@@ -1365,14 +1365,13 @@ function renderNodeEditor(node     , links       , cand                  , reren
           const dirSel = el('select', { style: { width: 'auto' } });
           opts.forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
           dirSel.value = opts.includes(src.Direction) ? src.Direction : 'out';
+          // Split's sign convention lives in a tooltip so it doesn't add a line to every row.
+          if (SIGNED_METRICS.includes(metric))
+            dirSel.title = node.Kind === 'grid' ? 'Split fans one ± value into both directions: positive = import, negative = export. Tick Invert if your source is reversed.'
+              : node.Kind === 'battery' ? 'Split fans one ± value into both directions: positive = discharge, negative = charge. Tick Invert if your source is reversed.'
+              : 'Split fans one ± value into both directions: positive = out, negative = in. Tick Invert if reversed.';
           dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : dirSel.value; rerender(); };
           cell.appendChild(dirSel);
-          // Split assumes the common Solar-Assistant sign convention; if the source is reversed, Invert flips it.
-          if (src.Direction === 'split')
-            cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', fontSize: '10px' },
-              text: node.Kind === 'grid' ? 'positive = import, negative = export — tick Invert if reversed'
-                : node.Kind === 'battery' ? 'positive = discharge, negative = charge — tick Invert if reversed'
-                : 'positive = out, negative = in — tick Invert if reversed' }));
         } else {
           cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
         }
