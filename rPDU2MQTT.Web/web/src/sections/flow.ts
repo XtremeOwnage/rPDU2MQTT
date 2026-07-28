@@ -1036,8 +1036,14 @@ export function addFlowSection(nav: any, sections: any) {
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
+  // Which measurement the flow is drawn by — link widths follow it. Power (W) is the live snapshot; Energy
+  // (kWh) is the cumulative total, so the diagram reads as "how much has flowed" rather than "how much now".
+  const metricSel = el('select', { title: 'Draw the flow by this measurement.' }) as HTMLSelectElement;
+  [['realpower', 'Power (W)'], ['energy', 'Energy (kWh)'], ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
+    .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  metricSel.onchange = () => load();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
@@ -1470,7 +1476,9 @@ export function addFlowSection(nav: any, sections: any) {
   };
 
   const load = async () => {
-    const r = await api(withInstance('/api/flow', instSel));
+    let path = withInstance('/api/flow', instSel);
+    if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
+    const r = await api(path);
     if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
     lastGraph = r.body;
     draw(r.body);
