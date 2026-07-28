@@ -228,6 +228,33 @@ public class EnergyFlowMqttSourceTests
     public void FlowMetricKey_SuffixesOnlyTheInDirection(string metric, string? direction, string expected)
         => Assert.Equal(expected, FlowMetricKey.For(metric, direction));
 
+    [Fact]
+    public void Apply_SplitDirection_FansOneSignedValueIntoBothOutAndIn()
+    {
+        // A single battery-power topic swings ±: positive = discharging (out), negative = charging (in). One
+        // 'split' binding drives both, so the user needn't invent two topics they don't have.
+        var nodes = new[] { NodeWith("battery", new EnergyFlowSource { Topic = "sa/batt_power", Metric = "realpower", Direction = "split" }) };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "1500", DateTime.UtcNow);   // discharging
+        Assert.True(cache.TryGetValue("battery", "realpower", out var outV) && outV == 1500);
+        Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("realpower", "in"), out var inV) && inV == 0);
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "-800", DateTime.UtcNow);   // charging
+        Assert.True(cache.TryGetValue("battery", "realpower", out outV) && outV == 0);
+        Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("realpower", "in"), out inV) && inV == 800);
+    }
+
+    [Fact]
+    public void FlowMetricKey_Fan_SplitsSignedValue_ElsePassesThrough()
+    {
+        Assert.Equal(new[] { ("p", 5.0), ("p#in", 0.0) }, FlowMetricKey.Fan("p", "split", 5).ToArray());
+        Assert.Equal(new[] { ("p", 0.0), ("p#in", 3.0) }, FlowMetricKey.Fan("p", "split", -3).ToArray());
+        Assert.Equal(new[] { ("p", -3.0) }, FlowMetricKey.Fan("p", "out", -3).ToArray());   // no split: as-is
+        Assert.Equal(new[] { ("p#in", 4.0) }, FlowMetricKey.Fan("p", "in", 4).ToArray());
+    }
+
     [Theory]
     [InlineData("realpower", "kW", 1000)]        // 1 kW -> 1000 W
     [InlineData("energy", "Wh", 0.001)]          // 1 Wh -> 0.001 kWh

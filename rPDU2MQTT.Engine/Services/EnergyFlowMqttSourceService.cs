@@ -138,7 +138,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         {
             if (topic == removedTopic) continue;
             foreach (var (nodeId, src) in list)
-                if (nodeId == key.Node && string.Equals(FlowMetricKey.For(src.Metric, src.Direction), key.Metric, StringComparison.OrdinalIgnoreCase))
+                if (nodeId == key.Node && FlowMetricKey.Keys(src.Metric, src.Direction).Any(k => string.Equals(k, key.Metric, StringComparison.OrdinalIgnoreCase)))
                     return false;
         }
         return true;
@@ -210,12 +210,15 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // Normalise to the metric's canonical unit (kW -> W, Wh -> kWh, …) so the roll-up and exports are
             // consistent, then apply the manual Scale (sign flips / oddball adjustments) on top.
             var value = raw * FlowUnits.ToCanonicalFactor(src.Metric, src.Unit) * src.Scale;
-            // An 'in' (charge/export) reading is stored under a direction-qualified key so it doesn't overwrite
-            // the 'out' supply value the roll-up reads — and, being a non-metric key, is skipped by the grain
-            // measurement sink below (Metrics.TryParse fails), keeping charge/export out of the power flow.
-            var key = FlowMetricKey.For(src.Metric, src.Direction);
-            cache.Set(nodeId, key, value, src.StaleAfterSeconds, nowUtc);
-            onReading?.Invoke(nodeId, key, value, src.StaleAfterSeconds);
+            // Fan the reading into its direction(s): normally one key, but a 'split' source (a single signed
+            // value) writes both the out (positive part) and in (negative magnitude) keys. The 'in' key is
+            // direction-qualified so it doesn't overwrite the out supply value, and — being a non-metric key —
+            // is skipped by the grain sink below (Metrics.TryParse fails), keeping charge/export out of the flow.
+            foreach (var (key, v) in FlowMetricKey.Fan(src.Metric, src.Direction, value))
+            {
+                cache.Set(nodeId, key, v, src.StaleAfterSeconds, nowUtc);
+                onReading?.Invoke(nodeId, key, v, src.StaleAfterSeconds);
+            }
         }
     }
 

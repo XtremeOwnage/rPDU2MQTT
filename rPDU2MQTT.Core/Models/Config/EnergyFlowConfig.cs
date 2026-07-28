@@ -202,8 +202,8 @@ public class EnergyFlowSource
     /// <c>flow_from</c> (consumption) and its <c>in</c> is <c>flow_to</c> (return).
     /// </summary>
     [DefaultValue("out")]
-    [Description("Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production; the supply direction) or 'in' (battery charge, grid export). Lets a battery/grid node bind both directions.")]
-    [AllowedValues("out", "in")]
+    [Description("Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.")]
+    [AllowedValues("out", "in", "split")]
     public string Direction { get; set; } = "out";
 
     /// <summary>
