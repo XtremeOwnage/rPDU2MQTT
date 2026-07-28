@@ -54,22 +54,21 @@ public class EnergyDashboardSourcesTests
     {
         var node = new FlowNode("grid", "Grid", "grid");
 
-        // Import only -> flow_from has the entry; flow_to is present but empty (HA's grid schema requires both).
+        // HA's grid source is flat: import = stat_energy_from, export = stat_energy_to (no flow_from/flow_to).
+        // Import only -> stat_energy_from set, stat_energy_to absent.
         var importOnly = Assert.Single(EnergyDashboardSync.BuildEnergySources(Graph(node),
             Stats(("grid", EnergyDirection.Out, "sensor.grid_import"))));
         Assert.Equal("grid", (string?)importOnly["type"]);
-        Assert.Equal("sensor.grid_import", (string?)importOnly["flow_from"]!.AsArray()[0]!["stat_energy_from"]);
-        Assert.Empty(importOnly["flow_to"]!.AsArray());
-        // Each flow entry carries the full key set (cost/price as null) — a bare entry fails HA's grid schema.
-        var entry = importOnly["flow_from"]!.AsArray()[0]!.AsObject();
-        Assert.True(entry.ContainsKey("stat_cost") && entry.ContainsKey("number_energy_price"));
+        Assert.Equal("sensor.grid_import", (string?)importOnly["stat_energy_from"]);
+        Assert.False(importOnly.ContainsKey("stat_energy_to"));
+        Assert.False(importOnly.ContainsKey("flow_from"));
 
-        // Both -> flow_from (import) + flow_to (export).
+        // Both -> stat_energy_from (import) + stat_energy_to (export).
         var both = Assert.Single(EnergyDashboardSync.BuildEnergySources(Graph(node),
             Stats(("grid", EnergyDirection.Out, "sensor.grid_import"),
                   ("grid", EnergyDirection.In, "sensor.grid_export"))));
-        Assert.Equal("sensor.grid_import", (string?)both["flow_from"]!.AsArray()[0]!["stat_energy_from"]);
-        Assert.Equal("sensor.grid_export", (string?)both["flow_to"]!.AsArray()[0]!["stat_energy_to"]);
+        Assert.Equal("sensor.grid_import", (string?)both["stat_energy_from"]);
+        Assert.Equal("sensor.grid_export", (string?)both["stat_energy_to"]);
     }
 
     [Fact]
