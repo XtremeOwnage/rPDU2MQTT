@@ -1287,13 +1287,26 @@ export function addFlowSection(nav: any, sections: any) {
       seen.delete(id); return colMemo[id] = c;
     };
     [...cand.keys()].forEach(id => col(id));
+    // Pull each node as far RIGHT as its nearest child allows (longest-path left-justifies every root, which
+    // leaves a feeder that skips a tier — Battery → inverter, past Solar — trailing a long line across the
+    // columns above it). A sink keeps its column; everyone else sits one step left of its earliest child, so
+    // it lands right next to what it powers. Processed children-first (descending depth); every edge still
+    // points strictly rightward because a node ends up strictly left of all its children.
+    const colX: any = {};
+    [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
+      const outs = outgoing[id] || [];
+      colX[id] = outs.length ? Math.max(0, Math.min(...outs.map((e: any) => colX[e.to])) - 1) : colMemo[id];
+    });
+    // Never leave an empty left margin if every node pulled off column 0.
+    const minC = Math.min(...([...cand.keys()].map(id => colX[id]) as number[]));
+    if (minC > 0) [...cand.keys()].forEach(id => { colX[id] -= minC; });
     // Would adding from→to create a loop? (can `to` already reach `from`?)
     const reaches = (a: string, b: string) => { const stack = [a], seen = new Set(); while (stack.length) { const x = stack.pop()!; if (x === b) return true; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach((e: any) => stack.push(e.to)); } return false; };
 
     // Layout: stack each column top-to-bottom; order downstream columns by feeder barycenter.
     const padX = 22, padY = 18, rowGap = 16, step = NW + 96;
     const cols: any[] = [];
-    [...cand.keys()].forEach(id => { const c = col(id); (cols[c] = cols[c] || []).push(id); });
+    [...cand.keys()].forEach(id => { const c = colX[id]; (cols[c] = cols[c] || []).push(id); });
     const pos: any = {};
     const bary = (id: string) => { const ins = incoming[id] || []; if (!ins.length) return 1e9; let s = 0, w = 0; ins.forEach((e: any) => { const p = pos[e.from]; if (p) { s += p.y + NH / 2; w++; } }); return w ? s / w : 1e9; };
     cols.forEach((ids, c) => {
