@@ -75,7 +75,7 @@ public static class EnergyDashboardSync
             switch (node.Kind?.ToLowerInvariant())
             {
                 case "solar" when !string.IsNullOrEmpty(outStat):
-                    sources.Add(new JsonObject { ["type"] = "solar", ["stat_energy_from"] = outStat, ["config_entry_solar_forecast"] = null });
+                    sources.Add(new JsonObject { ["type"] = "solar", ["stat_energy_from"] = outStat });
                     break;
 
                 // HA's battery source needs both a from (discharge) and a to (charge) stat; without the pair
@@ -84,18 +84,14 @@ public static class EnergyDashboardSync
                     sources.Add(new JsonObject { ["type"] = "battery", ["stat_energy_from"] = outStat, ["stat_energy_to"] = inStat });
                     break;
 
-                // HA's grid schema requires BOTH flow_from and flow_to (empty arrays are fine) and each flow
-                // entry must carry the full key set — the cost/price fields as null, not omitted. A bare
-                // {stat_energy_from} fails the grid schema, and voluptuous then falls through to the solar/
-                // battery schemas, reporting "extra keys not allowed @ flow_from" — the error users hit.
+                // HA's grid source is FLAT: stat_energy_from = import, stat_energy_to = export, right on the
+                // object — NOT the flow_from/flow_to arrays older docs show (those are "extra keys" to the
+                // current schema, which is what save_prefs rejected). cost_adjustment_day is required.
                 case "grid" when !string.IsNullOrEmpty(outStat) || !string.IsNullOrEmpty(inStat):
-                    var flowFrom = new JsonArray();
-                    var flowTo = new JsonArray();
-                    if (!string.IsNullOrEmpty(outStat))
-                        flowFrom.Add(new JsonObject { ["stat_energy_from"] = outStat, ["stat_cost"] = null, ["entity_energy_price"] = null, ["number_energy_price"] = null });
-                    if (!string.IsNullOrEmpty(inStat))
-                        flowTo.Add(new JsonObject { ["stat_energy_to"] = inStat, ["stat_compensation"] = null, ["entity_energy_price"] = null, ["number_energy_price"] = null });
-                    sources.Add(new JsonObject { ["type"] = "grid", ["flow_from"] = flowFrom, ["flow_to"] = flowTo, ["cost_adjustment_day"] = 0.0 });
+                    var grid = new JsonObject { ["type"] = "grid", ["cost_adjustment_day"] = 0.0 };
+                    if (!string.IsNullOrEmpty(outStat)) grid["stat_energy_from"] = outStat;
+                    if (!string.IsNullOrEmpty(inStat)) grid["stat_energy_to"] = inStat;
+                    sources.Add(grid);
                     break;
             }
         }
