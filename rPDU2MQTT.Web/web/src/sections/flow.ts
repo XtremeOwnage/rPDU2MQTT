@@ -721,17 +721,17 @@ async function saveConfig(onSaved: () => void) {
 // --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
 //     state is per-viewer (this session), defaulting to collapsed so a group de-clutters until you open it.
 const collapsedGroups = new Set<string>();
-let groupsInitialized = false;
+const seenGroups = new Set<string>();   // groups we've applied the default (collapsed) to at least once
 
 function flowGroups(): any[] {
   return (state.data?.EnergyFlow?.Groups || []).filter((g: any) => g && g.Id);
 }
 
-// Start every group collapsed the first time we see it (a group exists to tidy the diagram; opening it is
-// the deliberate act). Newly-added groups also start collapsed.
+// Collapse each group the FIRST time we see it (a group exists to tidy the diagram; opening it is the
+// deliberate act). After that, respect the viewer's choice — the old version re-collapsed any group that
+// wasn't currently collapsed on every redraw, which silently undid an expand the instant it happened.
 function ensureGroupState() {
-  flowGroups().forEach((g: any) => { if (!groupsInitialized || !collapsedGroups.has(g.Id)) collapsedGroups.add(g.Id); });
-  groupsInitialized = true;
+  flowGroups().forEach((g: any) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
 }
 
 // A member's owning group id, only when that group is currently collapsed.
@@ -790,9 +790,16 @@ function groupToggles(onToggle: () => void): HTMLElement | null {
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
   groups.forEach((g: any) => {
     const on = collapsedGroups.has(g.Id);
-    const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id}`);
-    chip.title = on ? 'Collapsed — click to expand its members' : 'Expanded — click to collapse into one node';
-    chip.onclick = () => { on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle(); };
+    const count = (g.Members || []).length;
+    const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
+    // A group with no members has nothing to fold — collapsing/expanding it is a no-op, so say so instead of
+    // leaving the click feeling broken.
+    chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
+      : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
+    chip.onclick = () => {
+      if (count === 0) { toast(`“${g.Label || g.Id}” has no members yet — add some in the Groups section on the Nodes tab.`, false); return; }
+      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
+    };
     row.appendChild(chip);
   });
   // Where membership is edited — the toggles only collapse/expand; you add or remove a group's nodes on the
