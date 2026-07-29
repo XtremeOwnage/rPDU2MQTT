@@ -548,8 +548,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
+        // NOTE (and see the RouteHandlersReturnTheirResults test): a handler taking HttpContext must use a
+        // statement body with `return`. An expression-bodied `async (HttpContext ctx) => Results.Json(...)`
+        // also fits RequestDelegate (Func<HttpContext,Task>), which is the more specific MapGet overload —
+        // so it wins, the IResult is discarded, and the endpoint answers 200 with an empty body.
         app.MapGet("/api/status", async (HttpContext ctx) =>
-            Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted), ConfigSchema.Json));
+        {
+            return Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted), ConfigSchema.Json);
+        });
 
         // One push channel for the whole GUI (#281): the browser opens a single EventSource and names the
         // feeds it wants; the hub recomputes each only while something is watching, and only sends changes.
@@ -1306,7 +1312,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         // Live readings pulled from the PDU(s), for the read-only "Live Data" view.
         app.MapGet("/api/livedata", async (HttpContext ctx) =>
-            Results.Json(await BuildLiveDataAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json));
+        {
+            return Results.Json(await BuildLiveDataAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);
+        });
 
         // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key),
         // reflecting the current overrides — for the GUI "Paths" view.
@@ -1328,7 +1336,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
         app.MapGet("/api/flow", async (HttpContext ctx) =>
-            Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json));
+        {
+            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json);
+        });
 
         // Preview the generated paths with the posted (unsaved) config applied, so the Overrides
         // editor can show how edits change the HA/Prometheus/EmonCMS paths. Runs the real processing

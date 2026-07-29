@@ -7,7 +7,9 @@ const state                               = { schema: [], data: {} };
 // Generic, dependency-free helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
 // zoom helper, and the multi-PDU instance selector.
 
-const api = (p        , opt      ) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+// `status` is carried so a caller can say *why* a call failed when the response had no message of its
+// own — an empty or non-JSON body reads as a bare "couldn't load it" otherwise, which says nothing.
+const api = (p        , opt      ) => fetch(p, opt).then(async r => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
 
 function ensure(obj     , key        , fallback     ) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
 
@@ -3122,10 +3124,15 @@ function addEnergyOverviewSection(nav     , sections     ) {
   };
 
   const loadBoard = async () => {
-    let r     ; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
+    let r     ;
+    try { r = await api(withInstance('/api/flow', instSel)); }
+    catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
-      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (r.body && r.body.message) || 'Could not load energy data.' }));
+      // Say what actually went wrong. A bare "could not load" leaves you with nowhere to start; the
+      // server's own message is the useful thing, and its HTTP status is the fallback.
+      const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
+      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
       status.textContent = ''; return;
     }
     const nodes = r.body.nodes || [];

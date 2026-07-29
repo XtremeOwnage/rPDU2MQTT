@@ -1762,10 +1762,15 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   const loadBoard = async () => {
-    let r: any; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
+    let r: any;
+    try { r = await api(withInstance('/api/flow', instSel)); }
+    catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
-      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (r.body && r.body.message) || 'Could not load energy data.' }));
+      // Say what actually went wrong. A bare "could not load" leaves you with nowhere to start; the
+      // server's own message is the useful thing, and its HTTP status is the fallback.
+      const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
+      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
       status.textContent = ''; return;
     }
     const nodes = r.body.nodes || [];

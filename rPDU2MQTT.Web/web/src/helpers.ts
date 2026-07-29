@@ -1,7 +1,9 @@
 // Generic, dependency-free helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
 // zoom helper, and the multi-PDU instance selector.
 
-export const api = (p: string, opt?: any) => fetch(p, opt).then(async r => ({ ok: r.ok, body: await r.json().catch(() => ({})) }));
+// `status` is carried so a caller can say *why* a call failed when the response had no message of its
+// own — an empty or non-JSON body reads as a bare "couldn't load it" otherwise, which says nothing.
+export const api = (p: string, opt?: any) => fetch(p, opt).then(async r => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
 
 export function ensure(obj: any, key: string, fallback: any) { if (obj[key] === undefined || obj[key] === null) obj[key] = fallback; return obj[key]; }
 
