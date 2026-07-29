@@ -30,7 +30,80 @@ export function svgEl(tag: string, attrs?: any): any {
   return e;
 }
 
-export function toast(msg: string, good?: boolean) { const t: any = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+// Stacked, self-dismissing toasts. The old one was a single <span> in the save bar: a second message
+// silently replaced the first, and anything raised while you were scrolled down was never seen at all.
+// Same signature, so every existing caller keeps working.
+export function toast(msg: string, good?: boolean) {
+  const host: any = document.getElementById('toasts');
+  if (!host || !msg) return;
+  const cls = 'toast ' + (good ? 'good' : 'bad');
+  // Repeating the same message (a per-item loop reporting each result) just refreshes the existing one.
+  const last: any = host.lastChild;
+  if (last && last.dataset && last.dataset.msg === msg) { clearTimeout(last._timer); last.className = cls; last._timer = setTimeout(() => dismissToast(last), toastLife(msg)); return; }
+
+  const t: any = el('div', { class: cls });
+  t.dataset.msg = msg;
+  t.append(
+    el('span', { class: 'toast-icon', text: good ? '✓' : '✕' }),
+    el('span', { class: 'toast-msg', text: msg }),
+    el('button', { class: 'toast-close', title: 'Dismiss', text: '✕', onclick: () => dismissToast(t) }),
+  );
+  host.appendChild(t);
+  // Cap the stack so a chatty loop can't paper over the page.
+  while (host.children.length > 4) host.removeChild(host.children[0]);
+  t._timer = setTimeout(() => dismissToast(t), toastLife(msg));
+}
+// Long messages need longer to read; failures stay put longer than confirmations.
+function toastLife(msg: string) { return Math.min(14000, 4000 + msg.length * 45); }
+function dismissToast(t: any) {
+  if (!t || t._gone) return;
+  t._gone = true; clearTimeout(t._timer); t.classList.add('leaving');
+  setTimeout(() => t.remove(), 200);
+}
+
+// --- Overlay sheet -------------------------------------------------------------------------------
+// A centered modal panel used by the command palette and the change review. Returns { close }.
+// Only one is open at a time; Esc and a backdrop click both dismiss it.
+export function openSheet(opts: any) {
+  const overlay: any = document.getElementById('overlay');
+  if (!overlay) return { close() { } };
+  closeSheet();
+
+  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') });
+  const close = () => closeSheet();
+
+  if (opts.title || opts.search) {
+    const head = el('div', { class: 'sheet-head' });
+    if (opts.search) head.appendChild(opts.search);
+    else head.appendChild(el('div', { class: 'sheet-title', text: opts.title }));
+    head.appendChild(el('button', { class: 'icon-btn', title: 'Close', text: '✕', onclick: close }));
+    sheet.appendChild(head);
+  }
+  const body = el('div', { class: 'sheet-body' });
+  if (opts.body) body.appendChild(opts.body);
+  sheet.appendChild(body);
+  if (opts.footer) { const f = el('div', { class: 'sheet-foot' }); (opts.footer as any[]).forEach(b => f.appendChild(b)); sheet.appendChild(f); }
+
+  overlay.innerHTML = '';
+  overlay.appendChild(sheet);
+  overlay.classList.remove('is-hidden');
+  overlay.onclick = (e: any) => { if (e.target === overlay) close(); };
+  openSheetEsc = opts.onClose;
+  return { close, body };
+}
+let openSheetEsc: any = null;
+export function closeSheet() {
+  const overlay: any = document.getElementById('overlay');
+  if (!overlay || overlay.classList.contains('is-hidden')) return;
+  overlay.classList.add('is-hidden');
+  overlay.innerHTML = '';
+  const fn = openSheetEsc; openSheetEsc = null;
+  if (typeof fn === 'function') fn();
+}
+export function sheetIsOpen() {
+  const overlay: any = document.getElementById('overlay');
+  return !!overlay && !overlay.classList.contains('is-hidden');
+}
 
 // Copy text, and say honestly whether it worked. navigator.clipboard only exists in a secure context, and
 // this GUI is usually reached over plain http on a LAN — so fall back to the old selection trick rather than
@@ -67,14 +140,33 @@ export function slug(text: string): string {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+// A nav entry: a leading glyph, the label, and room for a badge. The label also lives in `dataset.label`
+// because textContent now includes the glyph — everything that identifies a page (hash slugs, the
+// palette, the tests) reads navLabel(), never the raw text.
+export function navLink(nav: any, label: string, icon?: string) {
+  const a: any = el('a');
+  a.dataset.label = label;
+  // These are clickable <a>s with no href, so they need the focus + keyboard behaviour spelled out.
+  a.tabIndex = 0;
+  a.setAttribute('role', 'link');
+  a.onkeydown = (e: any) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); a.click(); } };
+  a.append(el('span', { class: 'nav-icon', text: icon || '•' }), el('span', { class: 'nav-label', text: label }));
+  nav.appendChild(a);
+  return a;
+}
+export function navLabel(link: any) { return (link?.dataset?.label || link?.textContent || '') as string; }
+
 export function activate(link: any, sec: any) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   link.classList.add('active'); sec.classList.add('active');
   // Reflect the active tab in the URL hash so a refresh (or a shared link) reopens it. Only write when it
   // actually changes, to avoid spurious history entries / hashchange loops (see the listener in main.ts).
-  const s = slug(link.textContent);
+  const s = slug(navLabel(link));
   if (s && decodeURIComponent((location.hash || '').slice(1)) !== s) location.hash = s;
+  // Anything that only runs for the visible page (the live-feed subscriptions) re-evaluates here, so a
+  // section never has to watch the nav itself.
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* no CustomEvent: sections just keep polling */ }
 }
 
 // Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;

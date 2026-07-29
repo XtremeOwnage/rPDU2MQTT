@@ -3,32 +3,67 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
 <title>rPDU2MQTT — Energy data consolidation</title>
 <link rel="stylesheet" href="/styles.css" />
+<!-- Apply the saved theme before first paint, so a reload never flashes the wrong one. -->
+<script>try{var t=localStorage.getItem('rpdu-theme');if(t&&t!=='system')document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
-<header>
-  <h1>rPDU2MQTT<span class="tagline">Energy data consolidation</span></h1>
-  <div class="status">
-    <span id="st-version"></span>
-    <button id="st-update" class="st-update" style="display:none"></button>
-    <span><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
-    <span id="st-user"></span>
-    <a id="st-logout" href="/logout" style="display:none;color:var(--accent)">Logout</a>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="appbar">
+  <button id="nav-toggle" class="icon-btn nav-toggle" aria-label="Toggle navigation" title="Toggle navigation">☰</button>
+
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">⚡</span>
+    <span class="brand-name">rPDU2MQTT</span>
+    <span class="brand-tag">Energy data consolidation</span>
+  </div>
+
+  <button id="cmd-open" class="cmd-open" title="Jump to a page (Ctrl+K)">
+    <span class="cmd-open-icon" aria-hidden="true">⌕</span>
+    <span class="cmd-open-text">Jump to…</span>
+    <kbd>Ctrl</kbd><kbd>K</kbd>
+  </button>
+
+  <div class="appbar-status">
+    <span id="st-live" class="pill" title="Connecting to the live update stream…"><span class="dot"></span>Live</span>
+    <span id="st-mqtt" class="pill"><span id="st-mqtt-dot" class="dot"></span>MQTT</span>
+    <span id="st-readonly" class="pill warn is-hidden" title="The configuration source is read-only, so changes cannot be saved from here.">Read-only</span>
+    <button id="st-update" class="pill pill-btn is-hidden"></button>
+    <button id="st-theme" class="icon-btn" title="Switch theme" aria-label="Switch theme">◐</button>
+    <span id="st-version" class="pill pill-mono"></span>
+    <span id="st-user" class="appbar-user"></span>
+    <a id="st-logout" class="appbar-logout is-hidden" href="/logout">Log out</a>
   </div>
 </header>
+
 <div class="layout">
-  <nav id="nav"></nav>
-  <main>
+  <nav id="nav" aria-label="Sections"></nav>
+  <div class="nav-scrim" id="nav-scrim"></div>
+  <main id="main">
     <div id="sections"></div>
-    <div class="actions">
-      <button class="primary" id="btn-save">Save</button>
-      <button id="btn-reload">Reload</button>
-      <span class="ro-note" id="ro-note">Config is read-only (ConfigMap / <code>:ro</code> mount) — editing disabled.</span>
-      <span class="toast" id="toast"></span>
-    </div>
   </main>
 </div>
+
+<!-- The save bar only appears when there is something to save (or the config is read-only). -->
+<div class="savebar is-hidden" id="savebar">
+  <div class="savebar-inner">
+    <span class="savebar-count" id="save-count"></span>
+    <span class="ro-note" id="ro-note">Config is read-only (ConfigMap / <code>:ro</code> mount) — editing is disabled.</span>
+    <div class="savebar-actions">
+      <button id="btn-review" class="ghost">Review changes</button>
+      <button id="btn-discard" class="ghost">Discard</button>
+      <button id="btn-reload" class="ghost" title="Re-read the saved configuration from the server">Reload</button>
+      <button id="btn-save" class="primary">Save<kbd>Ctrl</kbd><kbd>S</kbd></button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="overlay is-hidden" id="overlay"></div>
+
 <script src="/app.js"></script>
 </body>
 </html>

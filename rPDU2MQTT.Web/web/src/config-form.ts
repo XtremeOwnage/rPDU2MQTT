@@ -1,7 +1,8 @@
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
-import { ensure, el, btn, activate, slug, api, toast } from './helpers.js';
+import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel } from './helpers.js';
 import { state } from './state.js';
+import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
@@ -13,85 +14,102 @@ import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
 
+// Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
+// stay in step with the document as it is typed.
 function scalarInput(node: any, obj: any): any {
+  const touched = () => refreshDirty();
   let el: any;
   if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
-    el.onchange = () => obj[node.key] = el.checked;
+    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!obj[node.key];
+    el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
     (node.enumValues || []).forEach((v: string) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? undefined : el.value;
+    el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'int' || node.type === 'double') {
     el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
     if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
+    el.onchange = () => { obj[node.key] = el.value === '' ? null : Number(el.value); touched(); };
   } else {
     el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
+    el.onchange = () => { obj[node.key] = el.value === '' ? null : el.value; touched(); };
   }
   return el;
+}
+
+// A boolean reads (and hits) better as a switch with the current state spelled out beside it than as a
+// 16px checkbox whose meaning you have to infer from the label.
+function switchWrap(input: any) {
+  const label = el('span', { class: 'switch-state', text: input.checked ? 'On' : 'Off' });
+  const wrap = el('label', { class: 'switch-wrap' }, input, label);
+  const sync = () => label.textContent = input.checked ? 'On' : 'Off';
+  const prior = input.onchange;
+  input.onchange = (e: any) => { prior?.(e); sync(); };
+  return wrap;
 }
 
 // Render an object's child properties into `container`: scalar fields flow into a multi-column grid
 // (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
 // and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
-function renderObjectBody(properties: any[], target: any, container: any) {
+// `path` is where `target` lives in the config document, so each field can be tracked for unsaved edits.
+function renderObjectBody(properties: any[], target: any, container: any, path: string[] = []) {
   const isComplex = (c: any) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
   if (scalars.length) {
     const grid = document.createElement('div'); grid.className = 'grid';
-    scalars.forEach(child => renderNode(child, target, grid));
+    scalars.forEach(child => renderNode(child, target, grid, path));
     container.appendChild(grid);
   }
-  complex.forEach(child => renderNode(child, target, container));
+  complex.forEach(child => renderNode(child, target, container, path));
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-function renderNode(node: any, obj: any, container: any) {
+function renderNode(node: any, obj: any, container: any, path: string[] = []) {
+  const here = [...path, node.key];
   if (node.type === 'object') {
     const target = ensure(obj, node.key, {});
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs);
+    renderObjectBody(node.properties, target, fs, here);
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
-    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
+    container.appendChild(renderMap(node, ensure(obj, node.key, {}), here));
   } else if (node.type === 'list') {
-    container.appendChild(renderList(node, ensure(obj, node.key, [])));
+    container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
-    f.appendChild(input);
+    f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
     if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
+    // A password's value must never reach the change-review list.
+    registerField(here, f, node.type === 'password');
     container.appendChild(f);
   }
 }
 
 // Click-to-insert / draggable chips for a templated field's available {variables}.
 function templateVarChips(vars: string[], input: any, obj: any, node: any) {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+  const wrap = document.createElement('div'); wrap.className = 'tpl-vars';
   const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
   wrap.appendChild(label);
   vars.forEach(v => {
     const token = '{' + v + '}';
-    const chip = document.createElement('span'); chip.textContent = token; chip.draggable = true;
-    chip.style.cssText = 'cursor:grab;user-select:none;font:12px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;';
+    const chip = document.createElement('span'); chip.className = 'tpl-chip'; chip.textContent = token; chip.draggable = true;
     chip.title = 'Click to insert at the cursor, or drag into the field';
     chip.onclick = () => {
       const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
       input.value = input.value.slice(0, s) + token + input.value.slice(e);
       const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
       obj[node.key] = input.value === '' ? null : input.value;
+      refreshDirty();
     };
     // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
     chip.ondragstart = (ev: any) => ev.dataTransfer.setData('text/plain', token);
@@ -100,19 +118,20 @@ function templateVarChips(vars: string[], input: any, obj: any, node: any) {
   return wrap;
 }
 
-// Render the value of a dictionary/list element (valueSchema has no key of its own).
-function renderValue(valueSchema: any, holder: any, keyName: any, container: any) {
+// Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
+// the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
+function renderValue(valueSchema: any, holder: any, keyName: any, container: any, path: string[]) {
   const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
     // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
-    renderObjectBody(node.properties, target, container);
+    renderObjectBody(node.properties, target, container, path);
   } else {
-    renderNode(node, holder, container);
+    renderNode(node, holder, container, path.slice(0, -1));
   }
 }
 
-function renderMap(node: any, mapObj: any) {
+function renderMap(node: any, mapObj: any, path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
@@ -122,38 +141,38 @@ function renderMap(node: any, mapObj: any) {
     const wrap = document.createElement('div'); wrap.className = 'map-entry';
     const head = document.createElement('div'); head.className = 'head';
     const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
-    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
+    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; refreshDirty(); } };
     const del = btn('Remove', 'danger');
-    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
+    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); refreshDirty(); };
     head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
     if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
-    renderValue(node.valueSchema, mapObj, key, wrap);
+    renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
     entries.appendChild(wrap);
   };
 
   Object.keys(mapObj).forEach(drawEntry);
   const add = btn('+ Add');
-  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
+  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); refreshDirty(); };
   fs.appendChild(add);
   return fs;
 }
 
-function renderList(node: any, arr: any[]) {
+function renderList(node: any, arr: any[], path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   const entries = document.createElement('div'); fs.appendChild(entries);
   const draw = (idx: number) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
     const del = btn('Remove', 'danger');
-    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
+    del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
     wrap.appendChild(del);
-    renderValue(node.valueSchema, arr, idx, wrap);
+    renderValue(node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
     entries.appendChild(wrap);
   };
   const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
   rebuild();
   const add = btn('+ Add');
-  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
+  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
   fs.appendChild(add);
   return fs;
 }
@@ -175,6 +194,16 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
 const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
+// A leading glyph per schema-driven page. Purely a scanning aid — the label is still the page's
+// identity — so an unlisted section simply gets the neutral bullet. (The bespoke tool tabs pass their
+// own glyph to navLink() where they build their link.)
+const NAV_ICONS: Record<string, string> = {
+  'Vertiv rPDU': '▤', 'Overrides': '✎', 'MQTT': '⇅', 'Modbus TCP': '⧉', 'EmonCMS': '▦',
+  'Home Assistant': '⌂', 'Prometheus': '◎', 'GUI': '▭', 'API': '⚙',
+  'Health': '♥', 'Logging': '☰', 'Debug': '⚑', 'Operator': '⎈',
+};
+function navIcon(label: string) { return NAV_ICONS[label] || '•'; }
+
 // A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
 // (schema sections or tool tabs) are appended into.
 function navGroup(nav: any, title: string) {
@@ -189,7 +218,9 @@ function navGroup(nav: any, title: string) {
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node: any, nav: any, sections: any) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
-  const link = document.createElement('a'); link.textContent = label; nav.appendChild(link);
+  const link = navLink(nav, label, navIcon(label));
+  // Which part of the document this page edits, so its nav entry can carry a count of pending edits.
+  link.dataset.section = node.key;
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = label; sec.appendChild(h);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
@@ -213,9 +244,9 @@ function renderConfigSection(node: any, nav: any, sections: any) {
       ensure(state.data, node.key, {});
       // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
       const props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p: any) => p.key !== 'EnergyDashboard') : node.properties;
-      renderObjectBody(props, state.data[node.key], sec);
+      renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
-    else renderNode(node, state.data, sec);
+    else renderNode(node, state.data, sec, []);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
@@ -228,6 +259,8 @@ function renderConfigSection(node: any, nav: any, sections: any) {
 export function build() {
   const nav: any = document.getElementById('nav'); const sections: any = document.getElementById('sections');
   nav.innerHTML = ''; sections.innerHTML = '';
+  // Everything registered against the old DOM is gone with it.
+  clearFieldRegistry();
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
@@ -260,8 +293,26 @@ export function build() {
 
   // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
-  const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(a.textContent) === wanted) : null;
+  const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
+
+  wireNavBadges(nav);
+}
+
+// Each config page's nav entry carries the number of unsaved edits inside it, so pending work is
+// visible from anywhere — you don't have to remember which tab you were on when you changed something.
+let navBadgesOff: any = null;
+function wireNavBadges(nav: any) {
+  // A rebuild replaces every link, so drop the watcher that was pointing at the old ones.
+  navBadgesOff?.();
+  const links = ([...nav.querySelectorAll('a')] as any[]).filter(a => a.dataset?.section);
+  navBadgesOff = onDirty(() => links.forEach(a => {
+    const n = changeCountFor(a.dataset.section);
+    const existing = a.querySelector('.nav-badge');
+    if (!n) { existing?.remove(); return; }
+    if (existing) existing.textContent = String(n);
+    else a.appendChild(el('span', { class: 'nav-badge', text: String(n), title: n + ' unsaved change(s) on this page' }));
+  }));
 }
 
 // In the Gui section, grey out the auth fields that don't apply to the selected AuthType.

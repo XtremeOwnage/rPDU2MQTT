@@ -1,9 +1,9 @@
 // Home Assistant Energy Mapping (#128): the EnergyDashboard settings + manual sync/clear actions.
-import { api, btn, el, ensure, activate, toast } from '../helpers.js';
+import { api, btn, el, ensure, activate, toast, navLink } from '../helpers.js';
 import { state } from '../state.js';
 
 export function addHaEnergySection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'HA Energy Mapping'; nav.appendChild(link);
+  const link = navLink(nav, "HA Energy Mapping", "▮");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Home Assistant Energy Mapping'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';

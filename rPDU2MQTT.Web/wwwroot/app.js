@@ -36,7 +36,80 @@ function svgEl(tag        , attrs      )      {
   return e;
 }
 
-function toast(msg        , good          ) { const t      = document.getElementById('toast'); t.textContent = msg; t.className = 'toast ' + (good ? 'good' : 'bad'); }
+// Stacked, self-dismissing toasts. The old one was a single <span> in the save bar: a second message
+// silently replaced the first, and anything raised while you were scrolled down was never seen at all.
+// Same signature, so every existing caller keeps working.
+function toast(msg        , good          ) {
+  const host      = document.getElementById('toasts');
+  if (!host || !msg) return;
+  const cls = 'toast ' + (good ? 'good' : 'bad');
+  // Repeating the same message (a per-item loop reporting each result) just refreshes the existing one.
+  const last      = host.lastChild;
+  if (last && last.dataset && last.dataset.msg === msg) { clearTimeout(last._timer); last.className = cls; last._timer = setTimeout(() => dismissToast(last), toastLife(msg)); return; }
+
+  const t      = el('div', { class: cls });
+  t.dataset.msg = msg;
+  t.append(
+    el('span', { class: 'toast-icon', text: good ? '✓' : '✕' }),
+    el('span', { class: 'toast-msg', text: msg }),
+    el('button', { class: 'toast-close', title: 'Dismiss', text: '✕', onclick: () => dismissToast(t) }),
+  );
+  host.appendChild(t);
+  // Cap the stack so a chatty loop can't paper over the page.
+  while (host.children.length > 4) host.removeChild(host.children[0]);
+  t._timer = setTimeout(() => dismissToast(t), toastLife(msg));
+}
+// Long messages need longer to read; failures stay put longer than confirmations.
+function toastLife(msg        ) { return Math.min(14000, 4000 + msg.length * 45); }
+function dismissToast(t     ) {
+  if (!t || t._gone) return;
+  t._gone = true; clearTimeout(t._timer); t.classList.add('leaving');
+  setTimeout(() => t.remove(), 200);
+}
+
+// --- Overlay sheet -------------------------------------------------------------------------------
+// A centered modal panel used by the command palette and the change review. Returns { close }.
+// Only one is open at a time; Esc and a backdrop click both dismiss it.
+function openSheet(opts     ) {
+  const overlay      = document.getElementById('overlay');
+  if (!overlay) return { close() { } };
+  closeSheet();
+
+  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') });
+  const close = () => closeSheet();
+
+  if (opts.title || opts.search) {
+    const head = el('div', { class: 'sheet-head' });
+    if (opts.search) head.appendChild(opts.search);
+    else head.appendChild(el('div', { class: 'sheet-title', text: opts.title }));
+    head.appendChild(el('button', { class: 'icon-btn', title: 'Close', text: '✕', onclick: close }));
+    sheet.appendChild(head);
+  }
+  const body = el('div', { class: 'sheet-body' });
+  if (opts.body) body.appendChild(opts.body);
+  sheet.appendChild(body);
+  if (opts.footer) { const f = el('div', { class: 'sheet-foot' }); (opts.footer         ).forEach(b => f.appendChild(b)); sheet.appendChild(f); }
+
+  overlay.innerHTML = '';
+  overlay.appendChild(sheet);
+  overlay.classList.remove('is-hidden');
+  overlay.onclick = (e     ) => { if (e.target === overlay) close(); };
+  openSheetEsc = opts.onClose;
+  return { close, body };
+}
+let openSheetEsc      = null;
+function closeSheet() {
+  const overlay      = document.getElementById('overlay');
+  if (!overlay || overlay.classList.contains('is-hidden')) return;
+  overlay.classList.add('is-hidden');
+  overlay.innerHTML = '';
+  const fn = openSheetEsc; openSheetEsc = null;
+  if (typeof fn === 'function') fn();
+}
+function sheetIsOpen() {
+  const overlay      = document.getElementById('overlay');
+  return !!overlay && !overlay.classList.contains('is-hidden');
+}
 
 // Copy text, and say honestly whether it worked. navigator.clipboard only exists in a secure context, and
 // this GUI is usually reached over plain http on a LAN — so fall back to the old selection trick rather than
@@ -73,14 +146,33 @@ function slug(text        )         {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+// A nav entry: a leading glyph, the label, and room for a badge. The label also lives in `dataset.label`
+// because textContent now includes the glyph — everything that identifies a page (hash slugs, the
+// palette, the tests) reads navLabel(), never the raw text.
+function navLink(nav     , label        , icon         ) {
+  const a      = el('a');
+  a.dataset.label = label;
+  // These are clickable <a>s with no href, so they need the focus + keyboard behaviour spelled out.
+  a.tabIndex = 0;
+  a.setAttribute('role', 'link');
+  a.onkeydown = (e     ) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); a.click(); } };
+  a.append(el('span', { class: 'nav-icon', text: icon || '•' }), el('span', { class: 'nav-label', text: label }));
+  nav.appendChild(a);
+  return a;
+}
+function navLabel(link     ) { return (link?.dataset?.label || link?.textContent || '')          ; }
+
 function activate(link     , sec     ) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   link.classList.add('active'); sec.classList.add('active');
   // Reflect the active tab in the URL hash so a refresh (or a shared link) reopens it. Only write when it
   // actually changes, to avoid spurious history entries / hashchange loops (see the listener in main.ts).
-  const s = slug(link.textContent);
+  const s = slug(navLabel(link));
   if (s && decodeURIComponent((location.hash || '').slice(1)) !== s) location.hash = s;
+  // Anything that only runs for the visible page (the live-feed subscriptions) re-evaluates here, so a
+  // section never has to watch the nav itself.
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* no CustomEvent: sections just keep polling */ }
 }
 
 // Mouse-wheel zoom for an SVG inside a scroll container. The SVG must carry a viewBox of its base size;
@@ -165,6 +257,364 @@ function instanceSelector(onChange                       ) {
 function withInstance(path        , instSel     ) {
   const v = instSel.get();
   return v ? path + (path.includes('?') ? '&' : '?') + 'instance=' + encodeURIComponent(v) : path;
+}
+
+// ── theme.ts ────────────────────────────────────────────────────
+// Light / dark / follow-the-system theming.
+//
+// The GUI was dark-only, which is fine at 2am in a rack room and rough on a laptop in daylight. The
+// stylesheet carries both palettes; this file only decides which one is in force, by setting
+// `data-theme` on <html> (absent = follow the OS). index.html applies the stored choice inline before
+// first paint so a reload never flashes the wrong palette.
+//
+// Anything that paints from the tokens (the flow SVG reads var(--accent) & friends) is repainted by
+// listening for the `rpdu:theme` event.
+
+const THEME_KEY = 'rpdu-theme';
+const THEME_ORDER = ['system', 'dark', 'light'];
+const THEME_GLYPH                         = { system: '◐', dark: '☾', light: '☀' };
+const THEME_NAME                         = { system: 'Follow system', dark: 'Dark', light: 'Light' };
+
+function readTheme()         {
+  try { const v = localStorage.getItem(THEME_KEY); return THEME_ORDER.includes(v       ) ? (v          ) : 'system'; }
+  catch { return 'system'; }
+}
+
+function applyTheme(theme        ) {
+  const root      = document.documentElement;
+  if (!root) return;
+  // No attribute = the stylesheet's prefers-color-scheme branch decides.
+  if (theme === 'system') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', theme);
+  try { localStorage.setItem(THEME_KEY, theme); } catch { /* private mode: the choice just won't persist */ }
+  window.dispatchEvent?.(new CustomEvent('rpdu:theme', { detail: { theme } }));
+}
+
+// Wire the app-bar button: click cycles system -> dark -> light, and the glyph says where you are.
+function initTheme() {
+  const btn      = document.getElementById('st-theme');
+  let theme = readTheme();
+  const paint = () => {
+    if (!btn) return;
+    btn.textContent = THEME_GLYPH[theme];
+    btn.title = `Theme: ${THEME_NAME[theme]} — click to switch`;
+  };
+  applyTheme(theme);
+  paint();
+  if (btn) btn.onclick = () => {
+    theme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+    applyTheme(theme);
+    paint();
+  };
+}
+
+// ── realtime.ts ─────────────────────────────────────────────────
+// The browser end of the push channel (#281).
+//
+// One EventSource carries every feed. A caller says which feed it wants and gets a callback whenever
+// the server pushes a new value; the connection is (re)opened with exactly the set of feeds currently
+// wanted, so nothing is computed for a tab you aren't looking at.
+//
+// Why SSE rather than SignalR/WebSockets: the bundle is built with the Node binary alone (no npm), so a
+// client library can't be pulled in — and EventSource is already in every browser, with reconnection,
+// which is most of what a hub would have bought us. See Gui/GuiEventHub.cs for the server half.
+//
+// Every consumer must still work without this: `realtimeLive()` reports whether the stream is actually
+// carrying data, and each section keeps its manual refresh (and its polling fallback) for when it isn't.
+
+const rtHandlers = new Map                                  ();
+const rtStateWatchers = new Set                         ();
+let rtSource      = null;
+let rtOpenKeys = '';
+let rtReopen      = null;
+let rtState = 'idle';   // idle | connecting | live | down
+
+// Whether the push stream is currently delivering. Sections use it to decide between "stay live" and
+// "poll on a timer" — never assume it's up.
+function realtimeLive() { return rtState === 'live'; }
+
+function onRealtimeState(fn                         ) {
+  rtStateWatchers.add(fn);
+  fn(rtState);
+  return () => rtStateWatchers.delete(fn);
+}
+
+function setRtState(s        ) {
+  if (s === rtState) return;
+  rtState = s;
+  rtStateWatchers.forEach(fn => { try { fn(s); } catch { /* a broken watcher must not stop the rest */ } });
+}
+
+// Subscribe to a feed key ("status", "board", "livedata:pdu2", "flow:realpower"). Returns an
+// unsubscribe function; the connection re-opens with the reduced feed set when the last one goes.
+function subscribeLive(key        , handler                     ) {
+  if (typeof EventSource === 'undefined') return () => { };   // no push here; callers fall back to polling
+  let set = rtHandlers.get(key);
+  if (!set) { set = new Set(); rtHandlers.set(key, set); }
+  set.add(handler);
+  scheduleReopen();
+  return () => {
+    const s = rtHandlers.get(key);
+    if (!s) return;
+    s.delete(handler);
+    if (!s.size) rtHandlers.delete(key);
+    scheduleReopen();
+  };
+}
+
+// Subscriptions arrive in bursts (a tab opening wires several at once), so coalesce them into one
+// reconnect rather than tearing the stream down per handler.
+function scheduleReopen() {
+  clearTimeout(rtReopen);
+  rtReopen = setTimeout(openStream, 30);
+}
+
+function openStream() {
+  const keys = [...rtHandlers.keys()].sort();
+  const wanted = keys.join(',');
+  if (wanted === rtOpenKeys && rtSource) return;
+
+  if (rtSource) { rtSource.close(); rtSource = null; }
+  rtOpenKeys = wanted;
+  if (!wanted) { setRtState('idle'); return; }
+
+  setRtState('connecting');
+  const src = new EventSource('/api/events?topics=' + encodeURIComponent(wanted));
+  rtSource = src;
+
+  src.onopen = () => { if (rtSource === src) setRtState('live'); };
+  // EventSource retries on its own (the server sends `retry:`), so a drop is "down" until it re-opens.
+  src.onerror = () => { if (rtSource === src) setRtState('down'); };
+
+  for (const key of keys) {
+    src.addEventListener(key, (ev     ) => {
+      if (rtSource !== src) return;
+      setRtState('live');
+      let data     ;
+      try { data = JSON.parse(ev.data); } catch { return; }
+      const set = rtHandlers.get(key);
+      if (!set) return;
+      // Copy first: a handler may unsubscribe itself (a tab closing) while we're iterating.
+      [...set].forEach(fn => { try { fn(data); } catch (e) { console.error('live handler failed for ' + key, e); } });
+    });
+  }
+}
+
+// Keep a section live for as long as it is on screen: subscribes on activation, drops on the way out,
+// so nothing is computed for a page nobody is looking at. `keyOf()` is re-read on every check, so a
+// section can change what it watches (a different PDU instance, a different metric) just by returning a
+// different key and calling the returned sync().
+function liveWhileActive(sec     , keyOf              , handler                     ) {
+  let off      = null;
+  let key = '';
+  const sync = () => {
+    const want = sec.classList.contains('active') ? keyOf() : '';
+    if (want === key) return;
+    key = want;
+    if (off) { off(); off = null; }
+    if (want) off = subscribeLive(want, handler);
+  };
+  // activate() announces every tab switch, so this needs no knowledge of the nav.
+  window.addEventListener?.('rpdu:activate', sync);
+  sync();
+  return sync;
+}
+
+// ── dirty.ts ────────────────────────────────────────────────────
+// Unsaved-change tracking.
+//
+// The form binds straight to `state.data`, so editing was invisible: the Save button looked identical
+// whether you'd changed nothing or rewritten half the config, there was no way to see what a save would
+// write, and no way back short of a reload. This module keeps a baseline of the config as loaded, diffs
+// the live document against it, and lets the shell say exactly what is pending — per field, per page,
+// and as a reviewable list.
+//
+// The diff runs over the *pruned* document (the same shape that gets POSTed), so the empty objects the
+// renderer creates on the way past — ensure(obj, key, {}) — never register as edits.
+
+let dirtyBaseline      = {};
+let dirtyChanges        = [];
+const dirtyWatchers = new Set                          ();
+// path.join('.') -> the .field element, so an edited setting can be marked where it lives.
+const dirtyFields = new Map             ();
+// Paths whose values must never be shown in the review list.
+const dirtySecrets = new Set        ();
+
+function pathKey(path          ) { return path.join('.'); }
+
+// Take the current document as "saved" — on load, and again after a successful save.
+function setBaseline(data      ) {
+  dirtyBaseline = JSON.parse(JSON.stringify(data ?? exportData()));
+  refreshDirty();
+}
+
+// Register a rendered scalar field so it can be marked when its value differs from the baseline.
+// Called by the form renderer; the map is cleared on every rebuild.
+function registerField(path          , fieldEl     , secret          ) {
+  dirtyFields.set(pathKey(path), fieldEl);
+  if (secret) dirtySecrets.add(pathKey(path));
+}
+function clearFieldRegistry() { dirtyFields.clear(); dirtySecrets.clear(); }
+
+function changes() { return dirtyChanges; }
+function isDirty() { return dirtyChanges.length > 0; }
+
+function onDirty(fn                          ) {
+  dirtyWatchers.add(fn);
+  fn(dirtyChanges);
+  return () => dirtyWatchers.delete(fn);
+}
+
+// Recompute the diff and tell everyone. Called after any edit, and after load/save/discard.
+function refreshDirty() {
+  dirtyChanges = diffConfig(dirtyBaseline, exportData());
+
+  const changed = new Set(dirtyChanges.map(c => pathKey(c.path)));
+  dirtyFields.forEach((fieldEl, key) => {
+    // A container's field is marked when anything under it changed, so a nested edit isn't invisible.
+    const hit = changed.has(key) || [...changed].some(c => c.startsWith(key + '.'));
+    if (fieldEl.classList) fieldEl.classList[hit ? 'add' : 'remove']('dirty');
+  });
+
+  dirtyWatchers.forEach(fn => { try { fn(dirtyChanges); } catch { /* one bad watcher must not block the rest */ } });
+}
+
+// Throw the edits away and go back to the last saved document. The caller rebuilds the form from it.
+function discardChanges() {
+  state.data = JSON.parse(JSON.stringify(dirtyBaseline));
+  return state.data;
+}
+
+// Count of pending edits inside one top-level config section (drives the nav badges).
+function changeCountFor(sectionKey        ) {
+  return dirtyChanges.filter(c => c.path[0] === sectionKey).length;
+}
+
+// --- Diff ------------------------------------------------------------------------------------------
+
+function isPlainObject(v     ) { return v != null && typeof v === 'object' && !Array.isArray(v); }
+
+// Empty is empty however it's spelled: an absent key, null, '', {} and [] all mean "not set", and the
+// renderer produces all of them. Without this, opening a tab would look like an edit.
+function prune(v     )      {
+  if (v === null || v === undefined || v === '') return undefined;
+  if (Array.isArray(v)) {
+    const arr = v.map(prune).filter(x => x !== undefined);
+    return arr.length ? arr : undefined;
+  }
+  if (isPlainObject(v)) {
+    const out      = {};
+    for (const k of Object.keys(v)) { const p = prune(v[k]); if (p !== undefined) out[k] = p; }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return v;
+}
+
+function same(a     , b     ) { return JSON.stringify(a ?? null) === JSON.stringify(b ?? null); }
+
+function diffConfig(before     , after     ) {
+  const out        = [];
+  walk(prune(before), prune(after), [], out);
+  return out;
+}
+
+function walk(a     , b     , path          , out       ) {
+  if (same(a, b)) return;
+
+  // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
+  // row per setting rather than a wall of JSON.
+  const objectish = (v     ) => v === undefined || isPlainObject(v);
+  if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
+    const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
+    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], out);
+    return;
+  }
+
+  out.push({ path, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
+}
+
+// --- Display ---------------------------------------------------------------------------------------
+
+// One change's value, as a short readable string. Secrets never show their contents.
+function formatValue(v     , secret          ) {
+  if (v === undefined || v === null) return '(not set)';
+  if (secret) return '••••••';
+  if (typeof v === 'boolean') return v ? 'on' : 'off';
+  if (Array.isArray(v)) return `${v.length} ${v.length === 1 ? 'entry' : 'entries'}`;
+  if (isPlainObject(v)) {
+    const s = JSON.stringify(v);
+    return s.length > 120 ? s.slice(0, 117) + '…' : s;
+  }
+  return String(v);
+}
+
+// ── palette.ts ──────────────────────────────────────────────────
+// Ctrl+K page switcher.
+//
+// The nav has grown to five groups and twenty-odd pages, several of them collapsed; finding "HA Energy
+// Mapping" meant remembering which group it hides under. This types straight to it. It reads the nav
+// rather than keeping its own list, so a new page is reachable the moment it's rendered.
+
+function paletteItems() {
+  const out        = [];
+  document.querySelectorAll('.nav-group-wrap').forEach((wrap     ) => {
+    const group = wrap.querySelector('.nav-group')?.textContent || '';
+    wrap.querySelectorAll('a').forEach((a     ) => out.push({ label: a.dataset?.label || a.textContent, group, link: a }));
+  });
+  // Pages outside any group (the Status landing page).
+  const nav      = document.getElementById('nav');
+  nav?.querySelectorAll('a').forEach((a     ) => {
+    if (!out.some(i => i.link === a)) out.unshift({ label: a.dataset?.label || a.textContent, group: '', link: a });
+  });
+  return out;
+}
+
+function openPalette() {
+  const items = paletteItems();
+  const input      = el('input', { class: 'sheet-search', type: 'text', placeholder: 'Jump to a page…' });
+  const list      = el('div');
+  let shown        = items;
+  let sel = 0;
+
+  const choose = (i     ) => { closeSheet(); i?.link?.click(); };
+
+  const render = () => {
+    const q = (input.value || '').trim().toLowerCase();
+    shown = q ? items.filter(i => (i.label + ' ' + i.group).toLowerCase().includes(q)) : items;
+    if (sel >= shown.length) sel = Math.max(0, shown.length - 1);
+    list.innerHTML = '';
+    if (!shown.length) { list.appendChild(el('div', { class: 'cmd-empty', text: 'No page matches “' + input.value + '”.' })); return; }
+    shown.forEach((i, idx) => {
+      const row = el('div', { class: 'cmd-item', role: 'option', onclick: () => choose(i) },
+        el('span', { text: i.label }),
+        i.group ? el('span', { class: 'cmd-group', text: i.group }) : null);
+      row.setAttribute('aria-selected', String(idx === sel));
+      // Hovering moves the highlight, so mouse and keyboard don't disagree about what Enter does.
+      row.onmouseenter = () => { sel = idx; paint(); };
+      list.appendChild(row);
+    });
+  };
+  const paint = () => [...list.children].forEach((c     , idx        ) => c.setAttribute?.('aria-selected', String(idx === sel)));
+
+  input.oninput = () => { sel = 0; render(); };
+  input.onkeydown = (e     ) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, shown.length - 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(shown[sel]); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeSheet(); }
+  };
+
+  render();
+  openSheet({ search: input, body: list });
+  input.focus?.();
+}
+
+function initPalette() {
+  const opener      = document.getElementById('cmd-open');
+  if (opener) opener.onclick = () => openPalette();
+  window.addEventListener('keydown', (e     ) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); sheetIsOpen() ? closeSheet() : openPalette(); }
+  });
 }
 
 // ── overrides.ts ────────────────────────────────────────────────
@@ -376,7 +826,7 @@ function pathsTable(rows       , promOn         , emonOn         ) {
 
 // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key).
 function addPathsSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Paths'; nav.appendChild(link);
+  const link = navLink(nav, "Paths", "⤳");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Integration Paths'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -411,7 +861,7 @@ function addPathsSection(nav     , sections     ) {
 // Status / diagnostics: component health, versions, uptime, restart, and (in Kubernetes) logs + events.
 
 function addDiagnosticsSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Diagnostics'; nav.appendChild(link);
+  const link = navLink(nav, "Diagnostics", "✚");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Diagnostics'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Runtime status and maintenance actions.'; sec.appendChild(d);
@@ -594,7 +1044,7 @@ function buildK8sTools(container     ) {
 // Direct outlet control (on/off/reboot) + group actions + label editing.
 
 function addControlSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'PDU Control'; nav.appendChild(link);
+  const link = navLink(nav, "PDU Control", "⏻");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -760,7 +1210,7 @@ function addControlSection(nav     , sections     ) {
 // A read-only view of the current readings being pulled from the PDU(s).
 
 function addLiveDataSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Live Data'; nav.appendChild(link);
+  const link = navLink(nav, "Live Data", "∿");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
@@ -770,10 +1220,14 @@ function addLiveDataSection(nav     , sections     ) {
   const viewSel = document.createElement('select');
   [['grouped', 'Grouped (by outlet)'], ['flat', 'Flat (one row per reading)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; viewSel.appendChild(o); });
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
-  const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
-  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
+  // Live is the default now that the server pushes (#281): the table simply keeps up with the poller
+  // instead of asking you to opt into a 5-second refresh.
+  const autoLab = document.createElement('label'); const auto = document.createElement('input');
+  auto.type = 'checkbox'; auto.className = 'switch'; auto.checked = true;
+  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Live'));
+  autoLab.title = 'Follow the readings as they arrive. Turn off to freeze the table while you read it.';
   const count = document.createElement('span'); count.className = 'ld-count';
-  const instSel = instanceSelector(() => load());
+  const instSel = instanceSelector(() => { syncLive(); load(); });
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
   sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
@@ -878,25 +1332,34 @@ function addLiveDataSection(nav     , sections     ) {
     t.appendChild(tb); groupsWrap.appendChild(t);
   };
   const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
-  const load = async () => {
-    const r = await api(withInstance('/api/livedata', instSel));
-    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; groupsWrap.innerHTML = ''; count.textContent = ''; return; }
-    body = r.body;
+
+  // One place to take a payload, whether it was fetched or pushed.
+  const accept = (payload     ) => {
+    if (!payload || !payload.ok) {
+      tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + ((payload && payload.message) || 'Could not load live data.') + '</div>';
+      groupsWrap.innerHTML = ''; count.textContent = '';
+      return;
+    }
+    body = payload;
     count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings · ' + (body.groups || []).length + ' groups';
     draw();
   };
+  const load = async () => accept((await api(withInstance('/api/livedata', instSel))).body);
+
   refresh.onclick = load;
   filter.oninput = draw;
   viewSel.onchange = draw;
-  auto.onchange = () => {
-    clearInterval(timer);
-    if (auto.checked) timer = setInterval(() => {
-      // Stop polling the PDU once the user navigates away from this tab.
-      if (!sec.classList.contains('active')) { clearInterval(timer); auto.checked = false; return; }
-      load();
-    }, 5000);
-  };
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // Pushed while the tab is open and Live is on; the key carries the selected instance, so switching
+  // PDUs re-subscribes rather than re-polls.
+  const syncLive = liveWhileActive(sec, () => (auto.checked ? 'livedata' + (instSel.get() ? ':' + instSel.get() : '') : ''), accept);
+  auto.onchange = () => syncLive();
+  // The polling fallback: it only fires when this tab is open, Live is on, and the push stream is not
+  // up — so it costs nothing in the normal case but the table still moves without one.
+  timer = setInterval(() => {
+    if (sec.classList.contains('active') && auto.checked && !realtimeLive()) load();
+  }, 5000);
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // ── sections/flow.ts ────────────────────────────────────────────
@@ -1647,9 +2110,13 @@ function migrateEnergyFlow(flow     ) {
 
 // Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
 async function saveConfig(onSaved            ) {
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-  if (r.ok && r.body.ok) onSaved();
+  const payload = exportData();
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const ok = r.ok && r.body.ok;
+  toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
+  // This writes the same document the shell's save bar tracks, so re-baseline here too — otherwise the
+  // bar would keep claiming there are unsaved changes that have in fact just been written.
+  if (ok) { setBaseline(payload); onSaved(); }
 }
 
 // --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
@@ -1925,7 +2392,9 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 }
 
 function addFlowSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
+  const link = navLink(nav, "Flow", "⇄");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -2385,7 +2854,15 @@ function addFlowSection(nav     , sections     ) {
     renderTree();
   };
   refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
+  // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
+  const syncLive = liveWhileActive(sec,
+    () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
+    (body     ) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
+  metricSel.addEventListener('change', () => syncLive());
+
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
@@ -2473,7 +2950,9 @@ function renderImportPanel(flow     , existingIds             , rerender        
 }
 
 function addNodesSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
+  const link = navLink(nav, "Nodes", "⬡");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -2547,7 +3026,7 @@ function addNodesSection(nav     , sections     ) {
 // "—", never a fabricated zero (the whole flow's accuracy rule). Battery/grid net uses the in-direction
 // (charge/export) power from the #in cache key, so the arrows point the right way.
 function addEnergyOverviewSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Energy'; nav.appendChild(link);
+  const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy Overview' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
@@ -2633,7 +3112,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return { present: ns.length > 0, value: known ? sum : null };
   };
 
+  // The board needs several round-trips, and it is now triggered by pushes as well as by the timer and
+  // the button — so never let a second pass start on top of one still in flight.
+  let loading = false;
   const load = async () => {
+    if (loading) return;
+    loading = true;
+    try { await loadBoard(); } finally { loading = false; }
+  };
+
+  const loadBoard = async () => {
     let r     ; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
@@ -2780,8 +3268,14 @@ function addEnergyOverviewSection(nav     , sections     ) {
   };
 
   refresh.onclick = () => load();
-  setInterval(() => { if (sec.classList.contains('active')) load(); }, 8000);
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The board is assembled from several reads (the graph, the in-direction live values, the energy graph),
+  // so the push is used as a *trigger*: when the server says the flow moved, rebuild the board. That keeps
+  // one source of truth for how the figures are derived while making the page react in ~2s instead of 8.
+  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''), () => load());
+  // Fallback for when the stream isn't up; it does nothing while it is.
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 8000);
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // ── sections/export.ts ──────────────────────────────────────────
@@ -2789,7 +3283,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 // takes one back (#214), merged into what's on screen or replacing it whole.
 
 function addExportSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Export'; nav.appendChild(link);
+  const link = navLink(nav, "Export", "⇵");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Export'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -2885,7 +3379,7 @@ function buildImport() {
 // Home Assistant Energy Mapping (#128): the EnergyDashboard settings + manual sync/clear actions.
 
 function addHaEnergySection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'HA Energy Mapping'; nav.appendChild(link);
+  const link = navLink(nav, "HA Energy Mapping", "▮");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Home Assistant Energy Mapping'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -2943,7 +3437,7 @@ function addHaEnergySection(nav     , sections     ) {
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
 
 function addHomeSection(nav     , sections     ) {
-  const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
+  const link = navLink(nav, "Status", "◈");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Status' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Every hop your energy data takes — the meters it comes from, the broker it moves over, and the stores it lands in. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
@@ -2981,21 +3475,35 @@ function addHomeSection(nav     , sections     ) {
     return parts.join(' ');
   };
 
-  const load = async () => {
-    const r = await api('/api/status/board');
-    const cards = (r.body && r.body.cards) || [];
+  // What each card said last time, so a card whose verdict actually moved can be flashed. Without it a
+  // pushed update is indistinguishable from no update at all.
+  const lastState = new Map                ();
+
+  const render = (body     ) => {
+    const cards = (body && body.cards) || [];
     grid.innerHTML = '';
 
     if (!cards.length) {
       grid.appendChild(card('warn', 'Status', 'Waiting', 'No component has reported yet'));
+      lastState.clear();
       return;
     }
-    cards.forEach((c     ) => grid.appendChild(card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c))));
+    cards.forEach((c     ) => {
+      const node = card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c));
+      const sig = c.level + '/' + c.state;
+      if (lastState.has(c.id) && lastState.get(c.id) !== sig) node.classList.add('flash');
+      lastState.set(c.id, sig);
+      grid.appendChild(node);
+    });
   };
 
+  const load = async () => render((await api('/api/status/board')).body);
+
   refresh.onclick = () => load();
-  // Refresh while the tab is on screen so the board stays live without polling in the background.
-  setInterval(() => { if (sec.classList.contains('active')) load(); }, 10000);
+  // The board is pushed from the server (#281) while this tab is on screen. The timer stays as the
+  // fallback for when the stream isn't up — it does nothing while it is.
+  liveWhileActive(sec, () => 'board', render);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
   link.onclick = () => { activate(link, sec); load(); };
   return { link, load };
 }
@@ -3004,85 +3512,102 @@ function addHomeSection(nav     , sections     ) {
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
 
+// Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
+// stay in step with the document as it is typed.
 function scalarInput(node     , obj     )      {
+  const touched = () => refreshDirty();
   let el     ;
   if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.checked = !!obj[node.key];
-    el.onchange = () => obj[node.key] = el.checked;
+    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!obj[node.key];
+    el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
     (node.enumValues || []).forEach((v        ) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? undefined : el.value;
+    el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'int' || node.type === 'double') {
     el = document.createElement('input'); el.type = 'number'; if (node.type === 'double') el.step = 'any';
     if (node.min != null) el.min = node.min; if (node.max != null) el.max = node.max;
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : Number(el.value);
+    el.onchange = () => { obj[node.key] = el.value === '' ? null : Number(el.value); touched(); };
   } else {
     el = document.createElement('input'); el.type = node.type === 'password' ? 'password' : 'text';
     if (obj[node.key] != null) el.value = obj[node.key];
-    el.onchange = () => obj[node.key] = el.value === '' ? null : el.value;
+    el.onchange = () => { obj[node.key] = el.value === '' ? null : el.value; touched(); };
   }
   return el;
+}
+
+// A boolean reads (and hits) better as a switch with the current state spelled out beside it than as a
+// 16px checkbox whose meaning you have to infer from the label.
+function switchWrap(input     ) {
+  const label = el('span', { class: 'switch-state', text: input.checked ? 'On' : 'Off' });
+  const wrap = el('label', { class: 'switch-wrap' }, input, label);
+  const sync = () => label.textContent = input.checked ? 'On' : 'Off';
+  const prior = input.onchange;
+  input.onchange = (e     ) => { prior?.(e); sync(); };
+  return wrap;
 }
 
 // Render an object's child properties into `container`: scalar fields flow into a multi-column grid
 // (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
 // and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
-function renderObjectBody(properties       , target     , container     ) {
+// `path` is where `target` lives in the config document, so each field can be tracked for unsaved edits.
+function renderObjectBody(properties       , target     , container     , path           = []) {
   const isComplex = (c     ) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
   if (scalars.length) {
     const grid = document.createElement('div'); grid.className = 'grid';
-    scalars.forEach(child => renderNode(child, target, grid));
+    scalars.forEach(child => renderNode(child, target, grid, path));
     container.appendChild(grid);
   }
-  complex.forEach(child => renderNode(child, target, container));
+  complex.forEach(child => renderNode(child, target, container, path));
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-function renderNode(node     , obj     , container     ) {
+function renderNode(node     , obj     , container     , path           = []) {
+  const here = [...path, node.key];
   if (node.type === 'object') {
     const target = ensure(obj, node.key, {});
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs);
+    renderObjectBody(node.properties, target, fs, here);
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
-    container.appendChild(renderMap(node, ensure(obj, node.key, {})));
+    container.appendChild(renderMap(node, ensure(obj, node.key, {}), here));
   } else if (node.type === 'list') {
-    container.appendChild(renderList(node, ensure(obj, node.key, [])));
+    container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
-    f.appendChild(input);
+    f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
     if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
+    // A password's value must never reach the change-review list.
+    registerField(here, f, node.type === 'password');
     container.appendChild(f);
   }
 }
 
 // Click-to-insert / draggable chips for a templated field's available {variables}.
 function templateVarChips(vars          , input     , obj     , node     ) {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;';
+  const wrap = document.createElement('div'); wrap.className = 'tpl-vars';
   const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
   wrap.appendChild(label);
   vars.forEach(v => {
     const token = '{' + v + '}';
-    const chip = document.createElement('span'); chip.textContent = token; chip.draggable = true;
-    chip.style.cssText = 'cursor:grab;user-select:none;font:12px ui-monospace,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;';
+    const chip = document.createElement('span'); chip.className = 'tpl-chip'; chip.textContent = token; chip.draggable = true;
     chip.title = 'Click to insert at the cursor, or drag into the field';
     chip.onclick = () => {
       const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
       input.value = input.value.slice(0, s) + token + input.value.slice(e);
       const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
       obj[node.key] = input.value === '' ? null : input.value;
+      refreshDirty();
     };
     // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
     chip.ondragstart = (ev     ) => ev.dataTransfer.setData('text/plain', token);
@@ -3091,19 +3616,20 @@ function templateVarChips(vars          , input     , obj     , node     ) {
   return wrap;
 }
 
-// Render the value of a dictionary/list element (valueSchema has no key of its own).
-function renderValue(valueSchema     , holder     , keyName     , container     ) {
+// Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
+// the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
+function renderValue(valueSchema     , holder     , keyName     , container     , path          ) {
   const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
     // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
-    renderObjectBody(node.properties, target, container);
+    renderObjectBody(node.properties, target, container, path);
   } else {
-    renderNode(node, holder, container);
+    renderNode(node, holder, container, path.slice(0, -1));
   }
 }
 
-function renderMap(node     , mapObj     ) {
+function renderMap(node     , mapObj     , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
@@ -3113,38 +3639,38 @@ function renderMap(node     , mapObj     ) {
     const wrap = document.createElement('div'); wrap.className = 'map-entry';
     const head = document.createElement('div'); head.className = 'head';
     const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
-    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; } };
+    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; refreshDirty(); } };
     const del = btn('Remove', 'danger');
-    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); };
+    del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); refreshDirty(); };
     head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
     if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
-    renderValue(node.valueSchema, mapObj, key, wrap);
+    renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
     entries.appendChild(wrap);
   };
 
   Object.keys(mapObj).forEach(drawEntry);
   const add = btn('+ Add');
-  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); };
+  add.onclick = () => { let k = 'new'; let i = 1; while (mapObj[k] !== undefined) k = 'new' + (i++); mapObj[k] = node.valueSchema.type === 'object' ? {} : ''; drawEntry(k); refreshDirty(); };
   fs.appendChild(add);
   return fs;
 }
 
-function renderList(node     , arr       ) {
+function renderList(node     , arr       , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   const entries = document.createElement('div'); fs.appendChild(entries);
   const draw = (idx        ) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
     const del = btn('Remove', 'danger');
-    del.onclick = () => { arr.splice(idx, 1); rebuild(); };
+    del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
     wrap.appendChild(del);
-    renderValue(node.valueSchema, arr, idx, wrap);
+    renderValue(node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
     entries.appendChild(wrap);
   };
   const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
   rebuild();
   const add = btn('+ Add');
-  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); };
+  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
   fs.appendChild(add);
   return fs;
 }
@@ -3166,6 +3692,16 @@ const NAV_GROUPS                                        = [
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
 const LABEL_OVERRIDES                         = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
+// A leading glyph per schema-driven page. Purely a scanning aid — the label is still the page's
+// identity — so an unlisted section simply gets the neutral bullet. (The bespoke tool tabs pass their
+// own glyph to navLink() where they build their link.)
+const NAV_ICONS                         = {
+  'Vertiv rPDU': '▤', 'Overrides': '✎', 'MQTT': '⇅', 'Modbus TCP': '⧉', 'EmonCMS': '▦',
+  'Home Assistant': '⌂', 'Prometheus': '◎', 'GUI': '▭', 'API': '⚙',
+  'Health': '♥', 'Logging': '☰', 'Debug': '⚑', 'Operator': '⎈',
+};
+function navIcon(label        ) { return NAV_ICONS[label] || '•'; }
+
 // A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
 // (schema sections or tool tabs) are appended into.
 function navGroup(nav     , title        ) {
@@ -3180,7 +3716,9 @@ function navGroup(nav     , title        ) {
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node     , nav     , sections     ) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
-  const link = document.createElement('a'); link.textContent = label; nav.appendChild(link);
+  const link = navLink(nav, label, navIcon(label));
+  // Which part of the document this page edits, so its nav entry can carry a count of pending edits.
+  link.dataset.section = node.key;
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = label; sec.appendChild(h);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
@@ -3204,9 +3742,9 @@ function renderConfigSection(node     , nav     , sections     ) {
       ensure(state.data, node.key, {});
       // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
       const props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard') : node.properties;
-      renderObjectBody(props, state.data[node.key], sec);
+      renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
-    else renderNode(node, state.data, sec);
+    else renderNode(node, state.data, sec, []);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
@@ -3219,6 +3757,8 @@ function renderConfigSection(node     , nav     , sections     ) {
 function build() {
   const nav      = document.getElementById('nav'); const sections      = document.getElementById('sections');
   nav.innerHTML = ''; sections.innerHTML = '';
+  // Everything registered against the old DOM is gone with it.
+  clearFieldRegistry();
 
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
@@ -3251,8 +3791,26 @@ function build() {
 
   // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
-  const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => slug(a.textContent) === wanted) : null;
+  const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
+
+  wireNavBadges(nav);
+}
+
+// Each config page's nav entry carries the number of unsaved edits inside it, so pending work is
+// visible from anywhere — you don't have to remember which tab you were on when you changed something.
+let navBadgesOff      = null;
+function wireNavBadges(nav     ) {
+  // A rebuild replaces every link, so drop the watcher that was pointing at the old ones.
+  navBadgesOff?.();
+  const links = ([...nav.querySelectorAll('a')]         ).filter(a => a.dataset?.section);
+  navBadgesOff = onDirty(() => links.forEach(a => {
+    const n = changeCountFor(a.dataset.section);
+    const existing = a.querySelector('.nav-badge');
+    if (!n) { existing?.remove(); return; }
+    if (existing) existing.textContent = String(n);
+    else a.appendChild(el('span', { class: 'nav-badge', text: String(n), title: n + ' unsaved change(s) on this page' }));
+  }));
 }
 
 // In the Gui section, grey out the auth fields that don't apply to the selected AuthType.
@@ -3493,7 +4051,8 @@ async function clearHa() {
 }
 
 // ── main.ts ─────────────────────────────────────────────────────
-// Bootstrap & shared status: load the schema + config, build the UI, and wire the global Save/Reload.
+// Shell bootstrap: load the schema + config, build the UI, and own everything that lives outside a
+// section — the app bar, the live-stream indicator, the theme, the palette, and the save bar.
 
 // Back/forward navigation + direct hash edits: open the matching tab if it isn't already active. (Normal
 // tab clicks already set the hash via activate(), so by the time this fires the tab is active -> no-op,
@@ -3501,7 +4060,7 @@ async function clearHa() {
 window.addEventListener('hashchange', () => {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   if (!wanted) return;
-  const link = ([...document.querySelectorAll('nav a')]         ).find(a => slug(a.textContent) === wanted);
+  const link = ([...document.querySelectorAll('nav a')]         ).find(a => slug(a.dataset?.label || a.textContent) === wanted);
   if (link && !link.classList.contains('active')) link.click();
 });
 
@@ -3509,56 +4068,93 @@ async function load() {
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
   build();
+  // Whatever the server just handed us is, by definition, the saved state.
+  setBaseline();
   refreshStatus();
 }
 
+// --- App-bar status --------------------------------------------------------------------------------
+
 // Last-seen operator update report, so "check now" can tell when a fresh result has landed.
 let lastCheckedAt                = null;
+let configWritable = true;
 
 // Render the header update chip from the operator's report (#210). Hidden when no operator is reporting.
 function renderUpdate(u     ) {
-  const upd = document.getElementById('st-update')       ;
-  if (!u) { upd.style.display = 'none'; lastCheckedAt = null; return; }
+  const upd      = document.getElementById('st-update');
+  if (!upd) return;
+  if (!u) { upd.classList.add('is-hidden'); lastCheckedAt = null; return; }
   lastCheckedAt = u.checkedAt || null;
-  upd.style.display = 'inline-flex';
-  upd.classList.remove('busy');
+  upd.classList.remove('is-hidden', 'busy');
   if (u.available) {
-    upd.className = 'st-update warn';
+    upd.className = 'pill pill-btn warn';
     upd.textContent = '↑ ' + (u.latest || 'Update');
     upd.title = 'Update available: ' + (u.latest || '?') + (u.current ? ' (on ' + u.current + ')' : '')
       + (u.applied ? ' — auto-updated' : '') + '\nClick to check now';
   } else if (u.current) {
-    upd.className = 'st-update good';
+    upd.className = 'pill pill-btn good';
     upd.textContent = '✓ ' + u.current;
     upd.title = 'Up to date' + (u.checkedAt ? ' (checked ' + new Date(u.checkedAt).toLocaleString() + ')' : '') + '\nClick to check now';
   } else {
-    upd.className = 'st-update';
+    upd.className = 'pill pill-btn';
     upd.textContent = 'Check updates';
     upd.title = (u.message || '') + '\nClick to check now';
   }
 }
 
-async function refreshStatus() {
-  const { body } = await api('/api/status');
-  (document.getElementById('st-version')       ).textContent = 'v' + (body.version || '?');
-  (document.getElementById('st-mqtt-dot')       ).className = 'dot ' + (body.mqttConnected ? 'good' : 'bad');
+// Paint the app bar from a /api/status body — from the initial fetch, or pushed on the `status` feed.
+function renderStatus(body     ) {
+  if (!body) return;
+  const set = (id        , fn                  ) => { const e = document.getElementById(id); if (e) fn(e); };
+
+  set('st-version', e => { e.textContent = 'v' + (body.version || '?'); e.title = body.configSource ? 'Config source: ' + body.configSource : ''; });
+  set('st-mqtt', e => {
+    e.className = 'pill ' + (body.mqttConnected ? 'good' : 'bad');
+    e.title = (body.mqttConnected ? 'Connected to ' : 'Not connected to ') + (body.mqttHost || 'the broker');
+  });
+  set('st-mqtt-dot', e => e.className = 'dot ' + (body.mqttConnected ? 'good' : 'bad'));
   renderUpdate(body.update);
-  // A ConfigMap / read-only mount can't be saved; disable Save and explain why.
-  const readOnly = body.configWritable === false;
-  const save = document.getElementById('btn-save')       ;
-  save.disabled = readOnly;
-  save.title = readOnly ? 'Config file is read-only and cannot be saved.' : '';
-  (document.getElementById('ro-note')       ).style.display = readOnly ? 'inline' : 'none';
+
+  // A ConfigMap / read-only mount can't be saved: say so up front, not after the save fails.
+  configWritable = body.configWritable !== false;
+  set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
+  renderSaveBar();
+
   // Show a logout link + signed-in user when OIDC is in use.
   if (body.auth === 'oidc') {
-    (document.getElementById('st-logout')       ).style.display = 'inline';
-    if (body.user) (document.getElementById('st-user')       ).textContent = body.user;
+    set('st-logout', e => e.classList.remove('is-hidden'));
+    if (body.user) set('st-user', e => e.textContent = body.user);
   }
+}
+
+async function refreshStatus() {
+  renderStatus((await api('/api/status')).body);
+}
+
+// The live pill: the one place that says whether anything on screen is actually moving.
+function initLiveIndicator() {
+  const pill      = document.getElementById('st-live');
+  const LOOK                      = {
+    live: ['pill good', 'Live', 'Live updates are streaming from the bridge.'],
+    connecting: ['pill warn', 'Connecting', 'Opening the live update stream…'],
+    down: ['pill bad', 'Offline', 'The live update stream dropped — retrying. Pages fall back to manual refresh.'],
+    idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
+  };
+  onRealtimeState(s => {
+    if (!pill) return;
+    const [cls, text, title] = LOOK[s] || LOOK.idle;
+    pill.className = cls;
+    pill.title = title;
+    pill.innerHTML = '';
+    pill.append(el('span', { class: 'dot' + (s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '') }), text);
+  });
+  // The app bar is always watching, so the stream is up as soon as the page is.
+  subscribeLive('status', renderStatus);
 }
 
 // "Check now": ask the operator (a separate process) to run a registry check, then poll for the result.
 async function checkUpdatesNow() {
-  const upd = document.getElementById('st-update')       ;
+  const upd      = document.getElementById('st-update');
   if (upd.classList.contains('busy')) return;
   const priorCheckedAt = lastCheckedAt;
   upd.classList.add('busy'); upd.textContent = '⏳ Checking…'; upd.title = 'Checking for updates…';
@@ -3581,11 +4177,133 @@ async function checkUpdatesNow() {
   toast('Requested a check — no response yet. Is the operator role running?', false);
 }
 
-(document.getElementById('st-update')       ).onclick = checkUpdatesNow;
-(document.getElementById('btn-reload')       ).onclick = load;
-(document.getElementById('btn-save')       ).onclick = async () => {
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-};
+// --- Save bar --------------------------------------------------------------------------------------
+// It only exists when there is something to save, and it says how much. The old bar was permanent and
+// always enabled: identical whether you'd changed nothing or twenty settings, with no way to see what
+// a click would write, and no way back.
 
+let saving = false;
+
+function renderSaveBar() {
+  const bar      = document.getElementById('savebar');
+  const count      = document.getElementById('save-count');
+  const save      = document.getElementById('btn-save');
+  const note      = document.getElementById('ro-note');
+  if (!bar) return;
+
+  const n = changes().length;
+  bar.classList[n ? 'remove' : 'add']('is-hidden');
+  if (count) count.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
+  if (note) note.classList[configWritable ? 'add' : 'remove']('is-hidden');
+  if (save) {
+    save.disabled = saving || !configWritable;
+    save.title = configWritable ? 'Write these changes to the configuration source' : 'The configuration source is read-only and cannot be saved.';
+  }
+}
+
+async function saveConfigChanges() {
+  if (saving || !isDirty() || !configWritable) return;
+  const save      = document.getElementById('btn-save');
+  const payload = exportData();
+  saving = true; renderSaveBar();
+  if (save) save.textContent = 'Saving…';
+
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  saving = false;
+  if (save) { save.innerHTML = ''; save.append('Save', el('kbd', { text: 'Ctrl' }), el('kbd', { text: 'S' })); }
+
+  const ok = r.ok && r.body.ok;
+  // Only re-baseline on success — a failed save must leave the changes (and the bar) exactly as they were.
+  if (ok) setBaseline(payload);
+  else renderSaveBar();
+  toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
+}
+
+// The reviewable list of what a save would write: one row per setting, old value -> new value.
+function reviewChanges() {
+  const list = changes();
+  const body = el('div');
+  if (!list.length) body.appendChild(el('div', { class: 'cmd-empty', text: 'Nothing has been changed.' }));
+
+  // Grouped by the config section each setting belongs to, matching how the nav is organised.
+  const groups = new Map               ();
+  list.forEach(c => {
+    const g = c.path[0] || 'Config';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g) .push(c);
+  });
+
+  groups.forEach((rows, g) => {
+    const box = el('div', { class: 'diff-group' }, el('h4', { text: g }));
+    rows.forEach(c => box.appendChild(el('div', { class: 'diff-row' },
+      el('div', { class: 'diff-path', text: c.path.join(' › ') }),
+      el('span', { class: 'diff-val diff-old', text: formatValue(c.from, c.secret) }),
+      el('span', { class: 'diff-arrow', text: '→' }),
+      el('span', { class: 'diff-val diff-new', text: formatValue(c.to, c.secret) }))));
+    body.appendChild(box);
+  });
+
+  const discard = el('button', { class: 'danger', text: 'Discard all', onclick: () => { closeSheet(); discardAll(); } });
+  const saveBtn = el('button', { class: 'primary', text: 'Save', onclick: () => { closeSheet(); saveConfigChanges(); } });
+  openSheet({ title: list.length === 1 ? '1 unsaved change' : list.length + ' unsaved changes', body, wide: true, footer: list.length ? [discard, saveBtn] : null });
+}
+
+function discardAll() {
+  if (!isDirty()) return;
+  if (!confirm(`Discard ${changes().length} unsaved change(s) and go back to the saved configuration?`)) return;
+  discardChanges();
+  build();
+  refreshDirty();
+  toast('Changes discarded.', true);
+}
+
+// --- Wiring ----------------------------------------------------------------------------------------
+
+function initShell() {
+  const on = (id        , fn     ) => { const e      = document.getElementById(id); if (e) e.onclick = fn; };
+  on('st-update', checkUpdatesNow);
+  on('btn-save', saveConfig);
+  on('btn-review', reviewChanges);
+  on('btn-discard', discardAll);
+  on('btn-reload', () => {
+    if (isDirty() && !confirm(`Reload from the server and lose ${changes().length} unsaved change(s)?`)) return;
+    load();
+  });
+
+  // Narrow screens: the sidebar is a drawer. Any nav click closes it again.
+  const closeNav = () => document.body.classList.remove('nav-open');
+  on('nav-toggle', () => document.body.classList.toggle('nav-open'));
+  on('nav-scrim', closeNav);
+  document.getElementById('nav')?.addEventListener('click', (e     ) => { if (e.target?.closest?.('a')) closeNav(); });
+
+  window.addEventListener('keydown', (e     ) => {
+    if (e.key === 'Escape' && sheetIsOpen()) { e.preventDefault(); closeSheet(); return; }
+    // Ctrl/⌘+S is what everyone's fingers already do in a form this size.
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveConfigChanges(); }
+  });
+
+  // Don't let a tab close silently take edits with it.
+  window.addEventListener('beforeunload', (e     ) => {
+    if (!isDirty()) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  // The bar is a pure function of the pending changes, so it repaints whenever they move.
+  onDirty(renderSaveBar);
+
+  // The bespoke editors (energy-flow nodes, the overrides table) mutate the same document directly
+  // rather than going through the schema form. Instead of making every one of them report in, re-diff
+  // after any interaction with the page: the document is small, and this runs once per event burst.
+  let dirtyTick      = null;
+  const scheduleDirty = () => { clearTimeout(dirtyTick); dirtyTick = setTimeout(refreshDirty, 120); };
+  const sections = document.getElementById('sections');
+  ['change', 'input', 'click'].forEach(ev => sections?.addEventListener(ev, scheduleDirty, true));
+
+  initTheme();
+  initPalette();
+  initLiveIndicator();
+}
+
+initShell();
 load();

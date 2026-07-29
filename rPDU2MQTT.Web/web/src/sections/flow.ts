@@ -1,5 +1,7 @@
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
-import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance } from '../helpers.js';
+import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
+import { liveWhileActive, realtimeLive } from '../realtime.js';
+import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 
@@ -748,9 +750,13 @@ function migrateEnergyFlow(flow: any) {
 
 // Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
 async function saveConfig(onSaved: () => void) {
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-  if (r.ok && r.body.ok) onSaved();
+  const payload = exportData();
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const ok = r.ok && r.body.ok;
+  toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
+  // This writes the same document the shell's save bar tracks, so re-baseline here too — otherwise the
+  // bar would keep claiming there are unsaved changes that have in fact just been written.
+  if (ok) { setBaseline(payload); onSaved(); }
 }
 
 // --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
@@ -1026,7 +1032,9 @@ function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Ma
 }
 
 export function addFlowSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
+  const link = navLink(nav, "Flow", "⇄");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -1486,7 +1494,15 @@ export function addFlowSection(nav: any, sections: any) {
     renderTree();
   };
   refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
+  // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
+  const syncLive = liveWhileActive(sec,
+    () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
+    (body: any) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
+  metricSel.addEventListener('change', () => syncLive());
+
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
@@ -1574,7 +1590,9 @@ function renderImportPanel(flow: any, existingIds: Set<string>, rerender: () => 
 }
 
 export function addNodesSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
+  const link = navLink(nav, "Nodes", "⬡");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -1648,7 +1666,7 @@ export function addNodesSection(nav: any, sections: any) {
 // "—", never a fabricated zero (the whole flow's accuracy rule). Battery/grid net uses the in-direction
 // (charge/export) power from the #in cache key, so the arrows point the right way.
 export function addEnergyOverviewSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Energy'; nav.appendChild(link);
+  const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy Overview' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
@@ -1734,7 +1752,16 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return { present: ns.length > 0, value: known ? sum : null };
   };
 
+  // The board needs several round-trips, and it is now triggered by pushes as well as by the timer and
+  // the button — so never let a second pass start on top of one still in flight.
+  let loading = false;
   const load = async () => {
+    if (loading) return;
+    loading = true;
+    try { await loadBoard(); } finally { loading = false; }
+  };
+
+  const loadBoard = async () => {
     let r: any; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
@@ -1881,6 +1908,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   refresh.onclick = () => load();
-  setInterval(() => { if (sec.classList.contains('active')) load(); }, 8000);
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The board is assembled from several reads (the graph, the in-direction live values, the energy graph),
+  // so the push is used as a *trigger*: when the server says the flow moved, rebuild the board. That keeps
+  // one source of truth for how the figures are derived while making the page react in ~2s instead of 8.
+  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''), () => load());
+  // Fallback for when the stream isn't up; it does nothing while it is.
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 8000);
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }

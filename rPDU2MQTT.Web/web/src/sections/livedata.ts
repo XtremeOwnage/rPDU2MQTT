@@ -1,8 +1,9 @@
 // A read-only view of the current readings being pulled from the PDU(s).
-import { api, btn, activate, formatNum, instanceSelector, withInstance } from '../helpers.js';
+import { api, btn, activate, formatNum, instanceSelector, withInstance, navLink } from '../helpers.js';
+import { liveWhileActive, realtimeLive } from '../realtime.js';
 
 export function addLiveDataSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Live Data'; nav.appendChild(link);
+  const link = navLink(nav, "Live Data", "∿");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
@@ -12,10 +13,14 @@ export function addLiveDataSection(nav: any, sections: any) {
   const viewSel = document.createElement('select');
   [['grouped', 'Grouped (by outlet)'], ['flat', 'Flat (one row per reading)']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; viewSel.appendChild(o); });
   const filter = document.createElement('input'); filter.type = 'text'; filter.placeholder = 'Filter (device / outlet / measurement)…';
-  const autoLab = document.createElement('label'); const auto = document.createElement('input'); auto.type = 'checkbox';
-  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Auto-refresh (5s)'));
+  // Live is the default now that the server pushes (#281): the table simply keeps up with the poller
+  // instead of asking you to opt into a 5-second refresh.
+  const autoLab = document.createElement('label'); const auto = document.createElement('input');
+  auto.type = 'checkbox'; auto.className = 'switch'; auto.checked = true;
+  autoLab.appendChild(auto); autoLab.appendChild(document.createTextNode('Live'));
+  autoLab.title = 'Follow the readings as they arrive. Turn off to freeze the table while you read it.';
   const count = document.createElement('span'); count.className = 'ld-count';
-  const instSel = instanceSelector(() => load());
+  const instSel = instanceSelector(() => { syncLive(); load(); });
   bar.appendChild(refresh); bar.appendChild(instSel.wrap); bar.appendChild(viewSel); bar.appendChild(filter); bar.appendChild(autoLab); bar.appendChild(count);
   sec.appendChild(bar);
   const tableWrap = document.createElement('div'); sec.appendChild(tableWrap);
@@ -120,23 +125,32 @@ export function addLiveDataSection(nav: any, sections: any) {
     t.appendChild(tb); groupsWrap.appendChild(t);
   };
   const draw = () => { (viewSel.value === 'flat' ? drawFlat : drawGrouped)(); drawGroupRollups(); };
-  const load = async () => {
-    const r = await api(withInstance('/api/livedata', instSel));
-    if (!r.body.ok) { tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load live data.') + '</div>'; groupsWrap.innerHTML = ''; count.textContent = ''; return; }
-    body = r.body;
+
+  // One place to take a payload, whether it was fetched or pushed.
+  const accept = (payload: any) => {
+    if (!payload || !payload.ok) {
+      tableWrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + ((payload && payload.message) || 'Could not load live data.') + '</div>';
+      groupsWrap.innerHTML = ''; count.textContent = '';
+      return;
+    }
+    body = payload;
     count.textContent = (body.entities || []).length + ' outlets/entities · ' + (body.readings || []).length + ' readings · ' + (body.groups || []).length + ' groups';
     draw();
   };
+  const load = async () => accept((await api(withInstance('/api/livedata', instSel))).body);
+
   refresh.onclick = load;
   filter.oninput = draw;
   viewSel.onchange = draw;
-  auto.onchange = () => {
-    clearInterval(timer);
-    if (auto.checked) timer = setInterval(() => {
-      // Stop polling the PDU once the user navigates away from this tab.
-      if (!sec.classList.contains('active')) { clearInterval(timer); auto.checked = false; return; }
-      load();
-    }, 5000);
-  };
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // Pushed while the tab is open and Live is on; the key carries the selected instance, so switching
+  // PDUs re-subscribes rather than re-polls.
+  const syncLive = liveWhileActive(sec, () => (auto.checked ? 'livedata' + (instSel.get() ? ':' + instSel.get() : '') : ''), accept);
+  auto.onchange = () => syncLive();
+  // The polling fallback: it only fires when this tab is open, Live is on, and the push stream is not
+  // up — so it costs nothing in the normal case but the table still moves without one.
+  timer = setInterval(() => {
+    if (sec.classList.contains('active') && auto.checked && !realtimeLive()) load();
+  }, 5000);
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
