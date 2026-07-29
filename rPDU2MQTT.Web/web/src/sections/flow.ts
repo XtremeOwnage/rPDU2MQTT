@@ -1677,9 +1677,13 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, instSel.wrap, status); sec.appendChild(bar);
 
-  const flowWrap = el('div', { class: 'energy-flow' }); sec.appendChild(flowWrap);
-  const grid = el('div', { class: 'energy-grid' }); sec.appendChild(grid);
-  const summary = el('div', { class: 'energy-summary' }); sec.appendChild(summary);
+  // One column for the whole board, so the diagram and the tiles share an edge and read as a single
+  // thing. Left to themselves the diagram centred itself in the page while the tiles bunched up against
+  // the left margin, and the two looked unrelated.
+  const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
+  const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
+  const grid = el('div', { class: 'energy-grid' }); board.appendChild(grid);
+  const summary = el('div', { class: 'energy-summary' }); board.appendChild(summary);
 
   const fmtPower = (w: number | null) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
@@ -1705,7 +1709,20 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
   const drawFlow = (arms: { key: string, icon: string, label: string, text: string, color: string, flow: number | null }[]) => {
     flowWrap.innerHTML = '';
-    const svg = svgEl('svg', { viewBox: '0 0 440 300', width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg' });
+    // Frame only the arms that exist. The four positions describe the full cross (solar top, grid left,
+    // battery right, home bottom); a fixed 440x300 box therefore reserved the whole bottom of the diagram
+    // for a home arm that most setups never tag, leaving a tall band of blank space under it that the
+    // board had to push the tiles past. Fit the box to what is actually drawn instead.
+    // Only the vertical extent is fitted. The width stays the full cross (grid .. battery), because the
+    // SVG is laid out at 100% width and its height follows from the aspect ratio — narrowing the box for a
+    // one-armed system would make it render absurdly tall.
+    const ys = arms.map(a => NODEPOS[a.key].y);
+    // Below a node sits its label (+42) and value (+57); above it, the ring (r 26).
+    const y0 = Math.min(HUB.y, ...ys) - 40, y1 = Math.max(HUB.y, ...ys) + 70;
+    const svg = svgEl('svg', {
+      viewBox: `12 ${y0} 416 ${y1 - y0}`,
+      width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
+    });
     const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
     svg.append(lines, dots, nodes);
 
@@ -1742,6 +1759,25 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     nodes.appendChild(svgEl('circle', { cx: HUB.x, cy: HUB.y, r: 5, class: 'energy-hub' }));
     flowWrap.appendChild(svg);
   };
+
+  // Why is this tile empty? "No reading yet" is a dead end — it doesn't say whether the node has no source
+  // bound at all, or has one that has never delivered. The configured hierarchy is already in the browser,
+  // so answer it here and point at the thing to go fix.
+  const whyNoReading = (kind: string) => {
+    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n: any) => (n.Kind || '') === kind);
+    if (!nodes.length) return 'no reading yet';
+    const bound = nodes.flatMap((n: any) => n.Sources || []);
+    if (!bound.length)
+      return nodes.some((n: any) => n.Value != null) ? 'static value only' : 'no source bound';
+    // Bound but silent: name what it is waiting on, so the topic/register can be checked against reality.
+    const first = bound[0];
+    const what = first.Type === 'modbus'
+      ? `${first.Connection || 'modbus'} reg ${first.Register}`
+      : (first.Topic || 'its source');
+    return bound.length > 1 ? `waiting on ${bound.length} sources` : `waiting on ${what}`;
+  };
+  // The hint under a tile: the direction when there's a value, the reason when there isn't.
+  const subOrWhy = (value: number | null, kind: string, whenKnown: string) => value == null ? whyNoReading(kind) : whenKnown;
 
   // Sum a kind's out-direction (graph) values. Returns present (any nodes of this kind) and the known sum
   // (null when nodes exist but none has a value) so we can tell "no grid" from "grid, value unknown".
@@ -1864,11 +1900,11 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
-        solar.value == null ? 'no reading yet' : solar.value > 1 ? 'producing' : 'idle', solar.value && solar.value > 1 ? 'supply' : ''));
+        subOrWhy(solar.value, 'solar', solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : ''));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
-      const dir = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
+      const dir = subOrWhy(battNet, 'battery', battNet! > 1 ? 'discharging' : battNet! < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
       // SoC always leads the sub-line — "—" when no soc source is bound, so the state-of-charge slot is always
       // shown (bind a soc source on the Nodes tab to fill it) rather than silently vanishing.
@@ -1883,14 +1919,14 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
     if (gridK.present || gridIds.length) {
-      const sub = gridNet == null ? 'no reading yet' : gridNet > 1 ? 'importing' : gridNet < -1 ? 'exporting' : 'idle';
+      const sub = subOrWhy(gridNet, 'grid', gridNet! > 1 ? 'importing' : gridNet! < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
       grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
-      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), homeSub || 'no reading yet'));
+      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), home == null ? whyNoReading('load') : (homeSub || 'consuming')));
 
     // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
     // figure, not this instant's power. Only when the home energy and grid import both resolve and the house

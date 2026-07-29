@@ -379,7 +379,7 @@
   }
 
   /* --- Energy flow diagram ------------------------------------------------------------------------ */
-  .energy-flow { max-width:520px; margin:var(--sp-4) auto 0; }
+  .energy-flow { max-width:520px; margin:var(--sp-2) auto var(--sp-2); }
   .energy-flow-svg { display:block; width:100%; height:auto; }
   .energy-arm { stroke:var(--line); stroke-width:2; }
   .energy-hub { fill:var(--muted); }
@@ -391,7 +391,12 @@
   .energy-node-val { font-size:13px; font-weight:680; fill:var(--fg); text-anchor:middle; }
 
   /* --- Energy overview tiles ---------------------------------------------------------------------- */
-  .energy-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:var(--sp-3); margin-top:var(--sp-4); }
+  /* The board is one column: the diagram sits over the tiles it summarises, both bounded so they don't
+     drift apart on a wide screen. */
+  .energy-board { max-width:1040px; }
+  /* auto-FIT, not auto-fill: with three tagged kinds the empty tracks collapse and the tiles stretch to
+     the board's width, instead of huddling at the left with dead space beside them. */
+  .energy-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:var(--sp-3); margin-top:var(--sp-4); }
   .energy-tile {
     position:relative; border:1px solid var(--line); border-radius:var(--r); background:var(--panel);
     padding:var(--sp-3) var(--sp-4); box-shadow:var(--shadow-sm); overflow:hidden;
