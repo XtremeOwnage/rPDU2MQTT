@@ -162,9 +162,19 @@ public static class ServiceConfiguration
         if (worker || api || ui)
             services.AddHostedService(sp => new Hosting.FlowGrainSyncService(sp.GetRequiredService<Orleans.IGrainFactory>(), grainSyncedFlow));
 
-        // v3: every process reads flow values through the grain-synced mirror — Modbus (DeviceGrain) and MQTT
-        // (MqttToFlowBridge) both feed the flow grain, so this one source has all of it. No per-process ingest.
-        services.AddSingleton<Core.Flow.IFlowValueSource>(grainSyncedFlow);
+        // Reads prefer the in-process MQTT source cache, then fall back to the grain-synced mirror. In a
+        // single-binary (All-role) deployment the MQTT ingest runs in THIS process, so the GUI/exporters read
+        // the exact value the broker callback just wrote — no cross-process grain round-trip to delay it, and
+        // crucially it carries the direction-qualified (e.g. realpower#in — battery charge / grid export),
+        // state-of-charge (soc) and energy-in keys that the flow-grain sink strips out because they aren't
+        // canonical Metric names (Metrics.TryParse fails, so they never reach the grain or its mirror). Without
+        // this the battery SoC and every in-direction reading show "—" even though the ingest has them.
+        // In a UI-only split process the MQTT cache is never fed (the ingest isn't hosted there), so its reads
+        // return false and everything falls through to the mirror — this is strictly additive, never a
+        // regression. It is the single-binary deployment that makes it whole.
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
+            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+            grainSyncedFlow));
 
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
