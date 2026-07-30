@@ -22,7 +22,7 @@ namespace rPDU2MQTT.Services;
 /// Subscriptions are reconciled on a timer rather than only at startup, so binding a topic in the GUI
 /// takes effect without a restart (matching the rest of the app's live-reload behaviour).
 /// </summary>
-public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource
+public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics
 {
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
@@ -48,6 +48,13 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
 
     public bool TryGetValue(string nodeId, string metric, out double value)
         => latest.TryGetValue(nodeId, metric, out value);
+
+    // Freshness passes straight through to the cache, so the GUI can distinguish "never reported" from
+    // "stopped reporting" without reaching past this service into its private cache.
+    public bool TryDescribe(string nodeId, string metric, out FlowReading reading)
+        => latest.TryDescribe(nodeId, metric, out reading);
+
+    public IReadOnlyCollection<(string Node, string Metric)> ReportedKeys => latest.Keys;
 
     // Set when the client reconnects: everything in `subscribed` is a stale belief at that point and the
     // next reconcile must re-establish it. A flag rather than clearing the set from the event thread, so

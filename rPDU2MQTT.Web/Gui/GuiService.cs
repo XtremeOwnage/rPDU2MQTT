@@ -1137,10 +1137,28 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 var reqs = await System.Text.Json.JsonSerializer.DeserializeAsync<List<LiveValueQuery>>(
                     ctx.Request.Body, ProbeJson, ctx.RequestAborted) ?? new();
+                // `value` keeps its meaning exactly: the reading only if it can still be believed. The extra
+                // fields describe a reading that has expired, which TryGetValue deliberately hides — without
+                // them a publisher that died an hour ago is indistinguishable from one never configured, and
+                // the two need completely different fixes.
+                var diag = live as Core.Flow.IFlowValueDiagnostics;
                 var values = reqs.Select(q =>
                 {
-                    double? v = live is not null && live.TryGetValue(q.Node ?? "", q.Metric ?? "", out var got) ? got : null;
-                    return new { node = q.Node, metric = q.Metric, value = v };
+                    var node = q.Node ?? ""; var metric = q.Metric ?? "";
+                    double? v = live is not null && live.TryGetValue(node, metric, out var got) ? got : null;
+                    if (diag is null || !diag.TryDescribe(node, metric, out var r))
+                        return new { node = q.Node, metric = q.Metric, value = v, reported = (double?)null, atUtc = (DateTime?)null, ageSeconds = (double?)null, fresh = (bool?)null, staleAfterSeconds = (int?)null };
+                    return new
+                    {
+                        node = q.Node,
+                        metric = q.Metric,
+                        value = v,
+                        reported = (double?)r.Value,
+                        atUtc = (DateTime?)r.AtUtc,
+                        ageSeconds = (double?)Math.Round((DateTime.UtcNow - r.AtUtc).TotalSeconds, 1),
+                        fresh = (bool?)r.Fresh,
+                        staleAfterSeconds = (int?)r.StaleAfterSeconds,
+                    };
                 });
                 return Results.Json(new { ok = true, values }, ConfigSchema.Json);
             }

@@ -155,7 +155,7 @@ It should, ideally be positioned below, or above Solar/PV.... since it connects 
 
 ------------------------
 
-Need either a page, or dashboard, to allow display lots of the data we are collecting, Currently, kind of limited to whatever the chat displays. 
+- [x] Need either a page, or dashboard, to allow display lots of the data we are collecting, Currently, kind of limited to whatever the chat displays.
 
 Extra page just for displaying data would be handy.
 
@@ -166,6 +166,16 @@ Extra page just for displaying data would be handy.
     visible from the diagram itself. Built from data already on the client, so it costs no extra request.
     It is also the only place a node's intensive readings can appear, since those are deliberately kept
     off the ribbons.
+    Added an Energy Flow > Node Data tab: one row per node and bound metric, whatever the chart is
+    showing, with the source (topic, or connection + register) beside it.
+
+    Its point is the Updated column. TryGetValue deliberately hides an expired reading so the roll-up and
+    the exports can never carry one — but that also made a publisher that died an hour ago look identical
+    to a binding that was never right, and those need opposite fixes. /api/flow/live now reports a reading
+    either way, flagged fresh or stale, and the page marks it. "Problems only" filters to the rows that
+    have never reported or have gone stale.
+
+In addition, overing over items in the flow chart, SHOULD yield a hover-over popup, displaying node details, and data.
 
 ----------------------------
 

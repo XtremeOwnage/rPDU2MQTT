@@ -48,7 +48,14 @@ const flowGraph = {
   metric: 'realpower', units: 'W',
 };
 
+// One fresh reading and one that expired, so the Node Data page has both states to render.
+const liveValues = { ok: true, values: [
+  { node: 'solar', metric: 'realpower', value: 4237, reported: 4237, atUtc: new Date().toISOString(), ageSeconds: 3, fresh: true, staleAfterSeconds: 120 },
+  { node: 'solar', metric: 'energy', value: null, reported: 91.5, atUtc: new Date(Date.now() - 7200e3).toISOString(), ageSeconds: 7200, fresh: false, staleAfterSeconds: 120 },
+] };
+
 const bodies = (url) =>
+  url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
   url.includes('/api/config') ? config :
@@ -66,6 +73,7 @@ await new Promise(r => setTimeout(r, 50));
 
 // --- Assertions -------------------------------------------------------------------------------------
 const fail = (m) => { console.error('smoke FAILED: ' + m); process.exit(1); };
+const navLinksNow = () => query(getEl('nav'), 'a', true);
 
 const nav = getEl('nav');
 // A nav entry's text now includes its leading glyph, so its identity lives in dataset.label — the same
@@ -204,6 +212,20 @@ if (!query(focusSvg, 'path', true).some(p => p.classList.contains('on-path')))
 
 panelRect.dispatch('click', { stopPropagation() {} });
 if (focusSvg.classList.contains('flow-focus')) fail('clicking the focused node again did not restore the view');
+// --- Node Data page ------------------------------------------------------------------------------
+// Freshness is the reason this page exists: an expired reading must still be listed, and marked as such.
+const dataLink = navLinksNow().find(a => a.dataset.label === 'Node Data');
+if (!dataLink) fail('no Node Data tab');
+dataLink.click();
+await new Promise(r => setTimeout(r, 50));
+const dataSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (!dataSec) fail('clicking Node Data activated no section');
+const dataText = dataSec.textContent;
+if (!dataText.includes('solar_assistant/inverter_1/pv_power/state'))
+  fail('the Node Data page did not list the bound MQTT source');
+const dots = query(dataSec, '.dot', true);
+if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
+if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
 
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);
