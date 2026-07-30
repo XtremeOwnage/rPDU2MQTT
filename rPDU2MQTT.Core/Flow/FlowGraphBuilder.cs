@@ -282,7 +282,16 @@ public static class FlowGraphBuilder
                 // topology always renders — the zero just draws as a hairline — while a zero-producing source
                 // still drops as before.
                 var passThroughZero = Wired(from, to) && incoming.TryGetValue(from, out var upstream) && upstream.Count > 0;
-                if (known && value <= 0 && !passThroughZero) continue;
+
+                // The same reasoning one step earlier, for the link *into* an inert ('none', or valueless
+                // 'static') node that sits mid-chain. Such a node contributes nothing by design, so its links
+                // carry zero forever; dropping the inbound one strands it — with no feeders left it lays out
+                // as a root in column 0 rather than between the two nodes it was deliberately wired between.
+                // Only mid-chain: an inert node used as a pure *source* has nothing to give and nothing
+                // feeding it, and still drops out (Build_NoneNode_ContributesNothing… pins that).
+                var midChainInert = Inert(Mode(to)) && outgoing.TryGetValue(to, out var below) && below.Count > 0;
+
+                if (known && value <= 0 && !passThroughZero && !midChainInert) continue;
 
                 links.Add(new FlowLink(from, to, value, known));
             }

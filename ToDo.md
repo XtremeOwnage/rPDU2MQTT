@@ -96,9 +96,14 @@ Click it again, to restore.
     For those wanting simple install, should offer a simple sqlite database or mabye an inmemory cache or something.
     Cache will be responsible for aggregating Power into Energy.
 
-- Putting a "None" node between populated nodes, causing the chart to get extremely weird.
+- [x] Putting a "None" node between populated nodes, causing the chart to get extremely weird.
 
 The None nodes are removed form the chart, instead of displaying between the nodes.
+
+    Fixed: a none node carries zero by definition, and the known-zero filter dropped its inbound link —
+    leaving it with no feeders, so it laid out as a root in column 0 instead of between the pair it was
+    placed between. Its links are kept when it sits mid-chain; an inert node used as a pure source still
+    drops out, as two existing tests require.
 
 - Nodes without energy, explain extremely weird.
 
