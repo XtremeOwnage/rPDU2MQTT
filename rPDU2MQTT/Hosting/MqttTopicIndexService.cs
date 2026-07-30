@@ -87,7 +87,7 @@ public sealed class MqttTopicIndexService : BackgroundService
         try
         {
             mqtt.OnMessageReceived += OnMessageReceived;
-            var result = await mqtt.SubscribeAsync(filter, QualityOfService.AtMostOnceDelivery);
+            var result = await MqttSubscriptions.SubscribeAsync(mqtt, filter, QualityOfService.AtMostOnceDelivery);
             subscribedFilter = filter;
 
             // A broker can *deny* the subscription (an ACL that forbids the wildcard) and report it in the
@@ -117,6 +117,7 @@ public sealed class MqttTopicIndexService : BackgroundService
         try
         {
             await mqtt.UnsubscribeAsync(filter);
+            MqttSubscriptions.Forget(filter);   // else the reconnect replay resurrects it
             Serilog.Log.Information("Topic index: nobody is browsing; unsubscribed.");
         }
         catch (Exception ex) { Serilog.Log.Debug($"Topic index: unsubscribe failed: {ex.Message}"); }
