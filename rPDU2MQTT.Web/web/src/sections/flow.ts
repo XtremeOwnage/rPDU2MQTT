@@ -1178,13 +1178,21 @@ export function addFlowSection(nav: any, sections: any) {
     // "0 W" / "no data" nodes collides its labels into an unreadable smear. So a node occupies a *row* at
     // least this tall (its bar is centered inside it), while the bar itself stays proportional.
     const labelRow = 15;
-    // Barycenter: a node's preferred y is the value-weighted mean of its (already positioned) feeders.
-    const bary = (id: string) => { let w = 0, s = 0; (incoming[id] || []).forEach((l: any) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
-    let bottom = padTop;
-    cols.forEach((cn, c) => {
-      // Roots stack by size; downstream columns follow their feeder's order (groups children, avoids crossings).
-      if (c === 0) cn.sort((a: any, b: any) => nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a: any, b: any) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+    // A link's pull on the layout. Weighting purely by value means a zero-carrying link exerts none at
+    // all — and at night the whole solar chain is zero, so `w` stayed 0, bary() returned Infinity, and
+    // every MPPT and the PV aggregate sorted to the bottom of their columns while the inverter they feed
+    // stayed up beside the grid. The chain came out as scattered orphans joined by invisible ribbons.
+    // A floor keeps a zero link meaning "these two are wired together" without letting it outvote a
+    // measured one.
+    const wFloor = maxTotal / 1000;
+    const linkW = (l: any) => Math.max(l.value || 0, wFloor);
+    // Barycenter of the feeders that are already positioned (forward pass) …
+    const bary = (id: string) => { let w = 0, s = 0; (incoming[id] || []).forEach((l: any) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * linkW(l); w += linkW(l); } }); return w ? s / w : Infinity; };
+    // … and of what it feeds (backward pass), so a source column can be pulled level with its targets.
+    const obary = (id: string) => { let w = 0, s = 0; (outgoing[id] || []).forEach((l: any) => { const tp = pos[l.target]; if (tp) { s += (tp.y + tp.h / 2) * linkW(l); w += linkW(l); } }); return w ? s / w : Infinity; };
+
+    // Stack one column top-to-bottom in its current order; returns the y it ended at.
+    const placeColumn = (cn: any[], c: number) => {
       let y = padTop;
       cn.forEach((n: any) => {
         // Bar height is proportional; an unknown or measured-zero node is a thin marker (it has no
@@ -1194,8 +1202,26 @@ export function addFlowSection(nav: any, sections: any) {
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
         y += rowH + gap;
       });
-      bottom = Math.max(bottom, y);
+      return y;
+    };
+
+    // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
+    cols.forEach((cn, c) => {
+      if (c === 0) cn.sort((a: any, b: any) => nodeValue(b.id) - nodeValue(a.id));
+      else cn.sort((a: any, b: any) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      placeColumn(cn, c);
     });
+    // Backward: right-to-left, order each column by what it feeds. The forward pass alone can only order a
+    // column by its inputs, so column 0 — which has none — was sorted purely by size and a zero-output
+    // feeder always sank to the bottom, however far that was from the node it powers.
+    for (let c = cols.length - 2; c >= 0; c--) {
+      if (!cols[c]) continue;
+      cols[c].sort((a: any, b: any) => (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      placeColumn(cols[c], c);
+    }
+    // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.
+    let bottom = padTop;
+    cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
@@ -1206,16 +1232,21 @@ export function addFlowSection(nav: any, sections: any) {
     links.sort((a: any, b: any) => pos[a.target].y - pos[b.target].y).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
-      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
+      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
+      // zero is the same picture — 0 W scales to a 1px band at 30% opacity, i.e. nothing — so at night the
+      // solar chain looked disconnected rather than idle. Both get a visible hairline; only the ribbons
+      // carrying something get a proportional band.
       const unknownLink = l.known === false;
-      const h = unknownLink ? 1.5 : Math.max(1, l.value * pxPerUnit);
+      const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
+      const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
       const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
       svg.appendChild(svgEl('path', {
         d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`,
         fill: unknownLink ? 'var(--muted)' : color,
-        'fill-opacity': unknownLink ? '0.25' : '0.3',
+        // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
+        'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
       }));
       s.outOff += h; t.inOff += h;
     });
