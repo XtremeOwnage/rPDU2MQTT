@@ -227,5 +227,22 @@ const dots = query(dataSec, '.dot', true);
 if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
 if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
 
+// --- Stylesheet: the toggle switch's specificity ---------------------------------------------------
+// Nothing here renders CSS, so a cascade bug ships invisibly — this one did. `input[type=checkbox]` is
+// (0,1,1) and `.switch` is (0,1,0), so a bare checkbox rule silently outranks the switch and collapses
+// every toggle in the config form to a 16px circle with its thumb outside it.
+//
+// This does not evaluate the cascade (that needs a browser). It pins the one invariant that broke: a
+// checkbox sizing rule must not also match a switch.
+const sheet = await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8');
+for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}]*)\}/g)) {
+  const selector = m[2].trim(), body = m[3];
+  if (!/(^|;)\s*(width|height)\s*:/.test(body)) continue;          // not a sizing rule
+  if (selector.includes('.switch') && !selector.includes(':not(.switch)')) continue;  // the switch's own
+  if (!selector.includes(':not(.switch)'))
+    fail(`"${selector}" sizes checkboxes without excluding .switch — it outranks the switch rules and `
+       + 'collapses every toggle. Add :not(.switch), or raise the switch selector above it.');
+}
+
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);
