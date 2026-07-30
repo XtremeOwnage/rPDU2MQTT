@@ -89,18 +89,23 @@ Nothing open.
 
 Click it again, to restore.
 
-- Energy Flow Chart- ability to display Power.... Or Energy.
+- [x] Energy Flow Chart- ability to display Power.... Or Energy.  (#275 — metric toggle on the Flow tab)
 
 - Need to aggregate energy data, using the collected power data. Will need redis broker to support
     Helm chart will need redis broker. Docker compse example, will need redis.
     For those wanting simple install, should offer a simple sqlite database or mabye an inmemory cache or something.
     Cache will be responsible for aggregating Power into Energy.
 
-- Putting a "None" node between populated nodes, causing the chart to get extremely weird.
+- [x] Putting a "None" node between populated nodes, causing the chart to get extremely weird.
 
 The None nodes are removed form the chart, instead of displaying between the nodes.
 
-- Nodes without energy, explain extremely weird.
+    Fixed: a none node carries zero by definition, and the known-zero filter dropped its inbound link —
+    leaving it with no feeders, so it laid out as a root in column 0 instead of between the pair it was
+    placed between. Its links are kept when it sits mid-chain; an inert node used as a pure source still
+    drops out, as two existing tests require.
+
+- [x] Nodes without energy, explain extremely weird.
 
 In this case- MPPTs 1-3 feeds a aggregate node named Solar/PV, which feeds the inverter.
 
@@ -108,15 +113,24 @@ WELL..... since its night time, they have zero output. And... fubar.
 
 ![alt text](image.png)
 
+    Fixed: the barycenter weighted each feeder by its link value, so a zero-carrying link had no pull at
+    all and the whole idle solar chain sorted to the bottom of its column (measured: MPPTs at y=557/580/603
+    against Solar at y=29) while the inverter stayed up beside the grid — joined by ribbons that scaled to
+    ~0px, so nothing looked connected either. Weights now have a floor, a backward pass orders each column
+    by what it feeds, and an idle link draws as a visible hairline. Pinned by web/sankey.check.mjs.
+
 -----------
 
-- Hierarchy diagram, small bug-
+- [x] Hierarchy diagram, small bug-
 
 ![alt text](image-1.png)
 
 battery feeds the Flexboss/Inverter, but, is positioned to the left of Solar which also feeds the flexboss.
 
 It should, ideally be positioned below, or above Solar/PV.... since it connects to a node to the right of it. Instead, its displayed on the left side.
+
+    Already fixed by #266 (this screenshot predates it): every node now sits one column left of the
+    earliest thing it feeds, so Battery and Grid land beside Solar. Pinned by web/layout.check.mjs.
 
 -----------------------
 
