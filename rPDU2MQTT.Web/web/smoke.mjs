@@ -120,10 +120,15 @@ const bodies = (url) =>
   url.includes('/api/flow') ? flowGraph :
   { ok: true };
 
+// A tiny localStorage, so the theme can persist the way it does in a browser.
+const storage = new Map();
+
 const sandbox = {
   console,
   document: {
     body: root,
+    // The theme sets data-theme here; nothing else touches it.
+    documentElement: makeEl('html'),
     getElementById: (id) => getEl(id),
     createElement: (t) => makeEl(t), createElementNS: (_ns, t) => makeEl(t),
     createTextNode: () => makeEl('#text'),
@@ -131,14 +136,24 @@ const sandbox = {
     querySelectorAll: (s) => query(root, s, true),
     elementFromPoint: () => null,
   },
-  window: { addEventListener() {}, removeEventListener() {} },
+  window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } },
   // protocol/hostname are read when building the API docs links (#190).
   location: { hash: '', protocol: 'http:', hostname: 'localhost' },
   navigator: { clipboard: { writeText() {} } },
+  localStorage: {
+    getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k),
+  },
+  CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
   DOMPoint: class { matrixTransform() { return { x: 0, y: 0 }; } },
   setTimeout: (fn) => { if (typeof fn === 'function') fn(); return 0; },
+  clearTimeout() {},
   setInterval: () => 0, clearInterval() {},
+  confirm: () => true,
   fetch: async (url) => ({ ok: true, text: async () => '', json: async () => bodies(String(url)) }),
+  // EventSource is deliberately absent: it exercises the no-push path, where every section must still
+  // work off its manual refresh / polling fallback.
 };
 sandbox.globalThis = sandbox;
 
@@ -151,7 +166,10 @@ await new Promise(r => setTimeout(r, 50));
 const fail = (m) => { console.error('smoke FAILED: ' + m); process.exit(1); };
 
 const nav = getEl('nav');
-const linkText = query(nav, 'a', true).map(a => a.textContent);
+// A nav entry's text now includes its leading glyph, so its identity lives in dataset.label — the same
+// value the hash slugs and the command palette read.
+const navLinks = query(nav, 'a', true);
+const linkText = navLinks.map(a => a.dataset.label || a.textContent);
 const groups = query(nav, '.nav-group', true).map(g => g.textContent);
 
 if (!linkText.length) fail('no nav links were rendered');
@@ -170,9 +188,55 @@ if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the 
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
 
+// --- The shell: unsaved-change tracking, theme, palette ---------------------------------------------
+// These are the parts with no section of their own, so nothing else would notice them breaking.
+
+// Nothing has been edited yet, so the save bar must not be on screen at all.
+if (!getEl('savebar').classList.contains('is-hidden'))
+  fail('the save bar is showing before anything was edited');
+
+// Edit one field and the whole chain should light up: the field marks itself, the bar appears with a
+// count, and the owning page's nav entry gets a badge. (The MQTT page is a plain scalar form.)
+const mqttLink = navLinks.find(a => a.dataset.label === 'MQTT');
+if (!mqttLink) fail('no MQTT tab');
+mqttLink.click();
+const mqttSec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+if (!mqttSec) fail('clicking the MQTT tab activated no section');
+// (The stub sets `type` as a property, the way the renderer does, so select on that rather than [type=].)
+const textInput = (f) => query(f, 'input', true).find(i => i.type === 'text');
+const hostField = query(mqttSec, '.field', true).find(textInput);
+if (!hostField) fail('the MQTT page rendered no text field to edit');
+const hostInput = textInput(hostField);
+hostInput.value = 'broker.example.test';
+hostInput.onchange();
+
+if (!hostField.classList.contains('dirty')) fail('an edited field was not marked as changed');
+if (getEl('savebar').classList.contains('is-hidden')) fail('the save bar stayed hidden after an edit');
+if (getEl('save-count').textContent !== '1 unsaved change')
+  fail(`the save bar miscounted: "${getEl('save-count').textContent}"`);
+if (!query(mqttLink, '.nav-badge', false)) fail('the edited page got no nav badge');
+
+// Editing it back to the loaded value is not a change — the diff must ignore the round trip.
+hostInput.value = '';
+hostInput.onchange();
+if (!getEl('savebar').classList.contains('is-hidden'))
+  fail('reverting an edit left the save bar showing');
+if (hostField.classList.contains('dirty')) fail('reverting an edit left the field marked as changed');
+
+// Ctrl+K opens the palette, listing every page (it reads the nav, so a new page needs no registration).
+getEl('cmd-open').click();
+const cmdItems = query(getEl('overlay'), '.cmd-item', true);
+if (cmdItems.length !== navLinks.length)
+  fail(`the palette listed ${cmdItems.length} pages but the nav has ${navLinks.length}`);
+
+// The theme button cycles system -> dark -> light and persists the choice.
+getEl('st-theme').click();
+if (storage.get('rpdu-theme') !== 'dark') fail(`the theme button did not switch to dark (got ${storage.get('rpdu-theme')})`);
+if (sandbox.document.documentElement.getAttribute('data-theme') !== 'dark') fail('the dark theme was not applied to <html>');
+
 // Tabs build their body lazily on first click, so build() alone never touches the bespoke editors. Open
 // the Flow tab to exercise the Sankey + hierarchy drag-graph (#129).
-const flowLink = query(nav, 'a', true).find(a => a.textContent === 'Flow');
+const flowLink = navLinks.find(a => a.dataset.label === 'Flow');
 if (!flowLink) fail('no Flow tab');
 flowLink.click();
 await new Promise(r => setTimeout(r, 50));
@@ -181,7 +245,7 @@ if (!query(getEl('sections'), '.section', true).map(s => s.textContent).join(' '
 
 // Node configuration now lives on its own Nodes tab. Open it, open the 'solar' node's editor, and confirm
 // it surfaces the migrated MQTT topic, the Modbus connection picker, and the feeders/children wiring.
-const nodesLink = query(nav, 'a', true).find(a => a.textContent === 'Nodes');
+const nodesLink = navLinks.find(a => a.dataset.label === 'Nodes');
 if (!nodesLink) fail('no Nodes tab');
 nodesLink.click();
 await new Promise(r => setTimeout(r, 50));
@@ -202,4 +266,5 @@ if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
 
-console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; Flow + Nodes editors OK`);
+console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
+  + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);

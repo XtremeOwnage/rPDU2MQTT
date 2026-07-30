@@ -1,12 +1,12 @@
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
-import { api, btn, el, activate, toast, copyText } from '../helpers.js';
+import { api, btn, el, activate, toast, copyText, navLink } from '../helpers.js';
 import { exportData } from '../overrides.js';
 import { state } from '../state.js';
 import { build } from '../config-form.js';
 
 export function addExportSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Export'; nav.appendChild(link);
+  const link = navLink(nav, "Export", "⇵");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Export'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';

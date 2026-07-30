@@ -50,6 +50,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.Flow.IFlowValueSource? live;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
+    // Created on the first /api/events connection; the pump only runs while a tab is watching.
+    private GuiEventHub? events;
+    private readonly object eventsGate = new();
 
     private readonly Orleans.IGrainFactory grains;
 
@@ -226,14 +229,166 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        // Stop pushing before the host goes down, so open SSE connections end cleanly.
+        if (events is not null)
+            await events.DisposeAsync();
+
         if (app is not null)
             await app.StopAsync(cancellationToken);
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (events is not null)
+            await events.DisposeAsync();
+
         if (app is not null)
             await app.DisposeAsync();
+    }
+
+    /// <summary>
+    /// The push hub, built on the first /api/events connection so nothing runs in a GUI nobody has opened.
+    /// Each feed is one of the payload builders below on its own cadence — see <see cref="GuiEventHub"/>.
+    /// </summary>
+    private GuiEventHub EventHub()
+    {
+        lock (eventsGate)
+            return events ??= new GuiEventHub(ConfigSchema.Json,
+                // The header: version, MQTT, config writability, operator update. The operator report is a
+                // Kubernetes read, so this is the slowest feed.
+                new GuiEventHub.Feed("status", TimeSpan.FromSeconds(5), (_, ct) => BuildStatusAsync(null, ct)),
+                // The Status board's cards, straight from the component grains.
+                new GuiEventHub.Feed("board", TimeSpan.FromSeconds(3), (_, _) => BuildBoardAsync()),
+                // Readings for one instance ("livedata:<instance>"; bare "livedata" = the primary).
+                new GuiEventHub.Feed("livedata", TimeSpan.FromSeconds(2), BuildLiveDataAsync),
+                // The energy-flow graph, keyed "flow:<metric>" or "flow:<metric>|<instance>".
+                new GuiEventHub.Feed("flow", TimeSpan.FromSeconds(2), (arg, ct) =>
+                {
+                    var parts = (arg ?? "").Split('|');
+                    return BuildFlowAsync(parts.Length > 1 ? parts[1] : null, parts[0], ct);
+                }));
+    }
+
+    // --- Payload builders --------------------------------------------------------------------------
+    // Shared by the REST endpoints and the /api/events push feeds, so both always describe the same
+    // thing: a feed is literally the endpoint's body, recomputed on a timer and sent only when it moves.
+
+    /// <summary>Header state: version, config source/writability, MQTT, and the operator's update report.</summary>
+    private async Task<object> BuildStatusAsync(string? user, CancellationToken ct) => new
+    {
+        version = Version,
+        configSource = configSource.Describe,
+        configWritable = configSource.CanWrite,
+        gitops = configSource.IsGitOpsManaged,
+        mqttConnected = mqtt.IsConnected(),
+        mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
+        actionsEnabled = config.Primary.ActionsEnabled,
+        auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
+        user,
+        // Operator update state (#210) for the header indicator; null when no operator is reporting.
+        update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),
+    };
+
+    /// <summary>
+    /// The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
+    /// connected/stale/waiting, and what colour that is — belong to the components, so this just hands the
+    /// board over. One grain call, one cluster-wide answer, whichever replica serves the request.
+    /// </summary>
+    private async Task<object> BuildBoardAsync()
+    {
+        try
+        {
+            var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
+            var cards = board.Select(c => new
+            {
+                id = c.Id,
+                title = c.Title,
+                level = c.Level.ToString().ToLowerInvariant(),
+                state = c.State,
+                detail = c.Detail,
+                eventUtc = c.EventUtc,
+                age = c.Age.ToString().ToLowerInvariant(),
+            }).ToArray();
+            return new { ok = true, cards };
+        }
+        catch (Exception ex) { return new { ok = false, message = ex.Message }; }
+    }
+
+    /// <summary>Current readings for one instance, both flat and pivoted, plus OneView group rollups.</summary>
+    private async Task<object> BuildLiveDataAsync(string? instance, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+            var readingList = MetricsHelper.EnumerateReadings(data)
+                .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
+                .ToList();
+
+            var readings = readingList
+                .Select(r => new { device = r.Device, source = r.Source, type = r.Type, value = r.Value, units = r.Units })
+                .ToList();
+
+            // Pivoted view: one row per outlet/entity with its measurements as columns + state.
+            var types = readingList.Select(r => r.Type).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+            var units = readingList.GroupBy(r => r.Type, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Select(r => r.Units).FirstOrDefault(u => !string.IsNullOrEmpty(u)) ?? "", StringComparer.OrdinalIgnoreCase);
+
+            var entities = new List<object>();
+            foreach (var device in data.Devices)
+            {
+                foreach (var o in device.Outlets.OrderBy(o => o.Key))
+                    entities.Add(BuildLiveEntity(device.Entity_DisplayName, o.Entity_DisplayName, "outlet", o.Key + 1,
+                        pdu.ResolveOutletState(device.Key, o.Key, o.State), o.Measurements));
+                foreach (var e in device.Entity)
+                    entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
+            }
+
+            // OneView group rollups (Sum/Avg/Min/Max per measurement type). The group's aggregate
+            // measurements live on its single synthetic outlet (normal groups) or pduTotal (the Total group).
+            var groups = data.Groups.Select(g =>
+            {
+                var src = g.Entity?.Outlets?.FirstOrDefault()?.Measurements
+                          ?? g.Entity?.PduTotal?.FirstOrDefault()?.Measurements
+                          ?? new List<Models.PDU.GroupMeasurement>();
+                var measurements = src.Where(m => !string.IsNullOrEmpty(m.Type)).Select(m => new
+                {
+                    type = m.Type,
+                    units = m.Units,
+                    sum = ParseMeasure(m.SumValue),
+                    avg = ParseMeasure(m.AvgValue),
+                    min = ParseMeasure(m.MinValue),
+                    max = ParseMeasure(m.MaxValue),
+                }).ToList();
+                return new { name = g.Entity_DisplayName, measurements };
+            }).Where(g => g.measurements.Count > 0).ToList();
+
+            return new { ok = true, count = readings.Count, readings, entities, groups, types, units };
+        }
+        catch (Exception ex)
+        {
+            return new { ok = false, message = $"Could not read live PDU data: {ex.Message}" };
+        }
+    }
+
+    /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
+    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+            var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric, live);
+            return new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units };
+        }
+        catch (Exception ex)
+        {
+            return new { ok = false, message = $"Could not build flow graph: {ex.Message}" };
+        }
     }
 
     /// <summary>HTTP Basic auth against the configured username/password.</summary>
@@ -393,20 +548,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapGet("/api/status", async (HttpContext ctx) => Results.Json(new
+        // NOTE (and see the RouteHandlersReturnTheirResults test): a handler taking HttpContext must use a
+        // statement body with `return`. An expression-bodied `async (HttpContext ctx) => Results.Json(...)`
+        // also fits RequestDelegate (Func<HttpContext,Task>), which is the more specific MapGet overload —
+        // so it wins, the IResult is discarded, and the endpoint answers 200 with an empty body.
+        app.MapGet("/api/status", async (HttpContext ctx) =>
         {
-            version = Version,
-            configSource = configSource.Describe,
-            configWritable = configSource.CanWrite,
-            gitops = configSource.IsGitOpsManaged,
-            mqttConnected = mqtt.IsConnected(),
-            mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
-            actionsEnabled = config.Primary.ActionsEnabled,
-            auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
-            user = UseOidc ? ctx.User?.Identity?.Name : null,
-            // Operator update state (#210) for the header indicator; null when no operator is reporting.
-            update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ctx.RequestAborted),
-        }, ConfigSchema.Json));
+            return Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted), ConfigSchema.Json);
+        });
+
+        // One push channel for the whole GUI (#281): the browser opens a single EventSource and names the
+        // feeds it wants; the hub recomputes each only while something is watching, and only sends changes.
+        app.MapGet("/api/events", (HttpContext ctx) => EventHub().StreamAsync(ctx, ctx.Request.Query["topics"].ToString()));
 
         // "Check now" from the header: the operator runs in a separate process, so ask it over the bus to
         // run an immediate registry check. It patches the CR status, which the header then re-reads.
@@ -496,25 +649,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
         // connected/stale/waiting, and what colour that is — belong to the components, so this endpoint just
         // hands the board over. One grain call, one cluster-wide answer, whichever replica serves the request.
-        app.MapGet("/api/status/board", async () =>
-        {
-            try
-            {
-                var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
-                var cards = board.Select(c => new
-                {
-                    id = c.Id,
-                    title = c.Title,
-                    level = c.Level.ToString().ToLowerInvariant(),
-                    state = c.State,
-                    detail = c.Detail,
-                    eventUtc = c.EventUtc,
-                    age = c.Age.ToString().ToLowerInvariant(),
-                }).ToArray();
-                return Results.Json(new { ok = true, cards }, ConfigSchema.Json);
-            }
-            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
-        });
+        app.MapGet("/api/status/board", async () => Results.Json(await BuildBoardAsync(), ConfigSchema.Json));
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
@@ -1178,60 +1313,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Live readings pulled from the PDU(s), for the read-only "Live Data" view.
         app.MapGet("/api/livedata", async (HttpContext ctx) =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            try
-            {
-                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
-                var data = await ResolveData(id, pdu, cts.Token);
-                var readingList = MetricsHelper.EnumerateReadings(data)
-                    .OrderBy(r => r.Device).ThenBy(r => r.Source).ThenBy(r => r.Type)
-                    .ToList();
-
-                var readings = readingList
-                    .Select(r => new { device = r.Device, source = r.Source, type = r.Type, value = r.Value, units = r.Units })
-                    .ToList();
-
-                // Pivoted view: one row per outlet/entity with its measurements as columns + state.
-                var types = readingList.Select(r => r.Type).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
-                var units = readingList.GroupBy(r => r.Type, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(g => g.Key, g => g.Select(r => r.Units).FirstOrDefault(u => !string.IsNullOrEmpty(u)) ?? "", StringComparer.OrdinalIgnoreCase);
-
-                var entities = new List<object>();
-                foreach (var device in data.Devices)
-                {
-                    foreach (var o in device.Outlets.OrderBy(o => o.Key))
-                        entities.Add(BuildLiveEntity(device.Entity_DisplayName, o.Entity_DisplayName, "outlet", o.Key + 1,
-                            pdu.ResolveOutletState(device.Key, o.Key, o.State), o.Measurements));
-                    foreach (var e in device.Entity)
-                        entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
-                }
-
-                // OneView group rollups (Sum/Avg/Min/Max per measurement type). The group's aggregate
-                // measurements live on its single synthetic outlet (normal groups) or pduTotal (the Total group).
-                var groups = data.Groups.Select(g =>
-                {
-                    var src = g.Entity?.Outlets?.FirstOrDefault()?.Measurements
-                              ?? g.Entity?.PduTotal?.FirstOrDefault()?.Measurements
-                              ?? new List<Models.PDU.GroupMeasurement>();
-                    var measurements = src.Where(m => !string.IsNullOrEmpty(m.Type)).Select(m => new
-                    {
-                        type = m.Type,
-                        units = m.Units,
-                        sum = ParseMeasure(m.SumValue),
-                        avg = ParseMeasure(m.AvgValue),
-                        min = ParseMeasure(m.MinValue),
-                        max = ParseMeasure(m.MaxValue),
-                    }).ToList();
-                    return new { name = g.Entity_DisplayName, measurements };
-                }).Where(g => g.measurements.Count > 0).ToList();
-
-                return Results.Json(new { ok = true, count = readings.Count, readings, entities, groups, types, units }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Could not read live PDU data: {ex.Message}" }, ConfigSchema.Json);
-            }
+            return Results.Json(await BuildLiveDataAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Generated integration paths per measurement (MQTT topic, Prometheus metric, EmonCMS key),
@@ -1255,20 +1337,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
         app.MapGet("/api/flow", async (HttpContext ctx) =>
         {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            try
-            {
-                var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
-                var data = await ResolveData(id, pdu, cts.Token);
-                var metric = ctx.Request.Query["metric"].ToString();
-                var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric, live);
-                return Results.Json(new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Could not build flow graph: {ex.Message}" }, ConfigSchema.Json);
-            }
+            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Preview the generated paths with the posted (unsaved) config applied, so the Overrides

@@ -1,10 +1,11 @@
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
 // v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
-import { api, btn, el, activate } from '../helpers.js';
+import { api, btn, el, activate, navLink } from '../helpers.js';
+import { liveWhileActive, realtimeLive } from '../realtime.js';
 
 export function addHomeSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Status'; nav.appendChild(link);
+  const link = navLink(nav, "Status", "◈");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Status' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Every hop your energy data takes — the meters it comes from, the broker it moves over, and the stores it lands in. Green = healthy, amber = degraded or waiting, red = broken, grey = not configured.' }));
@@ -42,21 +43,35 @@ export function addHomeSection(nav: any, sections: any) {
     return parts.join(' ');
   };
 
-  const load = async () => {
-    const r = await api('/api/status/board');
-    const cards = (r.body && r.body.cards) || [];
+  // What each card said last time, so a card whose verdict actually moved can be flashed. Without it a
+  // pushed update is indistinguishable from no update at all.
+  const lastState = new Map<string, string>();
+
+  const render = (body: any) => {
+    const cards = (body && body.cards) || [];
     grid.innerHTML = '';
 
     if (!cards.length) {
       grid.appendChild(card('warn', 'Status', 'Waiting', 'No component has reported yet'));
+      lastState.clear();
       return;
     }
-    cards.forEach((c: any) => grid.appendChild(card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c))));
+    cards.forEach((c: any) => {
+      const node = card(dotClass[c.level] ?? '', c.title, c.state, detailOf(c));
+      const sig = c.level + '/' + c.state;
+      if (lastState.has(c.id) && lastState.get(c.id) !== sig) node.classList.add('flash');
+      lastState.set(c.id, sig);
+      grid.appendChild(node);
+    });
   };
 
+  const load = async () => render((await api('/api/status/board')).body);
+
   refresh.onclick = () => load();
-  // Refresh while the tab is on screen so the board stays live without polling in the background.
-  setInterval(() => { if (sec.classList.contains('active')) load(); }, 10000);
+  // The board is pushed from the server (#281) while this tab is on screen. The timer stays as the
+  // fallback for when the stream isn't up — it does nothing while it is.
+  liveWhileActive(sec, () => 'board', render);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
   link.onclick = () => { activate(link, sec); load(); };
   return { link, load };
 }

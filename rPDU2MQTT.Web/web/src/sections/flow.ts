@@ -1,5 +1,7 @@
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
-import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance } from '../helpers.js';
+import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
+import { liveWhileActive, realtimeLive } from '../realtime.js';
+import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 
@@ -748,9 +750,13 @@ function migrateEnergyFlow(flow: any) {
 
 // Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
 async function saveConfig(onSaved: () => void) {
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(exportData()) });
-  toast(r.body.message || (r.ok ? 'Saved.' : 'Save failed.'), r.ok && r.body.ok);
-  if (r.ok && r.body.ok) onSaved();
+  const payload = exportData();
+  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const ok = r.ok && r.body.ok;
+  toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
+  // This writes the same document the shell's save bar tracks, so re-baseline here too — otherwise the
+  // bar would keep claiming there are unsaved changes that have in fact just been written.
+  if (ok) { setBaseline(payload); onSaved(); }
 }
 
 // --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
@@ -1026,7 +1032,9 @@ function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Ma
 }
 
 export function addFlowSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Flow'; nav.appendChild(link);
+  const link = navLink(nav, "Flow", "⇄");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -1486,7 +1494,15 @@ export function addFlowSection(nav: any, sections: any) {
     renderTree();
   };
   refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
+  // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
+  const syncLive = liveWhileActive(sec,
+    () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
+    (body: any) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
+  metricSel.addEventListener('change', () => syncLive());
+
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
@@ -1574,7 +1590,9 @@ function renderImportPanel(flow: any, existingIds: Set<string>, rerender: () => 
 }
 
 export function addNodesSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Nodes'; nav.appendChild(link);
+  const link = navLink(nav, "Nodes", "⬡");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -1648,7 +1666,7 @@ export function addNodesSection(nav: any, sections: any) {
 // "—", never a fabricated zero (the whole flow's accuracy rule). Battery/grid net uses the in-direction
 // (charge/export) power from the #in cache key, so the arrows point the right way.
 export function addEnergyOverviewSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'Energy'; nav.appendChild(link);
+  const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy Overview' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
@@ -1659,9 +1677,13 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, instSel.wrap, status); sec.appendChild(bar);
 
-  const flowWrap = el('div', { class: 'energy-flow' }); sec.appendChild(flowWrap);
-  const grid = el('div', { class: 'energy-grid' }); sec.appendChild(grid);
-  const summary = el('div', { class: 'energy-summary' }); sec.appendChild(summary);
+  // One column for the whole board, so the diagram and the tiles share an edge and read as a single
+  // thing. Left to themselves the diagram centred itself in the page while the tiles bunched up against
+  // the left margin, and the two looked unrelated.
+  const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
+  const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
+  const grid = el('div', { class: 'energy-grid' }); board.appendChild(grid);
+  const summary = el('div', { class: 'energy-summary' }); board.appendChild(summary);
 
   const fmtPower = (w: number | null) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
@@ -1687,7 +1709,20 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
   const drawFlow = (arms: { key: string, icon: string, label: string, text: string, color: string, flow: number | null }[]) => {
     flowWrap.innerHTML = '';
-    const svg = svgEl('svg', { viewBox: '0 0 440 300', width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg' });
+    // Frame only the arms that exist. The four positions describe the full cross (solar top, grid left,
+    // battery right, home bottom); a fixed 440x300 box therefore reserved the whole bottom of the diagram
+    // for a home arm that most setups never tag, leaving a tall band of blank space under it that the
+    // board had to push the tiles past. Fit the box to what is actually drawn instead.
+    // Only the vertical extent is fitted. The width stays the full cross (grid .. battery), because the
+    // SVG is laid out at 100% width and its height follows from the aspect ratio — narrowing the box for a
+    // one-armed system would make it render absurdly tall.
+    const ys = arms.map(a => NODEPOS[a.key].y);
+    // Below a node sits its label (+42) and value (+57); above it, the ring (r 26).
+    const y0 = Math.min(HUB.y, ...ys) - 40, y1 = Math.max(HUB.y, ...ys) + 70;
+    const svg = svgEl('svg', {
+      viewBox: `12 ${y0} 416 ${y1 - y0}`,
+      width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
+    });
     const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
     svg.append(lines, dots, nodes);
 
@@ -1725,6 +1760,25 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     flowWrap.appendChild(svg);
   };
 
+  // Why is this tile empty? "No reading yet" is a dead end — it doesn't say whether the node has no source
+  // bound at all, or has one that has never delivered. The configured hierarchy is already in the browser,
+  // so answer it here and point at the thing to go fix.
+  const whyNoReading = (kind: string) => {
+    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n: any) => (n.Kind || '') === kind);
+    if (!nodes.length) return 'no reading yet';
+    const bound = nodes.flatMap((n: any) => n.Sources || []);
+    if (!bound.length)
+      return nodes.some((n: any) => n.Value != null) ? 'static value only' : 'no source bound';
+    // Bound but silent: name what it is waiting on, so the topic/register can be checked against reality.
+    const first = bound[0];
+    const what = first.Type === 'modbus'
+      ? `${first.Connection || 'modbus'} reg ${first.Register}`
+      : (first.Topic || 'its source');
+    return bound.length > 1 ? `waiting on ${bound.length} sources` : `waiting on ${what}`;
+  };
+  // The hint under a tile: the direction when there's a value, the reason when there isn't.
+  const subOrWhy = (value: number | null, kind: string, whenKnown: string) => value == null ? whyNoReading(kind) : whenKnown;
+
   // Sum a kind's out-direction (graph) values. Returns present (any nodes of this kind) and the known sum
   // (null when nodes exist but none has a value) so we can tell "no grid" from "grid, value unknown".
   const sumKind = (nodes: any[], kind: string) => {
@@ -1734,11 +1788,25 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return { present: ns.length > 0, value: known ? sum : null };
   };
 
+  // The board needs several round-trips, and it is now triggered by pushes as well as by the timer and
+  // the button — so never let a second pass start on top of one still in flight.
+  let loading = false;
   const load = async () => {
-    let r: any; try { r = await api(withInstance('/api/flow', instSel)); } catch { r = { body: { ok: false } }; }
+    if (loading) return;
+    loading = true;
+    try { await loadBoard(); } finally { loading = false; }
+  };
+
+  const loadBoard = async () => {
+    let r: any;
+    try { r = await api(withInstance('/api/flow', instSel)); }
+    catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
-      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (r.body && r.body.message) || 'Could not load energy data.' }));
+      // Say what actually went wrong. A bare "could not load" leaves you with nowhere to start; the
+      // server's own message is the useful thing, and its HTTP status is the fallback.
+      const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
+      grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
       status.textContent = ''; return;
     }
     const nodes = r.body.nodes || [];
@@ -1832,11 +1900,11 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
-        solar.value == null ? 'no reading yet' : solar.value > 1 ? 'producing' : 'idle', solar.value && solar.value > 1 ? 'supply' : ''));
+        subOrWhy(solar.value, 'solar', solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : ''));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
-      const dir = battNet == null ? 'no reading yet' : battNet > 1 ? 'discharging' : battNet < -1 ? 'charging' : 'idle';
+      const dir = subOrWhy(battNet, 'battery', battNet! > 1 ? 'discharging' : battNet! < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
       // SoC always leads the sub-line — "—" when no soc source is bound, so the state-of-charge slot is always
       // shown (bind a soc source on the Nodes tab to fill it) rather than silently vanishing.
@@ -1851,14 +1919,14 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
     if (gridK.present || gridIds.length) {
-      const sub = gridNet == null ? 'no reading yet' : gridNet > 1 ? 'importing' : gridNet < -1 ? 'exporting' : 'idle';
+      const sub = subOrWhy(gridNet, 'grid', gridNet! > 1 ? 'importing' : gridNet! < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
       grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
-      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), homeSub || 'no reading yet'));
+      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), home == null ? whyNoReading('load') : (homeSub || 'consuming')));
 
     // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
     // figure, not this instant's power. Only when the home energy and grid import both resolve and the house
@@ -1881,6 +1949,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   refresh.onclick = () => load();
-  setInterval(() => { if (sec.classList.contains('active')) load(); }, 8000);
-  link.onclick = () => { activate(link, sec); load(); };
+
+  // The board is assembled from several reads (the graph, the in-direction live values, the energy graph),
+  // so the push is used as a *trigger*: when the server says the flow moved, rebuild the board. That keeps
+  // one source of truth for how the figures are derived while making the page react in ~2s instead of 8.
+  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''), () => load());
+  // Fallback for when the stream isn't up; it does nothing while it is.
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 8000);
+  link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }

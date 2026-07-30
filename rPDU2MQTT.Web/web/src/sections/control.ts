@@ -1,8 +1,8 @@
 // Direct outlet control (on/off/reboot) + group actions + label editing.
-import { api, btn, activate, toast, instanceSelector, withInstance } from '../helpers.js';
+import { api, btn, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
 
 export function addControlSection(nav: any, sections: any) {
-  const link = document.createElement('a'); link.textContent = 'PDU Control'; nav.appendChild(link);
+  const link = navLink(nav, "PDU Control", "⏻");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';

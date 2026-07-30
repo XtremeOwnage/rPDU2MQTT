@@ -20,6 +20,10 @@ const outDir = join(here, '..', 'wwwroot');
 const MODULES = [
   'state.ts',
   'helpers.ts',
+  'theme.ts',
+  'realtime.ts',
+  'dirty.ts',
+  'palette.ts',
   'overrides.ts',
   'sections/paths.ts',
   'sections/diagnostics.ts',
