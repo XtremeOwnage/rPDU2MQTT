@@ -8,6 +8,10 @@ import { exportData } from '../overrides.js';
 // Metrics a live source can supply: [stored key (matches PDU Measurement.Type), friendly label, canonical
 // unit, selectable input units]. The key stays the PDU vocabulary so live values roll up with outlets; the
 // UI shows the friendly name and a unit picker. Mirrors EnergyFlowSource.Metric + FlowUnits (Core).
+// key, label, canonical unit, input units it can be bound in.
+// Kept in step with FlowUnits.cs (Core), which is the authority — including which of these add up the
+// tree. The intensive ones below describe a condition at a point and are never rolled up: a node shows
+// the reading it has, and one with none shows nothing rather than a sum that was true nowhere.
 const METRICS: [string, string, string, string[]][] = [
   ['realpower', 'Power', 'W', ['W', 'kW', 'MW']],
   ['apparentpower', 'Apparent power', 'VA', ['VA', 'kVA']],
@@ -17,7 +21,12 @@ const METRICS: [string, string, string, string[]][] = [
   ['frequency', 'Frequency', 'Hz', ['Hz']],
   ['powerfactor', 'Power factor', '', ['']],
   ['soc', 'State of charge', '%', ['%', 'fraction']],
+  ['percent', 'Percentage', '%', ['%', 'fraction']],
+  ['temperature', 'Temperature', '°C', ['°C', 'K']],
 ];
+// Which metrics the flow may sum from the leaves upward. Mirrors FlowUnits.IsAdditive.
+const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'current']);
+const isAdditiveMetric = (key?: string) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key?: string) => METRICS.find(m => m[0] === key) || METRICS[0];
 const metricLabel = (key?: string) => metricMeta(key)[1];
@@ -456,7 +465,18 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
       metricSel.value = metric;
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
-      tr.appendChild(el('td', {}, metricSel));
+      // Say at the point of choosing that this one won't roll up — otherwise the only clue is a parent
+      // node reading "no data", which looks like a broken binding rather than the correct answer.
+      const metricCell = el('td', {}, metricSel);
+      if (!isAdditiveMetric(metric)) {
+        metricCell.appendChild(el('div', {
+          class: 'desc', style: { margin: '2px 0 0', fontSize: '11px' },
+          text: 'per-node only — not summed',
+          title: `${metricLabel(metric)} describes a condition at a point, so it is never added up the tree.`
+          + ' The node you bind it to shows it; its parents show nothing rather than a total that was true nowhere.',
+        }));
+      }
+      tr.appendChild(metricCell);
 
       // Direction (battery/grid only, and only for a directional metric — voltage/soc have no direction, so
       // their cell stays blank). A signed metric (power/current) also offers 'split': one ± value fanned into
