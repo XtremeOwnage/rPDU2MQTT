@@ -200,6 +200,13 @@ public static class FlowGraphBuilder
         // must be shown as "no data" rather than as zero flow.
         bool Knowable(string from, string to)
         {
+            // An intensive metric — voltage, frequency, power factor, state of charge, temperature — does
+            // not flow, so no link carries a determinable amount of it. Saying so here makes every link
+            // "no data" (a hairline) and, because ValueOf only aggregates *known* links, leaves each node
+            // showing the reading it actually has and nothing where it has none. Without this the roll-up
+            // summed them: three 120 V outlets reported a 360 V PDU, a figure true nowhere in the system.
+            if (!FlowUnits.IsAdditive(metric)) return false;
+
             if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 

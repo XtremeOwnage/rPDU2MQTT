@@ -120,7 +120,16 @@ It should, ideally be positioned below, or above Solar/PV.... since it connects 
 
 -----------------------
 
-Need some units created for percentages. Ie- Battery Percent, Load Percent... etc.. Temperature, might be a good metric to create as well.
+- [x] Need some units created for percentages. Ie- Battery Percent, Load Percent... etc.. Temperature, might be a good metric to create as well.
+
+    Added `percent` (%, or a 0-1 fraction) and `temperature` (°C / K) alongside the existing `soc`.
+
+    While adding them: every metric was being summed up the tree, so an *intensive* one — voltage,
+    frequency, power factor, soc, and now temperature/percent — produced a figure true nowhere in the
+    system. Three 120 V outlets reported a 360 V PDU. Not reachable from the Sankey (its toggle only
+    offers additive metrics) but reachable through the API's ?metric= parameter, including the public
+    v1 API. FlowUnits now records which metrics add up, and an intensive one is reported per node with
+    no roll-up: a node shows the reading it has, a node without one shows nothing.
 
 ------------------------
 
