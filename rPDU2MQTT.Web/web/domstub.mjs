@@ -9,6 +9,10 @@ function matches(node, sel) {
   sel = sel.trim();
   const attr = sel.match(/^(\w+)\[type=(\w+)\]$/);
   if (attr) return node.tag === attr[1] && node.attrs.type === attr[2];
+  // Bare attribute selector, e.g. [data-node] — how the focus code finds what it may dim. Without it the
+  // focus matched nothing under test while working fine in a browser, which makes any assertion useless.
+  const bare = sel.match(/^\[([\w-]+)\]$/);
+  if (bare) return node.attrs[bare[1]] !== undefined;
   if (sel.startsWith('.')) return node.classList.has(sel.slice(1));
   const tagClass = sel.match(/^(\w+)\.([\w-]+)$/);
   if (tagClass) return node.tag === tagClass[1] && node.classList.has(tagClass[2]);
