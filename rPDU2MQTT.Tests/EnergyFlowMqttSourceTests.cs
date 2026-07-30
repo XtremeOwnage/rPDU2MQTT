@@ -527,4 +527,25 @@ public class EnergyFlowMqttSourceTests
         Assert.Equal(withDefault.Links.Count, withNull.Links.Count);
         Assert.Equal(50, Assert.Single(withNull.Links, l => l.Source == "solar").Value);
     }
+[Fact]
+    public void Cache_ReportsAnExpiredReading_RatherThanHidingIt()
+    {
+        // TryGetValue must hide a stale reading — the roll-up and exports must never carry one. But a UI
+        // needs to tell "this publisher died an hour ago" apart from "nothing was ever bound here", and
+        // those look identical if the expired value is simply dropped. TryDescribe returns it, flagged.
+        var cache = new FlowValueCache();
+        var t0 = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+        cache.Set("battery", "soc", 87, staleAfterSeconds: 60, nowUtc: t0);
+
+        var later = t0.AddMinutes(10);
+        Assert.False(cache.TryGetValue("battery", "soc", later, out _));
+
+        Assert.True(cache.TryDescribe("battery", "soc", later, out var reading));
+        Assert.Equal(87, reading.Value);
+        Assert.False(reading.Fresh);
+        Assert.Equal(t0, reading.AtUtc);
+
+        // And nothing at all is still nothing — the two states stay distinct.
+        Assert.False(cache.TryDescribe("battery", "temperature", later, out _));
+    }
 }

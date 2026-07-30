@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Core.Flow;
 /// ingest (<c>EnergyFlowMqttSourceService</c>) is just one writer, and a future CT-clamp or inverter
 /// poller can share it.
 /// </summary>
-public sealed class FlowValueCache : IFlowValueSource
+public sealed class FlowValueCache : IFlowValueSource, IFlowValueDiagnostics
 {
     private sealed record Reading(double Value, DateTime AtUtc, int StaleAfterSeconds);
 
@@ -38,6 +38,26 @@ public sealed class FlowValueCache : IFlowValueSource
         if (r.StaleAfterSeconds > 0 && (nowUtc - r.AtUtc).TotalSeconds > r.StaleAfterSeconds)
             return false;
         value = r.Value;
+        return true;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<(string Node, string Metric)> ReportedKeys => Keys;
+
+    /// <inheritdoc />
+    public bool TryDescribe(string nodeId, string metric, out FlowReading reading)
+        => TryDescribe(nodeId, metric, DateTime.UtcNow, out reading);
+
+    /// <summary>Testable overload: resolve freshness against an explicit "now".</summary>
+    public bool TryDescribe(string nodeId, string metric, DateTime nowUtc, out FlowReading reading)
+    {
+        reading = default;
+        if (!latest.TryGetValue((nodeId, metric), out var r))
+            return false;
+        // Unlike TryGetValue, an expired reading is still returned — flagged, not hidden. Telling "nothing
+        // ever reported this" apart from "it stopped an hour ago" is the whole point of this interface.
+        var fresh = r.StaleAfterSeconds <= 0 || (nowUtc - r.AtUtc).TotalSeconds <= r.StaleAfterSeconds;
+        reading = new FlowReading(r.Value, r.AtUtc, r.StaleAfterSeconds, fresh);
         return true;
     }
 }
