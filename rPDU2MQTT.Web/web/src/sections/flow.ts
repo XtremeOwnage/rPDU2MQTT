@@ -1303,7 +1303,48 @@ export function addFlowSection(nav: any, sections: any) {
       }
       svg.appendChild(lab);
 
-      // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
+        // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
+      // sources are bound to it. All of that is already on the client, so the card costs no extra request —
+      // and it's the only place a node's *intensive* readings (voltage, soc, temperature) can be shown, since
+      // those are deliberately absent from the ribbons.
+      const card = () => {
+        const rows: any[] = [];
+        rows.push(el('div', { class: 'nh-title', text: n.label }));
+        rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+        rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
+          unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
+          el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
+
+        const side = (title: string, ls: any[], other: (l: any) => string) => {
+          if (!ls.length) return;
+          rows.push(el('div', { class: 'nh-head', text: title }));
+          ls.forEach((l: any) => rows.push(el('div', { class: 'nh-row' },
+            el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
+            el('span', { class: 'nh-num', text: l.known === false ? '—' : `${formatNum(l.value)} ${units}`.trim() }))));
+        };
+        side('Fed by', incoming[n.id] || [], (l: any) => l.source);
+        side('Feeds', outgoing[n.id] || [], (l: any) => l.target);
+
+        // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
+        const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === n.id);
+        const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m: any) => ({ Type: 'mqtt', ...m })) : []);
+        if (bound.length) {
+          rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
+          bound.forEach((s: any) => rows.push(el('div', { class: 'nh-row' },
+            el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
+            el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
+        } else if (cfg) {
+          rows.push(el('div', { class: 'nh-head', text: cfg.Value != null ? 'Fixed value' : 'No source bound' }));
+        }
+        return rows;
+      };
+      [rect, lab].forEach((elm: any) => {
+        elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, card()));
+        elm.addEventListener('mousemove', (e: any) => moveNodeCard(e));
+        elm.addEventListener('mouseleave', hideNodeCard);
+      });
+
+    // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
       const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
       if (grp) {
         const gid = n.group ? n.id : grp.Id;
@@ -1558,6 +1599,35 @@ export function addFlowSection(nav: any, sections: any) {
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
 // bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+// --- Node hover card ------------------------------------------------------------------------------
+// One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
+let nodeCardEl: any = null;
+
+function showNodeCard(host: any, ev: any, rows: any[]) {
+  if (!nodeCardEl) {
+    nodeCardEl = el('div', { class: 'node-card' });
+    document.body.appendChild(nodeCardEl);
+  }
+  nodeCardEl.innerHTML = '';
+  rows.forEach(r => nodeCardEl.appendChild(r));
+  nodeCardEl.classList.add('show');
+  moveNodeCard(ev);
+}
+
+// Follow the pointer, but flip to the other side rather than hanging off the edge of the window.
+function moveNodeCard(ev: any) {
+  if (!nodeCardEl || !nodeCardEl.classList.contains('show')) return;
+  const pad = 14;
+  const w = nodeCardEl.offsetWidth || 260, h = nodeCardEl.offsetHeight || 120;
+  const vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
+  const x = ev.clientX + pad + w > vw ? ev.clientX - pad - w : ev.clientX + pad;
+  const y = Math.min(Math.max(pad, ev.clientY - h / 2), vh - h - pad);
+  nodeCardEl.style.left = Math.max(pad, x) + 'px';
+  nodeCardEl.style.top = y + 'px';
+}
+
+function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
+
 // Ready-made device templates (EG4 inverters, meters, …), fetched once and cached.
 let nodeTemplatesCache: any[] | null = null;
 async function loadNodeTemplates(): Promise<any[]> {

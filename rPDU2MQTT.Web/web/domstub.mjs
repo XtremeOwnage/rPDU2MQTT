@@ -61,7 +61,12 @@ export function makeEl(tag = 'div') {
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return this.attrs[k] ?? null; },
     removeAttribute(k) { delete this.attrs[k]; },
-    addEventListener() { }, removeEventListener() { },
+    // Listeners are recorded, not discarded, so a test can fire one — the hover card and the focus
+    // highlight are only reachable through events, and an untested interaction rots unnoticed.
+    _on: {},
+    addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
+    dispatch(type, ev) { (this._on[type] || []).forEach(f => f(ev)); },
     click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() { }, stopPropagation() { } }); },
     focus() { }, select() { }, setSelectionRange() { },
     querySelector(s) { return query(this, s, false); },
