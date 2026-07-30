@@ -1370,6 +1370,10 @@ function addLiveDataSection(nav     , sections     ) {
 // Metrics a live source can supply: [stored key (matches PDU Measurement.Type), friendly label, canonical
 // unit, selectable input units]. The key stays the PDU vocabulary so live values roll up with outlets; the
 // UI shows the friendly name and a unit picker. Mirrors EnergyFlowSource.Metric + FlowUnits (Core).
+// key, label, canonical unit, input units it can be bound in.
+// Kept in step with FlowUnits.cs (Core), which is the authority — including which of these add up the
+// tree. The intensive ones below describe a condition at a point and are never rolled up: a node shows
+// the reading it has, and one with none shows nothing rather than a sum that was true nowhere.
 const METRICS                                       = [
   ['realpower', 'Power', 'W', ['W', 'kW', 'MW']],
   ['apparentpower', 'Apparent power', 'VA', ['VA', 'kVA']],
@@ -1379,7 +1383,12 @@ const METRICS                                       = [
   ['frequency', 'Frequency', 'Hz', ['Hz']],
   ['powerfactor', 'Power factor', '', ['']],
   ['soc', 'State of charge', '%', ['%', 'fraction']],
+  ['percent', 'Percentage', '%', ['%', 'fraction']],
+  ['temperature', 'Temperature', '°C', ['°C', 'K']],
 ];
+// Which metrics the flow may sum from the leaves upward. Mirrors FlowUnits.IsAdditive.
+const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'current']);
+const isAdditiveMetric = (key         ) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
 const metricLabel = (key         ) => metricMeta(key)[1];
@@ -1818,7 +1827,18 @@ function renderNodeEditor(node     , links       , cand                  , reren
       opts.forEach((m        ) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
       metricSel.value = metric;
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
-      tr.appendChild(el('td', {}, metricSel));
+      // Say at the point of choosing that this one won't roll up — otherwise the only clue is a parent
+      // node reading "no data", which looks like a broken binding rather than the correct answer.
+      const metricCell = el('td', {}, metricSel);
+      if (!isAdditiveMetric(metric)) {
+        metricCell.appendChild(el('div', {
+          class: 'desc', style: { margin: '2px 0 0', fontSize: '11px' },
+          text: 'per-node only — not summed',
+          title: `${metricLabel(metric)} describes a condition at a point, so it is never added up the tree.`
+          + ' The node you bind it to shows it; its parents show nothing rather than a total that was true nowhere.',
+        }));
+      }
+      tr.appendChild(metricCell);
 
       // Direction (battery/grid only, and only for a directional metric — voltage/soc have no direction, so
       // their cell stays blank). A signed metric (power/current) also offers 'split': one ± value fanned into
@@ -2540,13 +2560,21 @@ function addFlowSection(nav     , sections     ) {
     // "0 W" / "no data" nodes collides its labels into an unreadable smear. So a node occupies a *row* at
     // least this tall (its bar is centered inside it), while the bar itself stays proportional.
     const labelRow = 15;
-    // Barycenter: a node's preferred y is the value-weighted mean of its (already positioned) feeders.
-    const bary = (id        ) => { let w = 0, s = 0; (incoming[id] || []).forEach((l     ) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * l.value; w += l.value; } }); return w ? s / w : Infinity; };
-    let bottom = padTop;
-    cols.forEach((cn, c) => {
-      // Roots stack by size; downstream columns follow their feeder's order (groups children, avoids crossings).
-      if (c === 0) cn.sort((a     , b     ) => nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+    // A link's pull on the layout. Weighting purely by value means a zero-carrying link exerts none at
+    // all — and at night the whole solar chain is zero, so `w` stayed 0, bary() returned Infinity, and
+    // every MPPT and the PV aggregate sorted to the bottom of their columns while the inverter they feed
+    // stayed up beside the grid. The chain came out as scattered orphans joined by invisible ribbons.
+    // A floor keeps a zero link meaning "these two are wired together" without letting it outvote a
+    // measured one.
+    const wFloor = maxTotal / 1000;
+    const linkW = (l     ) => Math.max(l.value || 0, wFloor);
+    // Barycenter of the feeders that are already positioned (forward pass) …
+    const bary = (id        ) => { let w = 0, s = 0; (incoming[id] || []).forEach((l     ) => { const sp = pos[l.source]; if (sp) { s += (sp.y + sp.h / 2) * linkW(l); w += linkW(l); } }); return w ? s / w : Infinity; };
+    // … and of what it feeds (backward pass), so a source column can be pulled level with its targets.
+    const obary = (id        ) => { let w = 0, s = 0; (outgoing[id] || []).forEach((l     ) => { const tp = pos[l.target]; if (tp) { s += (tp.y + tp.h / 2) * linkW(l); w += linkW(l); } }); return w ? s / w : Infinity; };
+
+    // Stack one column top-to-bottom in its current order; returns the y it ended at.
+    const placeColumn = (cn       , c        ) => {
       let y = padTop;
       cn.forEach((n     ) => {
         // Bar height is proportional; an unknown or measured-zero node is a thin marker (it has no
@@ -2556,28 +2584,57 @@ function addFlowSection(nav     , sections     ) {
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
         y += rowH + gap;
       });
-      bottom = Math.max(bottom, y);
+      return y;
+    };
+
+    // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
+    cols.forEach((cn, c) => {
+      if (c === 0) cn.sort((a     , b     ) => nodeValue(b.id) - nodeValue(a.id));
+      else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      placeColumn(cn, c);
     });
+    // Backward: right-to-left, order each column by what it feeds. The forward pass alone can only order a
+    // column by its inputs, so column 0 — which has none — was sorted purely by size and a zero-output
+    // feeder always sank to the bottom, however far that was from the node it powers.
+    for (let c = cols.length - 2; c >= 0; c--) {
+      if (!cols[c]) continue;
+      cols[c].sort((a     , b     ) => (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      placeColumn(cols[c], c);
+    }
+    // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.
+    let bottom = padTop;
+    cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+    // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
+    svg.addEventListener('click', () => clearFocus(svg));
+    focusedNode = null;
 
     // Ribbons (filled bezier bands), stacked on each node edge by target order.
     links.sort((a     , b     ) => pos[a.target].y - pos[b.target].y).forEach((l     ) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
-      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
+      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
+      // zero is the same picture — 0 W scales to a 1px band at 30% opacity, i.e. nothing — so at night the
+      // solar chain looked disconnected rather than idle. Both get a visible hairline; only the ribbons
+      // carrying something get a proportional band.
       const unknownLink = l.known === false;
-      const h = unknownLink ? 1.5 : Math.max(1, l.value * pxPerUnit);
+      const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
+      const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
       const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
       svg.appendChild(svgEl('path', {
         d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`,
         fill: unknownLink ? 'var(--muted)' : color,
-        'fill-opacity': unknownLink ? '0.25' : '0.3',
+        // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
+        'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
+        // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint — the
+        // opacity above encodes whether a value is known, and must not be overwritten to dim them.
+        'data-src': l.source, 'data-dst': l.target,
       }));
       s.outOff += h; t.inOff += h;
     });
@@ -2598,11 +2655,13 @@ function addFlowSection(nav     , sections     ) {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
         fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
         'fill-opacity': unknownNode ? '0.45' : '1',
+        'data-node': n.id,
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
         x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
+        'data-node': n.id,
       });
       lab.textContent = unknownNode ? `${n.label} · no data` : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
       if (unknownNode) {
@@ -2614,7 +2673,58 @@ function addFlowSection(nav     , sections     ) {
       }
       svg.appendChild(lab);
 
-      // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
+        // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
+      // sources are bound to it. All of that is already on the client, so the card costs no extra request —
+      // and it's the only place a node's *intensive* readings (voltage, soc, temperature) can be shown, since
+      // those are deliberately absent from the ribbons.
+      const card = () => {
+        const rows        = [];
+        rows.push(el('div', { class: 'nh-title', text: n.label }));
+        rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+        rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
+          unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
+          el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
+
+        const side = (title        , ls       , other                    ) => {
+          if (!ls.length) return;
+          rows.push(el('div', { class: 'nh-head', text: title }));
+          ls.forEach((l     ) => rows.push(el('div', { class: 'nh-row' },
+            el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
+            el('span', { class: 'nh-num', text: l.known === false ? '—' : `${formatNum(l.value)} ${units}`.trim() }))));
+        };
+        side('Fed by', incoming[n.id] || [], (l     ) => l.source);
+        side('Feeds', outgoing[n.id] || [], (l     ) => l.target);
+
+        // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
+        const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === n.id);
+        const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m     ) => ({ Type: 'mqtt', ...m })) : []);
+        if (bound.length) {
+          rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
+          bound.forEach((s     ) => rows.push(el('div', { class: 'nh-row' },
+            el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
+            el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
+        } else if (cfg) {
+          rows.push(el('div', { class: 'nh-head', text: cfg.Value != null ? 'Fixed value' : 'No source bound' }));
+        }
+        return rows;
+      };
+      [rect, lab].forEach((elm     ) => {
+        elm.addEventListener('mouseenter', (e     ) => showNodeCard(sec, e, card()));
+        elm.addEventListener('mousemove', (e     ) => moveNodeCard(e));
+        elm.addEventListener('mouseleave', hideNodeCard);
+      });
+
+      // Click to trace where this node's supply comes from: everything upstream stays lit, the rest dims.
+      // Click again — or anywhere off a node — to restore. Group nodes keep click for expand/collapse,
+      // which is their established affordance; use the toggles above to open one, then trace inside it.
+      if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
+        [rect, lab].forEach((elm     ) => {
+          elm.style.cursor = 'pointer';
+          elm.addEventListener('click', (e     ) => { e.stopPropagation?.(); focusPath(svg, incoming, n.id); });
+        });
+      }
+
+    // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
       const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
       if (grp) {
         const gid = n.group ? n.id : grp.Id;
@@ -2869,6 +2979,75 @@ function addFlowSection(nav     , sections     ) {
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
 // bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+// --- Focus a supply path --------------------------------------------------------------------------
+// "Where does this node's power come from?" is the question the diagram is worst at once there are more
+// than a handful of ribbons. Clicking a node lights everything upstream of it and dims the rest.
+//
+// Done by classing the <svg> and the elements on the path, never by rewriting their fill-opacity: that
+// attribute already carries meaning (a hairline says the quantity is unknown), and overwriting it to dim
+// would destroy the very thing the diagram is being read for.
+let focusedNode                = null;
+
+function focusPath(svg     , incoming     , id        ) {
+  if (focusedNode === id) { clearFocus(svg); return; }
+  focusedNode = id;
+
+  // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
+  // graph acyclic — this walks whatever it is handed.
+  const onPath = new Set        ([id]);
+  const links = new Set        ();
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop() ;
+    (incoming[cur] || []).forEach((l     ) => {
+      links.add(l.source + '' + l.target);
+      if (!onPath.has(l.source)) { onPath.add(l.source); stack.push(l.source); }
+    });
+  }
+
+  svg.querySelectorAll('[data-node]').forEach((e     ) =>
+    e.classList[onPath.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
+  svg.querySelectorAll('[data-src]').forEach((e     ) =>
+    e.classList[links.has(e.getAttribute('data-src') + '' + e.getAttribute('data-dst')) ? 'add' : 'remove']('on-path'));
+  svg.classList.add('flow-focus');
+}
+
+function clearFocus(svg     ) {
+  focusedNode = null;
+  if (!svg) return;
+  svg.classList.remove('flow-focus');
+  svg.querySelectorAll('.on-path').forEach((e     ) => e.classList.remove('on-path'));
+}
+
+// --- Node hover card ------------------------------------------------------------------------------
+// One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
+let nodeCardEl      = null;
+
+function showNodeCard(host     , ev     , rows       ) {
+  if (!nodeCardEl) {
+    nodeCardEl = el('div', { class: 'node-card' });
+    document.body.appendChild(nodeCardEl);
+  }
+  nodeCardEl.innerHTML = '';
+  rows.forEach(r => nodeCardEl.appendChild(r));
+  nodeCardEl.classList.add('show');
+  moveNodeCard(ev);
+}
+
+// Follow the pointer, but flip to the other side rather than hanging off the edge of the window.
+function moveNodeCard(ev     ) {
+  if (!nodeCardEl || !nodeCardEl.classList.contains('show')) return;
+  const pad = 14;
+  const w = nodeCardEl.offsetWidth || 260, h = nodeCardEl.offsetHeight || 120;
+  const vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
+  const x = ev.clientX + pad + w > vw ? ev.clientX - pad - w : ev.clientX + pad;
+  const y = Math.min(Math.max(pad, ev.clientY - h / 2), vh - h - pad);
+  nodeCardEl.style.left = Math.max(pad, x) + 'px';
+  nodeCardEl.style.top = y + 'px';
+}
+
+function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
+
 // Ready-made device templates (EG4 inverters, meters, …), fetched once and cached.
 let nodeTemplatesCache               = null;
 async function loadNodeTemplates()                 {
@@ -3321,6 +3500,150 @@ function addEnergyOverviewSection(nav     , sections     ) {
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
+// ── sections/nodedata.ts ────────────────────────────────────────
+// Node Data: every reading the energy flow is collecting, in one table.
+//
+// The chart shows one metric at a time and only what flows, so everything else the bridge ingests — a
+// battery's state of charge, a temperature, an inverter's frequency — had nowhere to be seen. This lists
+// each node against every metric bound to it.
+//
+// The column that matters is Updated. A dead publisher and a topic that was never right both show an
+// empty chart, and they need completely different fixes; the API reports a reading even after it has
+// expired (flagged, not hidden) precisely so the two can be told apart here.
+
+// Mirrors FlowUnits.cs — the canonical unit each metric is stored in, and its display name.
+const UNITS                                   = {
+  realpower: ['Power', 'W'], apparentpower: ['Apparent power', 'VA'], energy: ['Energy', 'kWh'],
+  current: ['Current', 'A'], voltage: ['Voltage', 'V'], frequency: ['Frequency', 'Hz'],
+  powerfactor: ['Power factor', ''], soc: ['State of charge', '%'],
+  percent: ['Percentage', '%'], temperature: ['Temperature', '°C'],
+};
+const metricName = (m        ) => (UNITS[m] || [m, ''])[0];
+const metricUnit = (m        ) => (UNITS[m] || [m, ''])[1];
+
+const ago = (s        ) => s < 1 ? 'just now'
+  : s < 90 ? Math.round(s) + 's ago'
+  : s < 5400 ? Math.round(s / 60) + 'm ago'
+  : Math.round(s / 3600) + 'h ago';
+
+function addNodeDataSection(nav     , sections     ) {
+  const link = navLink(nav, 'Node Data', '⊞');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' }); sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Node Data' }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Every reading the energy flow is collecting — one row per node and bound metric, whatever the chart happens to be showing. “Updated” is the one to watch: a source that has stopped reporting still lists its last value, marked stale, so a dead publisher can be told apart from a binding that was never right.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const refresh = btn('Refresh');
+  const filter = el('input', { type: 'text', placeholder: 'Filter (node / metric / topic)…' });
+  const onlyProblems = el('input', { type: 'checkbox', class: 'switch' });
+  const problemsLab = el('label', { title: 'Show only rows with no reading, or one that has gone stale.' },
+    onlyProblems, ' Problems only');
+  const count = el('span', { class: 'ld-count' });
+  bar.append(refresh, filter, problemsLab, count);
+  sec.appendChild(bar);
+  const wrap = el('div'); sec.appendChild(wrap);
+
+  // One row per (node, bound metric), from the configured hierarchy — so a binding that has never
+  // delivered still appears, which is exactly the case worth seeing.
+  const rows = () => {
+    const out        = [];
+    (state.data?.EnergyFlow?.Nodes || []).forEach((n     ) => {
+      if (!n.Id) return;
+      const bound = (n.Sources || []).concat((n.Mqtt || []).map((m     ) => ({ Type: 'mqtt', ...m })));
+      if (!bound.length) {
+        if (n.Value != null) out.push({ node: n, metric: 'realpower', src: null, fixed: n.Value });
+        return;
+      }
+      bound.forEach((s     ) => out.push({ node: n, metric: s.Metric || 'realpower', src: s }));
+    });
+    return out;
+  };
+
+  const describe = (s     ) => !s ? 'fixed value'
+    : s.Type === 'modbus' ? `${s.Connection || 'modbus'} · register ${s.Register}`
+    : (s.Topic || '') + (s.JsonField ? ` · ${s.JsonField}` : '');
+
+  let live                      = {};
+  const keyOf = (r     ) => `${r.node.Id}|${r.metric}`;
+
+  const draw = () => {
+    const f = (filter.value || '').trim().toLowerCase();
+    let list = rows();
+    list = list.filter(r => !f || `${r.node.Label || ''} ${r.node.Id} ${metricName(r.metric)} ${describe(r.src)}`.toLowerCase().includes(f));
+    if (onlyProblems.checked) list = list.filter(r => { const v = live[keyOf(r)]; return r.fixed == null && (!v || v.reported == null || v.fresh === false); });
+
+    wrap.innerHTML = '';
+    if (!list.length) {
+      wrap.appendChild(el('div', { class: 'desc', text: onlyProblems.checked ? 'Nothing stale or missing — every bound source is reporting.' : 'No nodes have sources bound yet. Bind one on the Nodes tab.' }));
+      return;
+    }
+
+    const t = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['Node', 'Metric', 'Value', 'Updated', 'Source'].forEach((h, i) => head.appendChild(el('th', { class: i === 2 ? 'num' : '', text: h })));
+    t.appendChild(el('thead', {}, head));
+    const tb = el('tbody');
+
+    let stale = 0, missing = 0;
+    list.forEach(r => {
+      const v = live[keyOf(r)];
+      const tr = el('tr');
+      tr.appendChild(el('td', {}, el('span', { text: r.node.Label || r.node.Id }),
+        el('div', { class: 'desc', style: { fontSize: '11px', margin: '0' }, text: r.node.Id })));
+      tr.appendChild(el('td', { text: metricName(r.metric) }));
+
+      const val = el('td', { class: 'num' });
+      if (r.fixed != null) val.append(el('span', { text: `${formatNum(r.fixed)} ${metricUnit(r.metric)}`.trim() }));
+      else if (v && v.reported != null) val.append(el('span', { text: `${formatNum(v.reported)} ${metricUnit(r.metric)}`.trim() }));
+      else { val.append(el('span', { style: { color: 'var(--muted)' }, text: '—' })); missing++; }
+      tr.appendChild(val);
+
+      const upd = el('td');
+      if (r.fixed != null) upd.append(el('span', { class: 'desc', text: 'fixed' }));
+      else if (!v || v.atUtc == null) upd.append(el('span', { style: { color: 'var(--muted)' }, text: 'never' }));
+      else {
+        const fresh = v.fresh !== false;
+        if (!fresh) stale++;
+        upd.append(el('span', { class: 'dot ' + (fresh ? 'good' : 'bad') }), ' ', ago(v.ageSeconds ?? 0));
+        upd.title = new Date(v.atUtc).toLocaleString()
+          + (v.staleAfterSeconds ? `\nExpires after ${v.staleAfterSeconds}s without an update.` : '\nNever expires.')
+          + (fresh ? '' : '\nStale — this value is no longer used by the flow or the exports.');
+      }
+      tr.appendChild(upd);
+      tr.appendChild(el('td', {}, el('span', { class: 'ov-sub', text: describe(r.src) })));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    wrap.appendChild(t);
+
+    count.textContent = `${list.length} reading(s)`
+      + (stale ? ` · ${stale} stale` : '') + (missing ? ` · ${missing} never reported` : '');
+    count.title = stale || missing
+      ? 'A stale row had a value that expired; a "never" row has a binding that has not delivered once — check the topic or register.'
+      : '';
+  };
+
+  const load = async () => {
+    const q = rows().filter(r => !r.fixed).map(r => ({ Node: r.node.Id, Metric: r.metric }));
+    if (q.length) {
+      const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+      live = {};
+      (r.body?.values || []).forEach((v     ) => { live[`${v.node}|${v.metric}`] = v; });
+    }
+    draw();
+  };
+
+  refresh.onclick = load;
+  filter.oninput = draw;
+  onlyProblems.onchange = draw;
+  // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
+  liveWhileActive(sec, () => 'flow:realpower', () => load());
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
+  link.onclick = () => { activate(link, sec); load(); };
+  return link;
+}
+
 // ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
@@ -3726,7 +4049,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },

@@ -200,6 +200,13 @@ public static class FlowGraphBuilder
         // must be shown as "no data" rather than as zero flow.
         bool Knowable(string from, string to)
         {
+            // An intensive metric — voltage, frequency, power factor, state of charge, temperature — does
+            // not flow, so no link carries a determinable amount of it. Saying so here makes every link
+            // "no data" (a hairline) and, because ValueOf only aggregates *known* links, leaves each node
+            // showing the reading it actually has and nothing where it has none. Without this the roll-up
+            // summed them: three 120 V outlets reported a 360 V PDU, a figure true nowhere in the system.
+            if (!FlowUnits.IsAdditive(metric)) return false;
+
             if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
@@ -282,7 +289,16 @@ public static class FlowGraphBuilder
                 // topology always renders — the zero just draws as a hairline — while a zero-producing source
                 // still drops as before.
                 var passThroughZero = Wired(from, to) && incoming.TryGetValue(from, out var upstream) && upstream.Count > 0;
-                if (known && value <= 0 && !passThroughZero) continue;
+
+                // The same reasoning one step earlier, for the link *into* an inert ('none', or valueless
+                // 'static') node that sits mid-chain. Such a node contributes nothing by design, so its links
+                // carry zero forever; dropping the inbound one strands it — with no feeders left it lays out
+                // as a root in column 0 rather than between the two nodes it was deliberately wired between.
+                // Only mid-chain: an inert node used as a pure *source* has nothing to give and nothing
+                // feeding it, and still drops out (Build_NoneNode_ContributesNothing… pins that).
+                var midChainInert = Inert(Mode(to)) && outgoing.TryGetValue(to, out var below) && below.Count > 0;
+
+                if (known && value <= 0 && !passThroughZero && !midChainInert) continue;
 
                 links.Add(new FlowLink(from, to, value, known));
             }

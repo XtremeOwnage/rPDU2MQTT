@@ -7,87 +7,13 @@
 // them. Regenerate the fixture when config sections change — see the header note in that file.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { makeDom, query } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 // The leading _README node carries the fixture's regeneration note (JSON has no comments); it isn't
 // part of the schema, so drop it before handing it to the app.
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
   .filter(n => n.key !== '_README');
-
-// --- A small fake DOM that actually keeps a tree, so we can assert on what was rendered -------------
-// (The previous stub discarded every appendChild, so nothing about the output could be checked.)
-function matches(node, sel) {
-  sel = sel.trim();
-  const attr = sel.match(/^(\w+)\[type=(\w+)\]$/);
-  if (attr) return node.tag === attr[1] && node.attrs.type === attr[2];
-  if (sel.startsWith('.')) return node.classList.has(sel.slice(1));
-  const tagClass = sel.match(/^(\w+)\.([\w-]+)$/);
-  if (tagClass) return node.tag === tagClass[1] && node.classList.has(tagClass[2]);
-  return node.tag === sel;
-}
-// Supports the selector shapes the GUI actually uses: "a", ".field", "nav a", "input[type=checkbox]",
-// and comma lists like "input, select, textarea".
-function query(root, sel, all) {
-  const out = [];
-  for (const branch of sel.split(',')) {
-    const parts = branch.trim().split(/\s+/);
-    let cur = [root];
-    for (const p of parts) {
-      const next = [];
-      for (const n of cur) for (const d of descendants(n)) if (matches(d, p)) next.push(d);
-      cur = next;
-    }
-    out.push(...cur);
-  }
-  return all ? out : (out[0] ?? null);
-}
-function* descendants(node) {
-  for (const c of node.children) { yield c; yield* descendants(c); }
-}
-
-function makeEl(tag = 'div') {
-  const node = {
-    tag, children: [], attrs: {}, style: {}, dataset: {}, _text: '',
-    classList: {
-      _s: new Set(),
-      add(...c) { c.forEach(x => x && this._s.add(x)); },
-      remove(...c) { c.forEach(x => this._s.delete(x)); },
-      contains(c) { return this._s.has(c); },
-      has(c) { return this._s.has(c); },
-    },
-    get className() { return [...this.classList._s].join(' '); },
-    set className(v) { this.classList._s = new Set(String(v).split(/\s+/).filter(Boolean)); },
-    get textContent() { return this._text || this.children.map(c => c.textContent).join(''); },
-    set textContent(v) { this._text = String(v); this.children = []; },
-    set innerHTML(v) { if (!v) this.children = []; },
-    get innerHTML() { return ''; },
-    appendChild(c) { if (c && c.tag) this.children.push(c); return c; },
-    append(...cs) { cs.forEach(c => { if (c && c.tag) this.children.push(c); }); },
-    removeChild(c) { this.children = this.children.filter(x => x !== c); },
-    remove() {}, insertBefore(c) { this.children.push(c); return c; },
-    // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
-    contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
-    setAttribute(k, v) { this.attrs[k] = String(v); },
-    getAttribute(k) { return this.attrs[k] ?? null; },
-    removeAttribute(k) { delete this.attrs[k]; },
-    addEventListener() {}, removeEventListener() {},
-    click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() {}, stopPropagation() {} }); },
-    focus() {}, select() {}, setSelectionRange() {},
-    querySelector(s) { return query(this, s, false); },
-    querySelectorAll(s) { return query(this, s, true); },
-    getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; },
-    getScreenCTM() { return { inverse() { return {}; } }; },
-  };
-  // classList.has is used by our matcher; keep `contains` as the DOM-facing name.
-  return node;
-}
-
-const root = makeEl('body');
-const byId = {};
-const getEl = (id) => (byId[id] ||= Object.assign(makeEl(id === 'nav' ? 'nav' : 'div'), { id }));
-// nav + sections live in the tree so `document.querySelectorAll('nav a')` can find the links.
-root.appendChild(getEl('nav'));
-root.appendChild(getEl('sections'));
 
 // A config with a custom flow node already bound to an MQTT source (#205), so opening the Flow tab
 // exercises the hierarchy editor and the live-sources table rather than just their empty states.
@@ -106,56 +32,39 @@ const config = {
   },
   Modbus: { Connections: [{ Id: 'inv1', Name: 'Inverter', Host: '10.0.0.5', Port: 502, UnitId: 1 }] },
 };
+// Three deep on purpose: mppt -> solar -> panel. A two-node graph cannot tell "walk the whole supply
+// chain" apart from "light the direct feeder", which is exactly the bug the focus test needs to catch.
 const flowGraph = {
   ok: true,
-  nodes: [{ id: 'solar', label: 'Solar', kind: 'node' }, { id: 'panel', label: 'Panel', kind: 'node' }],
-  links: [{ source: 'solar', target: 'panel', value: 750 }],
+  nodes: [
+    { id: 'mppt', label: 'MPPT', kind: 'node', value: 750 },
+    { id: 'solar', label: 'Solar', kind: 'node', value: 750 },
+    { id: 'panel', label: 'Panel', kind: 'node', value: 750 },
+  ],
+  links: [
+    { source: 'mppt', target: 'solar', value: 750 },
+    { source: 'solar', target: 'panel', value: 750 },
+  ],
   metric: 'realpower', units: 'W',
 };
 
+// One fresh reading and one that expired, so the Node Data page has both states to render.
+const liveValues = { ok: true, values: [
+  { node: 'solar', metric: 'realpower', value: 4237, reported: 4237, atUtc: new Date().toISOString(), ageSeconds: 3, fresh: true, staleAfterSeconds: 120 },
+  { node: 'solar', metric: 'energy', value: null, reported: 91.5, atUtc: new Date(Date.now() - 7200e3).toISOString(), ageSeconds: 7200, fresh: false, staleAfterSeconds: 120 },
+] };
+
 const bodies = (url) =>
+  url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
   url.includes('/api/config') ? config :
   url.includes('/api/flow') ? flowGraph :
   { ok: true };
 
-// A tiny localStorage, so the theme can persist the way it does in a browser.
-const storage = new Map();
+// The DOM + browser globals live in domstub.mjs, shared with layout.check.mjs.
+const { sandbox, getEl, storage } = makeDom({ bodies });
 
-const sandbox = {
-  console,
-  document: {
-    body: root,
-    // The theme sets data-theme here; nothing else touches it.
-    documentElement: makeEl('html'),
-    getElementById: (id) => getEl(id),
-    createElement: (t) => makeEl(t), createElementNS: (_ns, t) => makeEl(t),
-    createTextNode: () => makeEl('#text'),
-    querySelector: (s) => query(root, s, false),
-    querySelectorAll: (s) => query(root, s, true),
-    elementFromPoint: () => null,
-  },
-  window: { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } },
-  // protocol/hostname are read when building the API docs links (#190).
-  location: { hash: '', protocol: 'http:', hostname: 'localhost' },
-  navigator: { clipboard: { writeText() {} } },
-  localStorage: {
-    getItem: (k) => (storage.has(k) ? storage.get(k) : null),
-    setItem: (k, v) => storage.set(k, String(v)),
-    removeItem: (k) => storage.delete(k),
-  },
-  CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } },
-  DOMPoint: class { matrixTransform() { return { x: 0, y: 0 }; } },
-  setTimeout: (fn) => { if (typeof fn === 'function') fn(); return 0; },
-  clearTimeout() {},
-  setInterval: () => 0, clearInterval() {},
-  confirm: () => true,
-  fetch: async (url) => ({ ok: true, text: async () => '', json: async () => bodies(String(url)) }),
-  // EventSource is deliberately absent: it exercises the no-push path, where every section must still
-  // work off its manual refresh / polling fallback.
-};
-sandbox.globalThis = sandbox;
 
 vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
@@ -164,6 +73,7 @@ await new Promise(r => setTimeout(r, 50));
 
 // --- Assertions -------------------------------------------------------------------------------------
 const fail = (m) => { console.error('smoke FAILED: ' + m); process.exit(1); };
+const navLinksNow = () => query(getEl('nav'), 'a', true);
 
 const nav = getEl('nav');
 // A nav entry's text now includes its leading glyph, so its identity lives in dataset.label — the same
@@ -265,6 +175,57 @@ if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
+
+// --- Flow node hover card ----------------------------------------------------------------------------
+// The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.
+flowLink.click();
+await new Promise(r => setTimeout(r, 50));
+const nodeRect = query(getEl("sections"), "rect", true).find(r => r.attrs["data-node"] === "solar" && r._on.mouseenter);
+if (!nodeRect) fail("no Sankey node exposes a hover handler");
+nodeRect.dispatch("mouseenter", { clientX: 100, clientY: 100 });
+
+const cardEl = query(getEl("body") === undefined ? sandbox.document.body : sandbox.document.body, ".node-card", false);
+if (!cardEl) fail("hovering a node rendered no card");
+const cardText = cardEl.textContent;
+for (const want of ["Solar", "solar"])
+  if (!cardText.includes(want)) fail(`the hover card is missing "${want}" (got: ${cardText})`);
+if (!cardEl.classList.contains("show")) fail("the hover card was built but never shown");
+nodeRect.dispatch("mouseleave", {});
+if (cardEl.classList.contains("show")) fail("the hover card stayed up after the pointer left");
+
+// --- Focus a supply path -------------------------------------------------------------------------
+// Clicking a node lights what feeds it and dims the rest; clicking it again restores.
+const sankeyNodes = query(getEl('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+if (!sankeyNodes.length) fail('no Sankey node carries a data-node tag for focusing');
+const panelRect = sankeyNodes.find(r => r.attrs['data-node'] === 'panel');
+if (!panelRect) fail('the fixture graph did not render its "panel" node');
+
+panelRect.dispatch('click', { stopPropagation() {} });
+const focusSvg = query(getEl('sections'), 'svg', true).find(x => x.classList.contains('flow-focus'));
+if (!focusSvg) fail('clicking a node did not focus its supply path');
+// solar feeds panel, so both are on the path.
+const lit = query(focusSvg, 'rect', true).filter(r => r.classList.contains('on-path')).map(r => r.attrs['data-node']);
+for (const want of ['panel', 'solar', 'mppt'])
+  if (!lit.includes(want)) fail(`focusing "panel" left "${want}" off the path (lit: ${lit.join(', ')})`);
+if (!query(focusSvg, 'path', true).some(p => p.classList.contains('on-path')))
+  fail('the ribbon feeding the focused node was not lit');
+
+panelRect.dispatch('click', { stopPropagation() {} });
+if (focusSvg.classList.contains('flow-focus')) fail('clicking the focused node again did not restore the view');
+// --- Node Data page ------------------------------------------------------------------------------
+// Freshness is the reason this page exists: an expired reading must still be listed, and marked as such.
+const dataLink = navLinksNow().find(a => a.dataset.label === 'Node Data');
+if (!dataLink) fail('no Node Data tab');
+dataLink.click();
+await new Promise(r => setTimeout(r, 50));
+const dataSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (!dataSec) fail('clicking Node Data activated no section');
+const dataText = dataSec.textContent;
+if (!dataText.includes('solar_assistant/inverter_1/pv_power/state'))
+  fail('the Node Data page did not list the bound MQTT source');
+const dots = query(dataSec, '.dot', true);
+if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
+if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
 
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);
