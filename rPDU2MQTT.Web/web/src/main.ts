@@ -75,6 +75,9 @@ function renderStatus(body: any) {
   set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
   renderSaveBar();
 
+  // Off by default only if the operator turned it off; absent (an older server) means show it.
+  set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
+
   // Show a logout link + signed-in user when OIDC is in use.
   if (body.auth === 'oidc') {
     set('st-logout', e => e.classList.remove('is-hidden'));
