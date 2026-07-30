@@ -70,7 +70,12 @@ function makeEl(tag = 'div') {
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return this.attrs[k] ?? null; },
     removeAttribute(k) { delete this.attrs[k]; },
-    addEventListener() {}, removeEventListener() {},
+    // Listeners are recorded, not discarded, so a test can fire one — the hover card is only reachable
+    // through mouseenter, and an untested tooltip is exactly the thing that rots unnoticed.
+    _on: {},
+    addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
+    dispatch(type, ev) { (this._on[type] || []).forEach(f => f(ev)); },
     click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() {}, stopPropagation() {} }); },
     focus() {}, select() {}, setSelectionRange() {},
     querySelector(s) { return query(this, s, false); },
@@ -265,6 +270,23 @@ if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
+
+// --- Flow node hover card ----------------------------------------------------------------------------
+// The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.
+flowLink.click();
+await new Promise(r => setTimeout(r, 50));
+const nodeRect = query(getEl("sections"), "rect", true).find(r => r.attrs.width === "12" && r._on.mouseenter);
+if (!nodeRect) fail("no Sankey node exposes a hover handler");
+nodeRect.dispatch("mouseenter", { clientX: 100, clientY: 100 });
+
+const cardEl = query(getEl("body") === undefined ? sandbox.document.body : sandbox.document.body, ".node-card", false);
+if (!cardEl) fail("hovering a node rendered no card");
+const cardText = cardEl.textContent;
+for (const want of ["Solar", "solar"])
+  if (!cardText.includes(want)) fail(`the hover card is missing "${want}" (got: ${cardText})`);
+if (!cardEl.classList.contains("show")) fail("the hover card was built but never shown");
+nodeRect.dispatch("mouseleave", {});
+if (cardEl.classList.contains("show")) fail("the hover card stayed up after the pointer left");
 
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);

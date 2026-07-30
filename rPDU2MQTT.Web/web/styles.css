@@ -390,6 +390,29 @@
   .energy-node-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; fill:var(--muted); text-anchor:middle; }
   .energy-node-val { font-size:13px; font-weight:680; fill:var(--fg); text-anchor:middle; }
 
+  /* --- Flow node hover card ----------------------------------------------------------------------- */
+  /* Pinned to the viewport and following the pointer, so it is never clipped by the diagram's scroller. */
+  .node-card {
+    position:fixed; z-index:45; display:none; pointer-events:none;
+    min-width:200px; max-width:320px; padding:var(--sp-3);
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+    box-shadow:var(--shadow-lg); font-size:12.5px;
+  }
+  .node-card.show { display:block; animation:rpdu-fade .1s var(--ease); }
+  .nh-title { font-weight:650; font-size:13.5px; letter-spacing:-.01em; }
+  .nh-sub { color:var(--faint); font:11px/1.5 var(--mono); overflow-wrap:anywhere; margin-bottom:6px; }
+  .nh-value { font-size:19px; font-weight:680; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .nh-value.nh-unknown { font-size:14px; font-weight:600; font-style:italic; color:var(--muted); }
+  .nh-metric { font-size:11px; font-weight:600; color:var(--faint); letter-spacing:.03em; }
+  .nh-head {
+    margin:var(--sp-3) 0 3px; font-size:9.5px; font-weight:750; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--faint); border-top:1px solid var(--line-soft); padding-top:6px;
+  }
+  .nh-row { display:flex; gap:var(--sp-3); align-items:baseline; padding:1px 0; }
+  .nh-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nh-num { flex:none; font-variant-numeric:tabular-nums; font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .nh-src { flex:1.4; min-width:0; font:10.5px/1.4 var(--mono); color:var(--faint); overflow-wrap:anywhere; text-align:right; }
+
   /* --- Energy overview tiles ---------------------------------------------------------------------- */
   /* The board is one column: the diagram sits over the tiles it summarises, both bounded so they don't
      drift apart on a wide screen. */

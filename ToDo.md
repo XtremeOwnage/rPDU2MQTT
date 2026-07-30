@@ -137,7 +137,13 @@ Need either a page, or dashboard, to allow display lots of the data we are colle
 
 Extra page just for displaying data would be handy.
 
-In addition, overing over items in the flow chart, SHOULD yield a hover-over popup, displaying node details, and data.
+- [x] In addition, overing over items in the flow chart, SHOULD yield a hover-over popup, displaying node details, and data.
+
+    Hovering a Sankey node shows what it is, what it currently reads, what feeds it and what it feeds
+    (with each link's value), and which sources are bound to it — so a wrong topic or register is
+    visible from the diagram itself. Built from data already on the client, so it costs no extra request.
+    It is also the only place a node's intensive readings can appear, since those are deliberately kept
+    off the ribbons.
 
 ----------------------------
 
