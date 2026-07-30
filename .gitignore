@@ -365,3 +365,7 @@ FodyWeavers.xsd
 /rPDU2MQTT/config.yaml
 # Backup written by the GUI when saving config.
 *.yaml.bak
+
+# Local Claude Code tooling config. Drop this line if you ever want to commit shared agent/skill
+# definitions for the project; an unedited placeholder was committed by accident in #288.
+.claude/
