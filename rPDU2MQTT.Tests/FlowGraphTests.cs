@@ -721,4 +721,29 @@ public class FlowGraphTests
         Assert.False(map.ContainsKey("outlet:pdu1:1"));
         Assert.Equal(2, map.Count);
     }
+[Fact]
+    public void Build_NoneNodeBetweenPopulatedNodes_KeepsBothItsLinks()
+    {
+        // A 'none' node deliberately wired between two measured ones (ToDo.md: "putting a None node between
+        // populated nodes causes the chart to get extremely weird"). Its links carry zero by definition, and
+        // the known-zero filter dropped the inbound one — leaving the node with no feeders, so the chart laid
+        // it out as a root in column 0 rather than between the pair it was placed between.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "60"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Panel" },
+                new EnergyFlowNode { Id = "spacer", Label = "Sub-panel", Mode = "none" },
+            },
+            Parents = { ["spacer"] = "panel", ["pdu:pdu1"] = "spacer" },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Contains(graph.Nodes, n => n.Id == "spacer");
+        // Both halves of the wiring survive, so the node still sits between its feeder and what it feeds.
+        Assert.Contains(graph.Links, l => l.Source == "panel" && l.Target == "spacer");
+        Assert.Contains(graph.Links, l => l.Source == "spacer" && l.Target == "pdu:pdu1");
+    }
 }
