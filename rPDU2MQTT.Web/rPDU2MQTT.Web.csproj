@@ -36,6 +36,9 @@
 		<GuiSource Include="web\styles.css" />
 		<GuiSource Include="web\build.mjs" />
 		<GuiSource Include="web\smoke.mjs" />
+		<GuiSource Include="web\domstub.mjs" />
+		<GuiSource Include="web\layout.check.mjs" />
+		<GuiSource Include="web\sankey.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -50,6 +53,11 @@
 		<!-- Run the bundle's smoke test against the real schema: it builds every section in a stubbed DOM,
 		     so a broken cross-module reference fails the build here instead of blanking a tab at runtime. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/smoke.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- Layout regressions render fine and mean nothing: the hierarchy left-justified a feeder away from
+		     what it powers, and a night-time (all-zero) solar chain sank to the bottom of the chart joined by
+		     invisible ribbons. Both are asserted on the real bundle's rendered geometry. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/layout.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sankey.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

@@ -85,22 +85,35 @@ Nothing open.
 
 
 
-- in the energy flow chart- clicking a node, which hilight its path back to the root nodes, and dim everything else
+- [x] in the energy flow chart- clicking a node, which hilight its path back to the root nodes, and dim everything else
 
 Click it again, to restore.
 
-- Energy Flow Chart- ability to display Power.... Or Energy.
+    Clicking a node lights everything upstream of it and dims the rest; clicking it again, or clicking the
+    empty canvas, restores. Group nodes keep click for expand/collapse — that is their existing
+    affordance — so open a group first, then trace inside it.
+
+    Dimming is a class on the <svg>, never a rewrite of each element's fill-opacity: that attribute
+    already means something (a hairline says the quantity is unknown), and overwriting it to dim would
+    destroy the thing the chart is being read for.
+
+- [x] Energy Flow Chart- ability to display Power.... Or Energy.  (#275 — metric toggle on the Flow tab)
 
 - Need to aggregate energy data, using the collected power data. Will need redis broker to support
     Helm chart will need redis broker. Docker compse example, will need redis.
     For those wanting simple install, should offer a simple sqlite database or mabye an inmemory cache or something.
     Cache will be responsible for aggregating Power into Energy.
 
-- Putting a "None" node between populated nodes, causing the chart to get extremely weird.
+- [x] Putting a "None" node between populated nodes, causing the chart to get extremely weird.
 
 The None nodes are removed form the chart, instead of displaying between the nodes.
 
-- Nodes without energy, explain extremely weird.
+    Fixed: a none node carries zero by definition, and the known-zero filter dropped its inbound link —
+    leaving it with no feeders, so it laid out as a root in column 0 instead of between the pair it was
+    placed between. Its links are kept when it sits mid-chain; an inert node used as a pure source still
+    drops out, as two existing tests require.
+
+- [x] Nodes without energy, explain extremely weird.
 
 In this case- MPPTs 1-3 feeds a aggregate node named Solar/PV, which feeds the inverter.
 
@@ -108,9 +121,15 @@ WELL..... since its night time, they have zero output. And... fubar.
 
 ![alt text](image.png)
 
+    Fixed: the barycenter weighted each feeder by its link value, so a zero-carrying link had no pull at
+    all and the whole idle solar chain sorted to the bottom of its column (measured: MPPTs at y=557/580/603
+    against Solar at y=29) while the inverter stayed up beside the grid — joined by ribbons that scaled to
+    ~0px, so nothing looked connected either. Weights now have a floor, a backward pass orders each column
+    by what it feeds, and an idle link draws as a visible hairline. Pinned by web/sankey.check.mjs.
+
 -----------
 
-- Hierarchy diagram, small bug-
+- [x] Hierarchy diagram, small bug-
 
 ![alt text](image-1.png)
 
@@ -118,9 +137,21 @@ battery feeds the Flexboss/Inverter, but, is positioned to the left of Solar whi
 
 It should, ideally be positioned below, or above Solar/PV.... since it connects to a node to the right of it. Instead, its displayed on the left side.
 
+    Already fixed by #266 (this screenshot predates it): every node now sits one column left of the
+    earliest thing it feeds, so Battery and Grid land beside Solar. Pinned by web/layout.check.mjs.
+
 -----------------------
 
-Need some units created for percentages. Ie- Battery Percent, Load Percent... etc.. Temperature, might be a good metric to create as well.
+- [x] Need some units created for percentages. Ie- Battery Percent, Load Percent... etc.. Temperature, might be a good metric to create as well.
+
+    Added `percent` (%, or a 0-1 fraction) and `temperature` (°C / K) alongside the existing `soc`.
+
+    While adding them: every metric was being summed up the tree, so an *intensive* one — voltage,
+    frequency, power factor, soc, and now temperature/percent — produced a figure true nowhere in the
+    system. Three 120 V outlets reported a 360 V PDU. Not reachable from the Sankey (its toggle only
+    offers additive metrics) but reachable through the API's ?metric= parameter, including the public
+    v1 API. FlowUnits now records which metrics add up, and an intensive one is reported per node with
+    no roll-up: a node shows the reading it has, a node without one shows nothing.
 
 ------------------------
 
@@ -128,6 +159,13 @@ Need some units created for percentages. Ie- Battery Percent, Load Percent... et
 
 Extra page just for displaying data would be handy.
 
+- [x] In addition, overing over items in the flow chart, SHOULD yield a hover-over popup, displaying node details, and data.
+
+    Hovering a Sankey node shows what it is, what it currently reads, what feeds it and what it feeds
+    (with each link's value), and which sources are bound to it — so a wrong topic or register is
+    visible from the diagram itself. Built from data already on the client, so it costs no extra request.
+    It is also the only place a node's intensive readings can appear, since those are deliberately kept
+    off the ribbons.
     Added an Energy Flow > Node Data tab: one row per node and bound metric, whatever the chart is
     showing, with the source (topic, or connection + register) beside it.
 

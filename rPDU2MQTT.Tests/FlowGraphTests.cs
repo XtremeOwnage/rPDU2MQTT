@@ -721,4 +721,63 @@ public class FlowGraphTests
         Assert.False(map.ContainsKey("outlet:pdu1:1"));
         Assert.Equal(2, map.Count);
     }
+[Fact]
+    public void Build_IntensiveMetric_IsNeverSummedUpTheTree()
+    {
+        // Voltage is intensive: it describes a condition at a point. Three 120 V outlets do not make a
+        // 360 V PDU — but that is exactly what the roll-up reported, because every metric was summed. Each
+        // node now shows the reading it has, and a node with none shows nothing rather than a total that
+        // was true nowhere in the system.
+        var data = OnePdu(
+            Outlet(0, "A", "voltage", "120", "V"),
+            Outlet(1, "B", "voltage", "120", "V"),
+            Outlet(2, "C", "voltage", "120", "V"));
+
+        var graph = FlowGraphBuilder.Build(data, null, "voltage");
+
+        Assert.All(graph.Nodes.Where(n => n.Kind == "outlet"), n => Assert.Equal(120, n.Value));
+        Assert.Null(graph.Nodes.Single(n => n.Id == "pdu:pdu1").Value);
+        // The wiring is still drawn — as "no data" links, since no amount of voltage flows along them.
+        Assert.NotEmpty(graph.Links);
+        Assert.All(graph.Links, l => Assert.False(l.Known));
+    }
+
+    [Fact]
+    public void Build_ExtensiveMetric_StillRollsUp()
+    {
+        // The counterpart: power really does add, and must keep doing so.
+        var data = OnePdu(
+            Outlet(0, "A", "realpower", "60"),
+            Outlet(1, "B", "realpower", "40"));
+
+        var graph = FlowGraphBuilder.Build(data, null, "realpower");
+
+        Assert.Equal(100, graph.Nodes.Single(n => n.Id == "pdu:pdu1").Value);
+    }
+
+    [Fact]
+    public void Build_NoneNodeBetweenPopulatedNodes_KeepsBothItsLinks()
+    {
+        // A 'none' node deliberately wired between two measured ones (ToDo.md: "putting a None node between
+        // populated nodes causes the chart to get extremely weird"). Its links carry zero by definition, and
+        // the known-zero filter dropped the inbound one — leaving the node with no feeders, so the chart laid
+        // it out as a root in column 0 rather than between the pair it was placed between.
+        var data = OnePdu(Outlet(0, "Server", "realpower", "60"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Panel" },
+                new EnergyFlowNode { Id = "spacer", Label = "Sub-panel", Mode = "none" },
+            },
+            Parents = { ["spacer"] = "panel", ["pdu:pdu1"] = "spacer" },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Contains(graph.Nodes, n => n.Id == "spacer");
+        // Both halves of the wiring survive, so the node still sits between its feeder and what it feeds.
+        Assert.Contains(graph.Links, l => l.Source == "panel" && l.Target == "spacer");
+        Assert.Contains(graph.Links, l => l.Source == "spacer" && l.Target == "pdu:pdu1");
+    }
 }
