@@ -38,8 +38,8 @@ public class DiagnosticService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         mqtt.OnMessageReceived += OnMessageReceived;
-        await mqtt.SubscribeAsync(rediscoverTopic, QualityOfService.AtLeastOnceDelivery);
-        await mqtt.SubscribeAsync(restartTopic, QualityOfService.AtLeastOnceDelivery);
+        await MqttSubscriptions.SubscribeAsync(mqtt, rediscoverTopic, QualityOfService.AtLeastOnceDelivery);
+        await MqttSubscriptions.SubscribeAsync(mqtt, restartTopic, QualityOfService.AtLeastOnceDelivery);
         Log.Information($"Diagnostic actions subscribed ({rediscoverTopic}, {restartTopic}).");
     }
 

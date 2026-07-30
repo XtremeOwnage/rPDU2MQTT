@@ -62,18 +62,11 @@ public sealed class MqttReconfigurator
             client.Options = options;
             await client.ConnectAsync();
 
-            // Resubscribe to whatever the services had subscribed to before the reconnect.
-            foreach (var filter in previous)
-            {
-                try
-                {
-                    await client.SubscribeAsync(filter.Topic, filter.QoS);
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning($"Could not resubscribe to '{filter.Topic}' after re-pointing MQTT: {ex.Message}");
-                }
-            }
+            // Resubscribe to whatever the services had subscribed to before the reconnect. This goes through
+            // the shared registry rather than a private copy of the logic: `previous` is only correct because
+            // it was captured before the disconnect (the client empties its own list on reconnect), and a
+            // second implementation of that subtlety is one more place for it to rot.
+            await MqttSubscriptions.ResubscribeAllAsync(client);
 
             fingerprint = target;
             Log.Information($"MQTT client re-pointed at {options.Host}:{options.Port} ({previous.Count} subscription(s) restored).");

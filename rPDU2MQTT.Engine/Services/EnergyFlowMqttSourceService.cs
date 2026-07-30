@@ -49,10 +49,21 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     public bool TryGetValue(string nodeId, string metric, out double value)
         => latest.TryGetValue(nodeId, metric, out value);
 
+    // Set when the client reconnects: everything in `subscribed` is a stale belief at that point and the
+    // next reconcile must re-establish it. A flag rather than clearing the set from the event thread, so
+    // `subscribed` is only ever mutated by the reconcile loop.
+    private volatile bool connectionReset;
+
+    private void OnReconnected(object? sender, HiveMQtt.Client.Events.AfterConnectEventArgs e)
+    {
+        connectionReset = true;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Log.Information("Energy-flow MQTT ingest started — reconciling broker subscriptions from EnergyFlow.Nodes.");
         mqtt.OnMessageReceived += OnMessageReceived;
+        mqtt.AfterConnect += OnReconnected;
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
@@ -65,7 +76,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) { /* shutting down */ }
-        finally { mqtt.OnMessageReceived -= OnMessageReceived; }
+        finally { mqtt.OnMessageReceived -= OnMessageReceived; mqtt.AfterConnect -= OnReconnected; }
     }
 
     /// <summary>Bring the broker subscriptions in line with the current config (added/removed topics).</summary>
@@ -73,6 +84,18 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
 
     private async Task Reconcile(CancellationToken ct)
     {
+        // A reconnect leaves the broker with no session and the client with an empty subscription list, so
+        // every topic in `subscribed` is now a belief about a subscription that no longer exists. Without
+        // this, `subscribed.Add` below reports "already done" and the ingest never re-subscribes — the
+        // process keeps running, keeps reporting healthy, and silently receives nothing until it restarts.
+        if (connectionReset)
+        {
+            connectionReset = false;
+            if (subscribed.Count > 0)
+                Log.Information($"Energy-flow: MQTT reconnected — re-establishing {subscribed.Count} subscription(s).");
+            subscribed.Clear();
+        }
+
         var desired = BuildBindings(cfg.EnergyFlow.Nodes);
         bindings = desired;
 
@@ -92,7 +115,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             {
                 // AtLeastOnce so a value isn't silently dropped; retained messages arrive immediately, which
                 // is what makes a restarted process pick up e.g. Solar Assistant's last reading at once.
-                var result = await mqtt.SubscribeAsync(topic, QualityOfService.AtLeastOnceDelivery);
+                var result = await MqttSubscriptions.SubscribeAsync(mqtt, topic, QualityOfService.AtLeastOnceDelivery);
 
                 // A broker can *deny* a subscription (ACL) and the client reports it in the SUBACK, not as an
                 // exception. Treating that as success is how the ingest dies silently — check it, like the
@@ -122,6 +145,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             try
             {
                 await mqtt.UnsubscribeAsync(topic);
+                MqttSubscriptions.Forget(topic);   // else the reconnect replay resurrects it
                 subscribed.Remove(topic);
                 // Drop its cached readings too, so an unbound topic stops feeding the graph immediately.
                 foreach (var key in latest.Keys.Where(k => BoundOnlyBy(k, topic))) latest.Remove(key.Node, key.Metric);

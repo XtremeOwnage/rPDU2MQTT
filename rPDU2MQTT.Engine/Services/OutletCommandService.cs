@@ -60,7 +60,7 @@ public class OutletCommandService : IHostedService
 
         foreach (var filter in commandFilters)
         {
-            var result = await mqtt.SubscribeAsync(filter, QualityOfService.AtLeastOnceDelivery);
+            var result = await MqttSubscriptions.SubscribeAsync(mqtt, filter, QualityOfService.AtLeastOnceDelivery);
             foreach (var sub in result.Subscriptions)
             {
                 // SUBACK reason codes 0-2 are "granted QoS 0/1/2"; anything else is a failure/denial.

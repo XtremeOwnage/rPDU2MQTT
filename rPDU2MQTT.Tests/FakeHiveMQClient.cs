@@ -42,7 +42,23 @@ internal sealed class FakeHiveMQClient : IHiveMQClient
     {
         Calls.Add("subscribe:" + topic);
         Subscribed.Add(topic);
+        // The real client tracks it here too, which is what makes SimulateReconnect's clearing meaningful.
+        Subscriptions.Add(new Subscription(new TopicFilter(topic, qos)));
         return Task.FromResult<SubscribeResult>(null!);
+    }
+
+    /// <summary>
+    /// Behave like the real client across a reconnect: HiveMQtt <b>empties Subscriptions</b> as part of
+    /// reconnecting, before AfterConnect is raised (measured against 0.45.1). Any restore that reads the
+    /// client's own list therefore sees nothing. Modelling that here is the difference between a test that
+    /// proves the reconnect path works and one that only proves a list it filled itself can be replayed.
+    /// </summary>
+    public void SimulateReconnect()
+    {
+        Subscriptions.Clear();
+        Subscribed.Clear();
+        Calls.Add("reconnect");
+        Connected = true;
     }
 
     public Task<SubscribeResult> SubscribeAsync(SubscribeOptions options) => throw new NotImplementedException();

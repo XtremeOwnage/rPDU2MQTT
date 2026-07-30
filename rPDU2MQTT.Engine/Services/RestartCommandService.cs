@@ -41,7 +41,7 @@ public sealed class RestartCommandService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         mqtt.OnMessageReceived += OnMessageReceived;
-        try { await mqtt.SubscribeAsync(Topic, QualityOfService.AtLeastOnceDelivery); }
+        try { await MqttSubscriptions.SubscribeAsync(mqtt, Topic, QualityOfService.AtLeastOnceDelivery); }
         catch (Exception ex) { Log.Warning($"Restart-command: could not subscribe to {Topic}: {ex.Message}"); }
     }
 
