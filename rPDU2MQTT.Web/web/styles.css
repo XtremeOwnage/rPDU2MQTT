@@ -390,6 +390,15 @@
   .energy-node-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; fill:var(--muted); text-anchor:middle; }
   .energy-node-val { font-size:13px; font-weight:680; fill:var(--fg); text-anchor:middle; }
 
+  /* --- Focused supply path -------------------------------------------------------------------------- */
+  /* Dimming is applied here, on top of each element's own opacity, so the ribbons keep encoding whether
+     their quantity is known — a hairline still means "no data" while the path is focused. */
+  .flow-focus rect:not(.on-path),
+  .flow-focus path:not(.on-path),
+  .flow-focus text:not(.on-path) { opacity:.14; transition:opacity .15s var(--ease); }
+  .flow-focus .on-path { transition:opacity .15s var(--ease); }
+  .flow-focus rect.on-path { stroke:var(--fg); stroke-width:1; }
+
   /* --- Flow node hover card ----------------------------------------------------------------------- */
   /* Pinned to the viewport and following the pointer, so it is never clipped by the diagram's scroller. */
   .node-card {

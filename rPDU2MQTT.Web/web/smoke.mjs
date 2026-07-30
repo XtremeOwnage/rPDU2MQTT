@@ -20,6 +20,9 @@ function matches(node, sel) {
   sel = sel.trim();
   const attr = sel.match(/^(\w+)\[type=(\w+)\]$/);
   if (attr) return node.tag === attr[1] && node.attrs.type === attr[2];
+  // Bare attribute selector, e.g. [data-node] — how the focus code finds what it may dim.
+  const bare = sel.match(/^\[([\w-]+)\]$/);
+  if (bare) return node.attrs[bare[1]] !== undefined;
   if (sel.startsWith('.')) return node.classList.has(sel.slice(1));
   const tagClass = sel.match(/^(\w+)\.([\w-]+)$/);
   if (tagClass) return node.tag === tagClass[1] && node.classList.has(tagClass[2]);
@@ -111,10 +114,19 @@ const config = {
   },
   Modbus: { Connections: [{ Id: 'inv1', Name: 'Inverter', Host: '10.0.0.5', Port: 502, UnitId: 1 }] },
 };
+// Three deep on purpose: mppt -> solar -> panel. A two-node graph cannot tell "walk the whole supply
+// chain" apart from "light the direct feeder", which is exactly the bug the focus test needs to catch.
 const flowGraph = {
   ok: true,
-  nodes: [{ id: 'solar', label: 'Solar', kind: 'node' }, { id: 'panel', label: 'Panel', kind: 'node' }],
-  links: [{ source: 'solar', target: 'panel', value: 750 }],
+  nodes: [
+    { id: 'mppt', label: 'MPPT', kind: 'node', value: 750 },
+    { id: 'solar', label: 'Solar', kind: 'node', value: 750 },
+    { id: 'panel', label: 'Panel', kind: 'node', value: 750 },
+  ],
+  links: [
+    { source: 'mppt', target: 'solar', value: 750 },
+    { source: 'solar', target: 'panel', value: 750 },
+  ],
   metric: 'realpower', units: 'W',
 };
 
@@ -275,7 +287,7 @@ if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list 
 // The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.
 flowLink.click();
 await new Promise(r => setTimeout(r, 50));
-const nodeRect = query(getEl("sections"), "rect", true).find(r => r.attrs.width === "12" && r._on.mouseenter);
+const nodeRect = query(getEl("sections"), "rect", true).find(r => r.attrs["data-node"] === "solar" && r._on.mouseenter);
 if (!nodeRect) fail("no Sankey node exposes a hover handler");
 nodeRect.dispatch("mouseenter", { clientX: 100, clientY: 100 });
 
@@ -287,6 +299,26 @@ for (const want of ["Solar", "solar"])
 if (!cardEl.classList.contains("show")) fail("the hover card was built but never shown");
 nodeRect.dispatch("mouseleave", {});
 if (cardEl.classList.contains("show")) fail("the hover card stayed up after the pointer left");
+
+// --- Focus a supply path -------------------------------------------------------------------------
+// Clicking a node lights what feeds it and dims the rest; clicking it again restores.
+const sankeyNodes = query(getEl('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+if (!sankeyNodes.length) fail('no Sankey node carries a data-node tag for focusing');
+const panelRect = sankeyNodes.find(r => r.attrs['data-node'] === 'panel');
+if (!panelRect) fail('the fixture graph did not render its "panel" node');
+
+panelRect.dispatch('click', { stopPropagation() {} });
+const focusSvg = query(getEl('sections'), 'svg', true).find(x => x.classList.contains('flow-focus'));
+if (!focusSvg) fail('clicking a node did not focus its supply path');
+// solar feeds panel, so both are on the path.
+const lit = query(focusSvg, 'rect', true).filter(r => r.classList.contains('on-path')).map(r => r.attrs['data-node']);
+for (const want of ['panel', 'solar', 'mppt'])
+  if (!lit.includes(want)) fail(`focusing "panel" left "${want}" off the path (lit: ${lit.join(', ')})`);
+if (!query(focusSvg, 'path', true).some(p => p.classList.contains('on-path')))
+  fail('the ribbon feeding the focused node was not lit');
+
+panelRect.dispatch('click', { stopPropagation() {} });
+if (focusSvg.classList.contains('flow-focus')) fail('clicking the focused node again did not restore the view');
 
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);

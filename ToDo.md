@@ -85,9 +85,17 @@ Nothing open.
 
 
 
-- in the energy flow chart- clicking a node, which hilight its path back to the root nodes, and dim everything else
+- [x] in the energy flow chart- clicking a node, which hilight its path back to the root nodes, and dim everything else
 
 Click it again, to restore.
+
+    Clicking a node lights everything upstream of it and dims the rest; clicking it again, or clicking the
+    empty canvas, restores. Group nodes keep click for expand/collapse — that is their existing
+    affordance — so open a group first, then trace inside it.
+
+    Dimming is a class on the <svg>, never a rewrite of each element's fill-opacity: that attribute
+    already means something (a hairline says the quantity is unknown), and overwriting it to dim would
+    destroy the thing the chart is being read for.
 
 - Energy Flow Chart- ability to display Power.... Or Energy.
 

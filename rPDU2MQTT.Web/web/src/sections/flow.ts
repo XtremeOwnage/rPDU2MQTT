@@ -1221,6 +1221,9 @@ export function addFlowSection(nav: any, sections: any) {
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+    // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
+    svg.addEventListener('click', () => clearFocus(svg));
+    focusedNode = null;
 
     // Ribbons (filled bezier bands), stacked on each node edge by target order.
     links.sort((a: any, b: any) => pos[a.target].y - pos[b.target].y).forEach((l: any) => {
@@ -1236,6 +1239,9 @@ export function addFlowSection(nav: any, sections: any) {
         d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`,
         fill: unknownLink ? 'var(--muted)' : color,
         'fill-opacity': unknownLink ? '0.25' : '0.3',
+        // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint — the
+        // ribbons' own opacity encodes whether a value is known, and must not be overwritten to dim them.
+        'data-src': l.source, 'data-dst': l.target,
       }));
       s.outOff += h; t.inOff += h;
     });
@@ -1256,11 +1262,13 @@ export function addFlowSection(nav: any, sections: any) {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
         fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
         'fill-opacity': unknownNode ? '0.45' : '1',
+        'data-node': n.id,
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
         x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
+        'data-node': n.id,
       });
       lab.textContent = unknownNode ? `${n.label} · no data` : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
       if (unknownNode) {
@@ -1312,6 +1320,16 @@ export function addFlowSection(nav: any, sections: any) {
         elm.addEventListener('mousemove', (e: any) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
       });
+
+      // Click to trace where this node's supply comes from: everything upstream stays lit, the rest dims.
+      // Click again — or anywhere off a node — to restore. Group nodes keep click for expand/collapse,
+      // which is their established affordance; use the toggles above to open one, then trace inside it.
+      if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
+        [rect, lab].forEach((elm: any) => {
+          elm.style.cursor = 'pointer';
+          elm.addEventListener('click', (e: any) => { e.stopPropagation?.(); focusPath(svg, incoming, n.id); });
+        });
+      }
 
     // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
       const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
@@ -1568,6 +1586,46 @@ export function addFlowSection(nav: any, sections: any) {
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
 // bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+// --- Focus a supply path --------------------------------------------------------------------------
+// "Where does this node's power come from?" is the question the diagram is worst at once there are more
+// than a handful of ribbons. Clicking a node lights everything upstream of it and dims the rest.
+//
+// Done by classing the <svg> and the elements on the path, never by rewriting their fill-opacity: that
+// attribute already carries meaning (a hairline says the quantity is unknown), and overwriting it to dim
+// would destroy the very thing the diagram is being read for.
+let focusedNode: string | null = null;
+
+function focusPath(svg: any, incoming: any, id: string) {
+  if (focusedNode === id) { clearFocus(svg); return; }
+  focusedNode = id;
+
+  // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
+  // graph acyclic — this walks whatever it is handed.
+  const onPath = new Set<string>([id]);
+  const links = new Set<string>();
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    (incoming[cur] || []).forEach((l: any) => {
+      links.add(l.source + '' + l.target);
+      if (!onPath.has(l.source)) { onPath.add(l.source); stack.push(l.source); }
+    });
+  }
+
+  svg.querySelectorAll('[data-node]').forEach((e: any) =>
+    e.classList[onPath.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
+  svg.querySelectorAll('[data-src]').forEach((e: any) =>
+    e.classList[links.has(e.getAttribute('data-src') + '' + e.getAttribute('data-dst')) ? 'add' : 'remove']('on-path'));
+  svg.classList.add('flow-focus');
+}
+
+function clearFocus(svg: any) {
+  focusedNode = null;
+  if (!svg) return;
+  svg.classList.remove('flow-focus');
+  svg.querySelectorAll('.on-path').forEach((e: any) => e.classList.remove('on-path'));
+}
+
 // --- Node hover card ------------------------------------------------------------------------------
 // One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
 let nodeCardEl: any = null;
