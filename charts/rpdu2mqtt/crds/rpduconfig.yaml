@@ -627,6 +627,9 @@ spec:
                   Enabled:
                     type: boolean
                     description: Enable the embedded configuration web GUI.
+                  ShowProjectLink:
+                    type: boolean
+                    description: Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.
                   AuthType:
                     type: string
                     enum:

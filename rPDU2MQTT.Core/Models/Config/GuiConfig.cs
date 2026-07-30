@@ -13,6 +13,11 @@ public class GuiConfig
     [Description("Enable the embedded configuration web GUI.")]
     public bool Enabled { get; set; }
 
+    /// <summary>Show the link back to the project's GitHub page in the GUI footer.</summary>
+    [DefaultValue(true)]
+    [Description("Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
+    public bool ShowProjectLink { get; set; } = true;
+
     [DefaultValue(GuiAuthType.Basic)]
     [Display(Name = "Authentication")]
     [Description("How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).")]

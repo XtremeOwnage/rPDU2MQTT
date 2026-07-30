@@ -4360,7 +4360,32 @@ function wireOperatorSwitch(sec     ) {
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
 
-// Section-specific action buttons (connection tests; Home Assistant discovery actions).
+// A link out to the system this page configures. It appears only when a URL is actually configured, so it
+// can never dangle, and the href is resolved on each visit rather than at build time — otherwise editing
+// the URL and clicking straight through would open the old one.
+function externalLink(label        , href                     , hint        ) {
+  const a      = el('a', { class: 'ext-link', target: '_blank', rel: 'noopener', title: hint }, label + ' ↗');
+  const sync = () => {
+    const u = href();
+    if (u) { a.href = u; a.title = hint + '\n' + u; a.classList.remove('is-hidden'); }
+    else a.classList.add('is-hidden');
+  };
+  sync();
+  // activate() announces every tab switch, so a URL edited elsewhere is picked up on the way back here.
+  window.addEventListener?.('rpdu:activate', sync);
+  return a;
+}
+
+// A configured URL, trimmed and only if it looks like one — a half-typed host shouldn't produce a link.
+function cfgUrl(...path          )                {
+  let o      = state.data;
+  for (const p of path) { if (o == null) return null; o = o[p]; }
+  const s = typeof o === 'string' ? o.trim() : '';
+  return /^https?:\/\/.+/i.test(s) ? s.replace(/\/+$/, '') : null;
+}
+
+// Section-specific action buttons (connection tests; Home Assistant discovery actions; a way in to the
+// system being configured).
 function sectionActions(node     ) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
   const add = (label        , fn     , cls         ) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
@@ -4368,11 +4393,36 @@ function sectionActions(node     ) {
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') add('Test connections', testModbus);
-  else if (node.key === 'EmonCMS') { add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger'); }
-  else if (node.key === 'HomeAssistant') {
-    if ((state.data.HomeAssistant || {}).DiscoveryEnabled === false) return null;
-    add('Republish discovery', rediscoverHa);
-    add('Clear discovery', clearHa, 'danger');
+  else if (node.key === 'EmonCMS') {
+    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
+    bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
+  } else if (node.key === 'HomeAssistant') {
+    if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
+      add('Republish discovery', rediscoverHa);
+      add('Clear discovery', clearHa, 'danger');
+    }
+    // The base URL is configured for the Energy Dashboard sync, but it's the way in to HA either way.
+    bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
+  } else if (node.key === 'Prometheus') {
+    // Our own exporter, not the Pushgateway (that URL is a write endpoint, not something to visit). Built
+    // from this page's hostname the way the API docs links are — it only resolves if that port is exposed.
+    bar.appendChild(externalLink('Open /metrics', () => {
+      const p = state.data?.Prometheus || {};
+      return p.Exporter === false ? null : `${location.protocol}//${location.hostname}:${p.Port || 9184}/metrics`;
+    }, 'The metrics this bridge exposes for Prometheus to scrape'));
+  } else if (node.key === 'Pdus') {
+    // One way in per configured PDU — their web UIs are where you go to check anything this can't show.
+    Object.entries(state.data?.Pdus || {}).forEach(([id, pdu]     ) => {
+      bar.appendChild(externalLink(`Open ${id}`, () => {
+        const c = pdu?.Connection || {};
+        const host = (c.Host || '').trim();
+        if (!host) return null;
+        const scheme = c.Scheme || 'http';
+        const port = c.Port && c.Port !== 80 && c.Port !== 443 ? ':' + c.Port : '';
+        return `${scheme}://${host}${port}`;
+      }, `Open the ${id} PDU's own web interface`));
+    });
+    if (!bar.children.length) return null;
   } else return null;
 
   return bar;
@@ -4485,6 +4535,9 @@ function renderStatus(body     ) {
   configWritable = body.configWritable !== false;
   set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
   renderSaveBar();
+
+  // Off by default only if the operator turned it off; absent (an older server) means show it.
+  set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
 
   // Show a logout link + signed-in user when OIDC is in use.
   if (body.auth === 'oidc') {

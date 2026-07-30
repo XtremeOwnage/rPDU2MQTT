@@ -284,6 +284,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
         actionsEnabled = config.Primary.ActionsEnabled,
         auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
+        showProjectLink = config.Gui.ShowProjectLink,
         user,
         // Operator update state (#210) for the header indicator; null when no operator is reporting.
         update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),

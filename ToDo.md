@@ -179,14 +179,23 @@ In addition, overing over items in the flow chart, SHOULD yield a hover-over pop
 
 ----------------------------
 
-Should add a button to the emoncms page, which  opens a webpage/tab to emoncms.
+- [x] Should add a button to the emoncms page, which  opens a webpage/tab to emoncms.
 
 Prob should do the same for home assistant. And promehteus. And the PDUs.
 
 URLs should be optional, and button only display if populated.
 
+    Done, and no new config was needed: EmonCMS.Url, HomeAssistant.EnergyDashboard.Url and each PDU's
+    Connection (scheme/host/port) already carry them. Each button appears only when its URL is set and
+    looks like one, so it can never dangle. For Prometheus the link is our own /metrics exporter, not
+    Prometheus.Url — that is the Pushgateway write endpoint, not somewhere to visit.
+
 -----------------------------
 
-Minor- should add a button / badge somewhere on the web interface linking back to our github page. Ability to disable in the options too, but, default enabled.
+- [x] Minor- should add a button / badge somewhere on the web interface linking back to our github page. Ability to disable in the options too, but, default enabled.
+
+    A quiet mark bottom-right rather than a badge competing with the data; hides itself behind the save
+    bar or a toast. Gui.ShowProjectLink turns it off, default on. Config-model change, so both committed
+    CRD manifests and the GUI schema fixture were regenerated.
 
 Under diagnostics page, prob put a button linking to our discord for support. https://static.xtremeownage.com/discord

@@ -522,6 +522,25 @@
   .ro-note { color:var(--warn); font-size:12.5px; }
   .ro-note code { background:var(--panel3); padding:1px 5px; border-radius:var(--r-xs); font-family:var(--mono); font-size:11px; }
 
+  /* A quiet mark in the corner rather than a badge competing with the data; Gui.ShowProjectLink hides it. */
+  .project-link {
+    position:fixed; right:var(--sp-4); bottom:var(--sp-3); z-index:10;
+    font-size:11px; color:var(--faint); text-decoration:none; opacity:.65; transition:opacity .12s, color .12s;
+  }
+  .project-link:hover { opacity:1; color:var(--accent); }
+  /* Never let it sit under the save bar or a toast. */
+  body:has(#savebar:not(.is-hidden)) .project-link, body:has(.toasts .toast) .project-link { display:none; }
+  @media (max-width: 860px) { .project-link { display:none; } }
+
+  /* Link out to the system a page configures — reads as an action, but plainly a way off the page. */
+  .ext-link {
+    display:inline-flex; align-items:center; gap:6px; padding:5px 11px; font-size:12.5px; font-weight:550;
+    color:var(--accent); text-decoration:none; background:transparent;
+    border:1px solid var(--accent-dim); border-radius:var(--r-sm); white-space:nowrap;
+    transition:background .12s, border-color .12s;
+  }
+  .ext-link:hover { background:var(--accent-bg); border-color:var(--accent); text-decoration:none; }
+
   /* --- Toasts ------------------------------------------------------------------------------------- */
   .toasts {
     position:fixed; right:var(--sp-4); bottom:var(--sp-4); z-index:60;
