@@ -16,3 +16,22 @@ services:
     # ports:
     #   - "8080:8080"   # Gui.Enabled          -> configuration web GUI
     #   - "9184:9184"   # Prometheus.Exporter  -> /metrics endpoint
+
+  # Optional. A Valkey (Redis-compatible) instance for the bridge's shared, durable state — today the
+  # energy accumulator. Its running kWh totals have to survive a restart: Home Assistant and EmonCMS read
+  # a drop as a meter reset and correct their already-recorded history for it.
+  #
+  # Uncomment this service and set Cache.Enabled + Cache.Connection: valkey:6379 in config.yaml. Without
+  # it the totals go to a local state file instead, which is fine for a single container.
+  # valkey:
+  #   image: valkey/valkey:8-alpine
+  #   container_name: rpdu2mqtt-valkey
+  #   restart: unless-stopped
+  #   # appendonly keeps the counters across a restart; drop it to run as a pure cache.
+  #   command: ["--appendonly", "yes", "--dir", "/data"]
+  #   volumes:
+  #     - valkey-data:/data
+  #   # No published port: only rpdu2mqtt needs to reach it, over the compose network.
+
+# volumes:
+#   valkey-data:

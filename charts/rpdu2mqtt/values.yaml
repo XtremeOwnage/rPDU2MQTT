@@ -287,3 +287,28 @@ securityContext: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# A Valkey (Redis-compatible) instance for the bridge's shared, durable state — today the energy
+# accumulator. Its running kWh totals must survive a restart: Home Assistant and EmonCMS read a drop as a
+# meter reset and correct their already-recorded history for it.
+#
+# Enabling this only deploys the instance; the bridge uses it when config.Cache.Enabled is true. Point
+# config.Cache.Connection at your own instance and leave this disabled to share an existing one.
+valkey:
+  enabled: false
+  image:
+    repository: valkey/valkey
+    tag: "8-alpine"
+    pullPolicy: IfNotPresent
+  persistence:
+    # Off keeps it a pure cache: fine for everything except the energy totals, which are the reason it
+    # exists. Turn this on if you accumulate energy and want the counter to survive a pod restart.
+    enabled: false
+    size: 128Mi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

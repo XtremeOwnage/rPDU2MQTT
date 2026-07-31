@@ -1,0 +1,116 @@
+{{- if .Values.valkey.enabled }}
+{{- /*
+  A single Valkey instance for the bridge's shared, durable state — today the energy accumulator, whose
+  running kWh totals must survive a restart: consumers read a drop as a meter reset and correct their
+  recorded history for it.
+
+  Deliberately minimal. One replica, because this is a cache with one writer, not a datastore needing HA;
+  no auth by default, because it is only reachable from the bridge via the NetworkPolicy below. Point
+  `config.Cache.Connection` at an existing instance and set `valkey.enabled: false` to use your own.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-valkey
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "rpdu2mqtt.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: valkey
+  {{- if .Values.valkey.persistence.enabled }}
+  strategy:
+    # The volume is ReadWriteOnce, so the old pod must release it before the new one starts.
+    type: Recreate
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "rpdu2mqtt.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: valkey
+    spec:
+      containers:
+        - name: valkey
+          image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
+          imagePullPolicy: {{ .Values.valkey.image.pullPolicy }}
+          args:
+            {{- if .Values.valkey.persistence.enabled }}
+            # Append-only file: the totals are small and written every pass, and losing the last few
+            # seconds on an unclean stop is fine — losing all of them is not.
+            - "--appendonly"
+            - "yes"
+            - "--dir"
+            - "/data"
+            {{- else }}
+            - "--save"
+            - ""
+            - "--appendonly"
+            - "no"
+            {{- end }}
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: valkey
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: valkey
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          {{- if .Values.valkey.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      volumes:
+        {{- if .Values.valkey.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "rpdu2mqtt.fullname" . }}-valkey
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-valkey
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: valkey
+      protocol: TCP
+      name: valkey
+  selector:
+    {{- include "rpdu2mqtt.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+{{- if .Values.valkey.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-valkey
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.valkey.persistence.size }}
+  {{- with .Values.valkey.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}
+{{- end }}

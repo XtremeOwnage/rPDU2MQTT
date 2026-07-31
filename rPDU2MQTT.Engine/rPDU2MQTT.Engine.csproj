@@ -16,6 +16,7 @@
 		<PackageReference Include="HiveMQtt" Version="0.45.1" />
 		<PackageReference Include="KubernetesClient" Version="19.0.2" />
 		<PackageReference Include="prometheus-net" Version="8.2.1" />
+		<PackageReference Include="StackExchange.Redis" Version="3.0.25" />
 		<PackageReference Include="YamlDotNet" Version="18.1.0" />
 	</ItemGroup>
 

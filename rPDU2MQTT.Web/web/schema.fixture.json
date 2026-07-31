@@ -2098,6 +2098,53 @@
     ]
   },
   {
+    "key": "Cache",
+    "label": "Cache",
+    "type": "object",
+    "required": false,
+    "properties": [
+      {
+        "key": "Enabled",
+        "label": "Enabled",
+        "description": "Use a Redis/Valkey instance for shared, durable state (today: the energy accumulator).",
+        "type": "bool",
+        "required": false,
+        "default": false
+      },
+      {
+        "key": "Connection",
+        "label": "Connection",
+        "description": "Redis/Valkey endpoint, host:port. A full StackExchange.Redis connection string also works, e.g. \"valkey:6379,ssl=false\".",
+        "type": "string",
+        "required": false,
+        "default": "localhost:6379"
+      },
+      {
+        "key": "Password",
+        "label": "Password",
+        "description": "Password, if the instance requires one. Leave blank for an unauthenticated instance on a trusted network.",
+        "type": "password",
+        "required": false
+      },
+      {
+        "key": "KeyPrefix",
+        "label": "KeyPrefix",
+        "description": "Prefix for every key written, so the instance can be shared with other applications.",
+        "type": "string",
+        "required": false,
+        "default": "rpdu2mqtt:"
+      },
+      {
+        "key": "ConnectTimeoutSeconds",
+        "label": "ConnectTimeoutSeconds",
+        "description": "Seconds to wait when connecting before falling back to local state.",
+        "type": "int",
+        "required": false,
+        "default": 5
+      }
+    ]
+  },
+  {
     "key": "Operator",
     "label": "Operator",
     "description": "Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update).",

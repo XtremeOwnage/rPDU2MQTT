@@ -1005,6 +1005,25 @@ spec:
                           description: Poll this device. Turn off to disable it without deleting the connection.
                     description: Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.
                 description: Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).
+              Cache:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Enabled:
+                    type: boolean
+                    description: 'Use a Redis/Valkey instance for shared, durable state (today: the energy accumulator).'
+                  Connection:
+                    type: string
+                    description: Redis/Valkey endpoint, host:port. A full StackExchange.Redis connection string also works, e.g. "valkey:6379,ssl=false".
+                  Password:
+                    type: string
+                    description: Password, if the instance requires one. Leave blank for an unauthenticated instance on a trusted network.
+                  KeyPrefix:
+                    type: string
+                    description: Prefix for every key written, so the instance can be shared with other applications.
+                  ConnectTimeoutSeconds:
+                    type: integer
+                    description: Seconds to wait when connecting before falling back to local state.
               Operator:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
