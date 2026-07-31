@@ -10,6 +10,10 @@ namespace rPDU2MQTT.Models.Config;
 /// </summary>
 public class EnergyFlowConfig
 {
+    /// <summary>Deriving energy (kWh) from the power readings already being collected.</summary>
+    [Description("Accumulate energy (kWh) from the power readings, for nodes that report power but not energy.")]
+    public EnergyAggregationConfig Aggregation { get; set; } = new();
+
     /// <summary>
     /// Custom upstream nodes that aren't auto-derived from a PDU (e.g. a breaker, a transfer-switch
     /// output, the grid "Total"). Auto nodes use ids like <c>pdu:&lt;name&gt;</c> / <c>outlet:&lt;pdu&gt;:&lt;n&gt;</c>.

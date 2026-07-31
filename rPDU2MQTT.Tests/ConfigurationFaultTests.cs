@@ -76,3 +76,42 @@ public class ConfigurationFaultTests
         Assert.Single(faults.All);
     }
 }
+
+/// <summary>
+/// The Status board must distinguish a cache nobody has used from one that is down.
+/// </summary>
+public class CacheHealthTests
+{
+    [Fact]
+    public void BeforeAnythingTries_ItIsNotYetKnown_NotUnreachable()
+    {
+        // Energy aggregation is off by default, so nothing touches the cache. Reporting the initial
+        // false as "UNREACHABLE" made a perfectly healthy Valkey look broken on the board.
+        var h = new rPDU2MQTT.Core.Flow.CacheHealth();
+
+        Assert.False(h.Attempted);          // -> the card shows "checking", not a red failure
+        Assert.False(h.Reachable);
+        Assert.Null(h.Error);
+    }
+
+    [Fact]
+    public void SuccessAndFailureBothCountAsAttempted()
+    {
+        var h = new rPDU2MQTT.Core.Flow.CacheHealth();
+
+        h.Succeeded();
+        Assert.True(h.Attempted);
+        Assert.True(h.Reachable);
+        Assert.Null(h.Error);
+
+        h.Failed("connection refused");
+        Assert.True(h.Attempted);
+        Assert.False(h.Reachable);
+        Assert.Equal("connection refused", h.Error);
+
+        // And it recovers, so a transient outage doesn't leave the card red forever.
+        h.Succeeded();
+        Assert.True(h.Reachable);
+        Assert.Null(h.Error);
+    }
+}

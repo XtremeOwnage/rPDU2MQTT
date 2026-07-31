@@ -65,5 +65,21 @@ public sealed class RedisCacheClient : ICacheClient, IDisposable
         catch (Exception ex) { health.Failed(ex.Message); throw; }
     }
 
+    /// <summary>
+    /// A real round-trip, not just IsConnected: the multiplexer reports connected while a half-open
+    /// socket is still being reaped, and the Status board should say what the cache is doing now.
+    /// </summary>
+    public bool Ping()
+    {
+        try
+        {
+            var db = Db ?? throw new InvalidOperationException("cache is not connected");
+            db.Ping();
+            health.Succeeded();
+            return true;
+        }
+        catch (Exception ex) { health.Failed(ex.Message); return false; }
+    }
+
     public void Dispose() { if (connection.IsValueCreated) connection.Value?.Dispose(); }
 }

@@ -696,6 +696,20 @@ spec:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
                 properties:
+                  Aggregation:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Enabled:
+                        type: boolean
+                        description: Derive energy (kWh) by integrating each node's power over time. A real energy source on a node always takes precedence.
+                      SampleIntervalSeconds:
+                        type: integer
+                        description: How often to sample power, in seconds. Shorter samples track a spiky load more closely.
+                      MaxGapSeconds:
+                        type: integer
+                        description: Longest gap between samples that still counts, in seconds. A longer gap is recorded as unmeasured rather than guessed.
+                    description: Accumulate energy (kWh) from the power readings, for nodes that report power but not energy.
                   Nodes:
                     type: array
                     items:

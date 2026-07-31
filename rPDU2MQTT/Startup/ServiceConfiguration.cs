@@ -179,9 +179,33 @@ public static class ServiceConfiguration
         // In a UI-only split process the MQTT cache is never fed (the ingest isn't hosted there), so its reads
         // return false and everything falls through to the mirror — this is strictly additive, never a
         // regression. It is the single-binary deployment that makes it whole.
-        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.CompositeFlowValueSource(
-            sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-            grainSyncedFlow));
+        // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
+        // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
+        // integrate real readings rather than its own output.
+        var aggregationOn = cfg.EnergyFlow.Aggregation.Enabled;
+        if (aggregationOn)
+        {
+            services.AddSingleton(sp => new Services.EnergyAggregationService(
+                cfg,
+                new Core.Flow.CompositeFlowValueSource(
+                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow),
+                sp.GetRequiredService<Core.Flow.IEnergyStore>()));
+            // Accumulating is data production, so only the worker does it — otherwise every replica would
+            // integrate the same readings into its own copy of the counter.
+            if (worker)
+                services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyAggregationService>());
+        }
+
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn
+            ? new Core.Flow.CompositeFlowValueSource(
+                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+                grainSyncedFlow,
+                // LAST on purpose: the composite takes the first source with a fresh reading, so a node
+                // with a real energy binding uses that and the derived total only fills a gap.
+                sp.GetRequiredService<Services.EnergyAggregationService>())
+            : new Core.Flow.CompositeFlowValueSource(
+                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+                grainSyncedFlow));
 
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).

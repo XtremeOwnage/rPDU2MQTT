@@ -99,7 +99,7 @@ Click it again, to restore.
 
 - [x] Energy Flow Chart- ability to display Power.... Or Energy.  (#275 — metric toggle on the Flow tab)
 
-- Need to aggregate energy data, using the collected power data. Will need redis broker to support
+- [x] Need to aggregate energy data, using the collected power data. Will need redis broker to support
     Helm chart will need redis broker. Docker compse example, will need redis.
     For those wanting simple install, should offer a simple sqlite database or mabye an inmemory cache or something.
     Cache will be responsible for aggregating Power into Energy.
