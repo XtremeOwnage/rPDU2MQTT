@@ -112,6 +112,11 @@ public static class ServiceConfiguration
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
         // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
+        // Optional features that were switched on but can't run. Registered before anything checks, so a
+        // fault recorded during setup is visible to the Status board rather than only in the log.
+        var faults = new Core.Startup.ConfigurationFaults();
+        services.AddSingleton(faults);
+
         services.AddSingleton<Services.EmonCmsStatus>();
 
         // The shared cache. Registered whether or not it is enabled so the Status board can say "not
@@ -247,9 +252,20 @@ public static class ServiceConfiguration
             if (cfg.EmonCMS.Enabled)
             {
                 // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
-                if (cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http)
-                    ThrowError.TestRequiredConfigurationSection(cfg.EmonCMS.Url, "EmonCMS.Url");
-                services.AddHostedService<EmonCmsExportService>();
+                // A missing one used to throw here, so enabling EmonCMS in the GUI before filling in the
+                // URL left the process unable to start — taking the PDU poll, MQTT, HA and the flow with
+                // it. Skip just this exporter and say so; nothing a toggle can do may stop the bridge.
+                var emonFault = Core.Startup.DestinationRequirements.EmonCms(
+                    cfg.EmonCMS.Enabled,
+                    cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http,
+                    cfg.EmonCMS.Url);
+                if (emonFault is not null)
+                {
+                    Log.Error(emonFault.Message);
+                    faults.Record(emonFault);
+                }
+                else
+                    services.AddHostedService<EmonCmsExportService>();
             }
 
             // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
