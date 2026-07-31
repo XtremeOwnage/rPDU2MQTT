@@ -1477,6 +1477,39 @@
     "required": false,
     "properties": [
       {
+        "key": "Aggregation",
+        "label": "Aggregation",
+        "description": "Accumulate energy (kWh) from the power readings, for nodes that report power but not energy.",
+        "type": "object",
+        "required": false,
+        "properties": [
+          {
+            "key": "Enabled",
+            "label": "Enabled",
+            "description": "Derive energy (kWh) by integrating each node's power over time. A real energy source on a node always takes precedence.",
+            "type": "bool",
+            "required": false,
+            "default": false
+          },
+          {
+            "key": "SampleIntervalSeconds",
+            "label": "SampleIntervalSeconds",
+            "description": "How often to sample power, in seconds. Shorter samples track a spiky load more closely.",
+            "type": "int",
+            "required": false,
+            "default": 10
+          },
+          {
+            "key": "MaxGapSeconds",
+            "label": "MaxGapSeconds",
+            "description": "Longest gap between samples that still counts, in seconds. A longer gap is recorded as unmeasured rather than guessed.",
+            "type": "int",
+            "required": false,
+            "default": 60
+          }
+        ]
+      },
+      {
         "key": "Nodes",
         "label": "Nodes",
         "description": "Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.",
