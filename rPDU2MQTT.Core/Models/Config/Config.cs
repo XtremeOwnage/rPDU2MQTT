@@ -75,6 +75,9 @@ public class Config
     [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
     public ModbusConfig Modbus { get; set; } = new ModbusConfig();
 
+    /// <summary>Shared Redis/Valkey cache — durable state that survives restarts and is shared by replicas.</summary>
+    public CacheConfig Cache { get; set; } = new CacheConfig();
+
     [YamlMember(Alias = "Operator", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update).")]
     public OperatorConfig Operator { get; set; } = new OperatorConfig();
 

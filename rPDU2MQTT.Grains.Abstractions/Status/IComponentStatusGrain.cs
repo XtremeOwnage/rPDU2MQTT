@@ -34,5 +34,8 @@ public interface IHomeAssistantStatusGrain : IComponentStatusGrain { }
 /// <summary>The Prometheus exporter (key <c>prometheus</c>).</summary>
 public interface IPrometheusStatusGrain : IComponentStatusGrain { }
 
+/// <summary>The shared Redis/Valkey cache (key <c>cache</c>) — where the energy counters live.</summary>
+public interface ICacheStatusGrain : IComponentStatusGrain { }
+
 /// <summary>One process in the fleet (key <c>node:{processId}</c>) — its roles, version and uptime.</summary>
 public interface INodeStatusGrain : IComponentStatusGrain { }

@@ -35,7 +35,11 @@ jobs:
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set split.enabled=true \
             --set config.Gui.Enabled=true --set config.Prometheus.Exporter=true)
-          [ "$(echo "$out" | grep -c '^kind: Deployment')" = 3 ] || { echo "expected 3 role Deployments"; exit 1; }
+          # Count the ROLE Deployments by name, not every Deployment in the chart — the Valkey instance is
+          # a legitimate fourth. A bare total would have let a missing role slip through as soon as anything
+          # else was added, which is exactly what happened when Valkey arrived.
+          roles=$(echo "$out" | grep -cE '^  name: rpdu2mqtt-(worker|api|ui)$')
+          [ "$roles" = 3 ] || { echo "expected 3 role Deployments, found $roles"; exit 1; }
           for role in worker api ui; do
             echo "$out" | grep -q "name: rpdu2mqtt-$role$" || { echo "missing $role Deployment"; exit 1; }
             echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }

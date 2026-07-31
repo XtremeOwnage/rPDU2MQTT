@@ -96,6 +96,28 @@ public sealed class PrometheusStatusGrain : ComponentStatusGrainBase, IPrometheu
 }
 
 /// <summary>
+/// The shared cache. Unlike the other destinations, being <i>configured but unreachable</i> is a real
+/// failure rather than an "off" state: the energy counters it holds are what let a restart continue a
+/// total instead of looking like a meter reset, so a silent fallback to local state is worth shouting
+/// about.
+/// </summary>
+public sealed class CacheStatusGrain : ComponentStatusGrainBase, ICacheStatusGrain
+{
+    protected override int Order => 55;
+    protected override string DefaultTitle => "Cache";
+
+    protected override Verdict Evaluate(DateTime nowUtc)
+    {
+        if (!report.Enabled)
+            return new(StatusLevel.Off, "Not configured", report.Detail);
+        // Ok is set by the reporter from an actual round-trip, not from the config saying it should work.
+        return report.Ok == false
+            ? new(StatusLevel.Bad, "Unreachable", report.Detail)
+            : new(StatusLevel.Good, "Connected", report.Detail);
+    }
+}
+
+/// <summary>
 /// One process in the fleet. It reports itself; the base turns its silence amber and eventually retires the
 /// card — which is the whole "is that replica still there?" question, answered without a heartbeat topic.
 /// </summary>

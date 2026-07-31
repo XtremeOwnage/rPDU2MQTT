@@ -25,8 +25,9 @@ public sealed class StatusReporter : BackgroundService
     private readonly ISnapshotCache snapshots;
     private readonly EmonCmsStatus emon;
     private readonly ProcessIdentity self;
+    private readonly Core.Flow.CacheHealth? cacheHealth;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null)
     {
         this.grains = grains;
         this.config = config;
@@ -34,6 +35,7 @@ public sealed class StatusReporter : BackgroundService
         this.snapshots = snapshots;
         this.emon = emon;
         this.self = self;
+        this.cacheHealth = cacheHealth;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -94,6 +96,18 @@ public sealed class StatusReporter : BackgroundService
         {
             Enabled = config.Prometheus.Exporter,
             Detail = $":{config.Prometheus.Port}/metrics",
+        });
+
+        // The shared cache. Ok comes from a real round-trip via the store, not from the config claiming it
+        // should work — "configured but unreachable" is precisely the state worth surfacing, because the
+        // bridge keeps running on local state and the energy counters quietly stop being shared.
+        await grains.GetGrain<ICacheStatusGrain>("cache").Report(new ComponentReport
+        {
+            Enabled = config.Cache.Enabled,
+            Ok = config.Cache.Enabled ? cacheHealth?.Reachable : null,
+            Detail = config.Cache.Enabled
+                ? (cacheHealth?.Reachable == false ? (cacheHealth.Error ?? "no connection") : config.Cache.Connection)
+                : "Energy totals kept in a local file",
         });
 
         // This process. Its silence is what tells the board a replica has gone.
