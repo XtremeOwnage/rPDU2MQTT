@@ -3320,6 +3320,29 @@ function addEnergyOverviewSection(nav     , sections     ) {
   // The hint under a tile: the direction when there's a value, the reason when there isn't.
   const subOrWhy = (value               , kind        , whenKnown        ) => value == null ? whyNoReading(kind) : whenKnown;
 
+  // Same question for the battery's state of charge, which has its own source and so its own reasons to be
+  // blank. A bare "—" cannot be acted on: a battery with no soc source bound and one bound to a topic that
+  // never publishes look identical on screen and need completely different fixes. This happened for real —
+  // a soc source pointed at a topic name the publisher does not use, so power read fine and the percentage
+  // sat empty with nothing on the page to say why. Name the topic; that is the thing to check.
+  const whyNoSoc = (battIds          , liveInfo                     ) => {
+    const cfg = (state.data?.EnergyFlow?.Nodes || []).filter((n     ) => battIds.includes(n.Id));
+    if (!cfg.length) return 'no battery node';
+    const socSrcs = cfg.flatMap((n     ) => (n.Sources || []).filter((s     ) => s.Metric === 'soc'));
+    if (!socSrcs.length) return 'no charge source bound';
+    // Bound and expired: the endpoint still reports the last reading, so say how old it is rather than
+    // showing a figure that is no longer true.
+    const stale = battIds.map(id => liveInfo[`${id}|soc`]).find((i     ) => i && i.reported != null);
+    if (stale) {
+      const secs = Math.round(stale.ageSeconds || 0);
+      const ago = secs >= 3600 ? `${Math.round(secs / 360) / 10} h` : secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs} s`;
+      return `charge ${ago} stale`;
+    }
+    const first = socSrcs[0];
+    const what = first.Type === 'modbus' ? `${first.Connection || 'modbus'} reg ${first.Register}` : (first.Topic || 'its source');
+    return `no charge yet from ${what}`;
+  };
+
   // Sum a kind's out-direction (graph) values. Returns present (any nodes of this kind) and the known sum
   // (null when nodes exist but none has a value) so we can tell "no grid" from "grid, value unknown".
   const sumKind = (nodes       , kind        ) => {
@@ -3357,6 +3380,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const battIds = nodes.filter((n     ) => n.kind === 'battery').map((n     ) => n.id);
     const gridIds = nodes.filter((n     ) => n.kind === 'grid').map((n     ) => n.id);
     const liveBy                         = {};
+    // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh),
+    // which are the only way to tell a source that has expired from one that never published at all.
+    const liveInfo                      = {};
     const q = [
       ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
       ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
@@ -3364,7 +3390,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (q.length) {
       try {
         const lr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
-        (lr.body?.values || []).forEach((v     ) => { if (typeof v.value === 'number') liveBy[`${v.node}|${v.metric}`] = v.value; });
+        (lr.body?.values || []).forEach((v     ) => {
+          liveInfo[`${v.node}|${v.metric}`] = v;
+          if (typeof v.value === 'number') liveBy[`${v.node}|${v.metric}`] = v.value;
+        });
       } catch { /* no live cache — these reads just stay absent */ }
     }
     const sumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|realpower#in`; if (k in liveBy) { s += liveBy[k]; known = true; } }); return known ? s : null; };
@@ -3447,9 +3476,12 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (batt.present || battIds.length) {
       const dir = subOrWhy(battNet, 'battery', battNet  > 1 ? 'discharging' : battNet  < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
-      // SoC always leads the sub-line — "—" when no soc source is bound, so the state-of-charge slot is always
-      // shown (bind a soc source on the Nodes tab to fill it) rather than silently vanishing.
-      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), `${soc == null ? '—' : soc + '%'} · ${dir}`, cls);
+      // SoC always leads the sub-line — so the state-of-charge slot is always shown rather than silently
+      // vanishing. When it is blank it says why (unbound / stale / never delivered) instead of just "—",
+      // because "—" gives the operator nothing to go and fix.
+      const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
+      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls);
+      if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
         const g = el('div', { class: 'energy-soc-bar', title: `${soc}% state of charge` }, el('span', { style: { width: soc + '%' } }));
