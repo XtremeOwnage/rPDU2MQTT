@@ -364,6 +364,43 @@ public static class FlowGraphBuilder
                 links.Add(new FlowLink(from, to, value, known));
             }
 
+        // The return lane: a battery being charged, a grid being exported to.
+        //
+        // A battery and a grid connection carry power both ways, but a Sankey is a DAG — a two-way edge
+        // cannot be laid out, and a single signed value cannot be drawn at all (which is why a negative
+        // reading is clamped above). So the two directions become two things on the diagram: the node
+        // keeps the supply direction and stays to the LEFT of what it feeds, and its draw direction becomes
+        // a sink to the RIGHT of that same hub. Charging then reads as the inverter feeding the battery,
+        // which is what is physically happening.
+        //
+        // Both quantities are already measured and already separate: a Direction: split source fans one
+        // signed reading into `realpower` and `realpower#in` (see FlowMetricKey), and the MQTT and HA
+        // exports have consumed the #in side for a while. The graph was the last consumer ignoring it, so
+        // a charging battery simply vanished from the picture instead of changing sides.
+        //
+        // A terminal sink by construction — no outgoing links — so it cannot close a cycle however the
+        // rest is wired.
+        if (live is not null)
+        {
+            var inKey = FlowMetricKey.For(metric, "in");
+            foreach (var n in flow.Nodes)
+            {
+                if (string.IsNullOrEmpty(n.Id) || !outgoing.TryGetValue(n.Id, out var fed) || fed.Count == 0) continue;
+                if (!live.TryGetValue(n.Id, inKey, out var drawn) || drawn <= 0) continue;
+
+                // Attach it where the node sends its supply, so the pair sits either side of one hub.
+                var hub = fed[0];
+                var sinkId = n.Id + FlowMetricKey.InSuffix;
+                var k = kind.TryGetValue(n.Id, out var nk) ? nk : "node";
+                label[sinkId] = (label.TryGetValue(n.Id, out var nl) ? nl : n.Id)
+                    + (k == "battery" ? " (charging)" : k == "grid" ? " (export)" : " (in)");
+                kind[sinkId] = k;
+                leaf[sinkId] = drawn;
+                links.Add(new FlowLink(hub, sinkId, drawn, true));
+                wired.Add(hub); wired.Add(sinkId);
+            }
+        }
+
         // A node's own value: its measurement if it has one, else what its known links determine (a root
         // only has outflow, a leaf only inflow). No measurement and no known link means genuinely unknown —
         // reported as null rather than 0, so nothing downstream can mistake "we don't know" for "it's zero".
