@@ -2593,31 +2593,6 @@ function addFlowSection(nav     , sections     ) {
     const cols        = [];
     nodes.forEach((n     ) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
-    // Order each column so its links cross as little as possible. Left to the server's alphabetical order,
-    // a column of siblings feeding one parent draws a braid — the links physically cross even though the
-    // topology is a simple fan-in, which reads as complexity that isn't there.
-    //
-    // Barycentre heuristic: put each node next to the average position of what it connects to in the
-    // neighbouring column, sweeping forwards then back so both sides get a say. It is not optimal — minimum
-    // crossing is NP-hard — but it is the standard fix and it removes the braid.
-    const orderBy = (cn       , c        , neighbourCol        , side              ) => {
-      const idx                         = {};
-      (cols[neighbourCol] || []).forEach((n     , i        ) => { idx[n.id] = i; });
-      const bary = (n     ) => {
-        const ls = side === 'in' ? (incoming[n.id] || []) : (outgoing[n.id] || []);
-        const ps = ls.map((l     ) => idx[side === 'in' ? l.source : l.target]).filter((x     ) => x != null);
-        // No neighbour to anchor against: keep where it is, rather than jumping to the top.
-        return ps.length ? ps.reduce((a        , b        ) => a + b, 0) / ps.length : cn.indexOf(n);
-      };
-      const keyed = cn.map((n     , i        ) => ({ n, b: bary(n), i }));
-      keyed.sort((a, b) => a.b - b.b || a.i - b.i);   // stable: equal barycentres keep their relative order
-      cols[c] = keyed.map(k => k.n);
-    };
-    for (let pass = 0; pass < 2; pass++) {
-      for (let c = 1; c <= maxCol; c++) if (cols[c]) orderBy(cols[c], c, c - 1, 'in');
-      for (let c = maxCol - 1; c >= 0; c--) if (cols[c]) orderBy(cols[c], c, c + 1, 'out');
-    }
-
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
@@ -2683,8 +2658,19 @@ function addFlowSection(nav     , sections     ) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands), stacked on each node edge by target order.
-    links.sort((a     , b     ) => pos[a.target].y - pos[b.target].y).forEach((l     ) => {
+    // Ribbons (filled bezier bands). The draw order IS the stacking order — outOff/inOff accumulate as we
+    // go — so it has to satisfy both ends at once.
+    //
+    // Target y alone was not enough. It stacks a node's *outgoing* links correctly (they appear in
+    // ascending target order), but says nothing about the order of the links arriving at any one target:
+    // several MPPTs feeding one inverter all share a target, so they stacked in array order and the
+    // ribbons crossed — a plain fan-in drawn as a braid. Adding source y as the tiebreak means the links
+    // into a node arrive in the same vertical order as the nodes they come from, so parallel feeders no
+    // longer cross. Both keys together satisfy source and target stacking simultaneously.
+    links.sort((a     , b     ) =>
+      (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+      (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
+    ).forEach((l     ) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
