@@ -16,7 +16,7 @@ namespace rPDU2MQTT.Startup;
 /// </summary>
 public static class StartupSummary
 {
-    public static void Log(Config cfg, HostRole roles, IConfigSource source)
+    public static void Log(Config cfg, HostRole roles, IConfigSource source, Core.Startup.ConfigurationFaults? faults = null)
     {
         var roleNames = new[] { HostRole.Worker, HostRole.Api, HostRole.Ui, HostRole.Operator }
             .Where(r => roles.HasFlag(r))
@@ -50,9 +50,13 @@ public static class StartupSummary
         Serilog.Log.Information("  Energy dashboard sync: {State}.", cfg.HASS.EnergyDashboard?.Enabled == true ? "on" : "off");
         Serilog.Log.Information("  Prometheus exporter: {State}{Port}",
             cfg.Prometheus.Exporter ? "on" : "off", cfg.Prometheus.Exporter ? $" → :{cfg.Prometheus.Port}/metrics" : "");
+        // "on" has to mean it is actually running. A destination switched on but skipped for a missing
+        // setting reported "on" here while exporting nothing, which is the least helpful line in the log.
+        var emonFault = faults?.For("emoncms");
         Serilog.Log.Information("  EmonCMS: {State}{Detail}",
-            cfg.EmonCMS.Enabled ? "on" : "off",
-            cfg.EmonCMS.Enabled ? $" via {cfg.EmonCMS.Transport} (feeds auto-configure {(cfg.EmonCMS.Feeds.AutoConfigure ? "on" : "off")})" : "");
+            emonFault is not null ? "DISABLED (misconfigured)" : cfg.EmonCMS.Enabled ? "on" : "off",
+            emonFault is not null ? $" — {emonFault.Path} is not set"
+                : cfg.EmonCMS.Enabled ? $" via {cfg.EmonCMS.Transport} (feeds auto-configure {(cfg.EmonCMS.Feeds.AutoConfigure ? "on" : "off")})" : "");
         Serilog.Log.Information("  GUI: {State}.", cfg.Gui.Enabled ? $"on :{cfg.Gui.Port}" : "off");
 
         // How to see more, said once, where someone reading the log will find it.

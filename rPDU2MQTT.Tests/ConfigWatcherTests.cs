@@ -186,6 +186,11 @@ public class MqttOptionsFactoryTests
 /// MqttReconfigurator (#192): the decision to re-point, and the re-point sequence itself, driven through
 /// <see cref="FakeHiveMQClient"/> so no live broker is needed.
 /// </summary>
+// Shares MqttSubscriptions' process-wide registry with MqttResubscribeTests, which resets it between
+// cases. Without pinning both to one collection xUnit runs them in parallel and the reset lands mid-
+// assertion here — passing alone, failing in a full run. Static state is the cost of that registry
+// surviving a reconnect; this is the containment.
+[Collection("MqttSubscriptions")]
 public class MqttReconfiguratorTests
 {
     private static Config Sample()

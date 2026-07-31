@@ -26,8 +26,9 @@ public sealed class StatusReporter : BackgroundService
     private readonly EmonCmsStatus emon;
     private readonly ProcessIdentity self;
     private readonly Core.Flow.CacheHealth? cacheHealth;
+    private readonly Core.Startup.ConfigurationFaults? faults;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null)
     {
         this.grains = grains;
         this.config = config;
@@ -36,6 +37,7 @@ public sealed class StatusReporter : BackgroundService
         this.emon = emon;
         this.self = self;
         this.cacheHealth = cacheHealth;
+        this.faults = faults;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -75,15 +77,21 @@ public sealed class StatusReporter : BackgroundService
         // null, which the grain treats as "no news" rather than "no export".
         var e = emon.Snapshot();
         var attempted = emon.HasAttempted;
+        // Enabled but unusable is its own state, and it has to be visible: the exporter was skipped at
+        // startup so it will never attempt anything, which would otherwise read as a healthy "on" card
+        // that simply never counts up.
+        var emonFault = faults?.For("emoncms");
         await grains.GetGrain<IEmonCmsStatusGrain>("emoncms").Report(new ComponentReport
         {
             Enabled = config.EmonCMS.Enabled,
-            Ok = attempted ? e.Ok : null,
+            Ok = emonFault is not null ? false : (attempted ? e.Ok : null),
             Count = attempted ? e.Count : 0,
             EventUtc = e.LastSuccessUtc,
-            Detail = attempted && e.Ok == false
-                ? e.LastError
-                : config.EmonCMS.Transport.ToString().ToUpperInvariant(),
+            Detail = emonFault is not null
+                ? emonFault.Message
+                : attempted && e.Ok == false
+                    ? e.LastError
+                    : config.EmonCMS.Transport.ToString().ToUpperInvariant(),
         });
 
         await grains.GetGrain<IHomeAssistantStatusGrain>("homeassistant").Report(new ComponentReport
