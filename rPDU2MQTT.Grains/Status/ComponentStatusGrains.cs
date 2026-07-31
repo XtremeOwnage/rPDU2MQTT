@@ -110,7 +110,11 @@ public sealed class CacheStatusGrain : ComponentStatusGrainBase, ICacheStatusGra
     {
         if (!report.Enabled)
             return new(StatusLevel.Off, "Not configured", report.Detail);
-        // Ok is set by the reporter from an actual round-trip, not from the config saying it should work.
+        // Ok comes from an actual round-trip, not from the config saying it should work. Null means no
+        // probe has completed yet — amber, because claiming "Connected" on no evidence is the same
+        // mistake in the other direction as calling an untried cache "Unreachable".
+        if (report.Ok is null)
+            return new(StatusLevel.Warn, "Checking", report.Detail);
         return report.Ok == false
             ? new(StatusLevel.Bad, "Unreachable", report.Detail)
             : new(StatusLevel.Good, "Connected", report.Detail);

@@ -15,6 +15,13 @@ public interface ICacheClient
 
     /// <summary>Replace a hash wholesale.</summary>
     void HashSet(string key, IReadOnlyDictionary<string, string> fields);
+
+    /// <summary>
+    /// Is the cache actually answering? Needed because the Status board must tell the truth about a cache
+    /// nothing happens to be using — energy aggregation is off by default, so without an active probe the
+    /// card only ever reported the state of traffic that never occurred.
+    /// </summary>
+    bool Ping();
 }
 
 /// <summary>

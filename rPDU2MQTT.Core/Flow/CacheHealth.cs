@@ -14,12 +14,19 @@ public sealed class CacheHealth
 {
     private volatile string? error;
 
+    /// <summary>
+    /// Whether anything has actually tried yet. Without this, a configured-but-idle cache reported as
+    /// UNREACHABLE purely because nothing had used it — indistinguishable from one that is genuinely
+    /// down, which is the same "never reported vs stopped reporting" confusion this class exists to avoid.
+    /// </summary>
+    public bool Attempted { get; private set; }
+
     /// <summary>True once an operation has succeeded; false after one has failed.</summary>
     public bool Reachable { get; private set; }
 
     /// <summary>Why the last attempt failed, when it did.</summary>
     public string? Error => error;
 
-    public void Succeeded() { Reachable = true; error = null; }
-    public void Failed(string message) { Reachable = false; error = message; }
+    public void Succeeded() { Attempted = true; Reachable = true; error = null; }
+    public void Failed(string message) { Attempted = true; Reachable = false; error = message; }
 }

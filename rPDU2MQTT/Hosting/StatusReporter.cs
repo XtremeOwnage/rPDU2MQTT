@@ -27,8 +27,9 @@ public sealed class StatusReporter : BackgroundService
     private readonly ProcessIdentity self;
     private readonly Core.Flow.CacheHealth? cacheHealth;
     private readonly Core.Startup.ConfigurationFaults? faults;
+    private readonly Services.ICacheClient? cacheProbe;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null)
     {
         this.grains = grains;
         this.config = config;
@@ -38,6 +39,7 @@ public sealed class StatusReporter : BackgroundService
         this.self = self;
         this.cacheHealth = cacheHealth;
         this.faults = faults;
+        this.cacheProbe = cacheProbe;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -109,10 +111,14 @@ public sealed class StatusReporter : BackgroundService
         // The shared cache. Ok comes from a real round-trip via the store, not from the config claiming it
         // should work — "configured but unreachable" is precisely the state worth surfacing, because the
         // bridge keeps running on local state and the energy counters quietly stop being shared.
+        // Probe rather than wait for traffic. Energy aggregation is off by default, so nothing else
+        // touches the cache — the card previously reported "unreachable" for a perfectly healthy instance
+        // simply because nothing had used it yet.
+        if (config.Cache.Enabled) cacheProbe?.Ping();
         await grains.GetGrain<ICacheStatusGrain>("cache").Report(new ComponentReport
         {
             Enabled = config.Cache.Enabled,
-            Ok = config.Cache.Enabled ? cacheHealth?.Reachable : null,
+            Ok = config.Cache.Enabled ? (cacheHealth?.Attempted == true ? cacheHealth.Reachable : null) : null,
             Detail = config.Cache.Enabled
                 ? (cacheHealth?.Reachable == false ? (cacheHealth.Error ?? "no connection") : config.Cache.Connection)
                 : "Energy totals kept in a local file",

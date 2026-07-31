@@ -29,6 +29,8 @@ public class RedisEnergyStoreTests
             return Data.TryGetValue(key, out var h) ? h : new Dictionary<string, string>();
         }
 
+        public bool Ping() => !Down;
+
         public void HashSet(string key, IReadOnlyDictionary<string, string> fields)
         {
             if (Down) throw new InvalidOperationException("cache is not connected");
