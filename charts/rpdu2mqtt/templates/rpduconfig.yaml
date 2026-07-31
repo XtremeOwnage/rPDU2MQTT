@@ -17,10 +17,24 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+{{- /*
+  When the chart deploys Valkey, point the bridge at it — shipping the instance and leaving the bridge
+  unaware of it would be worse than not shipping it. The service name can't live in values.config, which is
+  copied verbatim, so it is merged in here; anything the user set under config.Cache wins.
+*/}}
+{{- $cfg := deepCopy .Values.config }}
+{{- if .Values.valkey.enabled }}
+{{- $defaults := dict "Enabled" true "Connection" (printf "%s-valkey:6379" (include "rpdu2mqtt.fullname" .)) }}
+{{- $_ := set $cfg "Cache" (merge (default (dict) $cfg.Cache) $defaults) }}
+{{- end }}
 spec:
   {{- if $existing.spec }}
+  {{- /*
+    An existing CR is kept as-is (preserveExisting), so an upgrade will NOT add the Cache section to a
+    deployment that already has one — set it in the GUI, or preserveExisting: false to apply values.config.
+  */}}
   {{- toYaml $existing.spec | nindent 2 }}
   {{- else }}
-  {{- toYaml .Values.config | nindent 2 }}
+  {{- toYaml $cfg | nindent 2 }}
   {{- end }}
 {{- end }}

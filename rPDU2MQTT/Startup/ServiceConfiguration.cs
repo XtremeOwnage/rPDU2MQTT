@@ -114,6 +114,25 @@ public static class ServiceConfiguration
         // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
         services.AddSingleton<Services.EmonCmsStatus>();
 
+        // The shared cache. Registered whether or not it is enabled so the Status board can say "not
+        // configured" rather than the card simply being absent — an absent card looks like a feature that
+        // doesn't exist, which is exactly the confusion this is meant to remove.
+        services.AddSingleton<Core.Flow.CacheHealth>();
+        if (cfg.Cache.Enabled)
+        {
+            services.AddSingleton<Services.RedisCacheClient>();
+            services.AddSingleton<Services.ICacheClient>(sp => sp.GetRequiredService<Services.RedisCacheClient>());
+            services.AddSingleton<Core.Flow.IEnergyStore>(sp => new Services.RedisEnergyStore(
+                sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
+        }
+        else
+        {
+            // A local file: correct for one process, and it keeps the counter across a restart, which is
+            // the property that actually matters. It just can't be shared between replicas.
+            services.AddSingleton<Core.Flow.IEnergyStore>(_ => new Core.Flow.FileEnergyStore(
+                Path.Combine(AppContext.BaseDirectory, "energy-totals.json"), m => Log.Warning(m)));
+        }
+
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
 

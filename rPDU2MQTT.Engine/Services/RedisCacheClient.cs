@@ -1,4 +1,5 @@
 using StackExchange.Redis;
+using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Models.Config;
 
 namespace rPDU2MQTT.Services;
@@ -19,9 +20,11 @@ namespace rPDU2MQTT.Services;
 public sealed class RedisCacheClient : ICacheClient, IDisposable
 {
     private readonly Lazy<ConnectionMultiplexer?> connection;
+    private readonly CacheHealth health;
 
-    public RedisCacheClient(CacheConfig cfg)
+    public RedisCacheClient(CacheConfig cfg, CacheHealth health)
     {
+        this.health = health;
         connection = new Lazy<ConnectionMultiplexer?>(() =>
         {
             var options = ConfigurationOptions.Parse(cfg.Connection);
@@ -37,18 +40,29 @@ public sealed class RedisCacheClient : ICacheClient, IDisposable
 
     public IReadOnlyDictionary<string, string> HashGetAll(string key)
     {
-        var db = Db ?? throw new InvalidOperationException("cache is not connected");
-        return db.HashGetAll(key).ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
+        try
+        {
+            var db = Db ?? throw new InvalidOperationException("cache is not connected");
+            var result = db.HashGetAll(key).ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
+            health.Succeeded();
+            return result;
+        }
+        catch (Exception ex) { health.Failed(ex.Message); throw; }
     }
 
     public void HashSet(string key, IReadOnlyDictionary<string, string> fields)
     {
-        var db = Db ?? throw new InvalidOperationException("cache is not connected");
-        // Replace wholesale: a node removed from the config must not leave its total behind forever.
-        var tx = db.CreateTransaction();
-        _ = tx.KeyDeleteAsync(key);
-        _ = tx.HashSetAsync(key, fields.Select(kv => new HashEntry(kv.Key, kv.Value)).ToArray());
-        tx.Execute();
+        try
+        {
+            var db = Db ?? throw new InvalidOperationException("cache is not connected");
+            // Replace wholesale: a node removed from the config must not leave its total behind forever.
+            var tx = db.CreateTransaction();
+            _ = tx.KeyDeleteAsync(key);
+            _ = tx.HashSetAsync(key, fields.Select(kv => new HashEntry(kv.Key, kv.Value)).ToArray());
+            tx.Execute();
+            health.Succeeded();
+        }
+        catch (Exception ex) { health.Failed(ex.Message); throw; }
     }
 
     public void Dispose() { if (connection.IsValueCreated) connection.Value?.Dispose(); }

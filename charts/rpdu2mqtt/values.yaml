@@ -295,15 +295,15 @@ affinity: {}
 # Enabling this only deploys the instance; the bridge uses it when config.Cache.Enabled is true. Point
 # config.Cache.Connection at your own instance and leave this disabled to share an existing one.
 valkey:
-  enabled: false
+  enabled: true
   image:
     repository: valkey/valkey
     tag: "8-alpine"
     pullPolicy: IfNotPresent
   persistence:
-    # Off keeps it a pure cache: fine for everything except the energy totals, which are the reason it
-    # exists. Turn this on if you accumulate energy and want the counter to survive a pod restart.
-    enabled: false
+    # On by default: the energy counters are the reason this exists, and losing them on a pod restart reads
+    # downstream as a meter reset. Turn it off to run as a pure cache with nothing worth keeping.
+    enabled: true
     size: 128Mi
     storageClass: ""
   resources:
