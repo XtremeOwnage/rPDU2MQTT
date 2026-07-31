@@ -64,4 +64,33 @@ public class OperatorGrainTests
         Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize("repo:unstable"));
         Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize(null));
     }
+[Fact]
+    public void ADeploymentNotRunningTheApp_IsLeftAlone()
+    {
+        // The label selector finds every Deployment in the release, and the chart's Valkey cache carries the
+        // same app.kubernetes.io/instance label. Selecting a container name for it used to fall back to the
+        // conventional "rpdu2mqtt" — and a strategic-merge patch keyed on name CREATES what isn't there, so
+        // the operator injected a whole crash-looping bridge container into the cache's pod.
+        var valkey = new[] { new k8s.Models.V1Container { Name = "valkey", Image = "valkey/valkey:8-alpine" } };
+
+        var targets = rPDU2MQTT.Grains.Operator.OperatorGrain.TargetContainers(valkey, "xtremeownage/rpdu2mqtt");
+
+        Assert.Empty(targets);   // empty means "skip this Deployment", never "invent a container"
+    }
+
+    [Fact]
+    public void ContainersRunningTheApp_AreTargeted()
+    {
+        // The counterpart: a real deployment, including a multi-container pod, still gets patched — and only
+        // the containers that actually run the app.
+        var pod = new[]
+        {
+            new k8s.Models.V1Container { Name = "rpdu2mqtt", Image = "ghcr.io/xtremeownage/rpdu2mqtt:unstable" },
+            new k8s.Models.V1Container { Name = "sidecar", Image = "busybox:latest" },
+        };
+
+        var targets = rPDU2MQTT.Grains.Operator.OperatorGrain.TargetContainers(pod, "xtremeownage/rpdu2mqtt");
+
+        Assert.Equal(new[] { "rpdu2mqtt" }, targets);
+    }
 }
