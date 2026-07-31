@@ -76,9 +76,9 @@ public class EnergyAggregationTests
         });
 
         var svc = new EnergyAggregationService(ConfigWith("solar"), new Fixed(), store);
-        // ExecuteAsync loads on start; drive one cycle and stop.
-        using var cts = new CancellationTokenSource(millisecondsDelay: 150);
-        try { svc.StartAsync(cts.Token).GetAwaiter().GetResult(); Thread.Sleep(120); } catch (OperationCanceledException) { }
+        // Call the carry-over directly. The first version started the service and slept, which passed
+        // locally and failed on a slower CI runner — a race, not a test.
+        Assert.Equal(1, svc.LoadTotals());
 
         Assert.True(svc.TryGetValue("solar", "energy", out var v));
         Assert.Equal(42.0, v);   // carried over, not restarted at 0

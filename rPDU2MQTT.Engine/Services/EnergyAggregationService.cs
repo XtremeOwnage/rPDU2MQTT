@@ -53,15 +53,23 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         return true;
     }
 
+    /// <summary>
+    /// Continue from wherever the last run got to. Separate from ExecuteAsync so the carry-over — the
+    /// whole reason the store exists — can be asserted directly; testing it by starting the service and
+    /// waiting for a timer was timing-dependent, and duly failed on a slower machine.
+    /// </summary>
+    public int LoadTotals()
+    {
+        states = new Dictionary<string, EnergyState>(store.Load(), StringComparer.OrdinalIgnoreCase);
+        return states.Count;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var agg = cfg.EnergyFlow.Aggregation;
-        // Continue from wherever the last run got to. A cold start here is the meter-reset case, so it is
-        // worth saying out loud how much was carried over.
-        var loaded = new Dictionary<string, EnergyState>(store.Load(), StringComparer.OrdinalIgnoreCase);
-        states = loaded;
+        var carried = LoadTotals();
         Log.Information($"Energy aggregation: sampling power every {agg.SampleIntervalSeconds}s "
-                      + $"(gaps over {agg.MaxGapSeconds}s are not counted); carried over {loaded.Count} node total(s).");
+                      + $"(gaps over {agg.MaxGapSeconds}s are not counted); carried over {carried} node total(s).");
 
         var maxGap = TimeSpan.FromSeconds(Math.Max(1, agg.MaxGapSeconds));
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, agg.SampleIntervalSeconds)));
