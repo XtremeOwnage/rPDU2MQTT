@@ -805,6 +805,48 @@ function collapsedMemberMap(): Record<string, any> {
 // Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
 // members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
 // group is only as known as its members (the same never-fabricate rule the server uses).
+/**
+ * An expanded group shows its members *instead of* its anchor, not as well as it.
+ *
+ * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
+ * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
+ * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
+ * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
+ *
+ * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
+ * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
+ * the toggle changes only how finely it is broken down.
+ *
+ * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
+ * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
+ * at least not a fabricated number, so that case keeps the hop.
+ */
+function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id));
+  if (!groups.length) return { nodes, links };
+
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g: any) => {
+    const byId: any = {}; outNodes.forEach((n: any) => { byId[n.id] = n; });
+    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    const members = (g.Members || []).filter((m: string) => byId[m]);
+    if (!members.length) return;
+
+    const feedsAnchor = outLinks.filter((l: any) => l.target === g.Id && members.includes(l.source));
+    const anchorFeeds = outLinks.filter((l: any) => l.source === g.Id);
+    if (!feedsAnchor.length || anchorFeeds.length !== 1) return;
+
+    const target = anchorFeeds[0];
+    const kept = outLinks.filter((l: any) => l.source !== g.Id && !(l.target === g.Id && members.includes(l.source)));
+    outLinks = kept.concat(feedsAnchor.map((ml: any) => ({
+      source: ml.source, target: target.target, value: ml.value,
+      known: ml.known !== false && target.known !== false,
+    })));
+    outNodes = outNodes.filter((n: any) => n.id !== g.Id);
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
 function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   const memberOf = collapsedMemberMap();
   if (!Object.keys(memberOf).length) return { nodes, links };
@@ -1149,7 +1191,10 @@ export function addFlowSection(nav: any, sections: any) {
     wrap.innerHTML = '';
     ensureGroupState();
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const folded = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
+    // at exactly one level of detail rather than both at once.
+    const folded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -1185,6 +1230,31 @@ export function addFlowSection(nav: any, sections: any) {
 
     const cols: any[] = [];
     nodes.forEach((n: any) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
+
+    // Order each column so its links cross as little as possible. Left to the server's alphabetical order,
+    // a column of siblings feeding one parent draws a braid — the links physically cross even though the
+    // topology is a simple fan-in, which reads as complexity that isn't there.
+    //
+    // Barycentre heuristic: put each node next to the average position of what it connects to in the
+    // neighbouring column, sweeping forwards then back so both sides get a say. It is not optimal — minimum
+    // crossing is NP-hard — but it is the standard fix and it removes the braid.
+    const orderBy = (cn: any[], c: number, neighbourCol: number, side: 'in' | 'out') => {
+      const idx: Record<string, number> = {};
+      (cols[neighbourCol] || []).forEach((n: any, i: number) => { idx[n.id] = i; });
+      const bary = (n: any) => {
+        const ls = side === 'in' ? (incoming[n.id] || []) : (outgoing[n.id] || []);
+        const ps = ls.map((l: any) => idx[side === 'in' ? l.source : l.target]).filter((x: any) => x != null);
+        // No neighbour to anchor against: keep where it is, rather than jumping to the top.
+        return ps.length ? ps.reduce((a: number, b: number) => a + b, 0) / ps.length : cn.indexOf(n);
+      };
+      const keyed = cn.map((n: any, i: number) => ({ n, b: bary(n), i }));
+      keyed.sort((a, b) => a.b - b.b || a.i - b.i);   // stable: equal barycentres keep their relative order
+      cols[c] = keyed.map(k => k.n);
+    };
+    for (let pass = 0; pass < 2; pass++) {
+      for (let c = 1; c <= maxCol; c++) if (cols[c]) orderBy(cols[c], c, c - 1, 'in');
+      for (let c = maxCol - 1; c >= 0; c--) if (cols[c]) orderBy(cols[c], c, c + 1, 'out');
+    }
 
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
