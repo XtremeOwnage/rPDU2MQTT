@@ -2,6 +2,7 @@
 // nav, and the overall build() that wires every tab.
 import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel } from './helpers.js';
 import { state } from './state.js';
+import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus } from './actions.js';
@@ -461,8 +462,14 @@ function wireOperatorSwitch(sec: any) {
     forceBtn.disabled = true;
     const res = await api('/api/operator/redeploy', { method: 'POST' });
     forceBtn.disabled = false;
-    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), res.ok && res.body?.ok);
-    if (res.ok && res.body?.ok) status.textContent = res.body.message;
+    const forcedOk = res.ok && res.body?.ok;
+    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), forcedOk);
+    if (forcedOk) {
+      status.textContent = res.body.message;
+      // The workload is about to go away. Say so, so the dropped stream reads as "busy", not "broken".
+      expectRestart('Re-pulling the deployed image');
+      toast('Updating — the bridge is restarting. This page reconnects on its own.', true);
+    }
   };
 
   const CHANNEL_LABEL: Record<string, string> = {
@@ -491,8 +498,13 @@ function wireOperatorSwitch(sec: any) {
       switchBtn.disabled = true;
       const res = await api('/api/operator/set-tag?tag=' + encodeURIComponent(tag), { method: 'POST' });
       switchBtn.disabled = false;
-      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), res.ok && res.body?.ok);
-      if (res.ok && res.body?.ok) status.textContent = res.body.message;
+      const switchedOk = res.ok && res.body?.ok;
+      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), switchedOk);
+      if (switchedOk) {
+        status.textContent = res.body.message;
+        expectRestart(`Switching to ${tag}`);
+        toast(`Updating to ${tag} — the bridge is restarting. This page reconnects on its own.`, true);
+      }
     };
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }

@@ -1,5 +1,6 @@
 // Status / diagnostics: component health, versions, uptime, restart, and (in Kubernetes) logs + events.
 import { api, btn, activate, toast, navLink } from '../helpers.js';
+import { expectRestart } from '../realtime.js';
 
 export function addDiagnosticsSection(nav: any, sections: any) {
   const link = navLink(nav, "Diagnostics", "✚");
@@ -29,7 +30,10 @@ export function addDiagnosticsSection(nav: any, sections: any) {
       b.onclick = async () => {
         if (!confirm(`${verb} ${t.label}? It will disconnect briefly while it restarts.`)) return;
         const rr = await api('/api/restart?target=' + encodeURIComponent(t.id), { method: 'POST' });
-        toast(rr.body.message || 'Restarting…', rr.ok && rr.body.ok);
+        const ok = rr.ok && rr.body.ok;
+        toast(rr.body.message || 'Restarting…', ok);
+        // Same reasoning as the operator's switch: the stream is about to drop because we asked it to.
+        if (ok) expectRestart(`${verb} — ${t.label}`);
       };
       restartBar.appendChild(b);
     });

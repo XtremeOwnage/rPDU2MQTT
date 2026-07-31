@@ -347,6 +347,39 @@ function setRtState(s        ) {
   rtStateWatchers.forEach(fn => { try { fn(s); } catch { /* a broken watcher must not stop the rest */ } });
 }
 
+// A restart we asked for, so the disconnection that follows can be explained instead of alarming.
+//
+// Switching version, forcing a re-pull or restarting a tier all take the bridge away for a few seconds.
+// The stream drops, and the app bar went bright red "Offline — the live update stream dropped", which is
+// true and useless: it reads as a fault at the exact moment the thing is working as instructed, and the
+// page looks hung rather than busy. Anyone who has just clicked "Switch" knows why it went away; the UI
+// should too.
+//
+// Deliberately time-boxed. If the bridge doesn't come back inside the window, the honest report is that
+// it is down — an "Updating…" that never clears would hide a rollout that actually failed.
+let restartUntil = 0;
+let restartWhy = '';
+
+function expectRestart(why        , seconds = 150) {
+  restartWhy = why;
+  restartUntil = Date.now() + seconds * 1000;
+  // Re-render watchers now: the drop usually lands a moment later, but the pill should change the
+  // instant the action is taken, not when the socket happens to notice.
+  rtStateWatchers.forEach(fn => { try { fn(rtState); } catch { /* as above */ } });
+}
+
+/// The reason we're expecting a gap, or null once the window has passed.
+function expectedRestart()                {
+  if (Date.now() >= restartUntil) return null;
+  return restartWhy;
+}
+
+/// Clear the window early — the stream is back, so the restart is over.
+function restartFinished() {
+  if (!restartUntil) return;
+  restartUntil = 0; restartWhy = '';
+}
+
 // Subscribe to a feed key ("status", "board", "livedata:pdu2", "flow:realpower"). Returns an
 // unsubscribe function; the connection re-opens with the reduced feed set when the last one goes.
 function subscribeLive(key        , handler                     ) {
@@ -890,7 +923,10 @@ function addDiagnosticsSection(nav     , sections     ) {
       b.onclick = async () => {
         if (!confirm(`${verb} ${t.label}? It will disconnect briefly while it restarts.`)) return;
         const rr = await api('/api/restart?target=' + encodeURIComponent(t.id), { method: 'POST' });
-        toast(rr.body.message || 'Restarting…', rr.ok && rr.body.ok);
+        const ok = rr.ok && rr.body.ok;
+        toast(rr.body.message || 'Restarting…', ok);
+        // Same reasoning as the operator's switch: the stream is about to drop because we asked it to.
+        if (ok) expectRestart(`${verb} — ${t.label}`);
       };
       restartBar.appendChild(b);
     });
@@ -4412,8 +4448,14 @@ function wireOperatorSwitch(sec     ) {
     forceBtn.disabled = true;
     const res = await api('/api/operator/redeploy', { method: 'POST' });
     forceBtn.disabled = false;
-    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), res.ok && res.body?.ok);
-    if (res.ok && res.body?.ok) status.textContent = res.body.message;
+    const forcedOk = res.ok && res.body?.ok;
+    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), forcedOk);
+    if (forcedOk) {
+      status.textContent = res.body.message;
+      // The workload is about to go away. Say so, so the dropped stream reads as "busy", not "broken".
+      expectRestart('Re-pulling the deployed image');
+      toast('Updating — the bridge is restarting. This page reconnects on its own.', true);
+    }
   };
 
   const CHANNEL_LABEL                         = {
@@ -4442,8 +4484,13 @@ function wireOperatorSwitch(sec     ) {
       switchBtn.disabled = true;
       const res = await api('/api/operator/set-tag?tag=' + encodeURIComponent(tag), { method: 'POST' });
       switchBtn.disabled = false;
-      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), res.ok && res.body?.ok);
-      if (res.ok && res.body?.ok) status.textContent = res.body.message;
+      const switchedOk = res.ok && res.body?.ok;
+      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), switchedOk);
+      if (switchedOk) {
+        status.textContent = res.body.message;
+        expectRestart(`Switching to ${tag}`);
+        toast(`Updating to ${tag} — the bridge is restarting. This page reconnects on its own.`, true);
+      }
     };
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
@@ -4649,11 +4696,21 @@ function initLiveIndicator() {
   };
   onRealtimeState(s => {
     if (!pill) return;
-    const [cls, text, title] = LOOK[s] || LOOK.idle;
+    // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
+    // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
+    // the button that caused it. Once the stream is back, the window closes and normal reporting resumes —
+    // and if it never comes back, the window expires and it goes red for real.
+    const why = expectedRestart();
+    if (s === 'live') restartFinished();
+    const restarting = why && s !== 'live';
+    const [cls, text, title] = restarting
+      ? ['pill warn', 'Updating', `${why} — the bridge is restarting, so live updates have paused. This page reconnects on its own.`]
+      : (LOOK[s] || LOOK.idle);
     pill.className = cls;
     pill.title = title;
     pill.innerHTML = '';
-    pill.append(el('span', { class: 'dot' + (s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '') }), text);
+    const dot = restarting ? ' warn' : s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '';
+    pill.append(el('span', { class: 'dot' + dot }), text);
   });
   // The app bar is always watching, so the stream is up as soon as the page is.
   subscribeLive('status', renderStatus);
