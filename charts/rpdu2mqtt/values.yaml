@@ -304,7 +304,10 @@ valkey:
     # On by default: the energy counters are the reason this exists, and losing them on a pod restart reads
     # downstream as a meter reset. Turn it off to run as a pure cache with nothing worth keeping.
     enabled: true
-    size: 128Mi
+    size: 1Gi
+    # Leave empty to use the cluster's default StorageClass — but check you HAVE exactly one default
+    # first. A cluster with two marked (default) picks non-deterministically, and a cache volume is
+    # exactly the kind of thing that silently lands on the wrong (or a non-provisioning) backend.
     storageClass: ""
   resources:
     requests:
