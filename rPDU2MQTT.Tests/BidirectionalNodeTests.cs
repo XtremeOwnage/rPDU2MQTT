@@ -96,4 +96,20 @@ public class BidirectionalNodeTests
 
         Assert.DoesNotContain(g.Links, l => l.Source == "battery#in");
     }
+
+    [Fact]
+    public void AnyNodeCanBeBidirectional_NotJustBatteryAndGrid()
+    {
+        // Nothing here is special-cased to battery/grid: a panel that can back-feed gets a lane too, on the
+        // same evidence — an in-direction reading. Only the wording follows the kind.
+        var cfg = Topology();
+        cfg.Nodes.Add(new EnergyFlowNode { Id = "sub_panel", Kind = "panel", Label = "Sub Panel" });
+        cfg.Links.Add(new EnergyFlowLink { From = "sub_panel", To = "inverter" });
+
+        var g = FlowGraphBuilder.Build(new PduData(), cfg, "realpower",
+            new Fixed(new() { ["sub_panel|realpower#in"] = 400, ["inverter|realpower"] = 4000 }));
+
+        Assert.Contains(g.Links, l => l.Source == "inverter" && l.Target == "sub_panel#in" && l.Value == 400);
+        Assert.Contains(g.Nodes, n => n.Id == "sub_panel#in" && n.Label == "Sub Panel (in)");
+    }
 }
