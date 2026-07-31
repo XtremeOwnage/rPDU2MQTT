@@ -1,11 +1,21 @@
 {{- if and .Values.kubernetesConfigSource.enabled .Values.kubernetesConfigSource.manageResource }}
 {{- $name := include "rpdu2mqtt.crName" . }}
 {{- /*
-  Create-once: when preserveExisting (default), keep the live CR's spec on upgrade so config edited
-  through the GUI isn't reverted; values.config only seeds the CR on first install. Relies on Helm's
-  `lookup`, which works for `helm upgrade` against a live cluster but returns nothing under
-  `helm template` / Argo CD — for Argo, add an ignoreDifferences for the RpduConfig spec (see the
-  chart README). Set preserveExisting: false to always apply values.config (declarative).
+  values.config SEEDS this resource; it is not the ongoing source of truth. The GUI writes here, and
+  whole sections (EnergyFlow, Modbus, Operator) typically exist ONLY here.
+
+  preserveExisting keeps the live spec on upgrade via Helm's `lookup` — which works for
+  `helm upgrade` against a live cluster and returns NOTHING under `helm template`. Argo CD renders
+  with `helm template`, so under Argo this branch never triggers and values.config is applied in full,
+  deleting any key it does not contain.
+
+  An Argo ignoreDifferences on /spec is NOT sufficient — that was in place on a real deployment and the
+  spec was still replaced on sync, losing the entire energy-flow hierarchy.
+
+  Under Argo (or any `helm template` renderer) the reliable pattern is:
+    1. install once with manageResource: true to seed the CR;
+    2. set manageResource: false so the chart stops rendering it and the cluster owns it.
+  The annotations below make step 2 safe — without them, dropping it from the render deletes it.
 */}}
 {{- $existing := dict }}
 {{- if .Values.kubernetesConfigSource.preserveExisting }}
@@ -17,6 +27,20 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+  annotations:
+    {{- /*
+      This resource is SEEDED here and then owned by the cluster — the GUI writes to it, and sections
+      that only ever existed there (EnergyFlow, Modbus, …) are not represented in values.config.
+
+      Both annotations exist so that turning manageResource off, once the CR exists, is a safe
+      operation rather than a destructive one:
+        - resource-policy: keep   -> helm uninstall/upgrade never deletes it
+        - Prune=false             -> Argo does not delete it when it leaves the rendered manifest
+                                     (Argo reads this from the LIVE object when deciding to prune)
+      Without them, dropping the CR from the render deletes it along with every GUI-made edit.
+    */}}
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
 {{- /*
   When the chart deploys Valkey, point the bridge at it — shipping the instance and leaving the bridge
   unaware of it would be worse than not shipping it. The service name can't live in values.config, which is
