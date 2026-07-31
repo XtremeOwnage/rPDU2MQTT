@@ -246,15 +246,31 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
             if (d.Metadata?.Name is not { } name) continue;
             var containers = d.Spec?.Template?.Spec?.Containers;
             if (containers is null) continue;
-            var targets = containers
-                .Where(c => ImageReference.TryParse(c.Image, out var r) && r.Repository == repository)
-                .Select(c => c.Name).DefaultIfEmpty(ContainerName).ToArray();
+            var targets = TargetContainers(containers, repository);
+            // No container here runs the app, so this Deployment is not ours to touch. It used to fall back
+            // to the conventional container name, and because a strategic-merge patch keyed on name CREATES
+            // an entry that doesn't exist, that injected a whole rPDU2MQTT container into any Deployment
+            // sharing the app's instance label — the chart's own Valkey among them, which then ran a
+            // crash-looping bridge alongside the cache.
+            if (targets.Length == 0) continue;
+
             var body = new V1Patch(BuildImagePatch(targets, newImage, envImage), V1Patch.PatchType.StrategicMergePatch);
             await source!.Client.AppsV1.PatchNamespacedDeploymentAsync(body, name, source.Namespace, cancellationToken: ct);
             patched.Add(name);
         }
         return patched;
     }
+
+    /// <summary>
+    /// The containers in a Deployment that actually run <paramref name="repository"/>. Empty means the
+    /// Deployment isn't running the app at all and must be left alone — the label selector finds every
+    /// Deployment in the release, which includes sidecar infrastructure like the Valkey cache.
+    /// </summary>
+    internal static string[] TargetContainers(IEnumerable<V1Container> containers, string repository)
+        => containers
+            .Where(c => ImageReference.TryParse(c.Image, out var r) && r.Repository == repository)
+            .Select(c => c.Name)
+            .ToArray();
 
     /// <summary>
     /// The strategic-merge patch body that sets each target container's image and its <c>RPDU2MQTT_IMAGE</c>
