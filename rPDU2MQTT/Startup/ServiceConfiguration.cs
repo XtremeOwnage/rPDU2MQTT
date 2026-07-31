@@ -119,24 +119,7 @@ public static class ServiceConfiguration
 
         services.AddSingleton<Services.EmonCmsStatus>();
 
-        // The shared cache. Registered whether or not it is enabled so the Status board can say "not
-        // configured" rather than the card simply being absent — an absent card looks like a feature that
-        // doesn't exist, which is exactly the confusion this is meant to remove.
-        services.AddSingleton<Core.Flow.CacheHealth>();
-        if (cfg.Cache.Enabled)
-        {
-            services.AddSingleton<Services.RedisCacheClient>();
-            services.AddSingleton<Services.ICacheClient>(sp => sp.GetRequiredService<Services.RedisCacheClient>());
-            services.AddSingleton<Core.Flow.IEnergyStore>(sp => new Services.RedisEnergyStore(
-                sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
-        }
-        else
-        {
-            // A local file: correct for one process, and it keeps the counter across a restart, which is
-            // the property that actually matters. It just can't be shared between replicas.
-            services.AddSingleton<Core.Flow.IEnergyStore>(_ => new Core.Flow.FileEnergyStore(
-                Path.Combine(AppContext.BaseDirectory, "energy-totals.json"), m => Log.Warning(m)));
-        }
+        AddCache(services, cfg);
 
         // Coordinates on-demand rediscovery (the "Rediscover" diagnostic button).
         services.AddSingleton<DiscoveryCoordinator>();
@@ -308,5 +291,41 @@ public static class ServiceConfiguration
         // ---- Ui role: the embedded configuration GUI. ----
         if (ui && cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
+    }
+
+    /// <summary>
+    /// The shared cache and the energy store that sits on it.
+    ///
+    /// <para>
+    /// Split out of <see cref="Configure"/> so it can be built in a test. Configure reads the config off
+    /// disk before it registers anything, so the only way to exercise this was to start the whole app —
+    /// which is why a registration that could never resolve reached a cluster. See
+    /// CacheRegistrationTests: with the cache enabled the graph is now built for real, and a constructor
+    /// that asks for something absent fails the build instead of the deployment.
+    /// </para>
+    /// </summary>
+    public static void AddCache(IServiceCollection services, Config cfg)
+    {
+        // Registered whether or not the cache is enabled, so the Status board can say "not configured"
+        // rather than the card simply being absent — an absent card looks like a feature that doesn't
+        // exist, which is exactly the confusion this is meant to remove.
+        services.AddSingleton<Core.Flow.CacheHealth>();
+        if (cfg.Cache.Enabled)
+        {
+            // Constructed explicitly: RedisCacheClient takes a CacheConfig, and only the whole Config is
+            // ever registered. Adding it by type left DI hunting for a CacheConfig that was never there,
+            // so the process died on boot — and with the cache on by default, on the default path.
+            services.AddSingleton(sp => new Services.RedisCacheClient(cfg.Cache, sp.GetRequiredService<Core.Flow.CacheHealth>()));
+            services.AddSingleton<Services.ICacheClient>(sp => sp.GetRequiredService<Services.RedisCacheClient>());
+            services.AddSingleton<Core.Flow.IEnergyStore>(sp => new Services.RedisEnergyStore(
+                sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
+        }
+        else
+        {
+            // A local file: correct for one process, and it keeps the counter across a restart, which is
+            // the property that actually matters. It just can't be shared between replicas.
+            services.AddSingleton<Core.Flow.IEnergyStore>(_ => new Core.Flow.FileEnergyStore(
+                Path.Combine(AppContext.BaseDirectory, "energy-totals.json"), m => Log.Warning(m)));
+        }
     }
 }
