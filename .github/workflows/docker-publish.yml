@@ -94,15 +94,20 @@ jobs:
           #   Release tag vX.Y.Z (non-prerelease):
           #     X.Y.Z, X.Y, X  -> pin to an exact/minor/major line and follow updates
           #     latest, stable, release -> always the newest stable release
-          #   main branch:            edge, main, dev, unstable   (bleeding edge, may be unstable)
-          #   any other branch:       <branch-name>               (that branch only, never a shared tag)
+          #   main branch:            edge, main, unstable, dev    (bleeding edge, may be unstable)
+          #   any other branch:       <branch-name>, dev           (dev = in development, so every build)
           #   pull request:           pr-<n>
           #
           # 'unstable' used to be enabled for every branch EXCEPT main, which is the inverse of what a
           # deployable tag should be: a cluster tracking :unstable was running whichever feature branch
           # happened to be pushed last, and main never fed it at all. Unreviewed work reached a live
-          # deployment on `git push`, before any PR, review or merge gate could apply. Shared moving tags
-          # now follow main only; a branch build is addressable by its own name for deliberate testing.
+          # deployment on `git push`, before any PR, review or merge gate could apply. So 'unstable' now
+          # follows main, and a branch build is also addressable by its own name.
+          #
+          # 'dev' is the deliberate exception and points at the newest build from ANY branch, main included
+          # — in-development is exactly what it means. That is the tag to point a test deployment at when
+          # you want whatever was pushed last without editing a manifest for each branch. Do not point
+          # anything you care about at it: by design it moves under you.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -112,7 +117,7 @@ jobs:
             type=raw,value=release,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=edge,branch=main
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ startsWith(github.ref, 'refs/heads/') }}
             type=raw,value=unstable,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch
             type=ref,event=pr
