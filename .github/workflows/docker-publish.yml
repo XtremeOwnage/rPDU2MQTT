@@ -94,15 +94,21 @@ jobs:
           #   Release tag vX.Y.Z (non-prerelease):
           #     X.Y.Z, X.Y, X  -> pin to an exact/minor/major line and follow updates
           #     latest, stable, release -> always the newest stable release
-          #   main branch:            edge, main, dev, unstable   (bleeding edge, may be unstable)
-          #   any other branch:       <branch-name>               (that branch only, never a shared tag)
+          #   main branch:            edge, main, unstable, dev    (bleeding edge, may be unstable)
+          #   any other branch:       <branch-name>, unstable, dev (work in progress, from any branch)
           #   pull request:           pr-<n>
           #
-          # 'unstable' used to be enabled for every branch EXCEPT main, which is the inverse of what a
-          # deployable tag should be: a cluster tracking :unstable was running whichever feature branch
-          # happened to be pushed last, and main never fed it at all. Unreviewed work reached a live
-          # deployment on `git push`, before any PR, review or merge gate could apply. Shared moving tags
-          # now follow main only; a branch build is addressable by its own name for deliberate testing.
+          # 'unstable' and 'dev' both mean work-in-progress, so both point at the newest build from ANY
+          # branch, main included. They are how you get the last thing pushed without editing a manifest
+          # per branch, and they move under you by design.
+          #
+          # What they are NOT is a release channel. Anything you do not want replaced by an in-progress
+          # branch should track a release tag ('stable' / 'latest' / vX.Y.Z) or, for bleeding edge that is
+          # at least merged, 'main' or 'edge' — those two follow main alone. The earlier bug here was that
+          # main published NEITHER of the moving tags, so :unstable meant "some branch" and never
+          # "released"; 'main'/'edge' now cover that case explicitly.
+          #
+          # Every branch build is also addressable by its own name, for pinning one specific branch.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -112,8 +118,8 @@ jobs:
             type=raw,value=release,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
             type=edge,branch=main
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=unstable,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev,enable=${{ startsWith(github.ref, 'refs/heads/') }}
+            type=raw,value=unstable,enable=${{ startsWith(github.ref, 'refs/heads/') }}
             type=ref,event=branch
             type=ref,event=pr
 

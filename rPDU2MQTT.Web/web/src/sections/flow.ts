@@ -805,6 +805,48 @@ function collapsedMemberMap(): Record<string, any> {
 // Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
 // members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
 // group is only as known as its members (the same never-fabricate rule the server uses).
+/**
+ * An expanded group shows its members *instead of* its anchor, not as well as it.
+ *
+ * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
+ * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
+ * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
+ * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
+ *
+ * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
+ * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
+ * the toggle changes only how finely it is broken down.
+ *
+ * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
+ * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
+ * at least not a fabricated number, so that case keeps the hop.
+ */
+function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id));
+  if (!groups.length) return { nodes, links };
+
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g: any) => {
+    const byId: any = {}; outNodes.forEach((n: any) => { byId[n.id] = n; });
+    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    const members = (g.Members || []).filter((m: string) => byId[m]);
+    if (!members.length) return;
+
+    const feedsAnchor = outLinks.filter((l: any) => l.target === g.Id && members.includes(l.source));
+    const anchorFeeds = outLinks.filter((l: any) => l.source === g.Id);
+    if (!feedsAnchor.length || anchorFeeds.length !== 1) return;
+
+    const target = anchorFeeds[0];
+    const kept = outLinks.filter((l: any) => l.source !== g.Id && !(l.target === g.Id && members.includes(l.source)));
+    outLinks = kept.concat(feedsAnchor.map((ml: any) => ({
+      source: ml.source, target: target.target, value: ml.value,
+      known: ml.known !== false && target.known !== false,
+    })));
+    outNodes = outNodes.filter((n: any) => n.id !== g.Id);
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
 function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   const memberOf = collapsedMemberMap();
   if (!Object.keys(memberOf).length) return { nodes, links };
@@ -1149,7 +1191,10 @@ export function addFlowSection(nav: any, sections: any) {
     wrap.innerHTML = '';
     ensureGroupState();
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const folded = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
+    // at exactly one level of detail rather than both at once.
+    const folded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -1185,6 +1230,7 @@ export function addFlowSection(nav: any, sections: any) {
 
     const cols: any[] = [];
     nodes.forEach((n: any) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
+
 
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
@@ -1251,8 +1297,19 @@ export function addFlowSection(nav: any, sections: any) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands), stacked on each node edge by target order.
-    links.sort((a: any, b: any) => pos[a.target].y - pos[b.target].y).forEach((l: any) => {
+    // Ribbons (filled bezier bands). The draw order IS the stacking order — outOff/inOff accumulate as we
+    // go — so it has to satisfy both ends at once.
+    //
+    // Target y alone was not enough. It stacks a node's *outgoing* links correctly (they appear in
+    // ascending target order), but says nothing about the order of the links arriving at any one target:
+    // several MPPTs feeding one inverter all share a target, so they stacked in array order and the
+    // ribbons crossed — a plain fan-in drawn as a braid. Adding source y as the tiebreak means the links
+    // into a node arrive in the same vertical order as the nodes they come from, so parallel feeders no
+    // longer cross. Both keys together satisfy source and target stacking simultaneously.
+    links.sort((a: any, b: any) =>
+      (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+      (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
+    ).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*

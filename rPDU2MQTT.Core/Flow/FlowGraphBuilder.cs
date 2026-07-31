@@ -14,6 +14,67 @@ public static class FlowGraphBuilder
 {
     public const string DefaultMetric = "realpower";
 
+    /// <summary>
+    /// Where a group's anchor node feeds a target and its members feed that same target, re-point the
+    /// members at the anchor so the chain reads members → anchor → target.
+    ///
+    /// <para>
+    /// A group whose Id is also a real node is an "anchor": it carries its own measured reading, and that
+    /// reading already <em>is</em> the members' total. Linking both the anchor and each member into the
+    /// same target therefore delivers the same energy twice. Seen on a live system: an inverter fed by
+    /// Solar (4947 W) and by MPPT_1/2/3 (2292 + 2655 + 0 = the same 4947 W), so the diagram showed 9894 W
+    /// of PV arriving at a node drawing 8629 W — supply exceeding the load it supplies, which is not a
+    /// state the hardware can be in.
+    /// </para>
+    /// <para>
+    /// Collapsing the group did not help: folding the members onto the anchor merged the duplicate links
+    /// into one, concentrating the doubled value on a single link rather than removing it, and the
+    /// inflated column total rescaled the whole diagram.
+    /// </para>
+    /// <para>
+    /// Nesting is the honest reading of the topology — the strings feed the array, the array feeds the
+    /// inverter — and it makes collapsing purely visual: the totals are identical either way. Members that
+    /// feed a target the anchor does <em>not</em> feed are left alone; that is a real, separate path.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<EnergyFlowLink> NestGroupMembers(EnergyFlowConfig flow)
+    {
+        if (flow.Groups.Count == 0 || flow.Links.Count == 0) return flow.Links;
+
+        // A member only nests under an anchor that is itself a node in the graph; a purely synthetic group
+        // (no node of its own) has no reading to double-count, so its members keep their links.
+        var nodeIds = new HashSet<string>(flow.Nodes.Select(n => n.Id ?? ""), StringComparer.OrdinalIgnoreCase);
+        var anchorOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in flow.Groups)
+        {
+            if (string.IsNullOrEmpty(g.Id) || !nodeIds.Contains(g.Id)) continue;
+            foreach (var m in g.Members)
+                if (!string.IsNullOrEmpty(m) && !string.Equals(m, g.Id, StringComparison.OrdinalIgnoreCase))
+                    anchorOf[m] = g.Id;
+        }
+        if (anchorOf.Count == 0) return flow.Links;
+
+        var anchorFeeds = new HashSet<string>(
+            flow.Links.Where(l => !string.IsNullOrEmpty(l.From) && anchorOf.Values.Contains(l.From, StringComparer.OrdinalIgnoreCase))
+                      .Select(l => l.From + "␟" + l.To),
+            StringComparer.OrdinalIgnoreCase);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<EnergyFlowLink>(flow.Links.Count);
+        foreach (var l in flow.Links)
+        {
+            var from = l.From ?? ""; var to = l.To ?? "";
+            // Only rewrite when the anchor demonstrably feeds the same target — otherwise this member's
+            // link describes a path the anchor does not cover, and dropping it would lose real topology.
+            if (anchorOf.TryGetValue(from, out var anchor) && anchorFeeds.Contains(anchor + "␟" + to))
+                to = anchor;
+            if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) continue;   // member already fed its anchor
+            if (!seen.Add(from + "␟" + to)) continue;                                    // rewriting can collide
+            result.Add(new EnergyFlowLink { From = from, To = to });
+        }
+        return result;
+    }
+
     public static FlowGraph Build(PduData data, string metric = DefaultMetric)
         => Build(data, null, metric);
 
@@ -126,7 +187,7 @@ public static class FlowGraphBuilder
         // read 0 W must not silently detach everything downstream of it.
         var wiredEdges = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         static string EdgeKey(string from, string to) => from + "␟" + to;
-        foreach (var l in flow.Links)
+        foreach (var l in NestGroupMembers(flow))
             if (!string.IsNullOrEmpty(l.From) && !string.IsNullOrEmpty(l.To) && label.ContainsKey(l.From) && label.ContainsKey(l.To))
                 if (AddEdgeSafe(l.From, l.To)) wiredEdges.Add(EdgeKey(l.From, l.To));
         foreach (var (child, parent) in flow.Parents)
@@ -302,6 +363,43 @@ public static class FlowGraphBuilder
 
                 links.Add(new FlowLink(from, to, value, known));
             }
+
+        // The return lane: a battery being charged, a grid being exported to.
+        //
+        // A battery and a grid connection carry power both ways, but a Sankey is a DAG — a two-way edge
+        // cannot be laid out, and a single signed value cannot be drawn at all (which is why a negative
+        // reading is clamped above). So the two directions become two things on the diagram: the node
+        // keeps the supply direction and stays to the LEFT of what it feeds, and its draw direction becomes
+        // a sink to the RIGHT of that same hub. Charging then reads as the inverter feeding the battery,
+        // which is what is physically happening.
+        //
+        // Both quantities are already measured and already separate: a Direction: split source fans one
+        // signed reading into `realpower` and `realpower#in` (see FlowMetricKey), and the MQTT and HA
+        // exports have consumed the #in side for a while. The graph was the last consumer ignoring it, so
+        // a charging battery simply vanished from the picture instead of changing sides.
+        //
+        // A terminal sink by construction — no outgoing links — so it cannot close a cycle however the
+        // rest is wired.
+        if (live is not null)
+        {
+            var inKey = FlowMetricKey.For(metric, "in");
+            foreach (var n in flow.Nodes)
+            {
+                if (string.IsNullOrEmpty(n.Id) || !outgoing.TryGetValue(n.Id, out var fed) || fed.Count == 0) continue;
+                if (!live.TryGetValue(n.Id, inKey, out var drawn) || drawn <= 0) continue;
+
+                // Attach it where the node sends its supply, so the pair sits either side of one hub.
+                var hub = fed[0];
+                var sinkId = n.Id + FlowMetricKey.InSuffix;
+                var k = kind.TryGetValue(n.Id, out var nk) ? nk : "node";
+                label[sinkId] = (label.TryGetValue(n.Id, out var nl) ? nl : n.Id)
+                    + (k == "battery" ? " (charging)" : k == "grid" ? " (export)" : " (in)");
+                kind[sinkId] = k;
+                leaf[sinkId] = drawn;
+                links.Add(new FlowLink(hub, sinkId, drawn, true));
+                wired.Add(hub); wired.Add(sinkId);
+            }
+        }
 
         // A node's own value: its measurement if it has one, else what its known links determine (a root
         // only has outflow, a leaf only inflow). No measurement and no known link means genuinely unknown —

@@ -34,6 +34,39 @@ function setRtState(s: string) {
   rtStateWatchers.forEach(fn => { try { fn(s); } catch { /* a broken watcher must not stop the rest */ } });
 }
 
+// A restart we asked for, so the disconnection that follows can be explained instead of alarming.
+//
+// Switching version, forcing a re-pull or restarting a tier all take the bridge away for a few seconds.
+// The stream drops, and the app bar went bright red "Offline — the live update stream dropped", which is
+// true and useless: it reads as a fault at the exact moment the thing is working as instructed, and the
+// page looks hung rather than busy. Anyone who has just clicked "Switch" knows why it went away; the UI
+// should too.
+//
+// Deliberately time-boxed. If the bridge doesn't come back inside the window, the honest report is that
+// it is down — an "Updating…" that never clears would hide a rollout that actually failed.
+let restartUntil = 0;
+let restartWhy = '';
+
+export function expectRestart(why: string, seconds = 150) {
+  restartWhy = why;
+  restartUntil = Date.now() + seconds * 1000;
+  // Re-render watchers now: the drop usually lands a moment later, but the pill should change the
+  // instant the action is taken, not when the socket happens to notice.
+  rtStateWatchers.forEach(fn => { try { fn(rtState); } catch { /* as above */ } });
+}
+
+/// The reason we're expecting a gap, or null once the window has passed.
+export function expectedRestart(): string | null {
+  if (Date.now() >= restartUntil) return null;
+  return restartWhy;
+}
+
+/// Clear the window early — the stream is back, so the restart is over.
+export function restartFinished() {
+  if (!restartUntil) return;
+  restartUntil = 0; restartWhy = '';
+}
+
 // Subscribe to a feed key ("status", "board", "livedata:pdu2", "flow:realpower"). Returns an
 // unsubscribe function; the connection re-opens with the reduced feed set when the last one goes.
 export function subscribeLive(key: string, handler: (data: any) => void) {

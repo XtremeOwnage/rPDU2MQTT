@@ -5,7 +5,7 @@ import { state } from './state.js';
 import { build } from './config-form.js';
 import { exportData } from './overrides.js';
 import { setBaseline, refreshDirty, discardChanges, isDirty, changes, formatValue, onDirty } from './dirty.js';
-import { subscribeLive, onRealtimeState } from './realtime.js';
+import { subscribeLive, onRealtimeState, expectedRestart, restartFinished } from './realtime.js';
 import { initTheme } from './theme.js';
 import { initPalette } from './palette.js';
 
@@ -100,11 +100,21 @@ function initLiveIndicator() {
   };
   onRealtimeState(s => {
     if (!pill) return;
-    const [cls, text, title] = LOOK[s] || LOOK.idle;
+    // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
+    // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
+    // the button that caused it. Once the stream is back, the window closes and normal reporting resumes —
+    // and if it never comes back, the window expires and it goes red for real.
+    const why = expectedRestart();
+    if (s === 'live') restartFinished();
+    const restarting = why && s !== 'live';
+    const [cls, text, title] = restarting
+      ? ['pill warn', 'Updating', `${why} — the bridge is restarting, so live updates have paused. This page reconnects on its own.`]
+      : (LOOK[s] || LOOK.idle);
     pill.className = cls;
     pill.title = title;
     pill.innerHTML = '';
-    pill.append(el('span', { class: 'dot' + (s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '') }), text);
+    const dot = restarting ? ' warn' : s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '';
+    pill.append(el('span', { class: 'dot' + dot }), text);
   });
   // The app bar is always watching, so the stream is up as soon as the page is.
   subscribeLive('status', renderStatus);

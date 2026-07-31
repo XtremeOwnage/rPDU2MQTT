@@ -347,6 +347,39 @@ function setRtState(s        ) {
   rtStateWatchers.forEach(fn => { try { fn(s); } catch { /* a broken watcher must not stop the rest */ } });
 }
 
+// A restart we asked for, so the disconnection that follows can be explained instead of alarming.
+//
+// Switching version, forcing a re-pull or restarting a tier all take the bridge away for a few seconds.
+// The stream drops, and the app bar went bright red "Offline — the live update stream dropped", which is
+// true and useless: it reads as a fault at the exact moment the thing is working as instructed, and the
+// page looks hung rather than busy. Anyone who has just clicked "Switch" knows why it went away; the UI
+// should too.
+//
+// Deliberately time-boxed. If the bridge doesn't come back inside the window, the honest report is that
+// it is down — an "Updating…" that never clears would hide a rollout that actually failed.
+let restartUntil = 0;
+let restartWhy = '';
+
+function expectRestart(why        , seconds = 150) {
+  restartWhy = why;
+  restartUntil = Date.now() + seconds * 1000;
+  // Re-render watchers now: the drop usually lands a moment later, but the pill should change the
+  // instant the action is taken, not when the socket happens to notice.
+  rtStateWatchers.forEach(fn => { try { fn(rtState); } catch { /* as above */ } });
+}
+
+/// The reason we're expecting a gap, or null once the window has passed.
+function expectedRestart()                {
+  if (Date.now() >= restartUntil) return null;
+  return restartWhy;
+}
+
+/// Clear the window early — the stream is back, so the restart is over.
+function restartFinished() {
+  if (!restartUntil) return;
+  restartUntil = 0; restartWhy = '';
+}
+
 // Subscribe to a feed key ("status", "board", "livedata:pdu2", "flow:realpower"). Returns an
 // unsubscribe function; the connection re-opens with the reduced feed set when the last one goes.
 function subscribeLive(key        , handler                     ) {
@@ -890,7 +923,10 @@ function addDiagnosticsSection(nav     , sections     ) {
       b.onclick = async () => {
         if (!confirm(`${verb} ${t.label}? It will disconnect briefly while it restarts.`)) return;
         const rr = await api('/api/restart?target=' + encodeURIComponent(t.id), { method: 'POST' });
-        toast(rr.body.message || 'Restarting…', rr.ok && rr.body.ok);
+        const ok = rr.ok && rr.body.ok;
+        toast(rr.body.message || 'Restarting…', ok);
+        // Same reasoning as the operator's switch: the stream is about to drop because we asked it to.
+        if (ok) expectRestart(`${verb} — ${t.label}`);
       };
       restartBar.appendChild(b);
     });
@@ -2167,6 +2203,48 @@ function collapsedMemberMap()                      {
 // Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
 // members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
 // group is only as known as its members (the same never-fabricate rule the server uses).
+/**
+ * An expanded group shows its members *instead of* its anchor, not as well as it.
+ *
+ * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
+ * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
+ * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
+ * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
+ *
+ * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
+ * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
+ * the toggle changes only how finely it is broken down.
+ *
+ * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
+ * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
+ * at least not a fabricated number, so that case keeps the hop.
+ */
+function explodeExpandedGroups(nodes       , links       )                                 {
+  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id));
+  if (!groups.length) return { nodes, links };
+
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g     ) => {
+    const byId      = {}; outNodes.forEach((n     ) => { byId[n.id] = n; });
+    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    const members = (g.Members || []).filter((m        ) => byId[m]);
+    if (!members.length) return;
+
+    const feedsAnchor = outLinks.filter((l     ) => l.target === g.Id && members.includes(l.source));
+    const anchorFeeds = outLinks.filter((l     ) => l.source === g.Id);
+    if (!feedsAnchor.length || anchorFeeds.length !== 1) return;
+
+    const target = anchorFeeds[0];
+    const kept = outLinks.filter((l     ) => l.source !== g.Id && !(l.target === g.Id && members.includes(l.source)));
+    outLinks = kept.concat(feedsAnchor.map((ml     ) => ({
+      source: ml.source, target: target.target, value: ml.value,
+      known: ml.known !== false && target.known !== false,
+    })));
+    outNodes = outNodes.filter((n     ) => n.id !== g.Id);
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
 function collapseGraph(nodes       , links       )                                 {
   const memberOf = collapsedMemberMap();
   if (!Object.keys(memberOf).length) return { nodes, links };
@@ -2511,7 +2589,10 @@ function addFlowSection(nav     , sections     ) {
     wrap.innerHTML = '';
     ensureGroupState();
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const folded = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
+    // at exactly one level of detail rather than both at once.
+    const folded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -2613,8 +2694,19 @@ function addFlowSection(nav     , sections     ) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands), stacked on each node edge by target order.
-    links.sort((a     , b     ) => pos[a.target].y - pos[b.target].y).forEach((l     ) => {
+    // Ribbons (filled bezier bands). The draw order IS the stacking order — outOff/inOff accumulate as we
+    // go — so it has to satisfy both ends at once.
+    //
+    // Target y alone was not enough. It stacks a node's *outgoing* links correctly (they appear in
+    // ascending target order), but says nothing about the order of the links arriving at any one target:
+    // several MPPTs feeding one inverter all share a target, so they stacked in array order and the
+    // ribbons crossed — a plain fan-in drawn as a braid. Adding source y as the tiebreak means the links
+    // into a node arrive in the same vertical order as the nodes they come from, so parallel feeders no
+    // longer cross. Both keys together satisfy source and target stacking simultaneously.
+    links.sort((a     , b     ) =>
+      (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+      (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
+    ).forEach((l     ) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
@@ -4356,8 +4448,14 @@ function wireOperatorSwitch(sec     ) {
     forceBtn.disabled = true;
     const res = await api('/api/operator/redeploy', { method: 'POST' });
     forceBtn.disabled = false;
-    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), res.ok && res.body?.ok);
-    if (res.ok && res.body?.ok) status.textContent = res.body.message;
+    const forcedOk = res.ok && res.body?.ok;
+    toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), forcedOk);
+    if (forcedOk) {
+      status.textContent = res.body.message;
+      // The workload is about to go away. Say so, so the dropped stream reads as "busy", not "broken".
+      expectRestart('Re-pulling the deployed image');
+      toast('Updating — the bridge is restarting. This page reconnects on its own.', true);
+    }
   };
 
   const CHANNEL_LABEL                         = {
@@ -4386,8 +4484,13 @@ function wireOperatorSwitch(sec     ) {
       switchBtn.disabled = true;
       const res = await api('/api/operator/set-tag?tag=' + encodeURIComponent(tag), { method: 'POST' });
       switchBtn.disabled = false;
-      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), res.ok && res.body?.ok);
-      if (res.ok && res.body?.ok) status.textContent = res.body.message;
+      const switchedOk = res.ok && res.body?.ok;
+      toast(res.body?.message || (res.ok ? 'Switch requested.' : 'Switch failed.'), switchedOk);
+      if (switchedOk) {
+        status.textContent = res.body.message;
+        expectRestart(`Switching to ${tag}`);
+        toast(`Updating to ${tag} — the bridge is restarting. This page reconnects on its own.`, true);
+      }
     };
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
@@ -4593,11 +4696,21 @@ function initLiveIndicator() {
   };
   onRealtimeState(s => {
     if (!pill) return;
-    const [cls, text, title] = LOOK[s] || LOOK.idle;
+    // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
+    // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
+    // the button that caused it. Once the stream is back, the window closes and normal reporting resumes —
+    // and if it never comes back, the window expires and it goes red for real.
+    const why = expectedRestart();
+    if (s === 'live') restartFinished();
+    const restarting = why && s !== 'live';
+    const [cls, text, title] = restarting
+      ? ['pill warn', 'Updating', `${why} — the bridge is restarting, so live updates have paused. This page reconnects on its own.`]
+      : (LOOK[s] || LOOK.idle);
     pill.className = cls;
     pill.title = title;
     pill.innerHTML = '';
-    pill.append(el('span', { class: 'dot' + (s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '') }), text);
+    const dot = restarting ? ' warn' : s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '';
+    pill.append(el('span', { class: 'dot' + dot }), text);
   });
   // The app bar is always watching, so the stream is up as soon as the page is.
   subscribeLive('status', renderStatus);
