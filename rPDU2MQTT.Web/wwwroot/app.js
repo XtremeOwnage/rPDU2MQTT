@@ -4629,6 +4629,29 @@ async function load() {
 // Last-seen operator update report, so "check now" can tell when a fresh result has landed.
 let lastCheckedAt                = null;
 let configWritable = true;
+// The tag the operator last reported having rolled to. null means "we haven't seen a report yet", which
+// is deliberately different from "" — see appliedTagChanged.
+let lastApplied                = null;
+
+/// Did the operator just roll the deployment to a different tag?
+///
+/// AutoUpdate rolls on the operator's own schedule, so unlike Switch or Force update there is no click to
+/// hang an expectRestart() on: the page's first and only warning is the stream dying, which shows as a red
+/// "Offline" for something entirely routine. The operator does report the tag it applied, and that arrives
+/// on the status feed before the pod goes down, so a change in it is the signal.
+///
+/// Never fires on the first report. On a fresh page load every value is "new", and announcing a restart
+/// that already happened (or never happened) would put the app bar into a state nothing is going to clear.
+function appliedTagChanged(applied                           )          {
+  const now = applied || '';
+  // No tag in this report is not a change of tag — the operator can simply stop reporting one (restarting,
+  // briefly unreachable). Forgetting the last tag here would make the next report of the SAME tag look
+  // like a fresh roll, and announce a restart that never happened.
+  if (now === '') return false;
+  const changed = lastApplied !== null && now !== lastApplied;
+  lastApplied = now;
+  return changed;
+}
 
 // Render the header update chip from the operator's report (#210). Hidden when no operator is reporting.
 function renderUpdate(u     ) {
@@ -4636,6 +4659,12 @@ function renderUpdate(u     ) {
   if (!upd) return;
   if (!u) { upd.classList.add('is-hidden'); lastCheckedAt = null; return; }
   lastCheckedAt = u.checkedAt || null;
+  // An update the operator applied by itself: the workload is going away and nobody here asked for it.
+  // Same treatment as a manual switch, so the drop that follows reads as "busy", not "broken".
+  if (appliedTagChanged(u.applied)) {
+    expectRestart(`Auto-updating to ${u.applied}`);
+    toast(`Update applied — rolling to ${u.applied}. The bridge is restarting.`, true);
+  }
   upd.classList.remove('is-hidden', 'busy');
   if (u.available) {
     upd.className = 'pill pill-btn warn';
