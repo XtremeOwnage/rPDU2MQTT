@@ -401,6 +401,45 @@ public static class FlowGraphBuilder
             }
         }
 
+        // Name the load nobody is metering, instead of drawing it as a blank slab.
+        //
+        // A node's bar is as tall as its throughput, but only its links carry flow. A panel passing 8299 W
+        // whose metered children draw 547 W therefore renders as an enormous bar with a few hairlines
+        // leaving it and ~7.7 kW of unexplained height. That reads as a broken chart, when the actual
+        // finding — most of the load downstream of this panel is not metered — is worth knowing and is
+        // arithmetic on measurements already trusted.
+        //
+        // Not a fabricated reading: the difference is inflow minus what the children account for, and the
+        // energy demonstrably went somewhere. What would be fabrication is attributing it to a device, so
+        // it gets its own 'unmeasured' kind and its own node rather than being folded into a sibling.
+        //
+        // Only where the node already has outgoing links (a terminal leaf's reading IS its consumption, so
+        // there is no gap to explain) and only above a 2% floor, to keep rounding noise off the diagram.
+        var unmeasured = new List<FlowLink>();
+        foreach (var id in outgoing.Keys)
+        {
+            double inflow = 0, outflow = 0;
+            bool anyIn = false, anyOut = false;
+            foreach (var l in links)
+            {
+                if (!l.Known) continue;
+                if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyIn = true; }
+                if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyOut = true; }
+            }
+            if (!anyOut) continue;
+            // What the node actually passes: its own measurement if it has one, else what reached it.
+            double total = leaf.TryGetValue(id, out var measured) ? measured : (anyIn ? inflow : 0);
+            var gap = total - outflow;
+            if (total <= 0 || gap <= 1 || gap <= total * 0.02) continue;
+
+            var uid = id + "#unmeasured";
+            label[uid] = "Unmeasured load";
+            kind[uid] = "unmeasured";
+            leaf[uid] = gap;
+            unmeasured.Add(new FlowLink(id, uid, gap, true));
+        }
+        foreach (var l in unmeasured) { links.Add(l); wired.Add(l.Source); wired.Add(l.Target); }
+
         // A node's own value: its measurement if it has one, else what its known links determine (a root
         // only has outflow, a leaf only inflow). No measurement and no known link means genuinely unknown —
         // reported as null rather than 0, so nothing downstream can mistake "we don't know" for "it's zero".
