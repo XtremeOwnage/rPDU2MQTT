@@ -4470,9 +4470,20 @@ function wireApiDocs(sec     ) {
       a.href = base + path; a.textContent = base + path;
       a.target = '_blank'; a.rel = 'noopener';
       a.style.cssText = 'font:12px ui-monospace,Consolas,monospace;';
-      if (!on) { a.style.pointerEvents = 'none'; a.style.opacity = '0.5'; }
-      row.appendChild(document.createTextNode(label + ': '));
-      row.appendChild(a);
+      // Left clickable even when the API is off. Killing pointer-events made these look like ordinary
+      // links that silently ignored a click — reported as "API links not clickable" (#295), because a
+      // dead-looking link is indistinguishable from a broken page. The reason is now on the row itself
+      // rather than only in the paragraph above it, so the state is legible where the link is.
+      if (!on) {
+        a.style.opacity = '0.55';
+        a.title = 'The API is disabled, so nothing is listening on this port yet — enable it above, save, and restart.';
+        row.appendChild(document.createTextNode(label + ': '));
+        row.appendChild(a);
+        row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: '· API disabled' }));
+      } else {
+        row.appendChild(document.createTextNode(label + ': '));
+        row.appendChild(a);
+      }
       list.appendChild(row);
     }
   };
