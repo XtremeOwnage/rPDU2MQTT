@@ -886,10 +886,50 @@ function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links: any[]
 }
 
 // The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
+// Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
+// figures already measured and is never exported (see FlowNode.Synthetic), so hiding it changes what you
+// are looking at and nothing else. On by default — a panel passing 8 kW to 560 W of metered outlets is
+// worth seeing — but it can dominate a chart when most of the load is unmetered, which is exactly when
+// someone wants the metered detail back.
+let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
+
+function setShowUnmeasured(on: boolean) {
+  showUnmeasured = on;
+  try { localStorage.setItem('rpdu-flow-unmeasured', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop the unmetered-remainder nodes and their links when the view is switched off. Return lanes (#in)
+/// are real measured flows and are never hidden by this.
+function applyUnmeasuredPref(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  if (showUnmeasured) return { nodes, links };
+  const hidden = new Set(nodes.filter((n: any) => String(n.id || '').endsWith('#unmeasured')).map((n: any) => n.id));
+  if (!hidden.size) return { nodes, links };
+  return {
+    nodes: nodes.filter((n: any) => !hidden.has(n.id)),
+    links: links.filter((l: any) => !hidden.has(l.target) && !hidden.has(l.source)),
+  };
+}
+
+/// The "Unmeasured load" view switch, shown wherever the group chips are.
+function unmeasuredToggle(onToggle: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Show the gap between what a node passes and what its metered children draw, as its own node. '
+      + 'A view setting only — the figure is never published, and turning it off does not change any total.',
+  });
+  const cb: any = el('input', { type: 'checkbox' });
+  cb.checked = showUnmeasured;
+  cb.onchange = () => { setShowUnmeasured(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Unmeasured load'));
+  return lbl;
+}
+
 function groupToggles(onToggle: () => void): HTMLElement | null {
   const groups = flowGroups();
   if (!groups.length) return null;
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(unmeasuredToggle(onToggle));
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
   groups.forEach((g: any) => {
     const on = collapsedGroups.has(g.Id);
@@ -1207,8 +1247,10 @@ export function addFlowSection(nav: any, sections: any) {
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
-    // at exactly one level of detail rather than both at once.
-    const folded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    // at exactly one level of detail rather than both at once...
+    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    // ...and finally honour the unmetered-remainder view switch.
+    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
