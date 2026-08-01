@@ -2624,6 +2624,30 @@ function addFlowSection(nav     , sections     ) {
       return colMemo[id] = c;
     };
     nodes.forEach((n     ) => col(n.id));
+
+    // Then pull every node as far RIGHT as its nearest child allows, so it lands next to what it powers.
+    //
+    // Longest-path alone left-justifies every root, which is fine while the graph is shallow but breaks as
+    // soon as one branch is deeper than another. Add panels -> strings -> MPPTs upstream of an inverter and
+    // Grid, having no feeder of its own, stays pinned in column 0 while the inverter moves out to column 3
+    // — so its ribbon, several kW wide, is dragged straight across the string and MPPT columns and over
+    // their bars and labels. Nothing reserves a lane for a link that skips a tier.
+    //
+    // A sink keeps its column; everyone else sits one step left of its earliest child. Every edge still
+    // points strictly rightward, because a node always ends up strictly left of all its children.
+    // Processed children-first (descending depth) so a child's column is final before its parent reads it.
+    //
+    // This is the same rule the hierarchy editor on the Nodes tab already applies, for the same reason —
+    // it hit this first with Battery -> inverter skipping past Solar. The two views now agree on where a
+    // node belongs, instead of the diagram and its editor disagreeing about the same topology.
+    nodes.slice().sort((a     , b     ) => colMemo[b.id] - colMemo[a.id]).forEach((n     ) => {
+      const outs = outgoing[n.id] || [];
+      if (outs.length) colMemo[n.id] = Math.max(0, Math.min(...outs.map((l     ) => colMemo[l.target])) - 1);
+    });
+    // Never leave an empty left margin if every node pulled off column 0.
+    const minCol = Math.min(...nodes.map((n     ) => colMemo[n.id]));
+    if (minCol > 0) nodes.forEach((n     ) => { colMemo[n.id] -= minCol; });
+
     const maxCol = Math.max(0, ...nodes.map((n     ) => colMemo[n.id]));
 
     const cols        = [];
