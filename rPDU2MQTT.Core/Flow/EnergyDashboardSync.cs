@@ -39,7 +39,8 @@ public static class EnergyDashboardSync
             ? new HashSet<string>(excludeKinds, StringComparer.OrdinalIgnoreCase)
             : null;
         var entries = new List<HaDeviceConsumption>();
-        foreach (var node in graph.Nodes)
+        // Diagram-only nodes are not devices — see FlowNode.Synthetic.
+        foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             // Sources/storage/pass-through (grid, solar, battery, inverter) aren't "device consumption" — they
             // clutter the list and double-count against the dashboard's own grid/solar/battery buckets.
@@ -73,7 +74,8 @@ public static class EnergyDashboardSync
         Func<string, string?>? powerFor = null, Func<string, string?>? socFor = null)
     {
         var sources = new List<JsonObject>();
-        foreach (var node in graph.Nodes)
+        // …and they are not energy sources either.
+        foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             var outStat = statFor(node.Id, EnergyDirection.Out);
             var inStat = statFor(node.Id, EnergyDirection.In);

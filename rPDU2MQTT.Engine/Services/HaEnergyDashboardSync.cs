@@ -88,7 +88,8 @@ public sealed class HaEnergyDashboardSync
         var energyType = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyType);
         var graph = FlowGraphBuilder.Build(merged, config.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
-        foreach (var node in graph.Nodes)
+        // Diagram-only nodes are not devices; they must not become Home Assistant entities.
+        foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             var uid = native.TryGetValue(node.Id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(node.Id);
             if (entityByUniqueId.TryGetValue(uid, out var e)) stats.Add(e);

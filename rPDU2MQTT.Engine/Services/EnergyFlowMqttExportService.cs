@@ -71,7 +71,9 @@ public class EnergyFlowMqttExportService : baseMQTTService
             .Select(n => n.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var node in graph.Nodes)
+        // Synthetic nodes are for the diagram only — see FlowNode.Synthetic. Publishing one would put a
+        // '#' in the topic, which is the MQTT wildcard and not legal in a publish topic.
+        foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             // Nothing determines this tier's power — no measurement, and no single path that conservation
             // pins down. Publishing it would put a fabricated 0 W into Home Assistant's history, which is

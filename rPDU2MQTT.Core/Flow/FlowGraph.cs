@@ -12,7 +12,27 @@ namespace rPDU2MQTT.Core.Flow;
 /// a diagram ends up stating a number nobody supplied, so the distinction is carried in the type.
 /// </para>
 /// </param>
-public sealed record FlowNode(string Id, string Label, string Kind, double? Value = null);
+public sealed record FlowNode(string Id, string Label, string Kind, double? Value = null)
+{
+    /// <summary>
+    /// A node the builder invented for the diagram, rather than one the operator configured: a
+    /// bidirectional node's return lane (<c>…#in</c>) and a pass-through's unmetered remainder
+    /// (<c>…#unmeasured</c>).
+    ///
+    /// <para>
+    /// These describe an arithmetic result, not a device. They must never be published: the id would
+    /// become an MQTT topic, and '#' is the multi-level wildcard — <c>energy/main_panel#unmeasured</c> is
+    /// not a legal publish topic at all. They would also duplicate figures the export already sends
+    /// properly (the in-direction goes out as the parent's <c>energy_in</c>, not as a separate device).
+    /// </para>
+    /// <para>
+    /// Centralised here because every consumer has to make this distinction and three of them got it wrong
+    /// independently — the Energy Overview double-counted a battery as charging and discharging at once,
+    /// the hierarchy editor offered these as wiring targets, and both exports published them.
+    /// </para>
+    /// </summary>
+    public bool Synthetic => Id.Contains('#');
+}
 
 /// <summary>A weighted link between two <see cref="FlowNode"/>s (energy flows Source → Target).</summary>
 /// <param name="Known">

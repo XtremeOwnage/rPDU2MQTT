@@ -2284,10 +2284,50 @@ function collapseGraph(nodes       , links       )                              
 }
 
 // The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
+// Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
+// figures already measured and is never exported (see FlowNode.Synthetic), so hiding it changes what you
+// are looking at and nothing else. On by default — a panel passing 8 kW to 560 W of metered outlets is
+// worth seeing — but it can dominate a chart when most of the load is unmetered, which is exactly when
+// someone wants the metered detail back.
+let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
+
+function setShowUnmeasured(on         ) {
+  showUnmeasured = on;
+  try { localStorage.setItem('rpdu-flow-unmeasured', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop the unmetered-remainder nodes and their links when the view is switched off. Return lanes (#in)
+/// are real measured flows and are never hidden by this.
+function applyUnmeasuredPref(nodes       , links       )                                 {
+  if (showUnmeasured) return { nodes, links };
+  const hidden = new Set(nodes.filter((n     ) => String(n.id || '').endsWith('#unmeasured')).map((n     ) => n.id));
+  if (!hidden.size) return { nodes, links };
+  return {
+    nodes: nodes.filter((n     ) => !hidden.has(n.id)),
+    links: links.filter((l     ) => !hidden.has(l.target) && !hidden.has(l.source)),
+  };
+}
+
+/// The "Unmeasured load" view switch, shown wherever the group chips are.
+function unmeasuredToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Show the gap between what a node passes and what its metered children draw, as its own node. '
+      + 'A view setting only — the figure is never published, and turning it off does not change any total.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = showUnmeasured;
+  cb.onchange = () => { setShowUnmeasured(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Unmeasured load'));
+  return lbl;
+}
+
 function groupToggles(onToggle            )                     {
   const groups = flowGroups();
   if (!groups.length) return null;
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(unmeasuredToggle(onToggle));
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
   groups.forEach((g     ) => {
     const on = collapsedGroups.has(g.Id);
@@ -2310,9 +2350,23 @@ function groupToggles(onToggle            )                     {
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+//
+// Not the nodes the builder synthesises to make the diagram balance — a bidirectional node's return lane
+// (`…#in`) and a pass-through's unmetered remainder (`…#unmeasured`). They describe an arithmetic result,
+// not a thing you can wire: they exist only in the built graph, are recomputed on every build, and have no
+// entry in the config at all.
+//
+// Leaving them in put "Unmeasured load" into the hierarchy editor as a node with no links — orphaned and
+// unexplained, because the editor draws links from the config while that node's link exists only in the
+// graph. It also offered them in the "wire to" picker and as group members, where selecting one would
+// write a config link to an id that is regenerated from scratch on the next build.
+//
+// '#' appears in no real id (PDU and outlet ids use ':'), so it marks exactly the builder's own inventions.
 function flowCandidates(lastGraph     , customNodes       ) {
   const cand = new Map             ();
-  (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+  (lastGraph?.nodes || [])
+    .filter((n     ) => !String(n.id || '').includes('#'))
+    .forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
   customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
   return cand;
 }
@@ -2591,8 +2645,10 @@ function addFlowSection(nav     , sections     ) {
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
-    // at exactly one level of detail rather than both at once.
-    const folded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    // at exactly one level of detail rather than both at once...
+    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    // ...and finally honour the unmetered-remainder view switch.
+    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
