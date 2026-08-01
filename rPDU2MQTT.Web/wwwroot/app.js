@@ -3465,7 +3465,15 @@ function addEnergyOverviewSection(nav     , sections     ) {
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
       status.textContent = ''; return;
     }
-    const nodes = r.body.nodes || [];
+    // Derived lanes are for the diagram, not the totals. The graph carries synthetic nodes the builder
+    // adds to make the picture balance — a bidirectional node's return lane (`battery#in`, `grid#in`) and
+    // a pass-through's unmetered remainder (`…#unmeasured`). The return lanes deliberately inherit their
+    // parent's kind so they colour and read as the same device, which means a plain sumKind('battery')
+    // would add charge to discharge and sumKind('grid') would add export to import — the tiles would
+    // report a battery doing both at once. These tiles compute the in-direction themselves, from the live
+    // cache, a few lines below. '#' appears in no real id (PDU and outlet ids use ':'), so it is a safe
+    // marker for "the builder made this".
+    const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes, plus battery state of
     // charge — none of which the flow graph carries. Keyed by node|metric so one round-trip covers them all.
