@@ -2310,9 +2310,23 @@ function groupToggles(onToggle            )                     {
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+//
+// Not the nodes the builder synthesises to make the diagram balance — a bidirectional node's return lane
+// (`…#in`) and a pass-through's unmetered remainder (`…#unmeasured`). They describe an arithmetic result,
+// not a thing you can wire: they exist only in the built graph, are recomputed on every build, and have no
+// entry in the config at all.
+//
+// Leaving them in put "Unmeasured load" into the hierarchy editor as a node with no links — orphaned and
+// unexplained, because the editor draws links from the config while that node's link exists only in the
+// graph. It also offered them in the "wire to" picker and as group members, where selecting one would
+// write a config link to an id that is regenerated from scratch on the next build.
+//
+// '#' appears in no real id (PDU and outlet ids use ':'), so it marks exactly the builder's own inventions.
 function flowCandidates(lastGraph     , customNodes       ) {
   const cand = new Map             ();
-  (lastGraph?.nodes || []).forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+  (lastGraph?.nodes || [])
+    .filter((n     ) => !String(n.id || '').includes('#'))
+    .forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
   customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
   return cand;
 }
