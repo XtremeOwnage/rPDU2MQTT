@@ -498,6 +498,12 @@
     color:var(--faint); font-weight:700; font-size:10.5px; text-transform:uppercase; letter-spacing:.07em;
     position:sticky; top:var(--appbar-h); background:var(--panel2); border-bottom-color:var(--line); z-index:1;
   }
+  /* A sticky header only makes sense for a table that scrolls with the page. Inside a sheet (the node
+     editor) the table has its own scroll container, so `top: var(--appbar-h)` pinned the header to the
+     viewport instead — it detached and parked on top of a row, hiding the very row being edited (#292).
+     The sheet is short and scrolls itself; it does not need a pinned header. */
+  .sheet table.ld th { position:static; }
+
   table.ld th.num, table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); }
   table.ld tbody tr:hover td { background:var(--panel2); }
 
