@@ -4301,6 +4301,14 @@ function scalarInput(node     , obj     )      {
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? null : el.value; touched(); };
   }
+  // A setting whose "off" would take away the means of turning it back on — the GUI's own Enabled flag
+  // being the one that matters. Shown rather than hidden: a setting that vanishes reads as unsupported and
+  // sends the operator looking for it, while a disabled control with the reason beside it answers in place.
+  // The server decides which these are (schema notEditableReason), so there is no list to keep in step here.
+  if (node.notEditableReason) {
+    el.disabled = true;
+    el.title = node.notEditableReason;
+  }
   return el;
 }
 
@@ -4351,6 +4359,13 @@ function renderNode(node     , obj     , container     , path           = []) {
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
     f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
+    // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
+    if (node.notEditableReason) {
+      const why = document.createElement('div');
+      why.className = 'desc field-locked';
+      why.textContent = node.notEditableReason;
+      f.appendChild(why);
+    }
     if (node.templateVars && node.templateVars.length) f.appendChild(templateVarChips(node.templateVars, input, obj, node));
     // A password's value must never reach the change-review list.
     registerField(here, f, node.type === 'password');

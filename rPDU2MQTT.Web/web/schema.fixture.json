@@ -1319,7 +1319,8 @@
         "description": "Enable the embedded configuration web GUI.",
         "type": "bool",
         "required": false,
-        "default": false
+        "default": false,
+        "notEditableReason": "Turning the GUI off from inside the GUI would lock you out of the only place you could turn it back on. Set it where the deployment is defined — the Helm values, the container environment, or config.yaml."
       },
       {
         "key": "ShowProjectLink",
