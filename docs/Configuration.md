@@ -888,6 +888,27 @@ plus pre-wired nodes (solar / battery / grid / inverter) with the register bindi
 > its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
 > it can be turned into a template.
 
+### Nothing is computed behind your back
+
+Every number the flow shows is either measured, summed from measured children, or **inferred** — and the
+diagram says which. An inferred value is labelled `· inferred` on the chart and explained in the hover card;
+it is never rendered the way a metered reading is.
+
+Two behaviours compute rather than read, and both are switches you can see on the **Flow** tab under
+*Energy roll-up*:
+
+| Switch | What it does | Default |
+| --- | --- | --- |
+| Derive kWh from power | Integrates watts over time for nodes with no energy counter. An estimate — a real energy source always wins. | Off |
+| Infer from a single supply path | Fills in an unmeasured node from what it feeds, when only one of several possible routes could have supplied it. | On |
+
+The second one is worth understanding. When a node has exactly **one** feeder, propagating demand up it is
+arithmetic, not a guess — a PDU's total is its outlets' — and that is always done. When a node has
+**several** feeders and all but one are ruled out (by `Mode: none`, or by their source having gone silent),
+picking the survivor is a claim about the hierarchy you drew rather than anything measured. That is what this
+switch governs, and what gets labelled `inferred`. Turn it off and such a node reads "no data" instead;
+plain roll-ups are unaffected either way.
+
 ### Energy today vs. energy lifetime
 
 Two cumulative counters can only be compared if they started counting at the same moment, and the ones on

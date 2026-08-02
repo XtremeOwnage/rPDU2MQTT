@@ -2954,7 +2954,12 @@ function addFlowSection(nav     , sections     ) {
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
-      lab.textContent = unknownNode ? `${n.label} · no data` : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
+      // An inferred figure is never dressed as a measured one. It is arithmetic about the hierarchy someone
+      // drew — sound, but not something anything metered — so it says so on its face, in the one place the
+      // number is actually read.
+      const inferredNode = n.derivation === 'inferred';
+      lab.textContent = unknownNode ? `${n.label} · no data`
+        : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -2964,6 +2969,16 @@ function addFlowSection(nav     , sections     ) {
       }
       // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
       // diagram instead of drawing the larger number at full height and letting it look intentional.
+      else if (inferredNode) {
+        lab.setAttribute('font-style', 'italic');
+        lab.setAttribute('fill-opacity', '0.85');
+        const why = svgEl('title');
+        why.textContent = 'Nothing measures this node. The figure is what conservation requires: the load '
+          + 'downstream is really being drawn, and the hierarchy you drew leaves exactly one path it could '
+          + 'have arrived by. It is only as true as that hierarchy. Bind a source to measure it, or turn off '
+          + '"Infer from a single supply path" under Energy roll-up to show no data instead.';
+        lab.appendChild(why);
+      }
       else if (n.imbalance != null) {
         lab.textContent += ' ⚠';
         const why = svgEl('title');
@@ -2988,6 +3003,12 @@ function addFlowSection(nav     , sections     ) {
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
           unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
+        // Provenance sits with the value, not in a legend somewhere else.
+        if (!unknownNode && n.derivation && n.derivation !== 'measured')
+          rows.push(el('div', { class: n.derivation === 'inferred' ? 'nh-warn' : 'desc', style: { margin: '2px 0 0' } },
+            n.derivation === 'inferred'
+              ? 'inferred — nothing measures this; conservation leaves one path it could have come by'
+              : 'summed from what it feeds'));
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
 
@@ -3158,6 +3179,16 @@ function addFlowSection(nav     , sections     ) {
         clock.style.color = 'var(--warn, #d08700)';
       }
     }).catch(() => { });
+
+    // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
+    // nothing measured — sound arithmetic about the hierarchy you drew, and only as true as that hierarchy.
+    const inferRow = el('div', { class: 'desc' })               ;
+    const inferChk = el('input', { type: 'checkbox' })                    ;
+    inferChk.checked = flow.InferFromConservation !== false;   // defaults on
+    inferChk.onchange = () => { flow.InferFromConservation = inferChk.checked ? undefined : false; refreshDirty(); };
+    inferRow.append(el('label', {}, inferChk,
+      ' Infer from a single supply path — fill in an unmeasured node from what it feeds, when only one path could have supplied it. Results are labelled “inferred”; off shows “no data”.'));
+    ed.appendChild(inferRow);
 
     // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
     const aggIntegrate = el('div', { class: 'desc' })               ;

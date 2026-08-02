@@ -1,5 +1,27 @@
 namespace rPDU2MQTT.Core.Flow;
 
+/// <summary>
+/// How a <see cref="FlowNode"/> came by its value.
+///
+/// <para>
+/// <c>summed</c> is deliberately distinct from <c>measured</c>: a PDU's total is real, but it is real
+/// <em>because</em> its outlets are. <c>inferred</c> is the one that matters most — conservation says the
+/// load arrived by the one path left open, which is sound arithmetic about a topology someone drew, and only
+/// as true as that topology.
+/// </para>
+/// </summary>
+public static class FlowDerivation
+{
+    /// <summary>The node reports this value itself — a live source, a static value, an outlet measurement.</summary>
+    public const string Measured = "measured";
+    /// <summary>Aggregated from links that are themselves known: a PDU's outlets, a panel's circuits.</summary>
+    public const string Summed = "summed";
+    /// <summary>Back-filled by conservation: the only unmeasured path into a node whose demand is known.</summary>
+    public const string Inferred = "inferred";
+    /// <summary>Nothing measures it and nothing determines it. <c>Value</c> is null.</summary>
+    public const string Unknown = "unknown";
+}
+
 /// <summary>A node in an energy/power flow graph (a PDU, an outlet, a circuit, …).</summary>
 /// <param name="Id">Stable unique id (used to wire links).</param>
 /// <param name="Label">Human-readable display name.</param>
@@ -24,7 +46,14 @@ namespace rPDU2MQTT.Core.Flow;
 /// meantime, rather than quietly rendering the larger of the two numbers and letting it look deliberate.
 /// </para>
 /// </param>
-public sealed record FlowNode(string Id, string Label, string Kind, double? Value = null, double? Imbalance = null)
+/// <param name="Derivation">
+/// How this node's value was arrived at — see <see cref="FlowDerivation"/>. Carried because a number's
+/// provenance is part of the number: an inferred figure is not wrong, but it is not a measurement either,
+/// and rendering it identically to a metered reading is how a diagram states something it cannot back up.
+/// </param>
+public sealed record FlowNode(
+    string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
+    string Derivation = FlowDerivation.Unknown)
 {
     /// <summary>
     /// A node the builder invented for the diagram, rather than one the operator configured: a

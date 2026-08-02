@@ -47,6 +47,25 @@ public class EnergyFlowConfig
     [Description("Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.")]
     public Dictionary<string, string> Parents { get; set; } = new();
 
+    /// <summary>
+    /// Back-fill a node's value from what it feeds, when the topology leaves exactly one path for that load
+    /// to have arrived by.
+    ///
+    /// <para>
+    /// Sound arithmetic — the load really is being drawn and it really did come from somewhere — but it is a
+    /// statement about a hierarchy someone drew, not a measurement, and it is only as true as that hierarchy.
+    /// So it is a switch you can see and turn off, not something the code quietly does on your behalf, and
+    /// anything it produces is labelled <c>inferred</c> everywhere it is shown.
+    /// </para>
+    /// <para>
+    /// Turning it off does not fabricate the other way: a node it would have filled in simply reads "no data"
+    /// and its links draw as unknown, which is the honest rendering of a hierarchy nobody is metering.
+    /// </para>
+    /// </summary>
+    [DefaultValue(true)]
+    [Description("Work out an unmeasured node's value from what it feeds, when exactly one path could have supplied it. Sound arithmetic, but it describes the hierarchy you drew rather than anything measured — so results are always labelled 'inferred'. Turn it off to show 'no data' instead.")]
+    public bool InferFromConservation { get; set; } = true;
+
     /// <summary>Publish each hierarchy tier's rolled-up value to MQTT every poll (#164).</summary>
     [DefaultValue(false)]
     [Description("Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.")]

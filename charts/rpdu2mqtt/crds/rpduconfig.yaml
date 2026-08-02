@@ -989,6 +989,9 @@ spec:
                     additionalProperties:
                       type: string
                     description: Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.
+                  InferFromConservation:
+                    type: boolean
+                    description: Work out an unmeasured node's value from what it feeds, when exactly one path could have supplied it. Sound arithmetic, but it describes the hierarchy you drew rather than anything measured — so results are always labelled 'inferred'. Turn it off to show 'no data' instead.
                   MqttExport:
                     type: boolean
                     description: Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.
