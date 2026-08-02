@@ -543,10 +543,20 @@ public static class FlowGraphBuilder
         // which of the two numbers to believe. Carrying the gap explicitly lets the diagram say so.
         double? ImbalanceOf(string id)
         {
-            if (leaf.ContainsKey(id)) return null;   // a measured node's own reading settles it
-
             var (inflow, outflow, anyIn, anyOut) = Sides(id);
             if (!anyIn || !anyOut) return null;
+
+            // A measured node is NOT exempt, which is what this used to assume. Its reading settles what that
+            // sensor measures — not what passes through the node. An inverter bound to `load_power` reports
+            // the AC-load leg only, so a unit taking 8,344 W of PV and sending 5,652 W of it to charge a
+            // battery reported 2,526 W and drew a bar a third the width of its own ribbons. Nothing was
+            // wrong with the number; it was answering a different question from the one the diagram asked.
+            if (leaf.TryGetValue(id, out var reading))
+            {
+                var throughput = Math.Max(inflow, outflow);
+                var short_ = throughput - reading;
+                return short_ > 1 && short_ > reading * 0.02 ? short_ : null;
+            }
 
             var gap = outflow - inflow;
             // Rounding noise and honest conversion loss are not contradictions; 2% matches the floor the

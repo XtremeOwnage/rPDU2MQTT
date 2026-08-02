@@ -35,8 +35,9 @@ public static class FlowDerivation
 /// </para>
 /// </param>
 /// <param name="Imbalance">
-/// How far this node's outflow exceeds its inflow (<c>outflow - inflow</c>), when both are determined and
-/// they materially disagree; <see langword="null"/> when they reconcile or when one of them is unknown.
+/// How far this node's flows exceed what it claims. For an unmeasured node that is <c>outflow - inflow</c>;
+/// for a measured one it is how far its throughput exceeds its own reading. <see langword="null"/> when they
+/// reconcile, or when there is not enough determined on both sides to compare.
 ///
 /// <para>
 /// Supply below load is not a state the hardware can be in, so a positive value here always means the two
