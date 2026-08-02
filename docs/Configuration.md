@@ -932,6 +932,10 @@ Notes:
 - Nodes bound today are only incomparable until the next rollover, not forever.
 - With `MqttExport` on, each tier also publishes `energy_today` and gets an **Energy today** sensor in Home
   Assistant (`total_increasing`, so HA reads the midnight drop as the start of a new day).
+- Prometheus exports every tier as `rpdu2mqtt_flow_realpower`, `rpdu2mqtt_flow_energy` and
+  `rpdu2mqtt_flow_energytoday`, labelled `node` / `name` / `kind` / `tier`. A tier nothing determines is
+  **absent** from the scrape rather than scraped as `0`, so a dashboard shows a gap instead of a reading
+  nobody took.
 - Where two sides of a node still can't both be true, the diagram marks the node **⚠** and the hover card
   says how much more leaves it than arrives. On lifetime energy that is expected; on `Energy today` it means
   a feeder is missing or not reporting.

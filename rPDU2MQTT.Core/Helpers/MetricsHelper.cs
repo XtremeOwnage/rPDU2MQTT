@@ -54,6 +54,7 @@ public static class MetricsHelper
             "apparentpower" => "Apparent Power",
             "powerfactor" => "Power Factor",
             "energy" => "Energy",
+            "energytoday" => "Energy Today",
             "current" => "Current",
             "voltage" => "Voltage",
             "frequency" => "Frequency",
