@@ -199,6 +199,12 @@ public static class ServiceConfiguration
             // integrate the same readings into its own copy of the counter.
             if (worker)
                 services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyAggregationService>());
+            // Every other role still needs the numbers, and reading is not producing. Without this a split
+            // deployment's GUI/exporters held a service that was never started, so every energy and daily
+            // total read as no-data while the worker had them all.
+            else if (api || ui)
+                services.AddHostedService(sp => new Services.EnergyStoreReaderService(
+                    cfg, sp.GetRequiredService<Services.EnergyAggregationService>()));
         }
 
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn

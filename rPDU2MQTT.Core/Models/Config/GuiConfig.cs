@@ -10,6 +10,7 @@ namespace rPDU2MQTT.Models.Config;
 public class GuiConfig
 {
     [DefaultValue(false)]
+    [NotEditableInGui("Turning the GUI off from inside the GUI would lock you out of the only place you could turn it back on. Set it where the deployment is defined — the Helm values, the container environment, or config.yaml.")]
     [Description("Enable the embedded configuration web GUI.")]
     public bool Enabled { get; set; }
 

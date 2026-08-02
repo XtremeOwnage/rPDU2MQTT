@@ -40,6 +40,12 @@ public sealed class SchemaNode
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool DynamicChoices { get; set; }
+
+    /// <summary>
+    /// Why the GUI shows this setting but won't let you change it — see <c>NotEditableInGuiAttribute</c>.
+    /// Null when the field is editable as normal.
+    /// </summary>
+    public string? NotEditableReason { get; set; }
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -116,6 +122,11 @@ public static class ConfigSchema
 
         if (prop.GetCustomAttribute<TemplateVariablesAttribute>() is { } tv)
             node.TemplateVars = tv.Names;
+
+        // A setting whose "off" would remove the means of turning it back on. Carried on the schema so the
+        // form does not need its own hardcoded list of which fields those are.
+        if (prop.GetCustomAttribute<NotEditableInGuiAttribute>() is { } locked)
+            node.NotEditableReason = locked.Reason;
 
         // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
         // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).

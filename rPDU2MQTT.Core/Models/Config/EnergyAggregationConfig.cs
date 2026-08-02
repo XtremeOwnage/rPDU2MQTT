@@ -17,6 +17,26 @@ namespace rPDU2MQTT.Models.Config;
 public sealed class TimeZoneChoicesAttribute : Attribute;
 
 /// <summary>
+/// Marks a setting the GUI must show but never let you change, with the reason to display.
+///
+/// <para>
+/// For settings whose "off" removes the means of turning them back on. The GUI's own Enabled flag is the
+/// case that motivated it: switching it off from inside the GUI takes away the only screen that could
+/// switch it on again, and the config is then only reachable by editing the deployment by hand.
+/// </para>
+/// <para>
+/// Shown rather than hidden on purpose — a setting that vanishes reads as unsupported, and the operator
+/// goes looking for it. Disabled with the reason beside it answers the question in place.
+/// </para>
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class NotEditableInGuiAttribute(string reason) : Attribute
+{
+    public string Reason { get; } = reason;
+}
+
+
+/// <summary>
 /// Deriving energy (kWh) from power readings.
 ///
 /// <para>
