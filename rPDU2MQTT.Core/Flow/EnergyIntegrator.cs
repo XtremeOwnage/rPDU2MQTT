@@ -19,8 +19,15 @@ namespace rPDU2MQTT.Core.Flow;
 /// </param>
 /// <param name="PeriodStartKWh"><see cref="KWh"/> as it read when the current period began.</param>
 /// <param name="LastCounterKWh">
-/// The last raw reading of a device-maintained counter, for <see cref="EnergyIntegrator.Observe"/> to take
-/// a delta against. Null for a node whose total we integrate ourselves.
+/// The last <b>accepted</b> reading of a device-maintained counter — the high-water mark
+/// <see cref="EnergyIntegrator.Observe"/> takes a delta against. Null for a node whose total we integrate
+/// ourselves.
+/// </param>
+/// <param name="PendingResetKWh">
+/// A reading that came in below the mark and is being held pending confirmation. Non-null means "the counter
+/// may have restarted"; a second consecutive low reading confirms it and a reading back above the mark
+/// discards it. Exists so one stray zero cannot re-baseline the mark and turn the next ordinary reading into
+/// a lifetime's worth of energy.
 /// </param>
 public readonly record struct EnergyState(
     double KWh,
@@ -29,7 +36,8 @@ public readonly record struct EnergyState(
     double UnmeasuredSeconds,
     string? PeriodKey = null,
     double PeriodStartKWh = 0,
-    double? LastCounterKWh = null)
+    double? LastCounterKWh = null,
+    double? PendingResetKWh = null)
 {
     public static readonly EnergyState Empty = new(0, default, 0, 0);
 
@@ -135,10 +143,21 @@ public static class EnergyIntegrator
     /// interval, and accumulating it gives a total on the same footing as an integrated one.
     /// </para>
     /// <para>
-    /// A counter reading lower than last time was reset — a reboot, a firmware clear, an outlet re-provisioned.
-    /// What it reads now is what has accrued since that reset, so it counts as the delta; treating it as
-    /// <c>now - last</c> would go negative and drag the total backwards, which is the one thing a cumulative
-    /// counter must never do. Energy from before the reset stays counted, because it genuinely happened.
+    /// A reading <b>below</b> the last one is not trusted on sight, and this is the expensive lesson in this
+    /// file. It used to be read as a device reset and counted at face value — which is right for a real reset,
+    /// but a single spurious low reading (a publisher restarting, an empty retained payload parsing as zero)
+    /// then re-baselined the mark at that bogus value, and the next perfectly ordinary reading was measured
+    /// against it. Seen on a live system: one stray zero, then a normal 791.9 kWh reading, and 791.9 kWh of
+    /// lifetime energy was booked as having happened today. The drop was handled; the <em>recovery</em> was
+    /// what destroyed the figure.
+    /// </para>
+    /// <para>
+    /// So a low reading is held, not accepted: the high-water mark stands, and a stray dip is ignored because
+    /// the reading after it comes back above the mark and contributes its honest delta. A genuine reset does
+    /// not go away — the counter keeps reading low and climbing from its new base — so a second consecutive
+    /// low reading confirms it, and the mark moves there counting <b>nothing</b> across the discontinuity.
+    /// That loses at most one interval of real energy, which is bounded and visible; the alternative lost
+    /// nothing and invented a year's worth.
     /// </para>
     /// <para>
     /// The first ever reading advances nothing: there is no interval behind it, so it only establishes the
@@ -156,12 +175,27 @@ public static class EnergyIntegrator
         if (prev.LastCounterKWh is not { } last)
             return state with { LastCounterKWh = counterKWh, LastSampleUtc = nowUtc };
 
-        var delta = counterKWh >= last ? counterKWh - last : counterKWh;
+        // Back above the mark: an ordinary rise, and any dip before it is forgotten as the noise it was.
+        if (counterKWh >= last)
+            return state with
+            {
+                KWh = state.KWh + (counterKWh - last),
+                LastCounterKWh = counterKWh,
+                LastSampleUtc = nowUtc,
+                PendingResetKWh = null,
+            };
 
+        // Below the mark. The first one is only a suspicion — hold it and count nothing.
+        if (state.PendingResetKWh is not { } pending)
+            return state with { PendingResetKWh = counterKWh, LastSampleUtc = nowUtc };
+
+        // A second one confirms the counter really did restart. Adopt the new base, still counting nothing:
+        // whatever the device accrued between the reset and now is genuinely unobserved, and guessing at it
+        // is what produced the 791.9 kWh day.
         return state with
         {
-            KWh = state.KWh + delta,
             LastCounterKWh = counterKWh,
+            PendingResetKWh = null,
             LastSampleUtc = nowUtc,
         };
     }
