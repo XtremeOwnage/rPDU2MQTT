@@ -61,18 +61,69 @@ public class EnergyPeriodTests
     }
 
     [Fact]
-    public void ACounterThatWentBackwards_WasReset_AndDoesNotDragTheTotalDown()
+    public void AStrayLowReading_IsIgnored_AndTheNextRealOneDoesNotBookTheWholeCounter()
     {
-        // A PDU reboot or firmware clear restarts the counter. What it reads now is what has accrued since
-        // that moment; treating it as now-minus-last would subtract, and a cumulative total must never fall.
+        // The bug that made a live system report 817 kWh of energy "today" on a rig that generates ~27.
+        // A publisher restarting emitted one bogus low value; that was taken as a device reset and became the
+        // new mark, so the very next ordinary reading measured against it booked the counter's entire
+        // lifetime as today's energy. The drop was handled — the recovery was what destroyed the figure.
+        var s = EnergyIntegrator.Observe(EnergyState.Empty, 750.0, Utc(1, 8), "2026-08-01");
+        s = EnergyIntegrator.Observe(s, 751.5, Utc(1, 9), "2026-08-01");
+        Assert.Equal(1.5, s.KWh, 6);
+
+        s = EnergyIntegrator.Observe(s, 0, Utc(1, 10), "2026-08-01");     // the stray
+        Assert.Equal(1.5, s.KWh, 6);                                      // counts nothing yet
+        Assert.Equal(751.5, s.LastCounterKWh!.Value, 6);                  // and the mark does NOT move
+
+        s = EnergyIntegrator.Observe(s, 791.9, Utc(1, 11), "2026-08-01"); // back to normal
+        Assert.Equal(41.9, s.KWh, 6);                                     // 791.9 - 751.5, not 791.9
+        Assert.Null(s.PendingResetKWh);
+    }
+
+    [Fact]
+    public void ACounterThatStaysLow_WasGenuinelyReset_AndAdoptsTheNewBaseWithoutInventingEnergy()
+    {
+        // A real reset does not go away: the counter keeps reading low and climbing from its new base. Two
+        // consecutive lows confirm it. Nothing is counted across the discontinuity — what the device accrued
+        // between resetting and being seen again is genuinely unobserved, and guessing is what caused the bug
+        // above. Energy from before the reset stays counted, because it genuinely happened.
         var s = EnergyIntegrator.Observe(EnergyState.Empty, 100, Utc(1, 8), "2026-08-01");
-        s = EnergyIntegrator.Observe(s, 140, Utc(1, 10), "2026-08-01");
+        s = EnergyIntegrator.Observe(s, 140, Utc(1, 9), "2026-08-01");
         Assert.Equal(40, s.KWh, 6);
 
-        s = EnergyIntegrator.Observe(s, 3, Utc(1, 12), "2026-08-01");
+        s = EnergyIntegrator.Observe(s, 3, Utc(1, 10), "2026-08-01");     // suspicion
+        s = EnergyIntegrator.Observe(s, 5, Utc(1, 11), "2026-08-01");     // confirmed: counting up from 0
+        Assert.Equal(40, s.KWh, 6);
+        Assert.Equal(5, s.LastCounterKWh!.Value, 6);
 
-        Assert.Equal(43, s.KWh, 6);          // the 40 before the reset genuinely happened; keep it
-        Assert.Equal(43, s.PeriodKWh, 6);
+        s = EnergyIntegrator.Observe(s, 9, Utc(1, 12), "2026-08-01");     // now measured against the new base
+        Assert.Equal(44, s.KWh, 6);
+    }
+
+    [Fact]
+    public void ACumulativeTotal_NeverFalls_WhateverTheCounterDoes()
+    {
+        // The invariant everything downstream depends on: Home Assistant and EmonCMS read a drop as a meter
+        // reset and rewrite history that was already correct.
+        var s = EnergyState.Empty;
+        var last = 0.0;
+        foreach (var reading in new[] { 10.0, 20, 0, 21, 22, 3, 4, 5, 0, 0, 1, 900, 901 })
+        {
+            s = EnergyIntegrator.Observe(s, reading, Utc(1, 8), "2026-08-01");
+            Assert.True(s.KWh >= last, $"total fell after reading {reading}");
+            last = s.KWh;
+        }
+        // A stray dip followed by recovery must not leak the counter's face value — the 791.9 kWh bug.
+        var stray = EnergyIntegrator.Observe(EnergyState.Empty, 750, Utc(1, 8), "2026-08-01");
+        stray = EnergyIntegrator.Observe(stray, 0, Utc(1, 9), "2026-08-01");
+        stray = EnergyIntegrator.Observe(stray, 791.9, Utc(1, 10), "2026-08-01");
+        Assert.Equal(41.9, stray.KWh, 6);
+
+        // Not asserted, and deliberately so: a *confirmed* reset (two lows) followed by a jump back to a
+        // large value is genuinely ambiguous — the counter either restarted and climbed fast, or the low
+        // period was a longer glitch. Nothing in the reading distinguishes them, so this counts the rise
+        // from the adopted base. Bounding it would need a plausible-rate ceiling, which needs a capacity
+        // this class does not have. Tracked in #314.
     }
 
     [Fact]
