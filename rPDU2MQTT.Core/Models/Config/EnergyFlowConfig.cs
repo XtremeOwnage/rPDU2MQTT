@@ -205,6 +205,31 @@ public class EnergyFlowSource
     /// <c>stat_energy_from</c> and its <c>in</c> becomes <c>stat_energy_to</c>; a grid's <c>out</c> is
     /// <c>flow_from</c> (consumption) and its <c>in</c> is <c>flow_to</c> (return).
     /// </summary>
+    /// <summary>
+    /// Whether this source's counter runs forever or restarts each period.
+    ///
+    /// <list type="bullet">
+    /// <item><c>lifetime</c> (default): a cumulative counter that only rises — a PDU's firmware total, an
+    /// inverter's all-time production. Its daily figure is derived by taking its rise since the period
+    /// began.</item>
+    /// <item><c>period</c>: a counter the device itself resets each day, so the reading <em>already is</em>
+    /// the daily total and is used as-is.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// This is not a detail you can ignore, and one publisher can do both: Solar Assistant's
+    /// <c>total/load_energy</c> and <c>total/grid_energy_in</c> are cumulative, while
+    /// <c>total/pv_energy</c> resets at midnight. Taking the "rise" of a resetting counter loses the day —
+    /// the counter drops to zero and climbs again unobserved, and the next reading measured against
+    /// yesterday's high-water mark yields a small fraction of the truth. Seen live: 2.76 kWh of solar
+    /// reported against 27.4 kWh actually generated.
+    /// </para>
+    /// </summary>
+    [DefaultValue("lifetime")]
+    [Description("Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.")]
+    [AllowedValues("lifetime", "period")]
+    public string Accumulation { get; set; } = "lifetime";
+
     [DefaultValue("out")]
     [Description("Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.")]
     [AllowedValues("out", "in", "split")]

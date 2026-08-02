@@ -442,7 +442,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
-    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Counter', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
       const th = el('th', { text: h });
       if (colHint[h]) th.title = colHint[h];
       head.appendChild(th);
@@ -500,6 +500,27 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
           cell.appendChild(dirSel);
         } else {
           cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
+        }
+        tr.appendChild(cell);
+      }
+
+      // Does this counter run forever, or does the device reset it every day? Only energy accumulates, so
+      // every other metric's cell stays blank. Getting it wrong is silent and expensive: measuring the
+      // "rise" of a counter the device resets at midnight loses the whole day, because it drops to zero and
+      // climbs again unobserved. One publisher can do both — Solar Assistant's total/load_energy is
+      // cumulative while total/pv_energy resets — so it cannot be inferred from the source.
+      {
+        const cell = el('td');
+        if (metric === 'energy') {
+          const accSel = el('select', { style: { width: 'auto' } });
+          [['lifetime', 'Lifetime'], ['period', 'Daily']].forEach(([v, t]) => accSel.appendChild(el('option', { value: v, text: t })));
+          accSel.value = src.Accumulation === 'period' ? 'period' : 'lifetime';
+          accSel.title = 'Lifetime: a cumulative total that only rises; its daily figure is its rise since midnight. '
+            + 'Daily: the device resets this counter itself, so the reading already is today\u2019s total and is used as-is.';
+          accSel.onchange = () => { src.Accumulation = accSel.value === 'lifetime' ? undefined : accSel.value; refreshDirty(); };
+          cell.appendChild(accSel);
+        } else {
+          cell.appendChild(el('span', { text: '\u2014', style: { color: 'var(--muted)' }, title: 'Only energy accumulates; this metric is instantaneous.' }));
         }
         tr.appendChild(cell);
       }

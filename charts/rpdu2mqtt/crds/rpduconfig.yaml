@@ -787,6 +787,13 @@ spec:
                                 - powerfactor
                                 - soc
                                 description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                              Accumulation:
+                                type: string
+                                enum:
+                                - ''
+                                - lifetime
+                                - period
+                                description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight."
                               Direction:
                                 type: string
                                 enum:
@@ -869,6 +876,13 @@ spec:
                                 - powerfactor
                                 - soc
                                 description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                              Accumulation:
+                                type: string
+                                enum:
+                                - ''
+                                - lifetime
+                                - period
+                                description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight."
                               Direction:
                                 type: string
                                 enum:

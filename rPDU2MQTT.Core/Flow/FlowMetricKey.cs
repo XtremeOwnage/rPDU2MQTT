@@ -36,6 +36,29 @@ public static class FlowMetricKey
             ? new[] { (metric, System.Math.Max(0, value)), (metric + InSuffix, System.Math.Max(0, -value)) }
             : new[] { (For(metric, direction), value) };
 
+    /// <summary>
+    /// The metric a source's readings are stored under, given how its counter accumulates.
+    ///
+    /// <para>
+    /// A <c>period</c> energy source has already done the re-basing for us — the device resets the counter
+    /// each day, so the reading <em>is</em> the daily total. Storing it under the daily metric hands it
+    /// straight to every consumer, and because the derived accumulator is registered last in the composite,
+    /// a real figure always wins over a computed one.
+    /// </para>
+    /// <para>
+    /// Only energy accumulates; power and the rest are instantaneous and pass through unchanged, whatever
+    /// the field says.
+    /// </para>
+    /// </summary>
+    public static string ForAccumulation(string metric, string? accumulation)
+        => IsPeriod(accumulation) && string.Equals(metric, "energy", System.StringComparison.OrdinalIgnoreCase)
+            ? EnergyPeriod.Metric
+            : metric;
+
+    /// <summary>True for a counter the device resets each period, rather than a cumulative one.</summary>
+    public static bool IsPeriod(string? accumulation)
+        => string.Equals(accumulation, "period", System.StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The cache key(s) a source writes, without values — for staleness/binding bookkeeping.</summary>
     public static IEnumerable<string> Keys(string metric, string? direction)
         => IsSplit(direction) ? new[] { metric, metric + InSuffix } : new[] { For(metric, direction) };

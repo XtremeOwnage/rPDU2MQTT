@@ -833,10 +833,17 @@ Per-source settings:
 | `Metric` | Which roll-up this feeds (`realpower`, `energy`, …). Bind one topic per metric to drive both power and energy. |
 | `JsonField` | For JSON payloads, the field to read — dotted for nesting (`battery.power`). Blank means the whole payload is the number. |
 | `Scale` | Multiplier for unit conversion (`0.001` for W → kW) or to flip a sign convention (`-1`). |
+| `Accumulation` | For an `energy` source: `lifetime` (default — a cumulative counter whose *rise* is measured) or `period` (the device resets it daily, so the reading already **is** today's total). |
 | `StaleAfterSeconds` | Ignore the value once it's this old (default 900). Stops a dead publisher from propping up the flow with a reading that stopped being true. `0` disables the check. |
 
 Notes:
 
+- **Check `Accumulation` on every energy source.** One publisher can do both: Solar Assistant's
+  `total/load_energy` and `total/grid_energy_in` are cumulative, while `total/pv_energy` rolls over at
+  midnight. Measuring the "rise" of a resetting counter loses the day — it drops to zero and climbs again
+  unobserved, and the next reading measured against yesterday's high-water mark gives a fraction of the
+  truth (seen live: 2.76 kWh of solar reported against 27.4 kWh actually generated). It cannot be inferred
+  from the topic, so it has to be declared.
 - A live reading **supersedes** the node's fixed `Value`, which stays as the fallback for anything you're
   modelling by hand. A live `0` is a real reading (solar at night), not a fall-back to `Value`.
 - Negative readings are clamped to `0` — a directed flow graph can't carry a negative, and it would

@@ -169,7 +169,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         {
             if (topic == removedTopic) continue;
             foreach (var (nodeId, src) in list)
-                if (nodeId == key.Node && FlowMetricKey.Keys(src.Metric, src.Direction).Any(k => string.Equals(k, key.Metric, StringComparison.OrdinalIgnoreCase)))
+                if (nodeId == key.Node && FlowMetricKey.Keys(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction).Any(k => string.Equals(k, key.Metric, StringComparison.OrdinalIgnoreCase)))
                     return false;
         }
         return true;
@@ -245,7 +245,10 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // value) writes both the out (positive part) and in (negative magnitude) keys. The 'in' key is
             // direction-qualified so it doesn't overwrite the out supply value, and — being a non-metric key —
             // is skipped by the grain sink below (Metrics.TryParse fails), keeping charge/export out of the flow.
-            foreach (var (key, v) in FlowMetricKey.Fan(src.Metric, src.Direction, value))
+            // A 'period' energy counter is reset by the device each day, so it already IS the daily total —
+            // store it under the daily metric rather than pretending it is cumulative and measuring its
+            // "rise", which loses the whole day every time the device rolls it over.
+            foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))
             {
                 cache.Set(nodeId, key, v, src.StaleAfterSeconds, nowUtc);
                 onReading?.Invoke(nodeId, key, v, src.StaleAfterSeconds);

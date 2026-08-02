@@ -2077,6 +2077,19 @@
                     ]
                   },
                   {
+                    "key": "Accumulation",
+                    "label": "Accumulation",
+                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
+                    "type": "enum",
+                    "required": false,
+                    "default": "lifetime",
+                    "enumValues": [
+                      "",
+                      "lifetime",
+                      "period"
+                    ]
+                  },
+                  {
                     "key": "Direction",
                     "label": "Direction",
                     "description": "Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.",
@@ -2230,6 +2243,19 @@
                       "frequency",
                       "powerfactor",
                       "soc"
+                    ]
+                  },
+                  {
+                    "key": "Accumulation",
+                    "label": "Accumulation",
+                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
+                    "type": "enum",
+                    "required": false,
+                    "default": "lifetime",
+                    "enumValues": [
+                      "",
+                      "lifetime",
+                      "period"
                     ]
                   },
                   {
