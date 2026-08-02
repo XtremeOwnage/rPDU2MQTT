@@ -205,7 +205,7 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
                 // against them. An inverted split convention is otherwise invisible — the diagram balances
                 // and the numbers look plausible; a charging battery just reads as discharging and gets
                 // added to the house total instead of subtracted. See DirectionAudit.
-                AuditDirection(id, next);
+                AuditDirection(id, next, now);
             }
         }
 
@@ -218,21 +218,48 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     // Warned nodes, so a contradiction that persists is said once rather than every sampling pass.
     private readonly HashSet<string> warnedDirection = new(StringComparer.OrdinalIgnoreCase);
 
-    private void AuditDirection(string id, Dictionary<string, EnergyState> next)
+    /// <summary>
+    /// Where each node's counters stood at the start of the current comparison window.
+    ///
+    /// <para>
+    /// A window, not the day, because a grid connection and a battery both reverse direction as a matter of
+    /// course — importing overnight and exporting at noon — so what the day did says nothing about now.
+    /// Comparing against the day warned about a grid genuinely exporting 150 W on an import-heavy afternoon,
+    /// which is exactly the false positive that teaches people to ignore warnings.
+    /// </para>
+    /// </summary>
+    private readonly Dictionary<string, (DateTime At, double Out, double In)> directionWindow = new(StringComparer.OrdinalIgnoreCase);
+
+    // Long enough that a coarse counter (often 0.1 kWh resolution) has actually moved, short enough that the
+    // node has probably not reversed inside it.
+    private static readonly TimeSpan DirectionWindow = TimeSpan.FromMinutes(10);
+
+    private void AuditDirection(string id, Dictionary<string, EnergyState> next, DateTime now)
     {
+        var outNow = next.TryGetValue(id, out var o) ? o.KWh : 0;
+        var inNow = next.TryGetValue(id + FlowMetricKey.InSuffix, out var i) ? i.KWh : 0;
+
+        if (!directionWindow.TryGetValue(id, out var start))
+        {
+            directionWindow[id] = (now, outNow, inNow);
+            return;
+        }
+        if (now - start.At < DirectionWindow) return;
+        directionWindow[id] = (now, outNow, inNow);   // next window starts here either way
+
         if (!upstream.TryGetValue(id, PowerMetric, out var pOut)) return;
         upstream.TryGetValue(id, FlowMetricKey.For(PowerMetric, "in"), out var pIn);
 
-        var outToday = next.TryGetValue(id, out var o) ? o.PeriodKWh : 0;
-        var inToday = next.TryGetValue(id + FlowMetricKey.InSuffix, out var i) ? i.PeriodKWh : 0;
+        var outRise = Math.Max(0, outNow - start.Out);
+        var inRise = Math.Max(0, inNow - start.In);
 
-        if (!DirectionAudit.LooksInverted(pOut, pIn, outToday, inToday))
+        if (!DirectionAudit.LooksInverted(pOut, pIn, outRise, inRise))
         {
             warnedDirection.Remove(id);   // it agrees again; a later contradiction is worth saying afresh
             return;
         }
         if (warnedDirection.Add(id))
-            Log.Warning(DirectionAudit.Explain(id, pOut, pIn, outToday, inToday));
+            Log.Warning(DirectionAudit.Explain(id, pOut, pIn, outRise, inRise));
     }
 
     /// <summary>
