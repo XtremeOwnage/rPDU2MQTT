@@ -263,10 +263,34 @@ public static class FlowGraphBuilder
         //    solar, the battery or the grid, so NONE of them carry anything. Dividing it between them —
         //    which is what this used to do — states a number the user never supplied, on the diagram whose
         //    whole purpose is to be accurate. Mark one 'residual' to say where the remainder actually goes.
+        // Nodes that are SUPPOSED to report this metric — someone bound a source for it — but have no fresh
+        // reading right now. "Unmeasured" and "unavailable" are not the same thing, and conflating them is how
+        // the diagram invented solar generation in the dark.
+        //
+        // A node with no source bound is genuinely unmeasured: nothing was ever going to measure it, so if the
+        // topology leaves exactly one path for the load to arrive by, conservation really does determine it.
+        // A node with a source bound and nothing coming out of it is a different situation entirely — the
+        // measurement failed. Letting it absorb the remainder says "we don't know what solar was doing, so
+        // assume it was doing all of it", which on a live system at night attributed the entire house load to
+        // a PV array in the dark while the grid that was actually carrying it read "no data".
+        //
+        // The project's rule is that unknown is never zero. This is the same rule pointing the other way:
+        // unknown is never "whatever balances the equation" either.
+        var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+        {
+            if (string.IsNullOrEmpty(n.Id) || leaf.ContainsKey(n.Id)) continue;
+            // Metric-specific on purpose: a node bound only for realpower is not "failing" to report energy,
+            // it was never asked to. Only a binding for THIS metric makes silence a failure.
+            if (n.AllSources().Any(src => string.Equals(src.Metric, metric, StringComparison.OrdinalIgnoreCase)))
+                expectsReading.Add(n.Id);
+        }
+        bool Unavailable(string id) => expectsReading.Contains(id);
+
         List<string> Absorbers(string to)
         {
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
             var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
             if (residual.Count > 0) return residual;
             return unmeasured.Count == 1 ? unmeasured : new List<string>();
@@ -287,8 +311,12 @@ public static class FlowGraphBuilder
             if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
+            // A feeder whose own source has stopped reporting carries an unknowable amount — not zero. Its
+            // link must draw as "no data" so the failure is visible, rather than as a confident hairline.
+            if (Unavailable(from)) return false;
+
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
 
             // A designated residual is told what it carries, so its own flow is determined. Its unmeasured
             // siblings are not: "the residual takes the remainder" says nothing about how much solar was
