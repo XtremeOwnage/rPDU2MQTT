@@ -113,6 +113,10 @@ export function addDiagnosticsSection(nav: any, sections: any) {
   };
 
   const fmtUptime = (s: number) => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  // Server timestamps are rendered exactly as the server sent them — never through the browser's Date, which
+  // would silently re-express them in the viewer's zone and defeat the point of showing the server's clock.
+  const fmtStamp = (s: string) => String(s || '').replace('T', ' ').replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)?$/, '');
+  const fmtOffset = (mins: number) => (mins < 0 ? '-' : '+') + String(Math.floor(Math.abs(mins) / 60)).padStart(2, '0') + ':' + String(Math.abs(mins) % 60).padStart(2, '0');
   const row = (k: string, v: any) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
 
   const load = async () => {
@@ -144,6 +148,32 @@ export function addDiagnosticsSection(nav: any, sections: any) {
       else txt = 'enabled (' + b.emoncms.transport + ') — no export yet';
       info.appendChild(row('EmonCMS', txt));
     }
+    // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
+    // browser — the container's clock is UTC unless someone set TZ, so "Energy today" can end at 7pm local
+    // and look like the numbers are wrong when it is only the day that ended.
+    try {
+      const t = (await api('/api/time')).body;
+      if (t && t.ok && t.host && t.period) {
+        info.appendChild(row('Server time (UTC)', fmtStamp(t.utc)));
+        info.appendChild(row('Server time zone', t.host.zone + ' (' + fmtOffset(t.host.offsetMinutes) + ') — ' + fmtStamp(t.host.time)));
+        const p = t.period;
+        if (!p.tracked) info.appendChild(row('Energy day', 'not tracked (EnergyFlow.Aggregation.TrackPeriods is off)'));
+        else {
+          const zoneRow = row('Energy day rolls at',
+            String(p.startHour).padStart(2, '0') + ':00 ' + p.zone + ' (' + fmtOffset(p.offsetMinutes) + ')'
+            + (p.configured ? '' : ' — not configured, using the host zone'));
+          // A configured zone this host cannot resolve is silently ignored at runtime; say so here, because
+          // the only other trace is one log line at startup.
+          if (!p.resolved) {
+            (zoneRow.lastChild as HTMLElement).textContent = '"' + p.configured + '" did not resolve on this host — falling back to ' + p.zone;
+            (zoneRow.lastChild as HTMLElement).style.color = 'var(--bad, #d05a5a)';
+          } else if (!p.configured) (zoneRow.lastChild as HTMLElement).style.color = 'var(--warn, #d08700)';
+          info.appendChild(zoneRow);
+          info.appendChild(row('Current energy day', p.key + ' — now ' + fmtStamp(p.time) + ' there'));
+          info.appendChild(row('Next rollover', fmtStamp(p.nextRolloverLocal) + ' ' + p.zone + ' (in ' + fmtUptime(p.secondsUntilRollover) + ')'));
+        }
+      }
+    } catch { /* an older server has no /api/time; the rest of the page is still useful */ }
     info.appendChild(row('Config source', b.configSource));
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));

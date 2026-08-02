@@ -19,14 +19,59 @@ public static class EnergyPeriod
     /// </summary>
     public const string Metric = "energytoday";
 
-    /// <summary>The key for the local day <paramref name="utc"/> falls in.</summary>
-    public static string KeyFor(DateTime utc, TimeZoneInfo zone)
+    /// <summary>Local time in <paramref name="zone"/> for an instant, whatever Kind the instant carries.</summary>
+    public static DateTime Local(DateTime utc, TimeZoneInfo zone)
     {
         // A stored DateTime round-trips through JSON as Unspecified; treat it as the UTC it is, because
         // ConvertTimeFromUtc rejects a value already marked Local and would throw on a machine in a
         // non-UTC zone — a crash in the sampler rather than a wrong date.
         var instant = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
-        return TimeZoneInfo.ConvertTimeFromUtc(instant, zone).ToString("yyyy-MM-dd");
+        return TimeZoneInfo.ConvertTimeFromUtc(instant, zone);
+    }
+
+    /// <summary>
+    /// The key for the period <paramref name="utc"/> falls in.
+    ///
+    /// <para>
+    /// <paramref name="startHour"/> moves the boundary off midnight — a utility whose day runs 06:00 to
+    /// 06:00, a shift pattern, or simply a preference not to have the chart reset while someone is looking
+    /// at it. Shifting the local clock back by that many hours and then taking the date does the whole job:
+    /// 05:00 with a start hour of 6 lands on the previous day's key, which is what "the day that began at
+    /// 06:00 yesterday" means.
+    /// </para>
+    /// </summary>
+    public static string KeyFor(DateTime utc, TimeZoneInfo zone, int startHour = 0)
+        => Local(utc, zone).AddHours(-Clamp(startHour)).ToString("yyyy-MM-dd");
+
+    /// <summary>When the current period ends, as an instant. What the GUI shows as "next rollover".</summary>
+    public static DateTime NextRollover(DateTime utc, TimeZoneInfo zone, int startHour = 0)
+    {
+        var hour = Clamp(startHour);
+        var local = Local(utc, zone);
+        // The next boundary is the start hour on the next day whose shifted date differs from this one's.
+        var next = local.Date.AddHours(hour);
+        if (next <= local) next = next.AddDays(1);
+        return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(next, DateTimeKind.Unspecified), zone);
+    }
+
+    /// <summary>A start hour outside 0–23 is a typo, not an instruction; midnight is the honest reading.</summary>
+    private static int Clamp(int startHour) => startHour is >= 0 and <= 23 ? startHour : 0;
+
+    /// <summary>
+    /// Every zone this host can resolve, so the GUI offers a list instead of a text box whose typos surface
+    /// only as a log line months later. Host-dependent by nature — a container without tzdata has almost
+    /// none, and showing that honestly is more useful than a hard-coded list that then fails to resolve.
+    /// </summary>
+    public static IReadOnlyList<string> AvailableZones()
+    {
+        try
+        {
+            return TimeZoneInfo.GetSystemTimeZones().Select(z => z.Id).OrderBy(z => z, StringComparer.Ordinal).ToList();
+        }
+        catch (Exception)
+        {
+            return Array.Empty<string>();
+        }
     }
 
     /// <summary>

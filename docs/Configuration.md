@@ -906,7 +906,14 @@ EnergyFlow:
   Aggregation:
     TrackPeriods: true              # default. Daily totals per node AND per outlet.
     PeriodTimeZone: America/Chicago # blank = the host's zone (UTC in most containers)
+    PeriodStartHour: 0              # 0 = midnight. 6 for a utility day that runs 06:00–06:00.
 ```
+
+`PeriodTimeZone` renders as a **dropdown** in the GUI, listing the zones the server can actually resolve —
+a zone that isn't there wouldn't resolve at runtime either. The **Diagnostics** page shows the server's own
+clock, its zone, the current energy day and the next rollover; the **Flow** tab repeats the day and a
+countdown next to the *Show* selector whenever you're looking at "Energy today". Worth checking once: the
+boundary is the server's, not your browser's.
 
 Notes:
 
@@ -916,7 +923,8 @@ Notes:
   `Aggregation.Enabled: true` to be integrated first. That stays opt-in because an integral of watts
   genuinely is an estimate.
 - **Set `PeriodTimeZone`** (or `TZ` on the container). A day that rolls over at UTC midnight is not the day
-  you or your utility are looking at.
+  you or your utility are looking at. Diagnostics flags it in amber while it's unset, and in red if the zone
+  you named doesn't exist on the server.
 - A counter that goes backwards — a PDU reboot, a firmware clear — is treated as a reset, and the energy
   recorded before it is kept rather than subtracted.
 - Unlike integration, a gap loses nothing: if a PDU is unreachable for an hour its counter kept running, so

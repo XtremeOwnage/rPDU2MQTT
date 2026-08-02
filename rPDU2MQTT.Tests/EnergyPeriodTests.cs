@@ -114,6 +114,54 @@ public class EnergyPeriodTests
     }
 
     [Fact]
+    public void AStartHour_MovesTheBoundaryOffMidnight()
+    {
+        // A utility day that runs 06:00 to 06:00. 05:00 still belongs to the day that began yesterday at 06.
+        Assert.Equal("2026-08-01", EnergyPeriod.KeyFor(Utc(2, 11), Zone, 6));   // 05:00 local on the 2nd
+        Assert.Equal("2026-08-02", EnergyPeriod.KeyFor(Utc(2, 13), Zone, 6));   // 07:00 local on the 2nd
+    }
+
+    [Fact]
+    public void AnOutOfRangeStartHour_IsMidnight_NotAnException()
+    {
+        // A typo in config must not take the sampler down or silently shift the day by a random amount.
+        Assert.Equal(EnergyPeriod.KeyFor(Utc(2, 7), Zone, 0), EnergyPeriod.KeyFor(Utc(2, 7), Zone, 99));
+        Assert.Equal(EnergyPeriod.KeyFor(Utc(2, 7), Zone, 0), EnergyPeriod.KeyFor(Utc(2, 7), Zone, -3));
+    }
+
+    [Fact]
+    public void TheNextRollover_IsTheNextBoundary_AndAlwaysAhead()
+    {
+        // 21:00 local on the 1st (03:00 UTC on the 2nd) → midnight local, which is 06:00 UTC on the 2nd.
+        Assert.Equal(Utc(2, 6), EnergyPeriod.NextRollover(Utc(2, 3), Zone));
+
+        // Standing exactly on a boundary rolls to the next one rather than reporting "now".
+        Assert.Equal(Utc(3, 6), EnergyPeriod.NextRollover(Utc(2, 6), Zone));
+    }
+
+    [Fact]
+    public void TheNextRollover_FollowsTheStartHour()
+    {
+        // Day starts 06:00 local = 12:00 UTC. At 05:00 local on the 2nd the next boundary is 06:00 that day.
+        Assert.Equal(Utc(2, 12), EnergyPeriod.NextRollover(Utc(2, 11), Zone, 6));
+        // An hour later it has passed, so the next one is the following day.
+        Assert.Equal(Utc(3, 12), EnergyPeriod.NextRollover(Utc(2, 13), Zone, 6));
+    }
+
+    [Fact]
+    public void TheKeyChangesExactlyWhenTheRolloverSaysItWill()
+    {
+        // The two have to agree, or the GUI counts down to a moment the sampler doesn't act on.
+        foreach (var hour in new[] { 0, 6, 23 })
+        {
+            var now = Utc(2, 3);
+            var next = EnergyPeriod.NextRollover(now, Zone, hour);
+            Assert.Equal(EnergyPeriod.KeyFor(now, Zone, hour), EnergyPeriod.KeyFor(next.AddSeconds(-1), Zone, hour));
+            Assert.NotEqual(EnergyPeriod.KeyFor(now, Zone, hour), EnergyPeriod.KeyFor(next, Zone, hour));
+        }
+    }
+
+    [Fact]
     public void AnUnknownTimeZone_FallsBackToLocal_AndSaysSo()
     {
         string? warned = null;

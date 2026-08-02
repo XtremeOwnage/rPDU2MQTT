@@ -714,7 +714,12 @@ spec:
                         description: Track a daily energy total per node and outlet, so the flow diagram compares figures that all start at the same moment. Lifetime totals are unaffected.
                       PeriodTimeZone:
                         type: string
-                        description: IANA time zone the daily total rolls over in, e.g. "America/Chicago". Blank uses the host's local time zone.
+                        description: IANA time zone the daily total rolls over in, e.g. "America/Chicago". Blank uses the host's local time zone — which in a container is usually UTC.
+                      PeriodStartHour:
+                        type: integer
+                        description: Hour of the day the daily total rolls over, in the period time zone. 0 = midnight.
+                        minimum: 0
+                        maximum: 23
                     description: Accumulate energy (kWh) from the power readings, for nodes that report power but not energy.
                   Nodes:
                     type: array

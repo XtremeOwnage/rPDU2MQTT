@@ -127,8 +127,12 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         Log.Information($"Energy aggregation: sampling power every {agg.SampleIntervalSeconds}s "
                       + $"(gaps over {agg.MaxGapSeconds}s are not counted); carried over {carried} node total(s).");
         if (Periods)
-            Log.Information($"Energy periods: daily totals roll over at midnight {zone.Id}, so every node's "
-                          + "figure covers the same window and the flow roll-up adds up.");
+        {
+            var hour = agg.PeriodStartHour is >= 0 and <= 23 ? agg.PeriodStartHour : 0;
+            Log.Information($"Energy periods: daily totals roll over at {hour:00}:00 {zone.Id} "
+                          + $"(next {EnergyPeriod.NextRollover(DateTime.UtcNow, zone, hour):yyyy-MM-dd HH:mm} UTC), so every "
+                          + "node's figure covers the same window and the flow roll-up adds up.");
+        }
 
         var maxGap = TimeSpan.FromSeconds(Math.Max(1, agg.MaxGapSeconds));
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, agg.SampleIntervalSeconds)));
@@ -157,7 +161,7 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     internal void Sample(TimeSpan maxGap, DateTime now)
     {
         var next = new Dictionary<string, EnergyState>(states, StringComparer.OrdinalIgnoreCase);
-        var periodKey = Periods ? EnergyPeriod.KeyFor(now, zone) : null;
+        var periodKey = Periods ? EnergyPeriod.KeyFor(now, zone, cfg.EnergyFlow.Aggregation.PeriodStartHour) : null;
         var sampled = 0;
 
         static EnergyState Prev(Dictionary<string, EnergyState> d, string k) => d.TryGetValue(k, out var s) ? s : EnergyState.Empty;

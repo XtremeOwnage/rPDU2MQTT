@@ -26,6 +26,20 @@ public sealed class SchemaNode
     public double? Min { get; set; }
     public double? Max { get; set; }
     public string[]? EnumValues { get; set; }
+
+    /// <summary>
+    /// The choices in <see cref="EnumValues"/> were discovered from the running host, not declared on the
+    /// model — today the time zones it can resolve.
+    ///
+    /// <para>
+    /// They are a GUI convenience and must never become a *constraint*: baking one machine's tzdata into the
+    /// CRD would have the API server reject a zone that is perfectly valid on the cluster actually running
+    /// the workload, and the emitted CRD would differ per build machine. Consumers that validate — the CRD
+    /// generator — skip the enum and keep the plain type; consumers that only offer choices render as usual.
+    /// </para>
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool DynamicChoices { get; set; }
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -109,6 +123,17 @@ public static class ConfigSchema
         {
             var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
             node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
+            node.Type = "enum";
+            return node;
+        }
+
+        // Choices that only the running host knows — the time zones it can resolve. Same dropdown as
+        // [AllowedValues], but filled in here because the list is host-dependent (see TimeZoneChoicesAttribute).
+        // Blank stays first so the field can be cleared back to "use the host's zone".
+        if (type == typeof(string) && prop.GetCustomAttribute<TimeZoneChoicesAttribute>() is not null)
+        {
+            node.EnumValues = Core.Flow.EnergyPeriod.AvailableZones().Prepend(string.Empty).ToArray();
+            node.DynamicChoices = true;
             node.Type = "enum";
             return node;
         }

@@ -1006,6 +1006,10 @@ function addDiagnosticsSection(nav     , sections     ) {
   };
 
   const fmtUptime = (s        ) => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  // Server timestamps are rendered exactly as the server sent them — never through the browser's Date, which
+  // would silently re-express them in the viewer's zone and defeat the point of showing the server's clock.
+  const fmtStamp = (s        ) => String(s || '').replace('T', ' ').replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)?$/, '');
+  const fmtOffset = (mins        ) => (mins < 0 ? '-' : '+') + String(Math.floor(Math.abs(mins) / 60)).padStart(2, '0') + ':' + String(Math.abs(mins) % 60).padStart(2, '0');
   const row = (k        , v     ) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
 
   const load = async () => {
@@ -1037,6 +1041,32 @@ function addDiagnosticsSection(nav     , sections     ) {
       else txt = 'enabled (' + b.emoncms.transport + ') — no export yet';
       info.appendChild(row('EmonCMS', txt));
     }
+    // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
+    // browser — the container's clock is UTC unless someone set TZ, so "Energy today" can end at 7pm local
+    // and look like the numbers are wrong when it is only the day that ended.
+    try {
+      const t = (await api('/api/time')).body;
+      if (t && t.ok && t.host && t.period) {
+        info.appendChild(row('Server time (UTC)', fmtStamp(t.utc)));
+        info.appendChild(row('Server time zone', t.host.zone + ' (' + fmtOffset(t.host.offsetMinutes) + ') — ' + fmtStamp(t.host.time)));
+        const p = t.period;
+        if (!p.tracked) info.appendChild(row('Energy day', 'not tracked (EnergyFlow.Aggregation.TrackPeriods is off)'));
+        else {
+          const zoneRow = row('Energy day rolls at',
+            String(p.startHour).padStart(2, '0') + ':00 ' + p.zone + ' (' + fmtOffset(p.offsetMinutes) + ')'
+            + (p.configured ? '' : ' — not configured, using the host zone'));
+          // A configured zone this host cannot resolve is silently ignored at runtime; say so here, because
+          // the only other trace is one log line at startup.
+          if (!p.resolved) {
+            (zoneRow.lastChild               ).textContent = '"' + p.configured + '" did not resolve on this host — falling back to ' + p.zone;
+            (zoneRow.lastChild               ).style.color = 'var(--bad, #d05a5a)';
+          } else if (!p.configured) (zoneRow.lastChild               ).style.color = 'var(--warn, #d08700)';
+          info.appendChild(zoneRow);
+          info.appendChild(row('Current energy day', p.key + ' — now ' + fmtStamp(p.time) + ' there'));
+          info.appendChild(row('Next rollover', fmtStamp(p.nextRolloverLocal) + ' ' + p.zone + ' (in ' + fmtUptime(p.secondsUntilRollover) + ')'));
+        }
+      }
+    } catch { /* an older server has no /api/time; the rest of the page is still useful */ }
     info.appendChild(row('Config source', b.configSource));
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
@@ -2572,9 +2602,36 @@ function addFlowSection(nav     , sections     ) {
   [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
-  metricSel.onchange = () => load();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
+  // and in a container that is UTC unless someone set TZ — so a day can end at 7pm local and look like the
+  // totals reset for no reason. Shown only on the daily metric, where it changes how to read the chart.
+  const dayNote = el('span', { class: 'ld-count' })               ;
+  dayNote.style.cssText = 'margin-left:8px';
+  const showDayNote = async () => {
+    dayNote.textContent = '';
+    dayNote.removeAttribute('title');
+    if (metricSel.value !== 'energytoday') return;
+    let p     ;
+    try { p = (await api('/api/time')).body?.period; } catch { return; }
+    if (!p) return;
+    if (!p.tracked) {
+      dayNote.textContent = '· daily totals are not being tracked';
+      dayNote.style.color = 'var(--warn, #d08700)';
+      dayNote.title = 'Set EnergyFlow.Aggregation.TrackPeriods to on. Without it nothing re-bases the counters, and this view has no data to draw.';
+      return;
+    }
+    const hrs = Math.floor(p.secondsUntilRollover / 3600), mins = Math.round(p.secondsUntilRollover % 3600 / 60);
+    dayNote.textContent = `· day ${p.key} in ${p.zone}, rolls in ${hrs ? hrs + 'h ' : ''}${mins}m`;
+    dayNote.style.color = p.configured && p.resolved ? '' : 'var(--warn, #d08700)';
+    dayNote.title = !p.resolved
+      ? `The configured zone "${p.configured}" did not resolve on the server; it is using ${p.zone} instead.`
+      : p.configured
+        ? `Every figure below covers ${p.key} in ${p.zone}, starting ${String(p.startHour).padStart(2, '0')}:00. Server time there is now ${String(p.time).replace('T', ' ').slice(0, 16)}.`
+        : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
+  };
+  metricSel.onchange = () => { load(); showDayNote(); };
+  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
@@ -3202,7 +3259,7 @@ function addFlowSection(nav     , sections     ) {
     (body     ) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
   metricSel.addEventListener('change', () => syncLive());
 
-  link.onclick = () => { activate(link, sec); syncLive(); load(); };
+  link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value

@@ -1174,9 +1174,36 @@ export function addFlowSection(nav: any, sections: any) {
   [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
-  metricSel.onchange = () => load();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
+  // and in a container that is UTC unless someone set TZ — so a day can end at 7pm local and look like the
+  // totals reset for no reason. Shown only on the daily metric, where it changes how to read the chart.
+  const dayNote = el('span', { class: 'ld-count' }) as HTMLElement;
+  dayNote.style.cssText = 'margin-left:8px';
+  const showDayNote = async () => {
+    dayNote.textContent = '';
+    dayNote.removeAttribute('title');
+    if (metricSel.value !== 'energytoday') return;
+    let p: any;
+    try { p = (await api('/api/time')).body?.period; } catch { return; }
+    if (!p) return;
+    if (!p.tracked) {
+      dayNote.textContent = '· daily totals are not being tracked';
+      dayNote.style.color = 'var(--warn, #d08700)';
+      dayNote.title = 'Set EnergyFlow.Aggregation.TrackPeriods to on. Without it nothing re-bases the counters, and this view has no data to draw.';
+      return;
+    }
+    const hrs = Math.floor(p.secondsUntilRollover / 3600), mins = Math.round(p.secondsUntilRollover % 3600 / 60);
+    dayNote.textContent = `· day ${p.key} in ${p.zone}, rolls in ${hrs ? hrs + 'h ' : ''}${mins}m`;
+    dayNote.style.color = p.configured && p.resolved ? '' : 'var(--warn, #d08700)';
+    dayNote.title = !p.resolved
+      ? `The configured zone "${p.configured}" did not resolve on the server; it is using ${p.zone} instead.`
+      : p.configured
+        ? `Every figure below covers ${p.key} in ${p.zone}, starting ${String(p.startHour).padStart(2, '0')}:00. Server time there is now ${String(p.time).replace('T', ' ').slice(0, 16)}.`
+        : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
+  };
+  metricSel.onchange = () => { load(); showDayNote(); };
+  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
@@ -1805,7 +1832,7 @@ export function addFlowSection(nav: any, sections: any) {
     (body: any) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
   metricSel.addEventListener('change', () => syncLive());
 
-  link.onclick = () => { activate(link, sec); syncLive(); load(); };
+  link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
