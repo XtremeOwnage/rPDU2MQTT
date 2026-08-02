@@ -200,6 +200,12 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
                 var inId = id + FlowMetricKey.InSuffix;
                 next[inId] = EnergyIntegrator.Observe(Prev(next, inId), inCounter, now, periodKey);
                 sampled++;
+
+                // Now that both energy directions are known for this node, check the power source's sign
+                // against them. An inverted split convention is otherwise invisible — the diagram balances
+                // and the numbers look plausible; a charging battery just reads as discharging and gets
+                // added to the house total instead of subtracted. See DirectionAudit.
+                AuditDirection(id, next);
             }
         }
 
@@ -207,6 +213,26 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
 
         states = next;
         if (sampled > 0) store.Save(next);
+    }
+
+    // Warned nodes, so a contradiction that persists is said once rather than every sampling pass.
+    private readonly HashSet<string> warnedDirection = new(StringComparer.OrdinalIgnoreCase);
+
+    private void AuditDirection(string id, Dictionary<string, EnergyState> next)
+    {
+        if (!upstream.TryGetValue(id, PowerMetric, out var pOut)) return;
+        upstream.TryGetValue(id, FlowMetricKey.For(PowerMetric, "in"), out var pIn);
+
+        var outToday = next.TryGetValue(id, out var o) ? o.PeriodKWh : 0;
+        var inToday = next.TryGetValue(id + FlowMetricKey.InSuffix, out var i) ? i.PeriodKWh : 0;
+
+        if (!DirectionAudit.LooksInverted(pOut, pIn, outToday, inToday))
+        {
+            warnedDirection.Remove(id);   // it agrees again; a later contradiction is worth saying afresh
+            return;
+        }
+        if (warnedDirection.Add(id))
+            Log.Warning(DirectionAudit.Explain(id, pOut, pIn, outToday, inToday));
     }
 
     /// <summary>
