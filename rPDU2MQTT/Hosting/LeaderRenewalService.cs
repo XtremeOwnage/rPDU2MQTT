@@ -31,10 +31,42 @@ public sealed class LeaderRenewalService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(Interval);
+        bool? was = null;        // null = nothing reported yet, so the first outcome is always announced
+        var complained = false;  // one line per outage, not one every five seconds
+
         do
         {
-            try { state.IsLeader = await grains.GetGrain<ILeaderGrain>(0).Renew(id, LeaseSeconds); }
-            catch { state.IsLeader = false; }   // can't reach the cluster → never assume leadership
+            bool now;
+            try
+            {
+                now = await grains.GetGrain<ILeaderGrain>(0).Renew(id, LeaseSeconds);
+                complained = false;
+            }
+            catch (Exception ex)
+            {
+                // Never assume leadership when the cluster is unreachable — but never lose the reason either.
+                // This used to be a bare `catch { }`, and the cost of that silence was total: every run-once
+                // service self-gates on this flag, so a failing renewal stopped the MQTT publish, the Home
+                // Assistant discovery and the energy-flow export dead, with nothing in the log to say so and
+                // a broker still showing yesterday's retained values as if they were current.
+                now = false;
+                if (!complained)
+                {
+                    complained = true;
+                    Log.Warning($"Cluster leadership could not be renewed ({ex.GetType().Name}: {ex.Message}). "
+                              + "This instance will not publish, export or run Home Assistant discovery until it "
+                              + "recovers — those all run on the leader only.");
+                }
+            }
+
+            if (was != now)
+            {
+                Log.Information(now
+                    ? "Cluster leadership acquired — this instance runs the publishers, exporters and discovery."
+                    : "Cluster leadership lost or held elsewhere — this instance publishes nothing until it returns.");
+                was = now;
+            }
+            state.IsLeader = now;
         }
         while (await SafeWait(timer, stoppingToken));
 

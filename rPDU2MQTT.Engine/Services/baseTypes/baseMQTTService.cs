@@ -28,6 +28,9 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     /// </summary>
     protected virtual bool LeaderGated => true;
 
+    // Said once per idle spell, so a permanent skip is visible without a line every tick.
+    private bool warnedNotLeader;
+
     /// <summary>
     /// When the data currently being published was read from the device (#205). A publishing loop sets this
     /// per snapshot; null means "no better answer than now" (e.g. a state echo after a control action).
@@ -70,7 +73,13 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     {
         if (timer is null)
         {
-            Log.Information($"{GetType().Name} - performing single execution.");
+            // A non-positive interval means this service runs ONCE and then never again. For a publisher or
+            // an exporter that is indistinguishable from being broken — the broker keeps serving whatever was
+            // retained on that single pass, so the data looks present and is simply frozen. Say so as a
+            // warning, not an info line lost in the startup noise.
+            Log.Warning($"{GetType().Name} has no repeat interval, so it runs once and then stops. Anything it "
+                      + "publishes will stay at its startup values; consumers will keep reading the retained "
+                      + "message as if it were current. Set a positive PollInterval to make it repeat.");
             await tick(cancellationToken);
             return;
         }
@@ -107,9 +116,19 @@ public abstract class baseMQTTService : IHostedService, IDisposable
             // v3: only the leader runs the run-once work; other instances no-op this tick (null leader = tests).
             if (LeaderGated && leader is { IsLeader: false })
             {
-                Log.Verbose($"{GetType().Name} - skipped (not cluster leader).");
+                // Debug, not Verbose. A service that quietly does nothing forever is indistinguishable from a
+                // broken one, and Verbose is off in every deployment anyone actually runs — so the one clue
+                // that publishing had stopped was invisible exactly when it was needed.
+                Log.Debug($"{GetType().Name} - skipped (not cluster leader).");
+                if (!warnedNotLeader)
+                {
+                    warnedNotLeader = true;
+                    Log.Information($"{GetType().Name} is idle: this instance does not hold cluster leadership. "
+                                  + "Retained values on the broker are from the last instance that did, and are not being refreshed.");
+                }
                 return;
             }
+            warnedNotLeader = false;
 
             Log.Debug($"{GetType().Name} - start.");
             await Execute(cancellationToken);
