@@ -1372,7 +1372,16 @@ export function addFlowSection(nav: any, sections: any) {
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
-    const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s: number, n: any) => s + nodeValue(n.id), 0)));
+    // What the node has to be tall enough to carry: its own reading, or the flows through it if those are
+    // larger. Never smaller than the ribbons it must accommodate.
+    const throughput = (id: string) => {
+      let inSum = 0, outSum = 0;
+      (incoming[id] || []).forEach((l: any) => { if (l.known !== false) inSum += l.value || 0; });
+      (outgoing[id] || []).forEach((l: any) => { if (l.known !== false) outSum += l.value || 0; });
+      return Math.max(nodeValue(id) || 0, inSum, outSum);
+    };
+
+    const maxTotal = Math.max(1, ...cols.map(cn => cn.reduce((s: number, n: any) => s + throughput(n.id), 0)));
     const pxPerUnit = usableH / maxTotal;
     const colX = (c: number) => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
@@ -1398,9 +1407,18 @@ export function addFlowSection(nav: any, sections: any) {
     const placeColumn = (cn: any[], c: number) => {
       let y = padTop;
       cn.forEach((n: any) => {
-        // Bar height is proportional; an unknown or measured-zero node is a thin marker (it has no
-        // magnitude to show) rather than a fixed slab. The row it sits in is what guarantees label spacing.
-        const h = known(n.id) ? Math.max(2, nodeValue(n.id) * pxPerUnit) : 3;
+        // Bar height is proportional to what actually passes THROUGH the node, not to its own reading.
+        //
+        // Those are not always the same number, and when they differ the bar is the thing that lies. An
+        // inverter bound to `load_power` reports its AC-load leg only, so one taking 8,344 W of PV and
+        // sending 5,652 W of it to charge a battery reported 2,526 W — and drew a bar a third the width of
+        // the ribbons entering and leaving it. The reading was correct; the geometry was not, and geometry is
+        // the whole point of a Sankey. The label still shows the node's own value, and the discrepancy is
+        // flagged separately.
+        //
+        // An unknown or measured-zero node is a thin marker (it has no magnitude to show) rather than a
+        // fixed slab. The row it sits in is what guarantees label spacing.
+        const h = known(n.id) ? Math.max(2, throughput(n.id) * pxPerUnit) : 3;
         const rowH = Math.max(h, labelRow);
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
         y += rowH + gap;
