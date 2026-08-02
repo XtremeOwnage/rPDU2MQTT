@@ -833,10 +833,17 @@ Per-source settings:
 | `Metric` | Which roll-up this feeds (`realpower`, `energy`, …). Bind one topic per metric to drive both power and energy. |
 | `JsonField` | For JSON payloads, the field to read — dotted for nesting (`battery.power`). Blank means the whole payload is the number. |
 | `Scale` | Multiplier for unit conversion (`0.001` for W → kW) or to flip a sign convention (`-1`). |
+| `Accumulation` | For an `energy` source: `lifetime` (default — a cumulative counter whose *rise* is measured) or `period` (the device resets it daily, so the reading already **is** today's total). |
 | `StaleAfterSeconds` | Ignore the value once it's this old (default 900). Stops a dead publisher from propping up the flow with a reading that stopped being true. `0` disables the check. |
 
 Notes:
 
+- **Check `Accumulation` on every energy source.** One publisher can do both: Solar Assistant's
+  `total/load_energy` and `total/grid_energy_in` are cumulative, while `total/pv_energy` rolls over at
+  midnight. Measuring the "rise" of a resetting counter loses the day — it drops to zero and climbs again
+  unobserved, and the next reading measured against yesterday's high-water mark gives a fraction of the
+  truth (seen live: 2.76 kWh of solar reported against 27.4 kWh actually generated). It cannot be inferred
+  from the topic, so it has to be declared.
 - A live reading **supersedes** the node's fixed `Value`, which stays as the fallback for anything you're
   modelling by hand. A live `0` is a real reading (solar at night), not a fall-back to `Value`.
 - Negative readings are clamped to `0` — a directed flow graph can't carry a negative, and it would
@@ -880,6 +887,27 @@ plus pre-wired nodes (solar / battery / grid / inverter) with the register bindi
 > scales against your own device. Each imported binding notes the register it maps, and the template links
 > its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
 > it can be turned into a template.
+
+### Nothing is computed behind your back
+
+Every number the flow shows is either measured, summed from measured children, or **inferred** — and the
+diagram says which. An inferred value is labelled `· inferred` on the chart and explained in the hover card;
+it is never rendered the way a metered reading is.
+
+Two behaviours compute rather than read, and both are switches you can see on the **Flow** tab under
+*Energy roll-up*:
+
+| Switch | What it does | Default |
+| --- | --- | --- |
+| Derive kWh from power | Integrates watts over time for nodes with no energy counter. An estimate — a real energy source always wins. | Off |
+| Infer from a single supply path | Fills in an unmeasured node from what it feeds, when only one of several possible routes could have supplied it. | On |
+
+The second one is worth understanding. When a node has exactly **one** feeder, propagating demand up it is
+arithmetic, not a guess — a PDU's total is its outlets' — and that is always done. When a node has
+**several** feeders and all but one are ruled out (by `Mode: none`, or by their source having gone silent),
+picking the survivor is a claim about the hierarchy you drew rather than anything measured. That is what this
+switch governs, and what gets labelled `inferred`. Turn it off and such a node reads "no data" instead;
+plain roll-ups are unaffected either way.
 
 ### Energy today vs. energy lifetime
 

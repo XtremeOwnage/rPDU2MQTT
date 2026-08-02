@@ -442,7 +442,7 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
-    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Counter', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
       const th = el('th', { text: h });
       if (colHint[h]) th.title = colHint[h];
       head.appendChild(th);
@@ -500,6 +500,27 @@ function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, reren
           cell.appendChild(dirSel);
         } else {
           cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
+        }
+        tr.appendChild(cell);
+      }
+
+      // Does this counter run forever, or does the device reset it every day? Only energy accumulates, so
+      // every other metric's cell stays blank. Getting it wrong is silent and expensive: measuring the
+      // "rise" of a counter the device resets at midnight loses the whole day, because it drops to zero and
+      // climbs again unobserved. One publisher can do both — Solar Assistant's total/load_energy is
+      // cumulative while total/pv_energy resets — so it cannot be inferred from the source.
+      {
+        const cell = el('td');
+        if (metric === 'energy') {
+          const accSel = el('select', { style: { width: 'auto' } });
+          [['lifetime', 'Lifetime'], ['period', 'Daily']].forEach(([v, t]) => accSel.appendChild(el('option', { value: v, text: t })));
+          accSel.value = src.Accumulation === 'period' ? 'period' : 'lifetime';
+          accSel.title = 'Lifetime: a cumulative total that only rises; its daily figure is its rise since midnight. '
+            + 'Daily: the device resets this counter itself, so the reading already is today\u2019s total and is used as-is.';
+          accSel.onchange = () => { src.Accumulation = accSel.value === 'lifetime' ? undefined : accSel.value; refreshDirty(); };
+          cell.appendChild(accSel);
+        } else {
+          cell.appendChild(el('span', { text: '\u2014', style: { color: 'var(--muted)' }, title: 'Only energy accumulates; this metric is instantaneous.' }));
         }
         tr.appendChild(cell);
       }
@@ -1506,7 +1527,12 @@ export function addFlowSection(nav: any, sections: any) {
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
-      lab.textContent = unknownNode ? `${n.label} · no data` : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}`;
+      // An inferred figure is never dressed as a measured one. It is arithmetic about the hierarchy someone
+      // drew — sound, but not something anything metered — so it says so on its face, in the one place the
+      // number is actually read.
+      const inferredNode = n.derivation === 'inferred';
+      lab.textContent = unknownNode ? `${n.label} · no data`
+        : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -1516,6 +1542,16 @@ export function addFlowSection(nav: any, sections: any) {
       }
       // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
       // diagram instead of drawing the larger number at full height and letting it look intentional.
+      else if (inferredNode) {
+        lab.setAttribute('font-style', 'italic');
+        lab.setAttribute('fill-opacity', '0.85');
+        const why = svgEl('title');
+        why.textContent = 'Nothing measures this node. The figure is what conservation requires: the load '
+          + 'downstream is really being drawn, and the hierarchy you drew leaves exactly one path it could '
+          + 'have arrived by. It is only as true as that hierarchy. Bind a source to measure it, or turn off '
+          + '"Infer from a single supply path" under Energy roll-up to show no data instead.';
+        lab.appendChild(why);
+      }
       else if (n.imbalance != null) {
         lab.textContent += ' ⚠';
         const why = svgEl('title');
@@ -1540,6 +1576,12 @@ export function addFlowSection(nav: any, sections: any) {
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
           unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
+        // Provenance sits with the value, not in a legend somewhere else.
+        if (!unknownNode && n.derivation && n.derivation !== 'measured')
+          rows.push(el('div', { class: n.derivation === 'inferred' ? 'nh-warn' : 'desc', style: { margin: '2px 0 0' } },
+            n.derivation === 'inferred'
+              ? 'inferred — nothing measures this; conservation leaves one path it could have come by'
+              : 'summed from what it feeds'));
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
 
@@ -1710,6 +1752,16 @@ export function addFlowSection(nav: any, sections: any) {
         clock.style.color = 'var(--warn, #d08700)';
       }
     }).catch(() => { });
+
+    // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
+    // nothing measured — sound arithmetic about the hierarchy you drew, and only as true as that hierarchy.
+    const inferRow = el('div', { class: 'desc' }) as HTMLElement;
+    const inferChk = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    inferChk.checked = flow.InferFromConservation !== false;   // defaults on
+    inferChk.onchange = () => { flow.InferFromConservation = inferChk.checked ? undefined : false; refreshDirty(); };
+    inferRow.append(el('label', {}, inferChk,
+      ' Infer from a single supply path — fill in an unmeasured node from what it feeds, when only one path could have supplied it. Results are labelled “inferred”; off shows “no data”.'));
+    ed.appendChild(inferRow);
 
     // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
     const aggIntegrate = el('div', { class: 'desc' }) as HTMLElement;

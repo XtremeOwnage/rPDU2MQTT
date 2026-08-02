@@ -47,6 +47,25 @@ public class EnergyFlowConfig
     [Description("Legacy single-feeder map (child id -> parent id). Prefer Links; still honored for back-compat.")]
     public Dictionary<string, string> Parents { get; set; } = new();
 
+    /// <summary>
+    /// Back-fill a node's value from what it feeds, when the topology leaves exactly one path for that load
+    /// to have arrived by.
+    ///
+    /// <para>
+    /// Sound arithmetic — the load really is being drawn and it really did come from somewhere — but it is a
+    /// statement about a hierarchy someone drew, not a measurement, and it is only as true as that hierarchy.
+    /// So it is a switch you can see and turn off, not something the code quietly does on your behalf, and
+    /// anything it produces is labelled <c>inferred</c> everywhere it is shown.
+    /// </para>
+    /// <para>
+    /// Turning it off does not fabricate the other way: a node it would have filled in simply reads "no data"
+    /// and its links draw as unknown, which is the honest rendering of a hierarchy nobody is metering.
+    /// </para>
+    /// </summary>
+    [DefaultValue(true)]
+    [Description("Work out an unmeasured node's value from what it feeds, when exactly one path could have supplied it. Sound arithmetic, but it describes the hierarchy you drew rather than anything measured — so results are always labelled 'inferred'. Turn it off to show 'no data' instead.")]
+    public bool InferFromConservation { get; set; } = true;
+
     /// <summary>Publish each hierarchy tier's rolled-up value to MQTT every poll (#164).</summary>
     [DefaultValue(false)]
     [Description("Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.")]
@@ -205,6 +224,31 @@ public class EnergyFlowSource
     /// <c>stat_energy_from</c> and its <c>in</c> becomes <c>stat_energy_to</c>; a grid's <c>out</c> is
     /// <c>flow_from</c> (consumption) and its <c>in</c> is <c>flow_to</c> (return).
     /// </summary>
+    /// <summary>
+    /// Whether this source's counter runs forever or restarts each period.
+    ///
+    /// <list type="bullet">
+    /// <item><c>lifetime</c> (default): a cumulative counter that only rises — a PDU's firmware total, an
+    /// inverter's all-time production. Its daily figure is derived by taking its rise since the period
+    /// began.</item>
+    /// <item><c>period</c>: a counter the device itself resets each day, so the reading <em>already is</em>
+    /// the daily total and is used as-is.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// This is not a detail you can ignore, and one publisher can do both: Solar Assistant's
+    /// <c>total/load_energy</c> and <c>total/grid_energy_in</c> are cumulative, while
+    /// <c>total/pv_energy</c> resets at midnight. Taking the "rise" of a resetting counter loses the day —
+    /// the counter drops to zero and climbs again unobserved, and the next reading measured against
+    /// yesterday's high-water mark yields a small fraction of the truth. Seen live: 2.76 kWh of solar
+    /// reported against 27.4 kWh actually generated.
+    /// </para>
+    /// </summary>
+    [DefaultValue("lifetime")]
+    [Description("Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.")]
+    [AllowedValues("lifetime", "period")]
+    public string Accumulation { get; set; } = "lifetime";
+
     [DefaultValue("out")]
     [Description("Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.")]
     [AllowedValues("out", "in", "split")]

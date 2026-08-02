@@ -263,10 +263,53 @@ public static class FlowGraphBuilder
         //    solar, the battery or the grid, so NONE of them carry anything. Dividing it between them —
         //    which is what this used to do — states a number the user never supplied, on the diagram whose
         //    whole purpose is to be accurate. Mark one 'residual' to say where the remainder actually goes.
+        // Nodes that are SUPPOSED to report this metric — someone bound a source for it — but have no fresh
+        // reading right now. "Unmeasured" and "unavailable" are not the same thing, and conflating them is how
+        // the diagram invented solar generation in the dark.
+        //
+        // A node with no source bound is genuinely unmeasured: nothing was ever going to measure it, so if the
+        // topology leaves exactly one path for the load to arrive by, conservation really does determine it.
+        // A node with a source bound and nothing coming out of it is a different situation entirely — the
+        // measurement failed. Letting it absorb the remainder says "we don't know what solar was doing, so
+        // assume it was doing all of it", which on a live system at night attributed the entire house load to
+        // a PV array in the dark while the grid that was actually carrying it read "no data".
+        //
+        // The project's rule is that unknown is never zero. This is the same rule pointing the other way:
+        // unknown is never "whatever balances the equation" either.
+        var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+        {
+            if (string.IsNullOrEmpty(n.Id) || leaf.ContainsKey(n.Id)) continue;
+            // Metric-specific on purpose: a node bound only for realpower is not "failing" to report energy,
+            // it was never asked to. Only a binding for THIS metric makes silence a failure.
+            if (n.AllSources().Any(src => string.Equals(
+                    FlowMetricKey.ForAccumulation(src.Metric ?? "", src.Accumulation), metric, StringComparison.OrdinalIgnoreCase)))
+                expectsReading.Add(n.Id);
+        }
+        bool Unavailable(string id) => expectsReading.Contains(id);
+
+        // Every node that ended up carrying a conservation back-fill, so its value can be labelled `inferred`
+        // rather than presented the way a metered one is.
+        var inferred = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Did this node have a CHOICE of feeders? That is the line between a roll-up and an attribution.
+        //
+        // One feeder is not an inference at all: a PDU's total is its outlets' demand arriving by the only
+        // route there is, and calling that a guess would label most of the diagram. Several feeders, with all
+        // but one ruled out by Mode or by having gone silent, is different — the load is real but *which*
+        // source supplied it is a claim about the hierarchy someone drew. That is the case that credited a PV
+        // array with the whole house load after dark, and the case the switch governs.
+        bool HasAlternatives(string to)
+            => (incoming.TryGetValue(to, out var fs) ? fs.Count : 0) > 1;
+
         List<string> Absorbers(string to)
         {
+            // Switched off: an attribution among alternatives is not made, and the node reads "no data"
+            // instead. Roll-ups are untouched — turning off inference must not blank out the PDU totals.
+            if (HasAlternatives(to) && !flow.InferFromConservation) return new List<string>();
+
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
             var residual = unmeasured.Where(f => Mode(f) == "residual").ToList();
             if (residual.Count > 0) return residual;
             return unmeasured.Count == 1 ? unmeasured : new List<string>();
@@ -287,8 +330,12 @@ public static class FlowGraphBuilder
             if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
+            // A feeder whose own source has stopped reporting carries an unknowable amount — not zero. Its
+            // link must draw as "no data" so the failure is visible, rather than as a confident hairline.
+            if (Unavailable(from)) return false;
+
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
-            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f))).ToList();
+            var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
 
             // A designated residual is told what it carries, so its own flow is determined. Its unmeasured
             // siblings are not: "the residual takes the remainder" says nothing about how much solar was
@@ -296,6 +343,8 @@ public static class FlowGraphBuilder
             if (unmeasured.Any(f => Mode(f) == "residual")) return Mode(from) == "residual";
 
             // One unmeasured path is determined by conservation. Several is a real unknown.
+            // With inference off we decline to pick between alternatives, but a plain roll-up still stands.
+            if (HasAlternatives(to) && !flow.InferFromConservation) return false;
             return unmeasured.Count <= 1;
         }
 
@@ -340,7 +389,11 @@ public static class FlowGraphBuilder
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
             var measured = feeders.Where(leaf.ContainsKey).Sum(f => EdgeFlow(f, to, path));
             var remainder = Math.Max(0, Need(to, path) - measured);
-            return remainder / absorbers.Count;
+            var share = remainder / absorbers.Count;
+            // Only an attribution gets the label. Where this feeder was the only route, the figure is the
+            // downstream measurement arriving intact — a roll-up, and marking it inferred would cry wolf.
+            if (share > 0 && HasAlternatives(to)) inferred.Add(from);
+            return share;
         }
 
         // Emit one link per edge, valued by the flow it carries. A link whose flow is *unknowable* is still
@@ -501,12 +554,24 @@ public static class FlowGraphBuilder
             return gap > 1 && gap > inflow * 0.02 ? gap : null;
         }
 
+        // Where a node's number came from. Provenance travels with the value so no consumer has to guess,
+        // and so an inferred figure can never be mistaken for a metered one.
+        string DerivationOf(string id)
+        {
+            if (leaf.ContainsKey(id)) return FlowDerivation.Measured;
+            if (ValueOf(id) is null) return FlowDerivation.Unknown;
+            // A node that absorbed a remainder is inferred even if it also sums children — the back-fill is
+            // the part that isn't measured, and that is what the label has to warn about.
+            return inferred.Contains(id) ? FlowDerivation.Inferred : FlowDerivation.Summed;
+        }
+
         // Every node the user declared, plus every auto (pdu/outlet) node that reported a measurement —
         // whether or not a value could be determined for it. A configured node that silently disappears is
         // its own kind of inaccuracy: it reads as "my config is broken" rather than "nothing measures this".
         var nodes = label.Keys
             .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
-            .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node", ValueOf(id), ImbalanceOf(id)))
+            .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
+                                       ValueOf(id), ImbalanceOf(id), DerivationOf(id)))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
