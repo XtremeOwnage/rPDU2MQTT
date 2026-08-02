@@ -3073,6 +3073,80 @@ function addFlowSection(nav     , sections     ) {
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
 
+    // How the energy roll-up is accumulated, and when the day ends. These live under EnergyFlow, which the
+    // generic config form deliberately hides (this visual editor replaces it) — so without a panel here they
+    // had no UI at all and could only be set by hand-editing the config.
+    const agg = ensure(flow, 'Aggregation', {});
+    ed.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
+    ed.appendChild(el('div', { class: 'desc' },
+      'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
+      + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
+      + 'Draw the diagram with Show → “Energy today”.'));
+
+    const aggRow = el('div', { class: 'ld-toolbar' });
+
+    const trackChk = el('input', { type: 'checkbox' })                    ;
+    trackChk.checked = agg.TrackPeriods !== false;   // defaults on
+    const zoneSel = el('select', { style: { minWidth: '200px' } })                     ;
+    const hourSel = el('select')                     ;
+    for (let h = 0; h < 24; h++) hourSel.appendChild(el('option', { value: String(h), text: String(h).padStart(2, '0') + ':00' }));
+    hourSel.value = String(agg.PeriodStartHour || 0);
+
+    // Zones come from the schema, which the server filled with the ones IT can resolve — a zone missing
+    // from this list would not resolve at runtime either, so offering it would only produce a silent
+    // fallback to the host zone.
+    const zoneNode = (state.schema || []).find((n     ) => n.key === 'EnergyFlow')?.properties
+      ?.find((n     ) => n.key === 'Aggregation')?.properties?.find((n     ) => n.key === 'PeriodTimeZone');
+    const zones           = zoneNode?.enumValues || [''];
+    zones.forEach(z => zoneSel.appendChild(el('option', { value: z, text: z || '(server’s own zone)' })));
+    zoneSel.value = agg.PeriodTimeZone || '';
+
+    const syncAgg = () => {
+      zoneSel.disabled = hourSel.disabled = !trackChk.checked;
+      agg.TrackPeriods = trackChk.checked;
+      agg.PeriodTimeZone = zoneSel.value || undefined;
+      agg.PeriodStartHour = Number(hourSel.value) || undefined;
+      refreshDirty();
+      showDayNote();
+    };
+    trackChk.onchange = zoneSel.onchange = hourSel.onchange = syncAgg;
+    zoneSel.disabled = hourSel.disabled = !trackChk.checked;
+
+    aggRow.append(
+      el('label', {}, trackChk, ' Track daily totals'),
+      el('span', { class: 'desc', style: { margin: '0' }, text: 'Day ends at:' }), hourSel, zoneSel);
+    ed.appendChild(aggRow);
+
+    // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
+    // container it is UTC unless someone set TZ. Not knowing that is how "Energy today" appears to reset at
+    // 7pm for no reason.
+    const clock = el('div', { class: 'desc' })               ;
+    ed.appendChild(clock);
+    api('/api/time').then((r     ) => {
+      const t = r.body; if (!t || !t.ok || !t.host || !t.period) return;
+      const p = t.period;
+      clock.textContent = `Server clock: ${String(t.host.time).replace('T', ' ').slice(0, 19)} (${t.host.zone}). `
+        + (p.tracked
+          ? `Current day ${p.key}, next rollover ${String(p.nextRolloverLocal).replace('T', ' ').slice(0, 16)} ${p.zone}.`
+          : 'Daily totals are off, so “Energy today” has nothing to draw.');
+      if (p.tracked && !p.resolved) {
+        clock.textContent += ` The saved zone "${p.configured}" does not exist on the server — it is using ${p.zone}.`;
+        clock.style.color = 'var(--bad, #d05a5a)';
+      } else if (p.tracked && !p.configured) {
+        clock.textContent += ' No zone set, so the server’s own is used — usually UTC in a container.';
+        clock.style.color = 'var(--warn, #d08700)';
+      }
+    }).catch(() => { });
+
+    // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
+    const aggIntegrate = el('div', { class: 'desc' })               ;
+    const intChk = el('input', { type: 'checkbox' })                    ;
+    intChk.checked = !!agg.Enabled;
+    intChk.onchange = () => { agg.Enabled = intChk.checked; refreshDirty(); };
+    aggIntegrate.append(el('label', {}, intChk,
+      ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
+    ed.appendChild(aggIntegrate);
+
     // Candidate nodes (from the built graph + custom defs).
     const cand = flowCandidates(lastGraph, customNodes);
     const nm = (id        )         => (cand.get(id) || {}).label || id;

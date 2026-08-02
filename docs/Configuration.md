@@ -909,11 +909,11 @@ EnergyFlow:
     PeriodStartHour: 0              # 0 = midnight. 6 for a utility day that runs 06:00–06:00.
 ```
 
-`PeriodTimeZone` renders as a **dropdown** in the GUI, listing the zones the server can actually resolve —
-a zone that isn't there wouldn't resolve at runtime either. The **Diagnostics** page shows the server's own
-clock, its zone, the current energy day and the next rollover; the **Flow** tab repeats the day and a
-countdown next to the *Show* selector whenever you're looking at "Energy today". Worth checking once: the
-boundary is the server's, not your browser's.
+All three are edited on the **Flow** tab, under *Energy roll-up* (`EnergyFlow` is hidden from the generic
+config form, since the Flow/Nodes editors replace it). `PeriodTimeZone` is a dropdown of the zones the server
+can actually resolve — one that isn't listed wouldn't resolve at runtime either. The server's own clock and
+the next rollover are shown right beneath it, and again on **Diagnostics**. Worth checking once: the boundary
+is the server's clock, not your browser's.
 
 Notes:
 
