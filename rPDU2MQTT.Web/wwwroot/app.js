@@ -1006,6 +1006,10 @@ function addDiagnosticsSection(nav     , sections     ) {
   };
 
   const fmtUptime = (s        ) => { s = Math.floor(s); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
+  // Server timestamps are rendered exactly as the server sent them — never through the browser's Date, which
+  // would silently re-express them in the viewer's zone and defeat the point of showing the server's clock.
+  const fmtStamp = (s        ) => String(s || '').replace('T', ' ').replace(/(\.\d+)?(Z|[+-]\d\d:\d\d)?$/, '');
+  const fmtOffset = (mins        ) => (mins < 0 ? '-' : '+') + String(Math.floor(Math.abs(mins) / 60)).padStart(2, '0') + ':' + String(Math.abs(mins) % 60).padStart(2, '0');
   const row = (k        , v     ) => { const tr = document.createElement('tr'); const a = document.createElement('td'); a.textContent = k; a.style.color = 'var(--muted)'; a.style.width = '220px'; const b = document.createElement('td'); b.textContent = (v == null || v === '') ? '—' : v; tr.appendChild(a); tr.appendChild(b); return tr; };
 
   const load = async () => {
@@ -1037,6 +1041,32 @@ function addDiagnosticsSection(nav     , sections     ) {
       else txt = 'enabled (' + b.emoncms.transport + ') — no export yet';
       info.appendChild(row('EmonCMS', txt));
     }
+    // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
+    // browser — the container's clock is UTC unless someone set TZ, so "Energy today" can end at 7pm local
+    // and look like the numbers are wrong when it is only the day that ended.
+    try {
+      const t = (await api('/api/time')).body;
+      if (t && t.ok && t.host && t.period) {
+        info.appendChild(row('Server time (UTC)', fmtStamp(t.utc)));
+        info.appendChild(row('Server time zone', t.host.zone + ' (' + fmtOffset(t.host.offsetMinutes) + ') — ' + fmtStamp(t.host.time)));
+        const p = t.period;
+        if (!p.tracked) info.appendChild(row('Energy day', 'not tracked (EnergyFlow.Aggregation.TrackPeriods is off)'));
+        else {
+          const zoneRow = row('Energy day rolls at',
+            String(p.startHour).padStart(2, '0') + ':00 ' + p.zone + ' (' + fmtOffset(p.offsetMinutes) + ')'
+            + (p.configured ? '' : ' — not configured, using the host zone'));
+          // A configured zone this host cannot resolve is silently ignored at runtime; say so here, because
+          // the only other trace is one log line at startup.
+          if (!p.resolved) {
+            (zoneRow.lastChild               ).textContent = '"' + p.configured + '" did not resolve on this host — falling back to ' + p.zone;
+            (zoneRow.lastChild               ).style.color = 'var(--bad, #d05a5a)';
+          } else if (!p.configured) (zoneRow.lastChild               ).style.color = 'var(--warn, #d08700)';
+          info.appendChild(zoneRow);
+          info.appendChild(row('Current energy day', p.key + ' — now ' + fmtStamp(p.time) + ' there'));
+          info.appendChild(row('Next rollover', fmtStamp(p.nextRolloverLocal) + ' ' + p.zone + ' (in ' + fmtUptime(p.secondsUntilRollover) + ')'));
+        }
+      }
+    } catch { /* an older server has no /api/time; the rest of the page is still useful */ }
     info.appendChild(row('Config source', b.configSource));
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
@@ -1423,11 +1453,14 @@ const METRICS                                       = [
   ['temperature', 'Temperature', '°C', ['°C', 'K']],
 ];
 // Which metrics the flow may sum from the leaves upward. Mirrors FlowUnits.IsAdditive.
-const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'current']);
+const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'energytoday', 'current']);
 const isAdditiveMetric = (key         ) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
-const metricLabel = (key         ) => metricMeta(key)[1];
+// Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS — that
+// list is the source-binding vocabulary, and the daily total is derived from counters already bound there.
+const DERIVED_METRIC_LABELS                         = { energytoday: 'Energy today' };
+const metricLabel = (key         ) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction — mirrors FlowMetricKey (Core): an 'in'
 // (charge/export) reading is stored under a '#in' suffix so it doesn't collide with the 'out' supply value.
 const sourceMetricKey = (src     ) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
@@ -2560,12 +2593,45 @@ function addFlowSection(nav     , sections     ) {
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it. Power (W) is the live snapshot; Energy
   // (kWh) is the cumulative total, so the diagram reads as "how much has flowed" rather than "how much now".
+  //
+  // "Energy today" is the one energy view whose arithmetic holds. Lifetime totals come from epochs that have
+  // nothing to do with each other — a PDU's firmware counter has run since the unit was commissioned, a
+  // derived node's since its binding was configured — so a panel can legitimately report eleven times what
+  // its own feeder does. Daily totals all start at the same midnight, so they actually sum.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' })                     ;
-  [['realpower', 'Power (W)'], ['energy', 'Energy (kWh)'], ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
+  [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
+   ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
-  metricSel.onchange = () => load();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
+  // and in a container that is UTC unless someone set TZ — so a day can end at 7pm local and look like the
+  // totals reset for no reason. Shown only on the daily metric, where it changes how to read the chart.
+  const dayNote = el('span', { class: 'ld-count' })               ;
+  dayNote.style.cssText = 'margin-left:8px';
+  const showDayNote = async () => {
+    dayNote.textContent = '';
+    dayNote.removeAttribute('title');
+    if (metricSel.value !== 'energytoday') return;
+    let p     ;
+    try { p = (await api('/api/time')).body?.period; } catch { return; }
+    if (!p) return;
+    if (!p.tracked) {
+      dayNote.textContent = '· daily totals are not being tracked';
+      dayNote.style.color = 'var(--warn, #d08700)';
+      dayNote.title = 'Set EnergyFlow.Aggregation.TrackPeriods to on. Without it nothing re-bases the counters, and this view has no data to draw.';
+      return;
+    }
+    const hrs = Math.floor(p.secondsUntilRollover / 3600), mins = Math.round(p.secondsUntilRollover % 3600 / 60);
+    dayNote.textContent = `· day ${p.key} in ${p.zone}, rolls in ${hrs ? hrs + 'h ' : ''}${mins}m`;
+    dayNote.style.color = p.configured && p.resolved ? '' : 'var(--warn, #d08700)';
+    dayNote.title = !p.resolved
+      ? `The configured zone "${p.configured}" did not resolve on the server; it is using ${p.zone} instead.`
+      : p.configured
+        ? `Every figure below covers ${p.key} in ${p.zone}, starting ${String(p.startHour).padStart(2, '0')}:00. Server time there is now ${String(p.time).replace('T', ' ').slice(0, 16)}.`
+        : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
+  };
+  metricSel.onchange = () => { load(); showDayNote(); };
+  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
@@ -2766,6 +2832,38 @@ function addFlowSection(nav     , sections     ) {
     let bottom = padTop;
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
+    // Then slide each column bodily down to meet what it feeds.
+    //
+    // The two passes above only ever *order* a column; every column still starts at padTop. That is fine
+    // while columns are of similar height, and comes apart when a short one feeds into a tall one: pulling
+    // Grid rightward to hug the inverter (#307) put it above Solar in the same column, which pushed Solar
+    // ~530px down — while the three idle MPPTs feeding it stayed pinned at the top of the column to their
+    // left, joined to it by hairlines running the full height of the chart. Ordering cannot fix that; only
+    // the column's offset can, and nothing was setting one.
+    //
+    // Translating the whole column keeps the order and spacing both passes just settled, and moves it by the
+    // link-weighted average of how far each of its nodes misses what it powers. Right-to-left, so a column
+    // reads targets that have already stopped moving.
+    for (let c = cols.length - 2; c >= 0; c--) {
+      const cn = cols[c];
+      if (!cn || !cn.length) continue;
+      let w = 0, s = 0;
+      cn.forEach((n     ) => (outgoing[n.id] || []).forEach((l     ) => {
+        const tp = pos[l.target], sp = pos[n.id];
+        if (!tp || !sp) return;
+        s += ((tp.y + tp.h / 2) - (sp.y + sp.h / 2)) * linkW(l);
+        w += linkW(l);
+      }));
+      if (!w) continue;
+      // Never above the top margin, and never so far down that the column leaves the canvas — a chain that
+      // hugs its target off-screen is no more readable than one that drifted away from it.
+      const top = Math.min(...cn.map((n     ) => pos[n.id].y));
+      const foot = Math.max(...cn.map((n     ) => pos[n.id].y + pos[n.id].h));
+      const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
+      if (Math.abs(shift) < 1) continue;
+      cn.forEach((n     ) => { pos[n.id].y += shift; });
+    }
+
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
@@ -2843,6 +2941,19 @@ function addFlowSection(nav     , sections     ) {
         why.textContent = 'Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.';
         lab.appendChild(why);
       }
+      // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
+      // diagram instead of drawing the larger number at full height and letting it look intentional.
+      else if (n.imbalance != null) {
+        lab.textContent += ' ⚠';
+        const why = svgEl('title');
+        why.textContent = `This node passes ${formatNum(nodeValue(n.id))} ${units} to what it feeds, but only `
+          + `${formatNum(nodeValue(n.id) - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
+          + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
+          + (metricSel.value === 'energy'
+            ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
+            : ' Check that the feeders into this node are all wired and reporting.');
+        lab.appendChild(why);
+      }
       svg.appendChild(lab);
 
         // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
@@ -2856,6 +2967,8 @@ function addFlowSection(nav     , sections     ) {
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
           unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
+        if (n.imbalance != null)
+          rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
 
         const side = (title        , ls       , other                    ) => {
           if (!ls.length) return;
@@ -2959,6 +3072,80 @@ function addFlowSection(nav     , sections     ) {
     expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     ed.appendChild(exportRow);
+
+    // How the energy roll-up is accumulated, and when the day ends. These live under EnergyFlow, which the
+    // generic config form deliberately hides (this visual editor replaces it) — so without a panel here they
+    // had no UI at all and could only be set by hand-editing the config.
+    const agg = ensure(flow, 'Aggregation', {});
+    ed.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
+    ed.appendChild(el('div', { class: 'desc' },
+      'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
+      + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
+      + 'Draw the diagram with Show → “Energy today”.'));
+
+    const aggRow = el('div', { class: 'ld-toolbar' });
+
+    const trackChk = el('input', { type: 'checkbox' })                    ;
+    trackChk.checked = agg.TrackPeriods !== false;   // defaults on
+    const zoneSel = el('select', { style: { minWidth: '200px' } })                     ;
+    const hourSel = el('select')                     ;
+    for (let h = 0; h < 24; h++) hourSel.appendChild(el('option', { value: String(h), text: String(h).padStart(2, '0') + ':00' }));
+    hourSel.value = String(agg.PeriodStartHour || 0);
+
+    // Zones come from the schema, which the server filled with the ones IT can resolve — a zone missing
+    // from this list would not resolve at runtime either, so offering it would only produce a silent
+    // fallback to the host zone.
+    const zoneNode = (state.schema || []).find((n     ) => n.key === 'EnergyFlow')?.properties
+      ?.find((n     ) => n.key === 'Aggregation')?.properties?.find((n     ) => n.key === 'PeriodTimeZone');
+    const zones           = zoneNode?.enumValues || [''];
+    zones.forEach(z => zoneSel.appendChild(el('option', { value: z, text: z || '(server’s own zone)' })));
+    zoneSel.value = agg.PeriodTimeZone || '';
+
+    const syncAgg = () => {
+      zoneSel.disabled = hourSel.disabled = !trackChk.checked;
+      agg.TrackPeriods = trackChk.checked;
+      agg.PeriodTimeZone = zoneSel.value || undefined;
+      agg.PeriodStartHour = Number(hourSel.value) || undefined;
+      refreshDirty();
+      showDayNote();
+    };
+    trackChk.onchange = zoneSel.onchange = hourSel.onchange = syncAgg;
+    zoneSel.disabled = hourSel.disabled = !trackChk.checked;
+
+    aggRow.append(
+      el('label', {}, trackChk, ' Track daily totals'),
+      el('span', { class: 'desc', style: { margin: '0' }, text: 'Day ends at:' }), hourSel, zoneSel);
+    ed.appendChild(aggRow);
+
+    // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
+    // container it is UTC unless someone set TZ. Not knowing that is how "Energy today" appears to reset at
+    // 7pm for no reason.
+    const clock = el('div', { class: 'desc' })               ;
+    ed.appendChild(clock);
+    api('/api/time').then((r     ) => {
+      const t = r.body; if (!t || !t.ok || !t.host || !t.period) return;
+      const p = t.period;
+      clock.textContent = `Server clock: ${String(t.host.time).replace('T', ' ').slice(0, 19)} (${t.host.zone}). `
+        + (p.tracked
+          ? `Current day ${p.key}, next rollover ${String(p.nextRolloverLocal).replace('T', ' ').slice(0, 16)} ${p.zone}.`
+          : 'Daily totals are off, so “Energy today” has nothing to draw.');
+      if (p.tracked && !p.resolved) {
+        clock.textContent += ` The saved zone "${p.configured}" does not exist on the server — it is using ${p.zone}.`;
+        clock.style.color = 'var(--bad, #d05a5a)';
+      } else if (p.tracked && !p.configured) {
+        clock.textContent += ' No zone set, so the server’s own is used — usually UTC in a container.';
+        clock.style.color = 'var(--warn, #d08700)';
+      }
+    }).catch(() => { });
+
+    // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
+    const aggIntegrate = el('div', { class: 'desc' })               ;
+    const intChk = el('input', { type: 'checkbox' })                    ;
+    intChk.checked = !!agg.Enabled;
+    intChk.onchange = () => { agg.Enabled = intChk.checked; refreshDirty(); };
+    aggIntegrate.append(el('label', {}, intChk,
+      ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
+    ed.appendChild(aggIntegrate);
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = flowCandidates(lastGraph, customNodes);
@@ -3146,7 +3333,7 @@ function addFlowSection(nav     , sections     ) {
     (body     ) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
   metricSel.addEventListener('change', () => syncLive());
 
-  link.onclick = () => { activate(link, sec); syncLive(); load(); };
+  link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
 }
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value

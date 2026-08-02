@@ -12,7 +12,19 @@ namespace rPDU2MQTT.Core.Flow;
 /// a diagram ends up stating a number nobody supplied, so the distinction is carried in the type.
 /// </para>
 /// </param>
-public sealed record FlowNode(string Id, string Label, string Kind, double? Value = null)
+/// <param name="Imbalance">
+/// How far this node's outflow exceeds its inflow (<c>outflow - inflow</c>), when both are determined and
+/// they materially disagree; <see langword="null"/> when they reconcile or when one of them is unknown.
+///
+/// <para>
+/// Supply below load is not a state the hardware can be in, so a positive value here always means the two
+/// sides of this node are quoting figures that cannot both be true — most often cumulative counters started
+/// from different epochs (a PDU counting since it was commissioned, an inverter since its binding was
+/// configured). <see cref="EnergyPeriod"/> is the fix for that; this is how the diagram admits to it in the
+/// meantime, rather than quietly rendering the larger of the two numbers and letting it look deliberate.
+/// </para>
+/// </param>
+public sealed record FlowNode(string Id, string Label, string Kind, double? Value = null, double? Imbalance = null)
 {
     /// <summary>
     /// A node the builder invented for the diagram, rather than one the operator configured: a

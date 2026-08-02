@@ -48,6 +48,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
         var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric, live);
         var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
         var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric, live);
+        // Energy since local midnight — the only energy roll-up whose tiers are comparable to each other,
+        // because every counter it is built from was re-based at the same instant. Built unconditionally;
+        // an unavailable total simply publishes null, exactly as the in-direction one does.
+        var todayGraph = FlowGraphBuilder.Build(merged, flow, EnergyPeriod.Metric, live);
 
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
@@ -90,6 +94,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
             double? energyIn = energyInNodes.Contains(node.Id) && live is not null
                 && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
 
+            // Today's total. Null — not 0 — when nothing determines it, so HA marks the sensor unavailable
+            // rather than recording a zero that would read as "this tier used nothing today".
+            double? energyToday = FlowExport.TryNodeValue(todayGraph, node.Id, out var et) ? et : null;
+
             // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export), so the
             // published power sensor swings ± the way HA's stat_rate wants. A one-way node keeps its plain power.
             double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
@@ -103,6 +111,7 @@ public class EnergyFlowMqttExportService : baseMQTTService
                 power = netPower,
                 energy,
                 energy_in = energyIn,
+                energy_today = energyToday,
                 soc,
                 units = graph.Units,
                 energyUnits = energyGraph.Units,
@@ -126,7 +135,9 @@ public class EnergyFlowMqttExportService : baseMQTTService
             }
             else
             {
-                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability, includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id));
+                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
+                    includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
+                    includeEnergyToday: energyToday is not null);
                 await PublishString(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, cancellationToken);
             }
         }

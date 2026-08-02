@@ -881,6 +881,61 @@ plus pre-wired nodes (solar / battery / grid / inverter) with the register bindi
 > its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
 > it can be turned into a template.
 
+### Energy today vs. energy lifetime
+
+Two cumulative counters can only be compared if they started counting at the same moment, and the ones on
+your system did not. A PDU's `energy` measurement comes from firmware and has been running since the unit
+was commissioned; a node's comes from whenever you bound its source. Put both on one diagram and the
+arithmetic breaks in a way that looks like a bug in the chart:
+
+```
+EG4 FlexBoss 21 · 740 kWh  ──▶  Main Panel · 8,358.187 kWh  ──▶  Rack-PDU-1 · 7,371.006 kWh
+                                                             └─▶  Rack-PDU-2 ·   987.181 kWh
+```
+
+The right-hand side adds up exactly. The panel and its feeder disagree by a factor of eleven — not because
+anything is measured wrong, but because 740 and 8,358 are counted from different years.
+
+**Daily totals fix this.** Every node and outlet is re-based at local midnight, so every figure covers the
+same window and legitimately sums. Pick **"Energy today (kWh)"** in the Flow tab's *Show* selector; it is
+the energy view whose numbers reconcile. `Energy, lifetime (kWh)` is still there — it is what Home Assistant
+and EmonCMS have recorded history against, and it is unchanged.
+
+```yaml
+EnergyFlow:
+  Aggregation:
+    TrackPeriods: true              # default. Daily totals per node AND per outlet.
+    PeriodTimeZone: America/Chicago # blank = the host's zone (UTC in most containers)
+    PeriodStartHour: 0              # 0 = midnight. 6 for a utility day that runs 06:00–06:00.
+```
+
+All three are edited on the **Flow** tab, under *Energy roll-up* (`EnergyFlow` is hidden from the generic
+config form, since the Flow/Nodes editors replace it). `PeriodTimeZone` is a dropdown of the zones the server
+can actually resolve — one that isn't listed wouldn't resolve at runtime either. The server's own clock and
+the next rollover are shown right beneath it, and again on **Diagnostics**. Worth checking once: the boundary
+is the server's clock, not your browser's.
+
+Notes:
+
+- **Not an estimate.** For an outlet — or any node bound to a real `energy` source — the daily figure is the
+  *rise* of that counter since midnight: measured, not inferred, and independent of `Aggregation.Enabled`.
+  A node that reports only power is the exception: there is no counter to take a rise of, so it needs
+  `Aggregation.Enabled: true` to be integrated first. That stays opt-in because an integral of watts
+  genuinely is an estimate.
+- **Set `PeriodTimeZone`** (or `TZ` on the container). A day that rolls over at UTC midnight is not the day
+  you or your utility are looking at. Diagnostics flags it in amber while it's unset, and in red if the zone
+  you named doesn't exist on the server.
+- A counter that goes backwards — a PDU reboot, a firmware clear — is treated as a reset, and the energy
+  recorded before it is kept rather than subtracted.
+- Unlike integration, a gap loses nothing: if a PDU is unreachable for an hour its counter kept running, so
+  the whole hour arrives in the next reading.
+- Nodes bound today are only incomparable until the next rollover, not forever.
+- With `MqttExport` on, each tier also publishes `energy_today` and gets an **Energy today** sensor in Home
+  Assistant (`total_increasing`, so HA reads the midnight drop as the start of a new day).
+- Where two sides of a node still can't both be true, the diagram marks the node **⚠** and the hover card
+  says how much more leaves it than arrives. On lifetime energy that is expected; on `Energy today` it means
+  a feeder is missing or not reporting.
+
 ## Example Configurations
 
 Here- are a few example configuration files.

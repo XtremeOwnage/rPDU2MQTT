@@ -126,6 +126,10 @@ public static class CrdGenerator
             "bool" => new() { ["type"] = "boolean" },
             "int" => new() { ["type"] = "integer" },
             "double" => new() { ["type"] = "number" },
+            // Host-discovered choices are a GUI convenience, never a constraint: pinning this build machine's
+            // tzdata into the CRD would have the API server reject a zone that is valid on the cluster the
+            // workload actually runs on, and would make the emitted CRD differ per build machine.
+            "enum" when n.DynamicChoices => new() { ["type"] = "string" },
             "enum" => new() { ["type"] = "string", ["enum"] = (n.EnumValues ?? Array.Empty<string>()).Cast<object?>().ToList() },
             "object" => ObjectSchema(n.Properties ?? new()),
             "dictionary" => new()

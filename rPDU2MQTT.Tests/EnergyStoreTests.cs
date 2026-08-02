@@ -30,6 +30,41 @@ public class EnergyStoreTests : IDisposable
     }
 
     [Fact]
+    public void ThePeriodBaselineSurvivesARestart_SoADailyTotalDoesNotRestartWithTheProcess()
+    {
+        // The baseline is the only record of where today began. Losing it on restart would silently reset
+        // every daily figure to zero mid-afternoon — which reads as "nothing has run today", and is the kind
+        // of thing that looks fine until someone checks the numbers against the meter.
+        var at = new DateTime(2026, 8, 1, 14, 0, 0, DateTimeKind.Utc);
+        new FileEnergyStore(Path_).Save(new Dictionary<string, EnergyState>
+        {
+            ["outlet:rack_pdu_1:3"] = new(43.5, at, 0, 0, "2026-08-01", 31.0, 7371.006),
+        });
+
+        var s = new FileEnergyStore(Path_).Load()["outlet:rack_pdu_1:3"];
+
+        Assert.Equal("2026-08-01", s.PeriodKey);
+        Assert.Equal(31.0, s.PeriodStartKWh);
+        Assert.Equal(7371.006, s.LastCounterKWh!.Value, 6);
+        Assert.Equal(12.5, s.PeriodKWh, 6);
+    }
+
+    [Fact]
+    public void StateWrittenBeforePeriodsExisted_LoadsWithoutAPeriod_RatherThanClaimingOne()
+    {
+        // An upgrade must not invent a baseline. A null key means "no period established yet"; the next
+        // sample sets one, and today's figure starts from that moment instead of from a made-up zero.
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path_, """{"solar":{"KWh":42.0,"LastSampleUtc":"2026-07-31T12:00:00Z","LastPowerW":1000,"UnmeasuredSeconds":0}}""");
+
+        var s = new FileEnergyStore(Path_).Load()["solar"];
+
+        Assert.Equal(42.0, s.KWh);
+        Assert.Null(s.PeriodKey);
+        Assert.Null(s.LastCounterKWh);
+    }
+
+    [Fact]
     public void AMissingFile_StartsEmptyWithoutComplaint()
     {
         var warnings = new List<string>();

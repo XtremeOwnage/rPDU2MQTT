@@ -125,7 +125,8 @@ public static class FlowExport
     /// these makes the whole hierarchy — not just leaf outlets — visible to HA and linkable in the dashboard.
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
-        string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false)
+        string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
+        bool includeEnergyToday = false)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -168,6 +169,12 @@ public static class FlowExport
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
                 Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
+        // Energy since local midnight. total_increasing rather than total+last_reset: HA reads the drop at
+        // rollover as a meter reset and starts a new day, which is exactly the semantics, and it avoids
+        // having to publish a last_reset timestamp that must then agree with our rollover to the second.
+        if (includeEnergyToday)
+            doc["components"]!.AsObject()[$"{id}_energy_today"] =
+                Sensor($"{id}_energy_today", "Energy today", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_today }}");
         // A battery tier with a state-of-charge source publishes it too, so HA's battery source can show %.
         if (includeSoc)
             doc["components"]!.AsObject()[$"{id}_soc"] =

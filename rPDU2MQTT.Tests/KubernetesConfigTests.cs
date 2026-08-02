@@ -101,6 +101,27 @@ public class KubernetesConfigTests
             $"    dotnet run --project rPDU2MQTT --no-launch-profile -- --emit-crd > {relativePath}");
     }
 
+    [Fact]
+    public void HostDiscoveredChoices_AreNotBakedIntoTheCrdAsAConstraint()
+    {
+        // The time-zone list comes from whatever tzdata the machine generating the CRD happens to have.
+        // Emitting it as an `enum` would make the API server reject a zone that is perfectly valid on the
+        // cluster actually running the workload, and would make the committed CRD differ per build machine.
+        var yaml = CrdGenerator.ToYaml();
+        var tz = yaml.IndexOf("PeriodTimeZone:", StringComparison.Ordinal);
+        Assert.True(tz > 0, "PeriodTimeZone is missing from the CRD.");
+
+        // Look only at that property's own block — the next property at the same indentation ends it.
+        var block = yaml[tz..];
+        var end = block.IndexOf("PeriodStartHour:", StringComparison.Ordinal);
+        if (end > 0) block = block[..end];
+
+        Assert.Contains("type: string", block);
+        Assert.DoesNotContain("enum:", block);
+        // The list form — the description mentions "America/Chicago" as an example, which is fine.
+        Assert.DoesNotContain("- America/", block);
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

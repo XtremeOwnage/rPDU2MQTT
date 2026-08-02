@@ -182,21 +182,26 @@ public static class ServiceConfiguration
         // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
         // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
         // integrate real readings rather than its own output.
+        // Period (daily) totals are a separate concern from integration and default ON: they are the rise of
+        // counters that already exist, not an estimate standing in for a missing meter. They are also what
+        // makes the energy diagram add up at all, so the service is hosted for either reason.
         var aggregationOn = cfg.EnergyFlow.Aggregation.Enabled;
-        if (aggregationOn)
+        var periodsOn = cfg.EnergyFlow.Aggregation.TrackPeriods;
+        if (aggregationOn || periodsOn)
         {
             services.AddSingleton(sp => new Services.EnergyAggregationService(
                 cfg,
                 new Core.Flow.CompositeFlowValueSource(
                     sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow),
-                sp.GetRequiredService<Core.Flow.IEnergyStore>()));
+                sp.GetRequiredService<Core.Flow.IEnergyStore>(),
+                sp.GetRequiredService<Core.ISnapshotCache>()));
             // Accumulating is data production, so only the worker does it — otherwise every replica would
             // integrate the same readings into its own copy of the counter.
             if (worker)
                 services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyAggregationService>());
         }
 
-        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
                 sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 grainSyncedFlow,

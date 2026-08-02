@@ -20,6 +20,10 @@ public static class FlowUnits
             ["realpower"] = ("W", new(StringComparer.OrdinalIgnoreCase) { ["W"] = 1, ["kW"] = 1_000, ["MW"] = 1_000_000 }, true),
             ["apparentpower"] = ("VA", new(StringComparer.OrdinalIgnoreCase) { ["VA"] = 1, ["kVA"] = 1_000 }, true),
             ["energy"] = ("kWh", new(StringComparer.OrdinalIgnoreCase) { ["kWh"] = 1, ["Wh"] = 0.001, ["MWh"] = 1_000 }, true),
+            // Energy since the current period (local day) began. Same quantity and unit as `energy`; it
+            // exists separately because only these totals share an epoch and may therefore be compared
+            // across nodes — see EnergyPeriod.
+            [EnergyPeriod.Metric] = ("kWh", new(StringComparer.OrdinalIgnoreCase) { ["kWh"] = 1, ["Wh"] = 0.001, ["MWh"] = 1_000 }, true),
             ["current"] = ("A", new(StringComparer.OrdinalIgnoreCase) { ["A"] = 1, ["mA"] = 0.001 }, true),
             // --- Intensive: a condition at a point, not a quantity that flows. Never summed. ---
             ["voltage"] = ("V", new(StringComparer.OrdinalIgnoreCase) { ["mV"] = 0.001, ["V"] = 1, ["kV"] = 1_000 }, false),

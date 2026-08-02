@@ -140,12 +140,28 @@ public static class FlowGraphBuilder
             var pduId = $"pdu:{device.Entity_Name}";
             foreach (var outlet in device.Outlets)
             {
-                var m = outlet.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
-                if (m is null || !double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var value) || value <= 0)
-                    continue;
-                if (string.IsNullOrEmpty(units)) units = m.Units;
-
                 var outletId = $"outlet:{device.Entity_Name}:{outlet.Key}";
+                var m = outlet.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
+
+                double value;
+                if (m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var reported))
+                {
+                    value = reported;
+                    if (string.IsNullOrEmpty(units)) units = m.Units;
+                }
+                // A metric the PDU doesn't report natively but that something derives for this outlet —
+                // today the daily total, which the aggregator keeps for outlets precisely so they can be
+                // compared with the rest of the graph instead of contradicting it. Without this fallback the
+                // whole PDU side simply vanishes from any such metric's diagram.
+                else if (live is not null && live.TryGetValue(outletId, metric, out var derived))
+                {
+                    value = derived;
+                    if (string.IsNullOrEmpty(units)) units = FlowUnits.Canonical(metric);
+                }
+                else continue;
+
+                if (value <= 0) continue;
+
                 label[outletId] = outlet.Entity_DisplayName; kind[outletId] = "outlet"; leaf[outletId] = value;
                 label[pduId] = device.Entity_DisplayName; kind[pduId] = "pdu";
                 // Skip the auto PDU link when the user has wired an explicit feeder for this outlet.
@@ -447,15 +463,42 @@ public static class FlowGraphBuilder
         {
             if (leaf.TryGetValue(id, out var measured)) return measured;
 
+            var (inflow, outflow, anyIn, anyOut) = Sides(id);
+            return anyIn || anyOut ? Math.Max(inflow, outflow) : null;
+        }
+
+        // What this node's known links say arrives at it and leaves it.
+        (double In, double Out, bool AnyIn, bool AnyOut) Sides(string id)
+        {
             double inflow = 0, outflow = 0;
-            var anyKnown = false;
+            bool anyIn = false, anyOut = false;
             foreach (var l in links)
             {
                 if (!l.Known) continue;
-                if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyKnown = true; }
-                if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyKnown = true; }
+                if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyIn = true; }
+                if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyOut = true; }
             }
-            return anyKnown ? Math.Max(inflow, outflow) : null;
+            return (inflow, outflow, anyIn, anyOut);
+        }
+
+        // Outflow a node's supply cannot account for. Only where both sides are actually determined: a root
+        // has no inflow and a terminal leaf no outflow, and neither is a contradiction.
+        //
+        // ValueOf reports the larger side, because a Sankey has to lay out *something* and a bar shorter than
+        // the links leaving it is unreadable. But reporting it alone is how an 11x disagreement passed for a
+        // measurement: the panel drew at full height, the ribbon feeding it drew as a sliver, and nothing said
+        // which of the two numbers to believe. Carrying the gap explicitly lets the diagram say so.
+        double? ImbalanceOf(string id)
+        {
+            if (leaf.ContainsKey(id)) return null;   // a measured node's own reading settles it
+
+            var (inflow, outflow, anyIn, anyOut) = Sides(id);
+            if (!anyIn || !anyOut) return null;
+
+            var gap = outflow - inflow;
+            // Rounding noise and honest conversion loss are not contradictions; 2% matches the floor the
+            // unmeasured-load synthesis above already uses for the same reason.
+            return gap > 1 && gap > inflow * 0.02 ? gap : null;
         }
 
         // Every node the user declared, plus every auto (pdu/outlet) node that reported a measurement —
@@ -463,7 +506,7 @@ public static class FlowGraphBuilder
         // its own kind of inaccuracy: it reads as "my config is broken" rather than "nothing measures this".
         var nodes = label.Keys
             .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
-            .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node", ValueOf(id)))
+            .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node", ValueOf(id), ImbalanceOf(id)))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

@@ -643,6 +643,52 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, instances }, ConfigSchema.Json);
         });
 
+        // What time the SERVER thinks it is, and when the energy day next rolls over.
+        //
+        // Both halves are things you cannot check from a browser: the clock the daily totals are cut on is
+        // the container's, not yours, and a container's is UTC unless someone set TZ. Reading "Energy today"
+        // without knowing that is how you conclude the numbers are wrong when the day simply ended at 7pm.
+        // Computed from config rather than from the accumulator, so it answers on every role and still
+        // answers when period tracking is off — "off" is itself the thing worth seeing.
+        app.MapGet("/api/time", () =>
+        {
+            var agg = config.EnergyFlow.Aggregation;
+            var now = DateTime.UtcNow;
+            var configured = agg.PeriodTimeZone;
+            // Resolve without warning: the log has already said so once at startup, and an endpoint polled
+            // by a browser must not fill it up. `resolved` carries the same fact to the GUI instead.
+            var zone = EnergyPeriod.Resolve(configured);
+            var resolved = string.IsNullOrWhiteSpace(configured) || string.Equals(zone.Id, configured.Trim(), StringComparison.OrdinalIgnoreCase);
+            var startHour = agg.PeriodStartHour is >= 0 and <= 23 ? agg.PeriodStartHour : 0;
+            var next = EnergyPeriod.NextRollover(now, zone, startHour);
+
+            return Results.Json(new
+            {
+                ok = true,
+                utc = now,
+                host = new
+                {
+                    zone = TimeZoneInfo.Local.Id,
+                    offsetMinutes = (int)TimeZoneInfo.Local.GetUtcOffset(now).TotalMinutes,
+                    time = EnergyPeriod.Local(now, TimeZoneInfo.Local),
+                },
+                period = new
+                {
+                    tracked = agg.TrackPeriods,
+                    configured,
+                    resolved,
+                    zone = zone.Id,
+                    offsetMinutes = (int)zone.GetUtcOffset(now).TotalMinutes,
+                    startHour,
+                    time = EnergyPeriod.Local(now, zone),
+                    key = EnergyPeriod.KeyFor(now, zone, startHour),
+                    nextRolloverUtc = next,
+                    nextRolloverLocal = EnergyPeriod.Local(next, zone),
+                    secondsUntilRollover = (int)Math.Max(0, (next - now).TotalSeconds),
+                },
+            }, ConfigSchema.Json);
+        });
+
         // Ready-made energy-flow device templates the Nodes tab can import (EG4 inverters, meters, …).
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
