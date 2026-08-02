@@ -709,6 +709,12 @@ spec:
                       MaxGapSeconds:
                         type: integer
                         description: Longest gap between samples that still counts, in seconds. A longer gap is recorded as unmeasured rather than guessed.
+                      TrackPeriods:
+                        type: boolean
+                        description: Track a daily energy total per node and outlet, so the flow diagram compares figures that all start at the same moment. Lifetime totals are unaffected.
+                      PeriodTimeZone:
+                        type: string
+                        description: IANA time zone the daily total rolls over in, e.g. "America/Chicago". Blank uses the host's local time zone.
                     description: Accumulate energy (kWh) from the power readings, for nodes that report power but not energy.
                   Nodes:
                     type: array
