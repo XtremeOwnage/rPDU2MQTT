@@ -72,13 +72,25 @@ public class PrometheusExportService : baseMQTTService
         // The energy-flow tier feeding each reading — only built when the hierarchy label is wanted.
         var hierarchy = labelNames.Contains("hierarchy") ? BuildHierarchy() : null;
 
+        // What each gauge was given this pass, so anything it held from a previous one can be dropped below.
+        var written = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
         foreach (var snapshot in FreshSnapshotsWithId())
             foreach (var r in MetricsHelper.EnumerateReadings(snapshot.Data))
             {
                 var tier = hierarchy is null ? string.Empty : HierarchyFor(hierarchy, r);
                 var values = PrometheusLabels.Values(labelNames, r, cfg, snapshot.InstanceId, tier);
-                GetGauge(MetricsHelper.PrometheusMetricName(r, cfg), labelNames, r).WithLabels(values).Set(r.Value);
+                var name = MetricsHelper.PrometheusMetricName(r, cfg);
+                GetGauge(name, labelNames, r).WithLabels(values).Set(r.Value);
+                if (!written.TryGetValue(name, out var set)) written[name] = set = new(StringComparer.Ordinal);
+                set.Add(LabelKey(values));
             }
+
+        // An outlet that goes away — unplugged, renamed, a PDU dropped from the config — otherwise leaves its
+        // series behind frozen at its last reading, indefinitely, looking exactly like a live one.
+        foreach (var (name, set) in written)
+            if (gauges.TryGetValue(name, out var g))
+                Prune(g, set);
 
         ExportFlowTiers();
         return Task.CompletedTask;
@@ -123,6 +135,7 @@ public class PrometheusExportService : baseMQTTService
             {
                 var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", graph.Units, cfg);
                 var gauge = FlowGauge(name, metric, graph.Units);
+                var written = new HashSet<string>(StringComparer.Ordinal);
 
                 foreach (var node in graph.Nodes)
                 {
@@ -134,18 +147,53 @@ public class PrometheusExportService : baseMQTTService
                     if (node.Value is not { } v) continue;
 
                     var tier = Core.Flow.FlowExport.Parents(power, node.Id).FirstOrDefault() ?? "";
-                    gauge.WithLabels(
-                        node.Id,
-                        node.Label,
-                        node.Kind,
-                        labels.TryGetValue(tier, out var p) ? p.Label : tier).Set(v);
+                    var set = new[] { node.Id, node.Label, node.Kind, labels.TryGetValue(tier, out var p) ? p.Label : tier };
+                    gauge.WithLabels(set).Set(v);
+                    written.Add(LabelKey(set));
                 }
+
+                // Drop every label set we did NOT write this pass.
+                //
+                // A Prometheus gauge remembers every combination of labels it has ever been given, and keeps
+                // serving each one's last value forever. So a node that stops reporting, or whose `tier`
+                // changes when the hierarchy is re-wired, leaves its old series behind frozen at whatever it
+                // last read — and the scrape then carries two contradictory rows for the same node. Seen on a
+                // live system: the inverter appearing twice, at 82.6 and 67.1 kWh, one of them a ghost.
+                //
+                // This is the same rule the rest of the flow already follows. A value we can no longer stand
+                // behind must disappear, not linger looking current.
+                Prune(gauge, written);
             }
         }
         catch (Exception ex) { Log.Debug($"Prometheus flow-tier export skipped: {ex.Message}"); }
     }
 
     private static readonly string[] FlowLabelNames = ["node", "name", "kind", "tier"];
+
+    /// <summary>A label set as one comparable string. The separator is a unit separator, which cannot occur
+    /// in a label value, so two different sets can never collide into one key.</summary>
+    internal static string LabelKey(IReadOnlyList<string> labels) => string.Join('\u241F', labels);
+
+    /// <summary>
+    /// Forget every label set this gauge holds that was not written in the pass just finished.
+    ///
+    /// <para>
+    /// A Prometheus gauge remembers every combination of labels it has ever been given and keeps serving each
+    /// one's last value forever. Nothing ages out. So a series whose subject disappeared — an outlet
+    /// unplugged, a node re-wired so its tier label changed — stays in the scrape at whatever it last read,
+    /// indistinguishable from a live reading. Seen on this system: the inverter appearing twice in one
+    /// scrape, 82.6 kWh and 67.1 kWh, one of them a ghost.
+    /// </para>
+    /// <para>
+    /// Same rule as everywhere else here: a value we can no longer stand behind disappears rather than
+    /// lingering while it looks current.
+    /// </para>
+    /// </summary>
+    internal static void Prune(Collector<Gauge.Child> gauge, HashSet<string> written)
+    {
+        foreach (var stale in gauge.GetAllLabelValues().Where(l => !written.Contains(LabelKey(l))).ToList())
+            gauge.RemoveLabelled(stale);
+    }
 
     private Gauge FlowGauge(string name, string metric, string units)
     {
