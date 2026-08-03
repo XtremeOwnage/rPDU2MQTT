@@ -102,5 +102,58 @@ export function addHaEnergySection(nav: any, sections: any) {
     showOrphans([]);
   };
 
+  // Devices Home Assistant still lists for things that no longer exist anywhere.
+  //
+  // Distinct from the orphaned-config cleanup above, and not solvable the same way: these have no discovery
+  // config left to retract, so nothing published over MQTT can reach them. Home Assistant has to be asked
+  // directly. Needs the URL and token configured above.
+  sec.appendChild(el('h3', { text: 'Stale Home Assistant device registrations', style: { margin: '18px 0 4px' } }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Home Assistant keeps a device even after its discovery message is gone, so devices from earlier versions '
+    + '— an outlet named under an older scheme, a tier since removed — linger in the UI forever with no way to '
+    + 'clear them over MQTT. This lists ones belonging to this project that have no entities left at all, and '
+    + 'deletes them through Home Assistant’s own API. A device that still has entities is live and is never '
+    + 'listed; nothing from another integration is either.'));
+
+  const devOut = el('div', { class: 'desc' }) as HTMLElement;
+  const devFind = btn('Find stale devices');
+  const devDelete = btn('Delete them', 'danger');
+  devDelete.disabled = true;
+  sec.appendChild(el('div', { class: 'sec-actions' }, devFind, devDelete));
+  sec.appendChild(devOut);
+
+  const showDevices = (devices: any[]) => {
+    devOut.innerHTML = '';
+    if (!devices.length) {
+      devOut.textContent = 'Nothing stale — every device of ours in Home Assistant still has entities.';
+      devDelete.disabled = true;
+      return;
+    }
+    devOut.appendChild(el('div', { text: `${devices.length} stale device(s) would be deleted from Home Assistant:` }));
+    const list = el('ul', { style: { margin: '4px 0 0 18px' } });
+    devices.forEach((d: any) => list.appendChild(el('li', {},
+      el('span', { text: d.name || '(unnamed)' }),
+      el('span', { style: { color: 'var(--faint)', fontFamily: 'var(--mono)', fontSize: '11px' }, text: '  ' + (d.identifiers || []).join(', ') }))));
+    devOut.appendChild(list);
+    devDelete.disabled = false;
+  };
+
+  devFind.onclick = async () => {
+    devOut.textContent = 'Asking Home Assistant…';
+    const r = await api('/api/ha/devices/stale');
+    if (!r.body?.ok) { devOut.textContent = 'Could not check: ' + (r.body?.message || 'unknown error'); return; }
+    showDevices(r.body.devices || []);
+  };
+
+  devDelete.onclick = async () => {
+    if (!confirm('Delete these devices from Home Assistant? They have no entities, and anything still live will be re-created by discovery.')) return;
+    devDelete.disabled = true;
+    devOut.textContent = 'Deleting…';
+    const r = await api('/api/ha/devices/stale/delete', 'POST');
+    if (!r.body?.ok) { toast('Could not delete: ' + (r.body?.message || 'unknown error'), false); devOut.textContent = ''; return; }
+    toast(`Deleted ${r.body.deleted} stale device(s) from Home Assistant.`, true);
+    showDevices([]);
+  };
+
   link.onclick = () => activate(link, sec);
 }
