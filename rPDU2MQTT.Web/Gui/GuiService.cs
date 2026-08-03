@@ -7,6 +7,7 @@ using HiveMQtt.MQTT5.Types;
 using k8s;
 using k8s.Models;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
@@ -135,6 +136,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // so a browser carrying a fat cookie jar can still reach the GUI.
         builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestHeadersTotalSize = 64 * 1024);
 
+        // Before auth is wired: the cookie handler takes the key ring as it is at build time, so persisting
+        // it afterwards would have no effect on the cookies actually issued.
+        // Basic auth has no cookie, so this only matters for OIDC — but it costs nothing and the GUI may be
+        // switched to OIDC later without anyone revisiting this.
+        ConfigureDataProtection(builder);
+
         if (UseOidc)
             ConfigureOidc(builder, gui.Oidc);
 
@@ -162,6 +169,68 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         await app.StartAsync(cancellationToken);
         var how = AuthDisabled ? "no authentication" : UseOidc ? $"OIDC via {gui.Oidc.Authority}" : $"user '{gui.Username}'";
         Log.Information($"Configuration GUI listening on http://*:{gui.Port} ({how}).");
+    }
+
+    /// <summary>
+    /// Keep the key that encrypts auth cookies across restarts.
+    ///
+    /// <para>
+    /// ASP.NET Core generates a data-protection key ring in memory at startup unless told where to keep it.
+    /// Every restart therefore mints a new one, the cookie the previous process issued can no longer be
+    /// decrypted, and the browser is bounced back to the identity provider — so every deploy, every config
+    /// change that restarts the pod, meant signing in again. It was never the IdP or the cookie lifetime:
+    /// the key that could read the cookie had been thrown away.
+    /// </para>
+    /// <para>
+    /// Valkey/Redis when it is configured, because that also makes a session valid on <em>any</em> replica —
+    /// without a shared ring, a session only works on the pod that issued it, so scaling out logs people out
+    /// at random. A local directory otherwise, which survives a process restart but not a container that
+    /// keeps no volume; that is said out loud rather than left to be discovered.
+    /// </para>
+    /// <para>
+    /// The application name is pinned. It is part of the key derivation, so letting it default to the entry
+    /// assembly would silently invalidate every existing cookie the day the assembly is renamed.
+    /// </para>
+    /// </summary>
+    private void ConfigureDataProtection(WebApplicationBuilder builder)
+    {
+        var keys = builder.Services.AddDataProtection().SetApplicationName("rPDU2MQTT");
+
+        if (config.Cache.Enabled && !string.IsNullOrWhiteSpace(config.Cache.Connection))
+        {
+            try
+            {
+                var options = StackExchange.Redis.ConfigurationOptions.Parse(config.Cache.Connection);
+                options.AbortOnConnectFail = false;
+                if (!string.IsNullOrWhiteSpace(config.Cache.Password)) options.Password = config.Cache.Password;
+                options.ConnectTimeout = Math.Max(1, config.Cache.ConnectTimeoutSeconds) * 1000;
+
+                var redis = StackExchange.Redis.ConnectionMultiplexer.Connect(options);
+                keys.PersistKeysToStackExchangeRedis(redis, (config.Cache.KeyPrefix ?? "") + "dataprotection-keys");
+                Log.Information("Sign-in keys are kept in the cache, so a restart does not sign everyone out.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Falling through to disk is better than refusing to start the GUI; say why, because the
+                // symptom otherwise is "I have to log in again" with nothing to connect it to.
+                Log.Warning($"Could not keep sign-in keys in the cache ({ex.Message}); falling back to local disk. "
+                          + "Sessions will not survive a container that keeps no volume, or move between replicas.");
+            }
+        }
+
+        var dir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), "rpdu2mqtt-keys"));
+        try
+        {
+            dir.Create();
+            keys.PersistKeysToFileSystem(dir);
+            Log.Information($"Sign-in keys are kept in {dir.FullName}. Enable Cache (Redis/Valkey) to keep them "
+                          + "across container restarts and share them between replicas.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning($"Sign-in keys could not be persisted ({ex.Message}); every restart will require signing in again.");
+        }
     }
 
     /// <summary>Wire cookie + OpenID Connect authentication and require an authenticated user.</summary>
