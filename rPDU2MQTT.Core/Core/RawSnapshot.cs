@@ -1,4 +1,6 @@
+using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Models.PDU.DummyDevices;
 
 namespace rPDU2MQTT.Core.Transport;
 
@@ -51,6 +53,52 @@ public static class RawSnapshotMapper
 
     private static RawMeasurement ToWire(Measurement m) => new(
         m.Key, m.Type, m.Entity_Name, m.Entity_DisplayName, m.Value, m.Units, m.State);
+
+    /// <summary>
+    /// Re-establish the MQTT topic wiring on a rebuilt <see cref="PduData"/>.
+    ///
+    /// <para>
+    /// <c>Record_Key</c> and <c>Record_Parent</c> are <c>[JsonIgnore]</c>, so they do not cross the wire, and
+    /// nothing downstream can reconstruct them from the payload alone. <c>GetTopicPath()</c> walks that
+    /// parent chain upward; with it missing the path collapses to nothing and a measurement publishes to the
+    /// bare topic <c>state</c> at the broker root. That is not a topic anyone subscribes to, so on a live
+    /// system every Home Assistant sensor read "Unavailable" while discovery — which builds its ids by a
+    /// different route — looked perfectly healthy.
+    /// </para>
+    /// <para>
+    /// The wiring below mirrors what the poller does when it first builds the graph, and must keep mirroring
+    /// it: <c>SetParentAndIdentifier</c> also recomputes <c>Entity_Identifier</c>, which is the Home
+    /// Assistant unique_id. Diverging here would not fail loudly — it would silently mint a second device for
+    /// every outlet and leave the originals orphaned, which is a mess that outlives the fix.
+    /// </para>
+    /// </summary>
+    /// <param name="data">The rebuilt graph, straight out of <see cref="ToData"/>.</param>
+    /// <param name="parentTopic">The MQTT parent topic — the root of every path (<c>MQTT.ParentTopic</c>).</param>
+    /// <param name="rootIdentifier">The root's <c>Entity_Identifier</c>, which every child id is built from.</param>
+    public static void Rewire(PduData data, string parentTopic, string rootIdentifier)
+    {
+        // PduData is a container, not a topic node — the poller's root is the OneView document, which does
+        // not survive the wire either. A stand-in carrying the same key and identifier reproduces the same
+        // paths and the same ids, which is all the chain below reads from it.
+        var root = new DummyEntity
+        {
+            Record_Key = parentTopic ?? "",
+            Record_Parent = null,
+            Entity_Identifier = rootIdentifier ?? "",
+        };
+
+        data.Devices.SetParentAndIdentifier(root, o => o.Key);
+        foreach (var device in data.Devices)
+        {
+            device.Entity.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Entity), o => o.Key);
+            device.Outlets.SetParentAndIdentifier(BaseEntity.FromDevice(device, MqttPath.Outlets), o => o.Key.ToString());
+
+            foreach (var entity in device.Entity)
+                entity.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(entity, MqttPath.Measurements), o => o.Type);
+            foreach (var outlet in device.Outlets)
+                outlet.Measurements.SetParentAndIdentifier(BaseEntity.FromDevice(outlet, MqttPath.Measurements), o => o.Type);
+        }
+    }
 
     /// <summary>Consumer side: rebuild a ready-to-render <see cref="PduData"/> (keys + computed names restored).</summary>
     public static PduData ToData(RawSnapshot snapshot)
