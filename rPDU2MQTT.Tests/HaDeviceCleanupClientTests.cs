@@ -153,4 +153,21 @@ public class HaDeviceCleanupClientTests : IDisposable
             Assert.Equal("entry-mqtt", (string?)call["config_entry_id"]);
         }
     }
+
+    [Fact]
+    public async Task DeletingASubset_StillOnlyEverTouchesWhatIsIndependentlyStale()
+    {
+        // The batched delete lets the browser pass ids so it can show honest progress. Those ids must only
+        // ever NARROW the set the server computed for itself — never introduce one. A caller passing the id
+        // of a live device must get nothing, or the progress bar becomes a way around the safety rule.
+        var sync = Sync();
+        var stale = await sync.StaleDevicesAsync();
+
+        var subset = stale.Where(d => d.Id == "d-live").ToList();   // as if a caller asked for a live one
+        Assert.Empty(subset);
+
+        var removed = await sync.DeleteDevicesAsync(subset);
+        Assert.Equal(0, removed);
+        lock (Removals) Assert.Empty(Removals);
+    }
 }

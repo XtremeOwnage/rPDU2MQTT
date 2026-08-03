@@ -4331,7 +4331,9 @@ function addDiscoveryCleanup(sec     ) {
   sec.appendChild(el('div', { class: 'sec-actions' }, devFind, devDelete));
   sec.appendChild(devOut);
 
+  let lastDevices        = [];
   const showDevices = (devices       ) => {
+    lastDevices = devices;
     devOut.innerHTML = '';
     devDelete.disabled = !devices.length;
     if (!devices.length) { devOut.textContent = 'Nothing stale — every device of ours in Home Assistant still has entities.'; return; }
@@ -4352,11 +4354,33 @@ function addDiscoveryCleanup(sec     ) {
   devDelete.onclick = async () => {
     if (!confirm('Delete these devices from Home Assistant? They have no entities left, and anything still live '
       + 'is never listed — discovery re-creates a device if it comes back.')) return;
+
+    // Deleted in batches so the count is the truth rather than an animation. Each device is a WebSocket
+    // round trip to Home Assistant, so thirty-odd of them takes long enough that a spinner with nothing
+    // behind it is indistinguishable from a hang.
+    const ids = lastDevices.map((d     ) => d.id).filter(Boolean);
+    const total = ids.length;
     devDelete.disabled = true;
-    devOut.textContent = 'Deleting…';
-    const r = await api('/api/ha/devices/stale/delete', { method: 'POST' });
-    if (!r.body?.ok) { toast('Could not delete: ' + (r.body?.message || 'unknown error'), false); devOut.textContent = ''; return; }
-    toast(`Deleted ${r.body.deleted} stale device(s) from Home Assistant.`, true);
+    devFind.disabled = true;
+    devOut.innerHTML = '';
+    const label = el('div', { text: `Deleting 0 of ${total}…` });
+    const bar = el('div', { class: 'progress' }, el('span', { style: { width: '0%' } }));
+    devOut.appendChild(label); devOut.appendChild(bar);
+
+    let done = 0, removed = 0, failed = '';
+    for (let i = 0; i < ids.length; i += 5) {
+      const batch = ids.slice(i, i + 5);
+      const r = await api('/api/ha/devices/stale/delete', { method: 'POST', body: JSON.stringify({ ids: batch }) });
+      if (!r.body?.ok) { failed = r.body?.message || 'unknown error'; break; }
+      removed += r.body.deleted || 0;
+      done += batch.length;
+      label.textContent = `Deleting ${done} of ${total}…`;
+      (bar.firstChild               ).style.width = Math.round((done / total) * 100) + '%';
+    }
+
+    devFind.disabled = false;
+    if (failed) { toast('Stopped after ' + removed + ': ' + failed, false); devOut.textContent = `Deleted ${removed} of ${total} before failing: ${failed}`; return; }
+    toast(`Deleted ${removed} stale device(s) from Home Assistant.`, true);
     showDevices([]);
   };
 }

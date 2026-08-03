@@ -1091,14 +1091,34 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        app.MapPost("/api/ha/devices/stale/delete", async () =>
+        app.MapPost("/api/ha/devices/stale/delete", async (HttpContext ctx) =>
         {
             try
             {
                 // Re-read rather than trusting a list the browser has been holding: a device that has gained
                 // entities since it was listed is live again, and must not be deleted on the strength of a
-                // stale preview.
+                // stale preview. This holds however the caller narrows the request below.
                 var stale = await haEnergy.StaleDevicesAsync();
+
+                // An optional id list lets the caller work through them in batches so it can show honest
+                // progress. Deleting 38 devices is 38 WebSocket round trips, and a spinner that cannot say
+                // how far along it is looks identical to one that has hung. The ids only ever *narrow* what
+                // was independently computed above — they can never introduce a device that is not stale.
+                System.Text.Json.Nodes.JsonNode? body = null;
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body);
+                    var raw = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(raw)) body = System.Text.Json.Nodes.JsonNode.Parse(raw);
+                }
+                catch { /* no body, or not JSON: fall through and delete everything stale */ }
+
+                if (body?["ids"]?.AsArray() is { } wanted && wanted.Count > 0)
+                {
+                    var ids = new HashSet<string>(wanted.Select(n => (string?)n ?? ""), StringComparer.Ordinal);
+                    stale = stale.Where(d => ids.Contains(d.Id)).ToList();
+                }
+
                 var removed = await haEnergy.DeleteDevicesAsync(stale);
                 if (removed > 0) Log.Information($"Deleted {removed} stale Home Assistant device registration(s) at the operator's request.");
                 return Results.Json(new { ok = true, deleted = stale.Count, removed }, ConfigSchema.Json);
