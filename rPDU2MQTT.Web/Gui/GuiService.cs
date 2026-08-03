@@ -1749,8 +1749,47 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             if (!discovery.HasSubscribers)
                 return Results.Json(new { ok = false, message = "Home Assistant discovery is disabled." }, ConfigSchema.Json);
 
+            // First the services' own clear: each forgets and retracts what it published this run.
             await discovery.RequestClearAsync(CancellationToken.None);
-            return Results.Json(new { ok = true, message = "Cleared the retained Home Assistant discovery messages." }, ConfigSchema.Json);
+
+            // Then everything else of ours still retained on the broker. The services only know what THEY
+            // published since starting, which is why this button used to leave devices behind — anything
+            // from an earlier version, from a config that has since changed, or from the energy-flow
+            // exporter's separate bookkeeping, survived every "clear" and stayed in Home Assistant forever.
+            // "Clear discovery" has to mean the broker is clean, so the list comes from the broker.
+            var swept = 0;
+            var message = "Cleared the retained Home Assistant discovery messages.";
+            try
+            {
+                var prefix = config.HASS.DiscoveryTopic;
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                await index.Renew((prefix ?? "").Trim().Trim('/') + "/#");
+                var retained = (await index.Search(null, 5000)).Select(t => t.Topic);
+
+                foreach (var topic in Core.HomeAssistant.HaDiscoveryTopics.Owned(retained, prefix))
+                {
+                    await mqtt.PublishAsync(new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
+                    {
+                        Payload = Array.Empty<byte>(),
+                        Retain = true,
+                    });
+                    swept++;
+                }
+                if (swept > 0)
+                {
+                    Log.Information($"Clear discovery: swept {swept} retained discovery topic(s) from the broker.");
+                    message = $"Cleared the retained Home Assistant discovery messages, including {swept} left over from earlier runs.";
+                }
+            }
+            catch (Exception ex)
+            {
+                // The services' own clear already succeeded; say what did and did not happen rather than
+                // reporting a blanket failure.
+                Log.Warning($"Clear discovery: the broker sweep failed ({ex.Message}); only this run's topics were cleared.");
+                message = "Cleared this run's discovery messages, but could not sweep the broker for older ones: " + ex.Message;
+            }
+
+            return Results.Json(new { ok = true, swept, message }, ConfigSchema.Json);
         });
     }
 

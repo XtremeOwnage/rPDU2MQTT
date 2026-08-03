@@ -33,7 +33,9 @@ export async function deleteEmonCmsFeeds() {
 }
 export async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 export async function clearHa() {
-  if (!confirm('Clear all Home Assistant discovery messages? The entities will disappear from Home Assistant until discovery runs again.')) return;
+  if (!confirm('Clear ALL Home Assistant discovery messages published by rPDU2MQTT — including any left over '
+    + 'from earlier versions or configurations? Every entity disappears from Home Assistant until discovery '
+    + 'runs again. Nothing belonging to another integration is touched.')) return;
   const r = await api('/api/discovery/clear', { method: 'POST' });
   toast(r.body.message, r.body.ok);
 }
