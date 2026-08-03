@@ -93,6 +93,61 @@ public static class FlowExport
     /// <summary>The HA unique_id of a battery tier's state-of-charge sensor ("energyflow_&lt;key&gt;_soc").</summary>
     public static string SocUniqueId(string nodeId) => DeviceId(nodeId) + "_soc";
 
+    /// <summary>The discovery-topic prefix every device this exporter publishes is named with.</summary>
+    public const string DeviceIdPrefix = "energyflow_";
+
+    /// <summary>
+    /// Retained Home Assistant discovery configs this exporter published and would no longer publish today —
+    /// the ones to clear.
+    ///
+    /// <para>
+    /// A discovery config is retained, so it outlives the thing it described. An outlet that gains a native
+    /// energy sensor (so the flow export correctly stops publishing a duplicate for it), a node renamed, a
+    /// tier deleted from the hierarchy — each leaves its config sitting on the broker, and Home Assistant
+    /// goes on showing the device as though it were real. Seen on a live system: fifteen orphaned devices,
+    /// several of them a second and third copy of an outlet that already had one.
+    /// </para>
+    /// <para>
+    /// Nothing revisits them on its own. The publish loop only ever walks the nodes that exist <em>now</em>,
+    /// so a config for something that no longer exists is unreachable by construction — it can only be found
+    /// by looking at what is actually retained and subtracting what we mean to publish.
+    /// </para>
+    /// <para>
+    /// Deliberately narrow: only topics under the discovery prefix, only the <c>device</c> component, and only
+    /// ids beginning with <see cref="DeviceIdPrefix"/>. Another integration's discovery — or this project's own
+    /// native PDU discovery, which a different service owns — must never be touched by this.
+    /// </para>
+    /// </summary>
+    /// <param name="retainedTopics">Every retained topic currently on the broker.</param>
+    /// <param name="currentDeviceIds">The device ids the exporter would publish right now.</param>
+    /// <param name="discoveryPrefix">The configured Home Assistant discovery prefix (e.g. "homeassistant").</param>
+    public static IReadOnlyList<string> OrphanedDiscoveryTopics(
+        IEnumerable<string> retainedTopics, IEnumerable<string> currentDeviceIds, string discoveryPrefix)
+    {
+        var keep = new HashSet<string>(currentDeviceIds, StringComparer.OrdinalIgnoreCase);
+        var root = (discoveryPrefix ?? "").Trim().Trim('/');
+        if (root.Length == 0) return Array.Empty<string>();
+
+        var orphans = new List<string>();
+        foreach (var topic in retainedTopics)
+        {
+            if (string.IsNullOrWhiteSpace(topic)) continue;
+            var parts = topic.Split('/');
+            // <root>/device/<id>/config — anything else is not ours to reason about.
+            if (parts.Length != 4) continue;
+            if (!string.Equals(parts[0], root, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(parts[1], "device", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(parts[3], "config", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var id = parts[2];
+            if (!id.StartsWith(DeviceIdPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+            if (keep.Contains(id)) continue;
+
+            orphans.Add(topic);
+        }
+        return orphans;
+    }
+
     /// <summary>
     /// Flow node id -> the unique_id of the native PDU-discovery energy sensor it already has (#177): PDU
     /// tiers (<c>pdu:{name}</c>) and outlets (<c>outlet:{name}:{key}</c>) that carry an energy measurement.
