@@ -53,6 +53,9 @@ public class DiagnosticService : IHostedService
     {
         // v3: only the leader acts on diagnostic commands (rediscover once cluster-wide).
         if (leader is { IsLeader: false }) return;
+        // Live toggle, same as the discovery service: the listener is always registered, but it does nothing
+        // while discovery is off rather than needing a restart to appear.
+        if (!cfg.HASS.DiscoveryEnabled) return;
 
         var topic = e.PublishMessage.Topic ?? string.Empty;
         try

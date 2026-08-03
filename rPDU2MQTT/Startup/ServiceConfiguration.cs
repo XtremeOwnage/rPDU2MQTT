@@ -292,13 +292,15 @@ public static class ServiceConfiguration
             // activation grain, so this only pokes it; "once cluster-wide" is the grain, not a leader check.
             services.AddHostedService<Hosting.EmonCmsReconciler>();
 
-            if (cfg.HASS.DiscoveryEnabled)
-            {
-                services.AddHostedService<HomeAssistantDiscoveryService>();
-                services.AddHostedService<DiagnosticService>();
-            }
-            else
-                Log.Warning($"Home Assistant Discovery Disabled.");
+            // Registered unconditionally and self-gating on the live HomeAssistant.DiscoveryEnabled, the same
+            // way EmonCmsReconciler above honours its own toggle. Registering only when the flag happened to
+            // be true at startup meant turning discovery ON later could not start a service that was never
+            // registered — and the config watcher deliberately does not restart for HASS changes, so nothing
+            // re-evaluated it either. The toggle read On while the process reported discovery disabled.
+            services.AddHostedService<HomeAssistantDiscoveryService>();
+            services.AddHostedService<DiagnosticService>();
+            if (!cfg.HASS.DiscoveryEnabled)
+                Log.Warning("Home Assistant discovery is off. Turning it on in the GUI takes effect on the next pass; no restart needed.");
 
             // Sync the energy-flow hierarchy into HA's Energy Dashboard via its WebSocket API (#128).
             // Registered unconditionally; it honors the live HomeAssistant.EnergyDashboard.Enabled toggle.
