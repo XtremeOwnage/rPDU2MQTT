@@ -107,16 +107,6 @@
         ]
       },
       {
-        "key": "PublishTimeoutSeconds",
-        "label": "PublishTimeoutSeconds",
-        "description": "Seconds a single MQTT publish may take before it is abandoned and the pass fails loudly. Stops one unacknowledged message from silently wedging publishing altogether.",
-        "type": "int",
-        "required": false,
-        "default": 15,
-        "min": 1,
-        "max": 600
-      },
-      {
         "key": "KeepAlive",
         "label": "KeepAlive",
         "description": "The keepalive interval for the MQTT connection in seconds.",

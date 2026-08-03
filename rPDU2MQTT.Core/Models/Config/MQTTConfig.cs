@@ -37,24 +37,6 @@ public class MQTTConfig
     /// <summary>
     /// Gets or sets the keepalive interval for the MQTT connection in seconds.
     /// </summary>
-    /// <summary>
-    /// How long a single publish may take before it is abandoned.
-    ///
-    /// <para>
-    /// A QoS-1 publish waits for the broker to acknowledge it, and nothing in the protocol promises that
-    /// acknowledgement ever arrives — a broker that drops the message on an ACL, or a connection that is up
-    /// but not delivering, simply never answers. Awaiting that with no bound wedges the service: the tick
-    /// never returns, so the loop that would have run the next one never spins again. Seen on a live system,
-    /// where the PDU publisher and the energy-flow export each ran exactly one tick, hung inside it, and
-    /// stayed that way — every sensor in Home Assistant showing "Unavailable" with nothing in the log,
-    /// because a service waiting forever is not an error, it is just quiet.
-    /// </para>
-    /// </summary>
-    [DefaultValue(15)]
-    [Range(1, 600, ErrorMessage = "PublishTimeoutSeconds must be between 1 and 600.")]
-    [Description("Seconds a single MQTT publish may take before it is abandoned and the pass fails loudly. Stops one unacknowledged message from silently wedging publishing altogether.")]
-    public int PublishTimeoutSeconds { get; set; } = 15;
-
     [Range(1, int.MaxValue, ErrorMessage = "KeepAlive must be greater than 0.")]
     [Display(Description = "The keepalive interval for the MQTT connection in seconds.")]
     public int KeepAlive { get; set; } = 60;

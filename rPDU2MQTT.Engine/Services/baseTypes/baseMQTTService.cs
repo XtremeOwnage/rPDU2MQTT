@@ -211,45 +211,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
         // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
         // publish failures surface in tick(). No need to check connectivity per message.
-        return PublishWithTimeout(msg, cancellationToken);
-    }
-
-    /// <summary>
-    /// Publish, but never wait forever.
-    ///
-    /// <para>
-    /// A QoS-1 publish waits for the broker's acknowledgement, and nothing guarantees one comes: a broker
-    /// that drops the message on an ACL, or a link that is nominally up but not delivering, just never
-    /// answers. An unbounded await on that does not fail — it stops. The tick never returns, so the timer
-    /// loop never comes round again, and the service is dead without a single line in the log.
-    /// </para>
-    /// <para>
-    /// That is exactly how a live system ended up with every Home Assistant sensor reading "Unavailable":
-    /// the PDU publisher and the energy-flow export each logged one <c>start.</c>, never a <c>finish.</c>,
-    /// and sat there. Discovery had completed earlier in the run, so the entities existed and simply never
-    /// received a value — which reads as a broker problem and is not one.
-    /// </para>
-    /// <para>
-    /// Timing out throws, so the pass ends in <see cref="tick"/>'s handler with the topic named and the next
-    /// pass still runs. A publisher that cannot publish should say so once every interval, not fall silent.
-    /// </para>
-    /// </summary>
-    private async Task PublishWithTimeout(MQTT5PublishMessage msg, CancellationToken cancellationToken)
-    {
-        var seconds = cfg.MQTT.PublishTimeoutSeconds is > 0 and <= 600 ? cfg.MQTT.PublishTimeoutSeconds : 15;
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(seconds));
-        try
-        {
-            await mqtt.PublishAsync(msg, timeout.Token);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"The broker did not acknowledge a publish to '{msg.Topic}' within {seconds}s. Publishing is "
-              + "stopped for this pass and will be retried on the next one. A connection that is up but never "
-              + "acknowledges usually means the broker is refusing the topic — check its ACL for this user.");
-        }
+        return mqtt.PublishAsync(msg, cancellationToken);
     }
 
     /// <summary>
