@@ -4263,109 +4263,6 @@ function addHaEnergySection(nav     , sections     ) {
     const r = await api('/api/ha-energy/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.inp.value.trim(), token: token.inp.value }) });
     toast(r.body.message || (r.ok ? 'Done.' : 'Failed.'), r.ok && r.body.ok);
   };
-  // Orphaned discovery configs — devices Home Assistant still shows for things that no longer exist.
-  //
-  // A discovery config is retained, so it outlives what it described: an outlet that later gained a native
-  // energy sensor, a tier deleted from the hierarchy, a node renamed. The publish loop can never find them
-  // again because it only walks the nodes that exist now. Two steps on purpose — deleting devices from
-  // someone's Home Assistant is not something to do quietly, so it lists them and waits.
-  sec.appendChild(el('h3', { text: 'Orphaned Home Assistant devices', style: { margin: '18px 0 4px' } }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Discovery messages are retained, so a device stays in Home Assistant after the thing it described is '
-    + 'gone — an outlet that gained its own energy sensor, a renamed node, a deleted tier. This finds configs '
-    + 'published under this project’s own prefix that the current setup would no longer publish. Nothing '
-    + 'belonging to another integration is ever listed or touched.'));
-
-  const orphanOut = el('div', { class: 'desc' })               ;
-  const orphanFind = btn('Find orphaned devices');
-  const orphanClear = btn('Clear them', 'danger');
-  orphanClear.disabled = true;
-  const orphanBar = el('div', { class: 'sec-actions' }, orphanFind, orphanClear);
-  sec.appendChild(orphanBar);
-  sec.appendChild(orphanOut);
-
-  const showOrphans = (topics          ) => {
-    orphanOut.innerHTML = '';
-    if (!topics.length) {
-      orphanOut.textContent = 'Nothing orphaned — every retained discovery config matches something that still exists.';
-      orphanClear.disabled = true;
-      return;
-    }
-    orphanOut.appendChild(el('div', { text: `${topics.length} orphaned config(s) would be cleared:` }));
-    const list = el('ul', { style: { margin: '4px 0 0 18px' } });
-    topics.forEach(t => list.appendChild(el('li', { text: t, style: { fontFamily: 'var(--mono)', fontSize: '11px' } })));
-    orphanOut.appendChild(list);
-    orphanClear.disabled = false;
-  };
-
-  orphanFind.onclick = async () => {
-    orphanOut.textContent = 'Looking…';
-    const r = await api('/api/ha/orphans');
-    if (!r.body?.ok) { orphanOut.textContent = 'Could not check: ' + (r.body?.message || 'unknown error'); return; }
-    showOrphans(r.body.topics || []);
-  };
-
-  orphanClear.onclick = async () => {
-    orphanClear.disabled = true;
-    const r = await api('/api/ha/orphans/clear', 'POST');
-    if (!r.body?.ok) { toast('Could not clear: ' + (r.body?.message || 'unknown error'), false); return; }
-    toast(`Cleared ${r.body.cleared} orphaned device(s). Home Assistant removes them on the next discovery pass.`, true);
-    showOrphans([]);
-  };
-
-  // Devices Home Assistant still lists for things that no longer exist anywhere.
-  //
-  // Distinct from the orphaned-config cleanup above, and not solvable the same way: these have no discovery
-  // config left to retract, so nothing published over MQTT can reach them. Home Assistant has to be asked
-  // directly. Needs the URL and token configured above.
-  sec.appendChild(el('h3', { text: 'Stale Home Assistant device registrations', style: { margin: '18px 0 4px' } }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Home Assistant keeps a device even after its discovery message is gone, so devices from earlier versions '
-    + '— an outlet named under an older scheme, a tier since removed — linger in the UI forever with no way to '
-    + 'clear them over MQTT. This lists ones belonging to this project that have no entities left at all, and '
-    + 'deletes them through Home Assistant’s own API. A device that still has entities is live and is never '
-    + 'listed; nothing from another integration is either.'));
-
-  const devOut = el('div', { class: 'desc' })               ;
-  const devFind = btn('Find stale devices');
-  const devDelete = btn('Delete them', 'danger');
-  devDelete.disabled = true;
-  sec.appendChild(el('div', { class: 'sec-actions' }, devFind, devDelete));
-  sec.appendChild(devOut);
-
-  const showDevices = (devices       ) => {
-    devOut.innerHTML = '';
-    if (!devices.length) {
-      devOut.textContent = 'Nothing stale — every device of ours in Home Assistant still has entities.';
-      devDelete.disabled = true;
-      return;
-    }
-    devOut.appendChild(el('div', { text: `${devices.length} stale device(s) would be deleted from Home Assistant:` }));
-    const list = el('ul', { style: { margin: '4px 0 0 18px' } });
-    devices.forEach((d     ) => list.appendChild(el('li', {},
-      el('span', { text: d.name || '(unnamed)' }),
-      el('span', { style: { color: 'var(--faint)', fontFamily: 'var(--mono)', fontSize: '11px' }, text: '  ' + (d.identifiers || []).join(', ') }))));
-    devOut.appendChild(list);
-    devDelete.disabled = false;
-  };
-
-  devFind.onclick = async () => {
-    devOut.textContent = 'Asking Home Assistant…';
-    const r = await api('/api/ha/devices/stale');
-    if (!r.body?.ok) { devOut.textContent = 'Could not check: ' + (r.body?.message || 'unknown error'); return; }
-    showDevices(r.body.devices || []);
-  };
-
-  devDelete.onclick = async () => {
-    if (!confirm('Delete these devices from Home Assistant? They have no entities, and anything still live will be re-created by discovery.')) return;
-    devDelete.disabled = true;
-    devOut.textContent = 'Deleting…';
-    const r = await api('/api/ha/devices/stale/delete', 'POST');
-    if (!r.body?.ok) { toast('Could not delete: ' + (r.body?.message || 'unknown error'), false); devOut.textContent = ''; return; }
-    toast(`Deleted ${r.body.deleted} stale device(s) from Home Assistant.`, true);
-    showDevices([]);
-  };
-
   link.onclick = () => activate(link, sec);
 }
 
@@ -5009,6 +4906,11 @@ function sectionActions(node     ) {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
       add('Republish discovery', rediscoverHa);
       add('Clear discovery', clearHa, 'danger');
+      // The two cleanups that "Clear discovery" cannot do. One removes retained configs for things this
+      // build no longer publishes; the other removes devices Home Assistant still lists whose config is
+      // already gone, which is reachable only through HA's own API.
+      add('Clear orphaned configs', clearOrphanedDiscovery, 'danger');
+      add('Delete stale HA devices', deleteStaleHaDevices, 'danger');
     }
     // The base URL is configured for the Energy Dashboard sync, but it's the way in to HA either way.
     bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
@@ -5069,6 +4971,43 @@ async function deleteEmonCmsFeeds() {
   toast(r.body.message, r.body.ok);
 }
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+// Devices Home Assistant still lists for things that no longer exist anywhere — the ones no MQTT retraction
+// can reach, because their discovery config is already gone. Removed through Home Assistant's own API.
+// Lists them before doing anything: this deletes registry entries and nothing here can put them back.
+async function deleteStaleHaDevices() {
+  const found = await api('/api/ha/devices/stale');
+  if (!found.body?.ok) { toast('Could not ask Home Assistant: ' + (found.body?.message || 'unknown error'), false); return; }
+
+  const devices = found.body.devices || [];
+  if (!devices.length) { toast('Nothing stale — every device of ours in Home Assistant still has entities.', true); return; }
+
+  const names = devices.slice(0, 25).map((d     ) => '  • ' + (d.name || '(unnamed)')).join('\n');
+  const more = devices.length > 25 ? `\n  …and ${devices.length - 25} more` : '';
+  if (!confirm(`Delete ${devices.length} stale device(s) from Home Assistant?\n\n${names}${more}\n\n`
+    + 'These have no entities left. Anything still live is never listed, and will be re-created by discovery.')) return;
+
+  const r = await api('/api/ha/devices/stale/delete', { method: 'POST' });
+  toast(r.body?.ok ? `Deleted ${r.body.deleted} stale device(s) from Home Assistant.`
+                   : 'Could not delete: ' + (r.body?.message || 'unknown error'), !!r.body?.ok);
+}
+
+// Retained discovery configs for tiers this build would no longer publish. Distinct from "Clear discovery",
+// which retracts everything: this removes only what is already stale, leaving live devices alone.
+async function clearOrphanedDiscovery() {
+  const found = await api('/api/ha/orphans');
+  if (!found.body?.ok) { toast('Could not check: ' + (found.body?.message || 'unknown error'), false); return; }
+
+  const topics = found.body.topics || [];
+  if (!topics.length) { toast('Nothing orphaned — every retained discovery config still matches something.', true); return; }
+
+  if (!confirm(`Clear ${topics.length} orphaned discovery config(s)?\n\n` + topics.slice(0, 25).join('\n')
+    + (topics.length > 25 ? `\n…and ${topics.length - 25} more` : ''))) return;
+
+  const r = await api('/api/ha/orphans/clear', { method: 'POST' });
+  toast(r.body?.ok ? `Cleared ${r.body.cleared} orphaned config(s).`
+                   : 'Could not clear: ' + (r.body?.message || 'unknown error'), !!r.body?.ok);
+}
+
 async function clearHa() {
   if (!confirm('Clear ALL Home Assistant discovery messages published by rPDU2MQTT — including any left over '
     + 'from earlier versions or configurations? Every entity disappears from Home Assistant until discovery '
