@@ -1762,9 +1762,29 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var prefix = config.HASS.DiscoveryTopic;
+                var root = (prefix ?? "").Trim().Trim('/');
                 var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                await index.Renew((prefix ?? "").Trim().Trim('/') + "/#");
-                var retained = (await index.Search(null, 5000)).Select(t => t.Topic);
+
+                // The index only fills while someone is reading it, and the subscription it needs is opened by
+                // another process on its own timer. Reading it the instant after asking would sweep whatever
+                // happened to be cached — possibly for a different filter, possibly nothing — and then report
+                // success. Wait for the feed to actually be live, and give the retained backlog a moment to
+                // land, before deciding what exists.
+                var state = await index.Renew(root + "/#");
+                for (var i = 0; i < 30 && !(state.Listening && state.Granted != false); i++)
+                {
+                    await Task.Delay(500);
+                    state = await index.Renew(root + "/#");
+                }
+                if (state.Granted == false)
+                    throw new InvalidOperationException($"the broker refused a subscription to '{root}/#', so what is retained there cannot be read");
+                if (!state.Listening)
+                    throw new InvalidOperationException("no process is feeding the topic index, so what is retained on the broker cannot be read");
+                await Task.Delay(2000);   // retained messages arrive in a burst; let it finish
+
+                // Uncapped on purpose: Search caps at 200 and orders by topic length, which is right for an
+                // autocomplete and wrong for a sweep that must not miss one.
+                var retained = await index.TopicsUnder(root + "/");
 
                 foreach (var topic in Core.HomeAssistant.HaDiscoveryTopics.Owned(retained, prefix))
                 {
@@ -1775,11 +1795,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     });
                     swept++;
                 }
-                if (swept > 0)
-                {
-                    Log.Information($"Clear discovery: swept {swept} retained discovery topic(s) from the broker.");
-                    message = $"Cleared the retained Home Assistant discovery messages, including {swept} left over from earlier runs.";
-                }
+                Log.Information($"Clear discovery: swept {swept} retained discovery topic(s) from the broker "
+                              + $"(index held {retained.Count} under '{root}/').");
+                message = swept > 0
+                    ? $"Cleared every rPDU2MQTT discovery message on the broker — {swept} topic(s), including any left over from earlier versions."
+                    : "Cleared this run's discovery messages; the broker held nothing else of ours.";
             }
             catch (Exception ex)
             {
