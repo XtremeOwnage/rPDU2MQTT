@@ -91,6 +91,17 @@ public sealed class TopicIndexGrain : Grain, ITopicIndexGrain
         return Task.FromResult(matches);
     }
 
+
+    public Task<List<string>> TopicsUnder(string prefix)
+    {
+        leaseUntilUtc = DateTime.UtcNow + Lease;   // a sweep is a reader too; don't let the feed lapse mid-scan
+        timer ??= this.RegisterGrainTimer(TickAsync, new GrainTimerCreationOptions(Tick, Tick) { KeepAlive = true });
+
+        var p = prefix ?? "";
+        return Task.FromResult(topics.Keys
+            .Where(t => p.Length == 0 || t.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+            .ToList());
+    }
     public Task<TopicSample?> Get(string topic)
         => Task.FromResult(topics.TryGetValue(topic ?? "", out var sample) ? sample : null);
 

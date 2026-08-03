@@ -221,4 +221,53 @@ public class TopicIndexGrainTests
         }
         finally { await cluster.StopAllSilosAsync(); }
     }
+
+    [Fact]
+    public async Task TopicsUnder_ReturnsEverything_WhereSearchWouldCapAndReorder()
+    {
+        // A sweep that must retract every retained discovery message cannot use Search: it caps at 200 and
+        // orders by topic length for autocomplete relevance, so on a busy broker it would quietly hand back a
+        // subset and the rest would survive the "clear" — the exact failure the sweep exists to prevent.
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+            await index.Renew("homeassistant/#");
+
+            var samples = Enumerable.Range(0, 400)
+                .Select(i => new TopicSample { Topic = $"homeassistant/device/rPDU2MQTT_dev{i:000}/config", SeenUtc = DateTime.UtcNow })
+                .Append(new TopicSample { Topic = "other/thing", SeenUtc = DateTime.UtcNow })
+                .ToList();
+            await index.Observe(samples);
+
+            var swept = await index.TopicsUnder("homeassistant/");
+            Assert.Equal(400, swept.Count);
+            Assert.DoesNotContain("other/thing", swept);
+
+            // What the old path would have given the sweep.
+            var browsed = await index.Search(null, 5000);
+            Assert.True(browsed.Count <= 200, $"Search is meant to stay a browse, got {browsed.Count}");
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
+
+    [Fact]
+    public async Task TopicsUnder_MatchesOnPrefix_NotSubstring()
+    {
+        var cluster = await GrainTestCluster.StartAsync();
+        try
+        {
+            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+            await index.Renew("#");
+            await index.Observe(new List<TopicSample>
+            {
+                new() { Topic = "homeassistant/device/a/config", SeenUtc = DateTime.UtcNow },
+                new() { Topic = "mirror/homeassistant/device/b/config", SeenUtc = DateTime.UtcNow },
+            });
+
+            var found = await index.TopicsUnder("homeassistant/");
+            Assert.Equal(new[] { "homeassistant/device/a/config" }, found);
+        }
+        finally { await cluster.StopAllSilosAsync(); }
+    }
 }

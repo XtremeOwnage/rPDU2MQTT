@@ -66,6 +66,20 @@ public interface ITopicIndexGrain : IGrainWithIntegerKey
     /// <summary>Topics matching a query (substring, case-insensitive), shortest first. Renews the lease.</summary>
     Task<List<TopicSample>> Search(string? query, int limit);
 
+    /// <summary>
+    /// Every topic currently held whose name starts with <paramref name="prefix"/> — uncapped, unordered by
+    /// relevance.
+    ///
+    /// <para>
+    /// Separate from <see cref="Search"/> because the two want opposite things. Search is a browse: it caps
+    /// at a couple of hundred and puts the shortest topics first, because a human typing into an autocomplete
+    /// wants the closest match, not a complete inventory. A sweep that has to retract <em>every</em> retained
+    /// discovery message wants exactly the inventory, and quietly receiving the first two hundred by length
+    /// would leave the rest behind — which is the failure the sweep exists to prevent.
+    /// </para>
+    /// </summary>
+    Task<List<string>> TopicsUnder(string prefix);
+
     /// <summary>The last payload seen on one topic, if it's in the index.</summary>
     Task<TopicSample?> Get(string topic);
 }
