@@ -295,6 +295,41 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// connected/stale/waiting, and what colour that is — belong to the components, so this just hands the
     /// board over. One grain call, one cluster-wide answer, whichever replica serves the request.
     /// </summary>
+    /// <summary>
+    /// Retained discovery configs under our own device-id prefix that this build would not publish today.
+    ///
+    /// <para>
+    /// Built by asking the broker what is actually retained and subtracting what the exporter means to
+    /// publish. That subtraction is the only way to find them: the publish loop walks the nodes that exist
+    /// now, so a config for something that no longer exists is unreachable from it by construction.
+    /// </para>
+    /// </summary>
+    private async Task<IReadOnlyList<string>> OrphanedDiscoveryAsync()
+    {
+        var prefix = config.HASS.DiscoveryTopic;
+        if (string.IsNullOrWhiteSpace(prefix)) return Array.Empty<string>();
+
+        var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+        await index.Renew(prefix.Trim().Trim('/') + "/#");
+        var retained = (await index.Search(null, 5000)).Select(t => t.Topic).ToList();
+
+        // What the exporter would publish right now: every non-synthetic tier that is NOT already covered by
+        // native PDU discovery. Anything else carrying our prefix is a leftover.
+        var merged = new Models.PDU.PduData();
+        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
+
+        var energyMetric = string.IsNullOrWhiteSpace(config.HASS.EnergyDashboard.EnergyMeasurementType)
+            ? "energy" : config.HASS.EnergyDashboard.EnergyMeasurementType;
+        var graph = Core.Flow.FlowGraphBuilder.Build(merged, config.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
+        var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
+
+        var current = graph.Nodes
+            .Where(n => !n.Synthetic && !native.ContainsKey(n.Id))
+            .Select(n => Core.Flow.FlowExport.DeviceId(n.Id));
+
+        return Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix);
+    }
+
     private async Task<object> BuildBoardAsync()
     {
         try
@@ -1034,6 +1069,48 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Browse what's on the broker, for the Nodes editor's topic autocomplete. Asking is what keeps the
         // index alive: the grain leases itself to readers and the subscription only exists while someone is
         // browsing (see ITopicIndexGrain), so this endpoint both queries and renews.
+        // Retained Home Assistant discovery configs this build would no longer publish — and, on POST, the
+        // clearing of them.
+        //
+        // A discovery config is retained, so it outlives whatever it described: an outlet that later gained a
+        // native energy sensor, a tier deleted from the hierarchy, a node renamed. Home Assistant goes on
+        // showing the device, and the publish loop can never find it again because that loop only ever walks
+        // the nodes that exist now. Seen live: fifteen orphans, several of them a second and third copy of an
+        // outlet that already had one.
+        //
+        // Two endpoints on purpose. Deleting devices from someone's Home Assistant is not something to do on
+        // a timer or at startup — GET says exactly what would go, POST does it, and the operator decides.
+        app.MapGet("/api/ha/orphans", async () =>
+        {
+            try
+            {
+                var found = await OrphanedDiscoveryAsync();
+                return Results.Json(new { ok = true, prefix = config.HASS.DiscoveryTopic, topics = found }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        app.MapPost("/api/ha/orphans/clear", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var found = await OrphanedDiscoveryAsync();
+                // An empty retained payload is how MQTT deletes a retained message, and how Home Assistant is
+                // told the device is gone. Same mechanism the exporter already uses for a single duplicate.
+                foreach (var topic in found)
+                    await mqtt.PublishAsync(new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
+                    {
+                        Payload = Array.Empty<byte>(),
+                        Retain = true,
+                    });
+
+                if (found.Count > 0)
+                    Log.Information($"Cleared {found.Count} orphaned Home Assistant discovery config(s) at the operator's request.");
+                return Results.Json(new { ok = true, cleared = found.Count, topics = found }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         app.MapGet("/api/mqtt/topics", async (HttpContext ctx) =>
         {
             try
