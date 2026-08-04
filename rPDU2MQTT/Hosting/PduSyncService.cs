@@ -18,15 +18,17 @@ public sealed class PduSyncService : BackgroundService
     private readonly PduInstanceRegistry registry;
     private readonly IMessageBus bus;
     private readonly HealthState health;
+    private readonly Config config;
     // The freshest snapshot timestamp seen per instance — a repeat of the same one isn't a new poll.
     private readonly Dictionary<string, DateTime> seen = new(StringComparer.OrdinalIgnoreCase);
 
-    public PduSyncService(IGrainFactory grains, PduInstanceRegistry registry, IMessageBus bus, HealthState health)
+    public PduSyncService(IGrainFactory grains, PduInstanceRegistry registry, IMessageBus bus, HealthState health, Config config)
     {
         this.grains = grains;
         this.registry = registry;
         this.bus = bus;
         this.health = health;
+        this.config = config;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,7 +44,17 @@ public sealed class PduSyncService : BackgroundService
                     var wire = await grains.GetGrain<IPduGrain>(id).Latest();
                     if (wire is null) continue;
 
-                    await bus.PublishAsync(new PduSnapshot(wire.InstanceId, wire.TimestampUtc, RawSnapshotMapper.ToData(wire)), stoppingToken);
+                    // Rebuilding from the wire loses Record_Key/Record_Parent — they are [JsonIgnore] and the
+                    // payload has no way to carry them. GetTopicPath() walks exactly that chain, so without
+                    // this the snapshot that lands in the cache publishes every measurement to the bare topic
+                    // `state`, and the good one the local poller put there is overwritten by it. On a live
+                    // system that showed up as every Home Assistant sensor reading "Unavailable" while
+                    // discovery — which builds its ids by another route — looked entirely healthy.
+                    var data = RawSnapshotMapper.ToData(wire);
+                    RawSnapshotMapper.Rewire(data, config.MQTT.ParentTopic,
+                        string.IsNullOrWhiteSpace(config.Overrides?.rPDU2MQTT?.ID) ? "rPDU2MQTT" : config.Overrides!.rPDU2MQTT!.ID!);
+
+                    await bus.PublishAsync(new PduSnapshot(wire.InstanceId, wire.TimestampUtc, data), stoppingToken);
 
                     // Readiness is a per-process signal read by this process's health endpoint, so it has to
                     // be recorded here — the poll itself happens in a grain on whichever silo owns it, and a
