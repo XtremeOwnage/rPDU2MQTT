@@ -1839,6 +1839,17 @@ function renderNodeEditor(node     , links       , cand                  , reren
     grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
   }
 
+  // The gauge's ceiling, for the kinds the Energy page draws a dial for. Deliberately not offered on every
+  // kind: a dial belongs on something with a rating (an array's peak, an inverter, a main breaker), and
+  // offering it everywhere invites a number that means nothing.
+  if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
+    const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });
+    maxIn.onchange = () => { const v = +maxIn.value; node.Max = (maxIn.value !== '' && !isNaN(v) && v > 0) ? v : undefined; };
+    grid.appendChild(field('Gauge max (W)', maxIn,
+      'Full scale for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating. '
+      + 'Blank shows the plain reading; no ceiling is ever guessed.'));
+  }
+
   if ((node.Kind || 'node') === 'battery') {
     const stoIn = el('input', { type: 'number', step: 'any', value: node.StorageKwh ?? '', placeholder: 'kWh' });
     stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
@@ -2547,8 +2558,9 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Bindings', ''].forEach(h => {
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Bindings', ''].forEach(h => {
     const th = el('th', { text: h });
+    if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
   });
@@ -2562,6 +2574,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
     tr.appendChild(el('td', { text: n.Mode || 'auto' }));
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
+    tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
     // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
@@ -3788,12 +3801,60 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const fmtEnergy = (v               , units        ) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} ${units || 'kWh'}`;
 
   // A tile: coloured accent, big power figure, a direction/idle sub-line.
-  const tile = (cls        , icon        , label        , value        , sub        , subCls = '') => {
+  // A dial drawn only against a ceiling somebody stated. Nothing here invents a maximum: without one the
+  // tile shows the plain reading, which is the honest rendering of a quantity whose limit nobody has given.
+  // Mirrors Core.Flow.Gauge, which owns the arithmetic and its edge cases.
+  const gaugeArc = (fraction        , over         ) => {
+    const R = 26, CX = 30, CY = 30;
+    // A 240° sweep opening at the bottom — the shape a dial is read as, rather than a full ring which has
+    // no start and therefore no "empty".
+    const START = 150, SWEEP = 240;
+    const pt = (deg        ) => {
+      const r = (deg * Math.PI) / 180;
+      return `${(CX + R * Math.cos(r)).toFixed(2)},${(CY + R * Math.sin(r)).toFixed(2)}`;
+    };
+    const arc = (from        , to        , cls        , extra                         = {}) => svgEl('path', {
+      d: `M${pt(from)} A${R},${R} 0 ${to - from > 180 ? 1 : 0} 1 ${pt(to)}`,
+      fill: 'none', 'stroke-width': '6', 'stroke-linecap': 'round', class: cls, ...extra,
+    });
+    const g = svgEl('svg', { viewBox: '0 0 60 60', class: 'gauge', width: '60', height: '60' });
+    g.appendChild(arc(START, START + SWEEP, 'gauge-track'));
+    if (fraction > 0) g.appendChild(arc(START, START + SWEEP * fraction, over ? 'gauge-fill over' : 'gauge-fill'));
+    return g;
+  };
+
+  const tile = (cls        , icon        , label        , value        , sub        , subCls = '',
+                gauge                                                                  ) => {
     const t = el('div', { class: 'energy-tile' + (cls ? ' ' + cls : '') });
     const head = el('div', { class: 'energy-head' });
     head.append(el('span', { class: 'energy-icon', text: icon }), el('span', { class: 'energy-label', text: label }));
     t.append(head, el('div', { class: 'energy-value', text: value }), el('div', { class: 'energy-sub' + (subCls ? ' ' + subCls : ''), text: sub }));
+    if (gauge) {
+      const wrap = el('div', { class: 'gauge-wrap' });
+      wrap.appendChild(gaugeArc(gauge.fraction, gauge.over));
+      wrap.appendChild(el('span', {
+        class: 'gauge-cap' + (gauge.over ? ' over' : ''),
+        text: gauge.over ? `over ${formatNum(gauge.max)} ${gauge.units}` : `of ${formatNum(gauge.max)} ${gauge.units}`,
+      }));
+      wrap.title = gauge.over
+        ? `This reading is past the ${formatNum(gauge.max)} ${gauge.units} maximum set for this node, so the dial `
+          + 'shows full. The reading is not wrong — the stated maximum is too low. Change it on the Nodes tab.'
+        : `${Math.round(gauge.fraction * 100)}% of the ${formatNum(gauge.max)} ${gauge.units} maximum set for this node.`;
+      t.appendChild(wrap);
+    }
     return t;
+  };
+
+  /// The gauge for a node, or undefined when one would be a guess. Reads Max straight from the config the
+  /// Nodes tab edits, so setting it takes effect on the next refresh with no restart.
+  const gaugeFor = (ids          , value               , units        ) => {
+    const cfgNodes = (state.data?.EnergyFlow?.Nodes || [])         ;
+    // Several tagged nodes of one kind (three MPPTs, two arrays) sum into one tile, so their ceilings sum too.
+    const maxes = ids.map(id => cfgNodes.find(n => n.Id === id)?.Max).filter((m     ) => typeof m === 'number' && m > 0);
+    if (!maxes.length || value == null) return undefined;
+    const max = maxes.reduce((a        , b        ) => a + b, 0);
+    const fraction = Math.min(1, Math.max(0, value / max));
+    return { fraction, over: value > max, max, units };
   };
 
   // The animated flow diagram: a central hub with Solar (top), Grid (left), Battery (right) and Home (bottom),
@@ -3943,6 +4004,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // charge — none of which the flow graph carries. Keyed by node|metric so one round-trip covers them all.
     const battIds = nodes.filter((n     ) => n.kind === 'battery').map((n     ) => n.id);
     const gridIds = nodes.filter((n     ) => n.kind === 'grid').map((n     ) => n.id);
+    // The other two kinds, for the gauges: a tile sums every node of its kind, so its ceiling sums too.
+    const solarIds = nodes.filter((n     ) => n.kind === 'solar').map((n     ) => n.id);
+    const loadIds = nodes.filter((n     ) => n.kind === 'load').map((n     ) => n.id);
     const liveBy                         = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh),
     // which are the only way to tell a source that has expired from one that never published at all.
@@ -4034,7 +4098,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmtPower(solar.value),
-        subOrWhy(solar.value, 'solar', solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : ''));
+        subOrWhy(solar.value, 'solar', solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
+        gaugeFor(solarIds, solar.value, 'W')));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
@@ -4044,7 +4109,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
       // vanishing. When it is blank it says why (unbound / stale / never delivered) instead of just "—",
       // because "—" gives the operator nothing to go and fix.
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
-      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls);
+      // The dial is the battery's power against its rating; the slim bar below is state of charge. Two
+      // different quantities, so they are two different marks rather than one doing double duty.
+      const t = tile('battery', '🔋', 'Battery', fmtPower(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls,
+        gaugeFor(battIds, battNet == null ? null : Math.abs(battNet), 'W'));
       if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
@@ -4058,12 +4126,14 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (gridK.present || gridIds.length) {
       const sub = subOrWhy(gridNet, 'grid', gridNet  > 1 ? 'importing' : gridNet  < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
-      grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls));
+      grid.appendChild(tile('grid', '⚡', 'Grid', fmtPower(gridNet == null ? null : Math.abs(gridNet)), sub, cls,
+        gaugeFor(gridIds, gridNet == null ? null : Math.abs(gridNet), 'W')));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
-      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), home == null ? whyNoReading('load') : (homeSub || 'consuming')));
+      grid.appendChild(tile('home', '🏠', 'Home', fmtPower(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
+        gaugeFor(loadIds, home, 'W')));
 
     // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
     // figure, not this instant's power. Only when the home energy and grid import both resolve and the house

@@ -2020,6 +2020,13 @@
               "required": false
             },
             {
+              "key": "Max",
+              "label": "Max",
+              "description": "Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed.",
+              "type": "double",
+              "required": false
+            },
+            {
               "key": "StorageKwh",
               "label": "StorageKwh",
               "description": "For a battery node: usable storage capacity in kWh (display metadata; optional).",

@@ -138,6 +138,21 @@ public class EnergyFlowNode
     [Description("Optional fixed value for a leaf node. Used only when no live source has reported for it.")]
     public double? Value { get; set; }
 
+    /// <summary>
+    /// Full-scale reading for this node's gauge — an array's peak output, an inverter's rating, a main
+    /// breaker's size.
+    ///
+    /// <para>
+    /// A gauge is a claim about proportion: it says "this much of what is possible". Only the operator knows
+    /// what is possible, so there is no default and nothing is inferred. Without it the Energy Overview shows
+    /// the plain reading, which is the honest rendering of a quantity whose ceiling nobody has stated.
+    /// Guessing one from the highest value seen so far would make the needle mean something different every
+    /// day and would quietly redefine "full" on the first spike.
+    /// </para>
+    /// </summary>
+    [Description("Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed.")]
+    public double? Max { get; set; }
+
     /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
     /// diagram/state-of-charge display; does not affect the power roll-up.</summary>
     [Description("For a battery node: usable storage capacity in kWh (display metadata; optional).")]
