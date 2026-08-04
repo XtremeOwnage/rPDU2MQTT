@@ -33,20 +33,37 @@ export async function load() {
 // Last-seen operator update report, so "check now" can tell when a fresh result has landed.
 let lastCheckedAt: string | null = null;
 let configWritable = true;
-// The tag the operator last reported having rolled to. null means "we haven't seen a report yet", which
-// is deliberately different from "" — see appliedTagChanged.
+// The last roll the operator reported — its timestamp, and the tag it went to. null means "we haven't seen
+// a report yet", which is deliberately different from "" — see appliedTagChanged.
 let lastApplied: string | null = null;
+let lastAppliedAt: string | null = null;
 
-/// Did the operator just roll the deployment to a different tag?
+/// Did the operator just roll the deployment?
 ///
 /// AutoUpdate rolls on the operator's own schedule, so unlike Switch or Force update there is no click to
 /// hang an expectRestart() on: the page's first and only warning is the stream dying, which shows as a red
-/// "Offline" for something entirely routine. The operator does report the tag it applied, and that arrives
-/// on the status feed before the pod goes down, so a change in it is the signal.
+/// "Offline" for something entirely routine.
+///
+/// Watching the applied *tag* was not enough, and is why this never fired for anyone. Tracking a moving
+/// channel — `unstable`, `main`, `edge`, the default and the common case — means an auto-update swaps the
+/// digest under an unchanged tag, so "unstable" was reported before and after and nothing looked different.
+/// Only a switch between two differently named tags was ever visible. The operator now stamps when it
+/// actually rolled, which changes either way; the tag is still checked so an older operator that reports no
+/// timestamp keeps working as it did.
 ///
 /// Never fires on the first report. On a fresh page load every value is "new", and announcing a restart
 /// that already happened (or never happened) would put the app bar into a state nothing is going to clear.
-export function appliedTagChanged(applied: string | undefined | null): boolean {
+export function appliedTagChanged(applied: string | undefined | null, appliedAt?: string | null): boolean {
+  const at = appliedAt || '';
+  if (at !== '') {
+    // Same rule as the tag below: an absent timestamp is not a new roll, so it must not clear what we know.
+    const rolled = lastAppliedAt !== null && at !== lastAppliedAt;
+    lastAppliedAt = at;
+    // Keep the tag in step so a later report can't read as a change purely because we stopped tracking it.
+    if (applied) lastApplied = applied;
+    return rolled;
+  }
+
   const now = applied || '';
   // No tag in this report is not a change of tag — the operator can simply stop reporting one (restarting,
   // briefly unreachable). Forgetting the last tag here would make the next report of the SAME tag look
@@ -65,7 +82,7 @@ function renderUpdate(u: any) {
   lastCheckedAt = u.checkedAt || null;
   // An update the operator applied by itself: the workload is going away and nobody here asked for it.
   // Same treatment as a manual switch, so the drop that follows reads as "busy", not "broken".
-  if (appliedTagChanged(u.applied)) {
+  if (appliedTagChanged(u.applied, u.appliedAt)) {
     expectRestart(`Auto-updating to ${u.applied}`);
     toast(`Update applied — rolling to ${u.applied}. The bridge is restarting.`, true);
   }

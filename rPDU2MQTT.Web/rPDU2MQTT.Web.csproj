@@ -39,6 +39,7 @@
 		<GuiSource Include="web\domstub.mjs" />
 		<GuiSource Include="web\layout.check.mjs" />
 		<GuiSource Include="web\sankey.check.mjs" />
+			<GuiSource Include="web\update.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -58,6 +59,10 @@
 		     invisible ribbons. Both are asserted on the real bundle's rendered geometry. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/layout.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sankey.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- The auto-update notice has no click behind it, so its only test is this transition table: #304
+		     shipped one in prose and the case it missed (a moving channel, where the tag never changes) was
+		     exactly the one that broke. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/update.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

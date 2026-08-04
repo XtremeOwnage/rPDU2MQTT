@@ -73,7 +73,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         try
         {
             var patched = await SetImageAsync(repository, newImage, newImage, CancellationToken.None);
-            await Report(report with { Available = false, Current = tag, Latest = tag, Applied = tag, CheckedAt = NowIso(), Message = $"Switched to {tag}.", Severity = OperatorSeverity.Ok });
+            await Report(report with { Available = false, Current = tag, Latest = tag, Applied = tag, AppliedAt = NowIso(), CheckedAt = NowIso(), Message = $"Switched to {tag}.", Severity = OperatorSeverity.Ok });
             return $"Switching to {tag}: rolled {(patched.Count > 0 ? string.Join(", ", patched) : "no")} deployment(s).";
         }
         catch (Exception ex) { return $"Switch to {tag} failed: {ex.Message}"; }
@@ -159,6 +159,11 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
                 Policy = cfg.Operator.Policy.ToString(),
                 AutoUpdate = cfg.Operator.AutoUpdate,
                 Applied = appliedChannel,
+                // Only stamped when a roll actually happened, and otherwise carried forward: this is "when
+                // we last rolled", not "when we last looked". On a moving channel the tag is identical
+                // before and after, so this timestamp is the only thing that changes — and it is what the
+                // GUI watches to announce the restart it is about to suffer.
+                AppliedAt = appliedChannel is not null ? NowIso() : report.AppliedAt,
                 CheckedAt = NowIso(),
                 Message = message,
                 Severity = severity,
@@ -183,6 +188,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
             Policy = cfg.Operator.Policy.ToString(),
             AutoUpdate = cfg.Operator.AutoUpdate,
             Applied = applied,
+            AppliedAt = applied is not null ? NowIso() : report.AppliedAt,
             CheckedAt = NowIso(),
             Message = check.UpdateAvailable ? (applied is not null ? $"Auto-updated to {applied}." : $"Update available: {latest}.") : "Up to date.",
             Severity = check.UpdateAvailable ? OperatorSeverity.UpdateAvailable : OperatorSeverity.Ok,
@@ -226,7 +232,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         if (source is null) return;
         try
         {
-            await source.PatchStatusAsync(new { update = new { available = r.Available, current = r.Current, latest = r.Latest, policy = r.Policy, autoUpdate = r.AutoUpdate, applied = r.Applied, checkedAt = r.CheckedAt, message = r.Message } }, CancellationToken.None);
+            await source.PatchStatusAsync(new { update = new { available = r.Available, current = r.Current, latest = r.Latest, policy = r.Policy, autoUpdate = r.AutoUpdate, applied = r.Applied, appliedAt = r.AppliedAt, checkedAt = r.CheckedAt, message = r.Message } }, CancellationToken.None);
         }
         catch (Exception ex) { log.LogDebug("Operator: CR status patch failed: {Msg}", ex.Message); }
     }
