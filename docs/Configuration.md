@@ -888,6 +888,17 @@ plus pre-wired nodes (solar / battery / grid / inverter) with the register bindi
 > its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
 > it can be turned into a template.
 
+### Gauges
+
+A node with a **Gauge max** set gets a dial on the Energy page showing its reading as a proportion of that
+maximum — a PV array's peak output, an inverter's rating, a main breaker's size. Set it per node on the
+**Nodes** tab (solar, battery, grid, load and inverter kinds).
+
+Leave it blank and the tile shows the plain reading instead. **No ceiling is ever inferred**: deriving one
+from the highest value seen would redefine "full" on the first spike and make the same needle position mean
+something different tomorrow. A reading past the maximum draws full and is flagged rather than running off
+the end — the reading isn't wrong, the stated maximum is too low, and those are different problems.
+
 ### Nothing is computed behind your back
 
 Every number the flow shows is either measured, summed from measured children, or **inferred** — and the
