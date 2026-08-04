@@ -60,6 +60,24 @@ await new Promise(r => setTimeout(r, 50));
 
 const fail = (m) => { console.error('sankey check FAILED: ' + m); process.exit(1); };
 
+/// Render a second graph in a fresh sandbox and return its ribbons.
+async function render(graph) {
+  const { sandbox: sb, getEl: ge } = makeDom({
+    bodies: (url) =>
+      url.includes('/api/schema') ? schema :
+      url.includes('/api/instances') ? { ok: true, instances: [] } :
+      url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] } } :
+      url.includes('/api/flow') ? graph :
+      { ok: true },
+  });
+  vm.createContext(sb);
+  vm.runInContext(code, sb, { filename: 'app.js' });
+  await new Promise(r => setTimeout(r, 40));
+  query(ge('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
+  await new Promise(r => setTimeout(r, 50));
+  return query(ge('sections'), 'path', true).filter(p => p.attrs['fill-opacity'] !== undefined);
+}
+
 // Node bars are <rect x y width height>; the Sankey's are the ones at the node width (12).
 const bars = query(getEl('sections'), 'rect', true)
   .filter(r => r.attrs.width === '12')
@@ -87,6 +105,37 @@ if (ribbons.length !== 6) fail(`expected 6 ribbons, found ${ribbons.length}`);
 for (const r of ribbons) {
   const op = Number(r.attrs['fill-opacity']);
   if (!(op >= 0.3)) fail(`a ribbon is drawn at ${op} opacity — an idle branch has to stay visible`);
+}
+
+// --- The other half of the same trade-off: a column that is already correctly placed must be left alone.
+//
+// A source whose targets' heights sum to its own stacks its ribbons flush by construction, so those bands
+// should leave and arrive at the same y. The drift rescue above used to fire on every column regardless,
+// which lifted such targets off the source's edge and bent a straight band into an S — ribbons rising out
+// of the top of the panel that fed them before turning back down.
+const flat = await render({
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'panel', label: 'Main Panel', value: 100 },
+    { id: 'a', label: 'A', value: 60 },
+    { id: 'b', label: 'B', value: 40 },
+  ],
+  links: [
+    { source: 'panel', target: 'a', value: 60 },
+    { source: 'panel', target: 'b', value: 40 },
+  ],
+});
+// The invariant is direction, not exact flatness: stacked targets sit a gap apart, so a later ribbon drifts
+// gently DOWN by the accumulated gaps and that is correct. A ribbon travelling UP means the target column
+// was moved above the source feeding it, which is the S — and that is what must never happen.
+for (const r of flat) {
+  const m = /^M[\d.-]+,([\d.-]+) C[\d.-]+,[\d.-]+ [\d.-]+,([\d.-]+)/.exec(r.attrs.d);
+  if (!m) continue;
+  const dy = Number(m[2]) - Number(m[1]);
+  if (dy < -2)
+    fail(`a ribbon rises ${(-dy).toFixed(1)}px out of the node feeding it — the target column sits above its source`);
+  if (dy > 40)
+    fail(`a ribbon whose targets exactly fill its source drops ${dy.toFixed(1)}px — far more than the stacking gaps`);
 }
 
 console.log(`sankey: night-time chain holds together (MPPTs within ${Math.round(drift)}px of Solar), `
