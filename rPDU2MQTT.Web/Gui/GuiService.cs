@@ -1138,6 +1138,63 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Browse what's on the broker, for the Nodes editor's topic autocomplete. Asking is what keeps the
         // index alive: the grain leases itself to readers and the subscription only exists while someone is
         // browsing (see ITopicIndexGrain), so this endpoint both queries and renews.
+        // Home Assistant devices that are ours and hold no entities.
+        //
+        // These are the leftovers no MQTT retraction can reach: their discovery config is already gone, so
+        // there is nothing left to retract, and Home Assistant does not drop a device merely because nothing
+        // mentions it any more. Seen here: 39 of them, from a build that named outlets `rack_pdu_1` where the
+        // current one says `pdu_1`. The only thing that can remove them is Home Assistant itself.
+        //
+        // Two endpoints, as with the broker sweep: GET says exactly what would go, POST does it.
+        app.MapGet("/api/ha/devices/stale", async () =>
+        {
+            try
+            {
+                var stale = await haEnergy.StaleDevicesAsync();
+                return Results.Json(new
+                {
+                    ok = true,
+                    devices = stale.Select(d => new { d.Id, d.Name, identifiers = d.Identifiers }).ToArray(),
+                }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        app.MapPost("/api/ha/devices/stale/delete", async (HttpContext ctx) =>
+        {
+            try
+            {
+                // Re-read rather than trusting a list the browser has been holding: a device that has gained
+                // entities since it was listed is live again, and must not be deleted on the strength of a
+                // stale preview. This holds however the caller narrows the request below.
+                var stale = await haEnergy.StaleDevicesAsync();
+
+                // An optional id list lets the caller work through them in batches so it can show honest
+                // progress. Deleting 38 devices is 38 WebSocket round trips, and a spinner that cannot say
+                // how far along it is looks identical to one that has hung. The ids only ever *narrow* what
+                // was independently computed above — they can never introduce a device that is not stale.
+                System.Text.Json.Nodes.JsonNode? body = null;
+                try
+                {
+                    using var reader = new StreamReader(ctx.Request.Body);
+                    var raw = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(raw)) body = System.Text.Json.Nodes.JsonNode.Parse(raw);
+                }
+                catch { /* no body, or not JSON: fall through and delete everything stale */ }
+
+                if (body?["ids"]?.AsArray() is { } wanted && wanted.Count > 0)
+                {
+                    var ids = new HashSet<string>(wanted.Select(n => (string?)n ?? ""), StringComparer.Ordinal);
+                    stale = stale.Where(d => ids.Contains(d.Id)).ToList();
+                }
+
+                var removed = await haEnergy.DeleteDevicesAsync(stale);
+                if (removed > 0) Log.Information($"Deleted {removed} stale Home Assistant device registration(s) at the operator's request.");
+                return Results.Json(new { ok = true, deleted = stale.Count, removed }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Retained Home Assistant discovery configs this build would no longer publish — and, on POST, the
         // clearing of them.
         //

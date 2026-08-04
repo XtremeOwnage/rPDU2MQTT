@@ -33,6 +33,7 @@ const MODULES = [
   'sections/nodedata.ts',
   'sections/export.ts',
   'sections/ha-energy.ts',
+  'sections/ha-cleanup.ts',
   'sections/home.ts',
   'config-form.ts',
   'actions.ts',

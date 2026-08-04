@@ -15,6 +15,7 @@ import { addNodeDataSection } from './sections/nodedata.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
+import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
 
 // Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
 // stay in step with the document as it is typed.
@@ -264,6 +265,8 @@ function renderConfigSection(node: any, nav: any, sections: any) {
       renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
     else renderNode(node, state.data, sec, []);
+    // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
+    if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
@@ -575,6 +578,9 @@ function sectionActions(node: any) {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
       add('Republish discovery', rediscoverHa);
       add('Clear discovery', clearHa, 'danger');
+      // The two cleanups that "Clear discovery" cannot do. One removes retained configs for things this
+      // build no longer publishes; the other removes devices Home Assistant still lists whose config is
+      // already gone, which is reachable only through HA's own API.
     }
     // The base URL is configured for the Energy Dashboard sync, but it's the way in to HA either way.
     bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));

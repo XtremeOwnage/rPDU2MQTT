@@ -216,6 +216,76 @@ public sealed class HaEnergyDashboardSync
             throw new Exception($"HA save_prefs failed: {result?["error"]?["message"] ?? result?.ToJsonString()}");
     }
 
+    /// <summary>
+    /// Home Assistant devices that are ours and hold no entities — the registry leftovers no MQTT retraction
+    /// can reach, because their discovery config is already gone.
+    /// </summary>
+    public async Task<IReadOnlyList<Core.HomeAssistant.HaDevice>> StaleDevicesAsync(CancellationToken ct = default)
+    {
+        var ha = config.HASS.EnergyDashboard;
+        using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
+        var call = Caller(ws, ct);
+
+        var devices = (await call("config/device_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
+        var entities = (await call("config/entity_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
+
+        var perDevice = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var e in entities)
+            if ((string?)e?["device_id"] is { Length: > 0 } id)
+                perDevice[id] = perDevice.TryGetValue(id, out var n) ? n + 1 : 1;
+
+        var all = new List<Core.HomeAssistant.HaDevice>();
+        foreach (var d in devices)
+        {
+            var id = (string?)d?["id"];
+            if (string.IsNullOrEmpty(id)) continue;
+
+            // identifiers is a list of [domain, id] pairs; the id is what the integration chose.
+            var idents = new List<string>();
+            foreach (var pair in d?["identifiers"]?.AsArray() ?? new JsonArray())
+                if (pair is JsonArray a && a.Count > 1 && (string?)a[1] is { } value)
+                    idents.Add(value);
+
+            var entries = new List<string>();
+            foreach (var ce in d?["config_entries"]?.AsArray() ?? new JsonArray())
+                if ((string?)ce is { Length: > 0 } v) entries.Add(v);
+
+            all.Add(new Core.HomeAssistant.HaDevice(
+                id, (string?)d?["name_by_user"] ?? (string?)d?["name"], idents,
+                perDevice.TryGetValue(id, out var c) ? c : 0, entries));
+        }
+        return Core.HomeAssistant.HaStaleDevices.Stale(all);
+    }
+
+    /// <summary>
+    /// Delete the given devices from Home Assistant's registry. Returns how many went.
+    ///
+    /// <para>
+    /// Removal is per config entry — the same call the Delete button in HA's own device page makes — so a
+    /// device belonging to more than one entry is detached from each.
+    /// </para>
+    /// </summary>
+    public async Task<int> DeleteDevicesAsync(IEnumerable<Core.HomeAssistant.HaDevice> devices, CancellationToken ct = default)
+    {
+        var ha = config.HASS.EnergyDashboard;
+        using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
+        var call = Caller(ws, ct);
+
+        var removed = 0;
+        foreach (var d in devices)
+            foreach (var entry in d.ConfigEntryIds)
+            {
+                var r = await call("config/device_registry/remove_config_entry", new JsonObject
+                {
+                    ["device_id"] = d.Id,
+                    ["config_entry_id"] = entry,
+                });
+                if ((bool?)r?["success"] == true) removed++;
+                else Log.Warning($"Home Assistant refused to remove device '{d.Name ?? d.Id}': {r?["error"]?["message"]}");
+            }
+        return removed;
+    }
+
     private static async Task<ClientWebSocket> ConnectAuth(string url, string token, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(token))
