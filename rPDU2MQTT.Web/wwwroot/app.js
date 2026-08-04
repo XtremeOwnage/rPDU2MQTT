@@ -3048,21 +3048,37 @@ function addFlowSection(nav     , sections     ) {
         clip.appendChild(svgEl('path', { d: ribbonPath }));
         svg.appendChild(clip);
 
-        const stream = svgEl('path', {
-          d: `M${x1},${sTop + h / 2} C${xc},${sTop + h / 2} ${xc},${tTop + h / 2} ${x2},${tTop + h / 2}`,
-          fill: 'none', stroke: color, 'stroke-opacity': '0.5',
-          // Overshoot the band so the clip, not the stroke width, defines the edges — a stroke exactly h
-          // tall leaves hairline gaps where the curve is steep.
-          'stroke-width': h + 2,
-          'stroke-dasharray': '14 26',
-          'clip-path': `url(#${clipId})`,
-          class: 'flow-stream',
-          'data-src': l.source, 'data-dst': l.target,
-        });
+        // Lanes of thin particles, not one stroke as tall as the band.
+        //
+        // A dashed stroke draws its gaps across the whole stroke width, so stroking the centre line at the
+        // ribbon's full height turns every dash into a full-height vertical bar: on a wide ribbon that reads
+        // as a venetian blind rather than as movement. Several thin lanes spread across the band, offset
+        // from one another, read as a current — and they degrade correctly, because a hairline ribbon simply
+        // gets one lane and looks exactly as it did.
+        const lanes = Math.max(1, Math.min(6, Math.round(h / 16)));
+        const laneW = Math.max(1.5, Math.min(3.5, (h / lanes) * 0.4));
         // Faster where the flow is denser, clamped either side so nothing crawls or strobes.
         const intensity = l.value / Math.max(1, maxTotal);
-        stream.style.animationDuration = `${Math.max(0.9, Math.min(6, 3.2 - intensity * 9)).toFixed(2)}s`;
-        svg.appendChild(stream);
+        const duration = Math.max(0.9, Math.min(6, 3.2 - intensity * 9));
+
+        for (let i = 0; i < lanes; i++) {
+          const f = (i + 0.5) / lanes;                       // this lane's position across the band
+          const sY = sTop + h * f, tY = tTop + h * f;
+          const stream = svgEl('path', {
+            d: `M${x1},${sY} C${xc},${sY} ${xc},${tY} ${x2},${tY}`,
+            fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
+            'stroke-width': laneW,
+            'stroke-linecap': 'round',
+            'stroke-dasharray': '9 31',
+            'clip-path': `url(#${clipId})`,
+            class: 'flow-stream',
+            'data-src': l.source, 'data-dst': l.target,
+          });
+          stream.style.animationDuration = `${duration.toFixed(2)}s`;
+          // Stagger the lanes so they read as a current rather than as one blinking comb.
+          stream.style.animationDelay = `${(-duration * (i / Math.max(1, lanes))).toFixed(2)}s`;
+          svg.appendChild(stream);
+        }
       }
 
       s.outOff += h; t.inOff += h;
