@@ -1737,8 +1737,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         app.MapPost("/api/discovery/rediscover", async () =>
         {
-            if (!discovery.HasSubscribers)
-                return Results.Json(new { ok = false, message = "Home Assistant discovery is disabled." }, ConfigSchema.Json);
+            // The live flag, not whether a service happens to be registered — discovery services are now
+            // always registered and self-gate, so HasSubscribers is always true and says nothing.
+            if (!config.HASS.DiscoveryEnabled)
+                return Results.Json(new { ok = false, message = "Home Assistant discovery is turned off. Turn it on and save; no restart needed." }, ConfigSchema.Json);
 
             await discovery.RequestRediscoverAsync(CancellationToken.None);
             return Results.Json(new { ok = true, message = "Discovery republish requested." }, ConfigSchema.Json);
@@ -1746,8 +1748,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         app.MapPost("/api/discovery/clear", async () =>
         {
-            if (!discovery.HasSubscribers)
-                return Results.Json(new { ok = false, message = "Home Assistant discovery is disabled." }, ConfigSchema.Json);
+            // Deliberately NOT gated on DiscoveryEnabled. Turning discovery off and then clearing what it
+            // left behind is the obvious sequence, and refusing there — as this used to — leaves the retained
+            // messages on the broker with no way to remove them short of turning discovery back on first.
+            // Retracting retained messages needs a broker connection, not a running discovery service.
 
             // First the services' own clear: each forgets and retracts what it published this run.
             await discovery.RequestClearAsync(CancellationToken.None);

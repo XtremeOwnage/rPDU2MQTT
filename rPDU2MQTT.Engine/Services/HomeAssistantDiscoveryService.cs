@@ -46,6 +46,16 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
+        // Read every pass, not once at startup: this is what lets the GUI toggle take effect without a
+        // restart. Turning it off stops publishing; it deliberately does not retract what is already
+        // retained, because "stop publishing" and "delete every device from Home Assistant" are different
+        // requests and the second one has its own button.
+        if (!cfg.HASS.DiscoveryEnabled)
+        {
+            Log.Debug("Home Assistant discovery is disabled; skipping this pass.");
+            return;
+        }
+
         // The timer and the on-demand rediscover trigger can both call this; don't overlap.
         if (!await discoveryLock.WaitAsync(0, cancellationToken))
         {
