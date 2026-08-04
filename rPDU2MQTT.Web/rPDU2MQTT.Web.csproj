@@ -41,6 +41,7 @@
 		<GuiSource Include="web\layout.check.mjs" />
 		<GuiSource Include="web\sankey.check.mjs" />
 			<GuiSource Include="web\update.check.mjs" />
+			<GuiSource Include="web\animation.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -64,6 +65,9 @@
 		     shipped one in prose and the case it missed (a moving channel, where the tag never changes) was
 		     exactly the one that broke. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/update.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- Motion is a claim: an unknown link and a measured zero must stay still, or "no data" looks
+		     busier than a real reading. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/animation.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

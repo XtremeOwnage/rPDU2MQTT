@@ -2377,11 +2377,35 @@ function unmeasuredToggle(onToggle            )              {
   return lbl;
 }
 
+/// The "Animate flow" view switch. Purely local: a per-viewer preference, not a property of the system, and
+/// off by default because motion on a dashboard left up on a wall is a nuisance rather than information.
+function animateToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Draw a moving stream along each ribbon. Speed follows how dense the flow is — flow per unit of '
+      + 'ribbon width — so it says how hard something is moving, which width alone cannot. Links with no '
+      + 'data, and measured zeroes, never animate: nothing should look busier than its reading.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = localStorage.getItem('rpdu2mqtt.flow.animate') === '1';
+  cb.onchange = () => { localStorage.setItem('rpdu2mqtt.flow.animate', cb.checked ? '1' : '0'); onToggle(); };
+  lbl.append(cb, document.createTextNode('Animate flow'));
+  return lbl;
+}
+
 function groupToggles(onToggle            )                     {
   const groups = flowGroups();
-  if (!groups.length) return null;
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  // The view switches are not about groups and must not disappear with them — this used to return null
+  // when nothing was grouped, which hid the "Unmeasured load" toggle from anyone who had no groups.
+  if (!groups.length) {
+    row.appendChild(unmeasuredToggle(onToggle));
+    row.appendChild(animateToggle(onToggle));
+    return row;
+  }
   row.appendChild(unmeasuredToggle(onToggle));
+  row.appendChild(animateToggle(onToggle));
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
   groups.forEach((g     ) => {
     const on = collapsedGroups.has(g.Id);
@@ -2627,6 +2651,12 @@ function addFlowSection(nav     , sections     ) {
   // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
   // and in a container that is UTC unless someone set TZ — so a day can end at 7pm local and look like the
   // totals reset for no reason. Shown only on the daily metric, where it changes how to read the chart.
+  // Animating the ribbons is decoration, and decoration that cannot be switched off is a nuisance on a
+  // dashboard left up on a wall. Off by default for the same reason, and remembered locally rather than in
+  // the config: it is a per-viewer preference, not a property of the system.
+  const animKey = 'rpdu2mqtt.flow.animate';
+  const animateFlow = () => localStorage.getItem(animKey) === '1';
+
   const dayNote = el('span', { class: 'ld-count' })               ;
   dayNote.style.cssText = 'margin-left:8px';
   const showDayNote = async () => {
@@ -2945,6 +2975,33 @@ function addFlowSection(nav     , sections     ) {
         // opacity above encodes whether a value is known, and must not be overwritten to dim them.
         'data-src': l.source, 'data-dst': l.target,
       }));
+
+      // A stream drawn along the ribbon's centre line, so the diagram shows direction and rate rather than
+      // just magnitude. Width already says how much; this says how hard, which a static Sankey cannot.
+      //
+      // Speed is tied to intensity — flow per unit of ribbon width, i.e. how fast the stuff is actually
+      // moving — not to the raw value. Tying it to the value would march the widest ribbon fastest simply
+      // for being wide, which reads as "more" twice and says nothing new.
+      //
+      // Skipped for anything unknown or idle: a hairline that animates claims motion nobody measured, and
+      // "no data" must never look busier than a real reading.
+      if (animateFlow() && !unknownLink && !idleLink) {
+        const mid = (t        ) => t;   // centre of the band at each end
+        const dash = svgEl('path', {
+          d: `M${x1},${sTop + h / 2} C${xc},${sTop + h / 2} ${xc},${tTop + h / 2} ${x2},${mid(tTop + h / 2)}`,
+          fill: 'none', stroke: color, 'stroke-opacity': '0.55',
+          'stroke-width': Math.max(1, Math.min(h * 0.5, 6)),
+          'stroke-linecap': 'round',
+          'stroke-dasharray': '6 22',
+          class: 'flow-stream',
+          'data-src': l.source, 'data-dst': l.target,
+        });
+        // Faster where the flow is denser, clamped either side so nothing crawls or strobes.
+        const intensity = l.value / Math.max(1, maxTotal);
+        dash.style.animationDuration = `${Math.max(0.9, Math.min(6, 3.2 - intensity * 9)).toFixed(2)}s`;
+        svg.appendChild(dash);
+      }
+
       s.outOff += h; t.inOff += h;
     });
 
