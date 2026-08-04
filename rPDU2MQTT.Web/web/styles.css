@@ -420,7 +420,7 @@
   /* The moving stream along a flow ribbon. Only drawn for links that carry a known, non-zero value, so
      motion always means measured throughput. Respects a reduced-motion preference. */
   .flow-stream { animation: rpdu-flow 3s linear infinite; }
-  @keyframes rpdu-flow { to { stroke-dashoffset: -28; } }
+  @keyframes rpdu-flow { to { stroke-dashoffset: -40; } }
   @media (prefers-reduced-motion: reduce) { .flow-stream { animation: none; } }
 
   /* A long job's real progress. Determinate on purpose: a bar that cannot say how far along it is looks

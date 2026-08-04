@@ -1486,23 +1486,57 @@ export function addFlowSection(nav: any, sections: any) {
     // Translating the whole column keeps the order and spacing both passes just settled, and moves it by the
     // link-weighted average of how far each of its nodes misses what it powers. Right-to-left, so a column
     // reads targets that have already stopped moving.
-    for (let c = cols.length - 2; c >= 0; c--) {
+    // Two sweeps: right-to-left settles each column against what it feeds, then left-to-right lets the
+    // feeders answer back now that their targets have moved. One sweep alone leaves the first column it
+    // touched positioned against neighbours that then moved.
+    const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
+    for (const c of relaxOrder) {
       const cn = cols[c];
       if (!cn || !cn.length) continue;
       let w = 0, s = 0;
-      cn.forEach((n: any) => (outgoing[n.id] || []).forEach((l: any) => {
-        const tp = pos[l.target], sp = pos[n.id];
-        if (!tp || !sp) return;
-        s += ((tp.y + tp.h / 2) - (sp.y + sp.h / 2)) * linkW(l);
-        w += linkW(l);
-      }));
+      cn.forEach((n: any) => {
+        const sp = pos[n.id];
+        if (!sp) return;
+        const mid = sp.y + sp.h / 2;
+        // Both sides, not just what it feeds.
+        //
+        // Weighing only the targets drags a column to the centre of what it powers, with nothing holding the
+        // other end: a pair of PDUs fanning out to a dozen outlets got pulled up above the top edge of the
+        // panel feeding them, so its ribbons rose out of the panel, crossed back down, and drew an S through
+        // the middle of the chart. A column belongs between its feeders and its consumers, so both pull.
+        (outgoing[n.id] || []).forEach((l: any) => {
+          const tp = pos[l.target];
+          if (!tp) return;
+          s += ((tp.y + tp.h / 2) - mid) * linkW(l);
+          w += linkW(l);
+        });
+        (incoming[n.id] || []).forEach((l: any) => {
+          const fp = pos[l.source];
+          if (!fp) return;
+          s += ((fp.y + fp.h / 2) - mid) * linkW(l);
+          w += linkW(l);
+        });
+      });
       if (!w) continue;
       // Never above the top margin, and never so far down that the column leaves the canvas — a chain that
       // hugs its target off-screen is no more readable than one that drifted away from it.
       const top = Math.min(...cn.map((n: any) => pos[n.id].y));
       const foot = Math.max(...cn.map((n: any) => pos[n.id].y + pos[n.id].h));
       const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
-      if (Math.abs(shift) < 1) continue;
+
+      // Only rescue a column that has genuinely come adrift; leave a well-placed one alone.
+      //
+      // This pass exists for the night-time case, where three idle MPPTs sorted ~530px away from the Solar
+      // node they feed and the chart read as scattered orphans. Applied to every column regardless, it also
+      // nudged columns that were already correct — and a nudge is not free. A panel feeding two PDUs stacks
+      // its ribbons flush by construction (the targets' heights sum to the source's), so any shift at all
+      // lifts the targets off the source's edge and bends what should be a straight band into an S. Seen on
+      // a live diagram: ribbons rising out of the top of the panel that fed them before turning back down.
+      //
+      // The test is overlap, not distance: if the column still spans where its flow wants it, the stacking
+      // has already done the job and moving it can only make things worse.
+      const reach = Math.max(8, (foot - top) / 2);
+      if (Math.abs(shift) < reach) continue;
       cn.forEach((n: any) => { pos[n.id].y += shift; });
     }
 
@@ -1523,6 +1557,8 @@ export function addFlowSection(nav: any, sections: any) {
     // ribbons crossed — a plain fan-in drawn as a braid. Adding source y as the tiebreak means the links
     // into a node arrive in the same vertical order as the nodes they come from, so parallel feeders no
     // longer cross. Both keys together satisfy source and target stacking simultaneously.
+    // Clip ids must be unique within the document, and a redraw rebuilds the whole svg.
+    let flowClipSeq = 0;
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
       (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
@@ -1539,8 +1575,9 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
+      const ribbonPath = `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`;
       svg.appendChild(svgEl('path', {
-        d: `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`,
+        d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
@@ -1559,20 +1596,33 @@ export function addFlowSection(nav: any, sections: any) {
       // Skipped for anything unknown or idle: a hairline that animates claims motion nobody measured, and
       // "no data" must never look busier than a real reading.
       if (animateFlow() && !unknownLink && !idleLink) {
-        const mid = (t: number) => t;   // centre of the band at each end
-        const dash = svgEl('path', {
-          d: `M${x1},${sTop + h / 2} C${xc},${sTop + h / 2} ${xc},${tTop + h / 2} ${x2},${mid(tTop + h / 2)}`,
-          fill: 'none', stroke: color, 'stroke-opacity': '0.55',
-          'stroke-width': Math.max(1, Math.min(h * 0.5, 6)),
-          'stroke-linecap': 'round',
-          'stroke-dasharray': '6 22',
+        // The stream is the band, not a line drawn down the middle of it.
+        //
+        // Stroking a thin centre line looked like a stray dash wandering loose over the diagram: 6px of
+        // thread inside a 200px ribbon reads as an unrelated squiggle, and where ribbons overlap it appeared
+        // to cross into bands it had nothing to do with. So the stroke is the ribbon's full height and is
+        // clipped to the ribbon itself — it can no longer paint a pixel outside the flow it describes, and
+        // it reads as the band moving rather than as something crawling along it.
+        const clipId = `fs${flowClipSeq++}`;
+        const clip = svgEl('clipPath', { id: clipId });
+        clip.appendChild(svgEl('path', { d: ribbonPath }));
+        svg.appendChild(clip);
+
+        const stream = svgEl('path', {
+          d: `M${x1},${sTop + h / 2} C${xc},${sTop + h / 2} ${xc},${tTop + h / 2} ${x2},${tTop + h / 2}`,
+          fill: 'none', stroke: color, 'stroke-opacity': '0.5',
+          // Overshoot the band so the clip, not the stroke width, defines the edges — a stroke exactly h
+          // tall leaves hairline gaps where the curve is steep.
+          'stroke-width': h + 2,
+          'stroke-dasharray': '14 26',
+          'clip-path': `url(#${clipId})`,
           class: 'flow-stream',
           'data-src': l.source, 'data-dst': l.target,
         });
         // Faster where the flow is denser, clamped either side so nothing crawls or strobes.
         const intensity = l.value / Math.max(1, maxTotal);
-        dash.style.animationDuration = `${Math.max(0.9, Math.min(6, 3.2 - intensity * 9)).toFixed(2)}s`;
-        svg.appendChild(dash);
+        stream.style.animationDuration = `${Math.max(0.9, Math.min(6, 3.2 - intensity * 9)).toFixed(2)}s`;
+        svg.appendChild(stream);
       }
 
       s.outOff += h; t.inOff += h;
@@ -1602,6 +1652,16 @@ export function addFlowSection(nav: any, sections: any) {
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
+      // A <title> must NOT be a child of <text>: its text node is part of the <text> element's content and
+      // gets painted onto the chart. That is how a tooltip explaining an imbalance ended up rendered across
+      // the diagram as a wall of words. Hang it on a wrapping <g> instead, where it is a tooltip and nothing
+      // else.
+      const labGroup = svgEl('g', {});
+      const explain = (text: string) => {
+        const t = svgEl('title');
+        t.textContent = text;
+        labGroup.appendChild(t);
+      };
       // An inferred figure is never dressed as a measured one. It is arithmetic about the hierarchy someone
       // drew — sound, but not something anything metered — so it says so on its face, in the one place the
       // number is actually read.
@@ -1611,34 +1671,44 @@ export function addFlowSection(nav: any, sections: any) {
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
-        const why = svgEl('title');
-        why.textContent = 'Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.';
-        lab.appendChild(why);
+        explain('Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.');
       }
       // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
       // diagram instead of drawing the larger number at full height and letting it look intentional.
       else if (inferredNode) {
         lab.setAttribute('font-style', 'italic');
         lab.setAttribute('fill-opacity', '0.85');
-        const why = svgEl('title');
-        why.textContent = 'Nothing measures this node. The figure is what conservation requires: the load '
+        explain('Nothing measures this node. The figure is what conservation requires: the load '
           + 'downstream is really being drawn, and the hierarchy you drew leaves exactly one path it could '
           + 'have arrived by. It is only as true as that hierarchy. Bind a source to measure it, or turn off '
-          + '"Infer from a single supply path" under Energy roll-up to show no data instead.';
-        lab.appendChild(why);
+          + '"Infer from a single supply path" under Energy roll-up to show no data instead.');
       }
       else if (n.imbalance != null) {
         lab.textContent += ' ⚠';
-        const why = svgEl('title');
-        why.textContent = `This node passes ${formatNum(nodeValue(n.id))} ${units} to what it feeds, but only `
-          + `${formatNum(nodeValue(n.id) - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
-          + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
-          + (metricSel.value === 'energy'
-            ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
-            : ' Check that the feeders into this node are all wired and reporting.');
-        lab.appendChild(why);
+        const reading = nodeValue(n.id);
+        // Two different discrepancies wear the same marker, and they need different sentences.
+        //
+        // For a MEASURED node the server sends throughput − reading, so the flows through it exceed what its
+        // own sensor reports. Subtracting the imbalance from the reading — which is what this used to do —
+        // is meaningless there and printed things like "-49.625 kWh arrives", which is not a quantity.
+        //
+        // For anything else it is outflow − inflow, and the reading IS the outflow, so inflow is the
+        // difference and the original wording holds.
+        explain(n.derivation === 'measured'
+          ? `This node reports ${formatNum(reading)} ${units}, but ${formatNum(reading + n.imbalance)} ${units} `
+            + `passes through it — ${formatNum(n.imbalance)} ${units} more than it accounts for. Its sensor is `
+            + 'probably measuring one leg rather than the whole node (an inverter bound to its AC-load output '
+            + 'while it also charges a battery), or a source is scaled wrongly. The bar is drawn to the '
+            + 'throughput so the ribbons fit; the label is the reading.'
+          : `This node passes ${formatNum(reading)} ${units} to what it feeds, but only `
+            + `${formatNum(reading - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
+            + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
+            + (metricSel.value === 'energy'
+              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
+              : ' Check that the feeders into this node are all wired and reporting.'));
       }
-      svg.appendChild(lab);
+      labGroup.appendChild(lab);
+      svg.appendChild(labGroup);
 
         // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
       // sources are bound to it. All of that is already on the client, so the card costs no extra request —

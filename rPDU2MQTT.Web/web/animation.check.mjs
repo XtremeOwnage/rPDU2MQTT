@@ -75,4 +75,31 @@ for (const p of on) {
   if (!(d >= 0.9 && d <= 6)) fail(`stream duration ${d}s is outside the 0.9–6s clamp`);
 }
 
-console.log(`animation: ${on.length} streams on known flow, none on unknown or zero, durations clamped`);
+// A <title> must never be a child of <text>. Its text node counts as part of the <text> element's content,
+// so an explanatory tooltip is painted across the chart instead of shown on hover — which is exactly how an
+// imbalance explanation ended up rendered over a live diagram as a wall of words. Tooltips belong on a
+// wrapping <g>. This fixture has an unknown node (battery), so a tooltip is definitely produced.
+const { sandbox: s3, getEl: get3 } = makeDom({
+  bodies: (url) =>
+    url.includes('/api/schema') ? schema :
+    url.includes('/api/instances') ? { ok: true, instances: [] } :
+    url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] } } :
+    url.includes('/api/flow') ? graph :
+    { ok: true },
+});
+vm.createContext(s3);
+vm.runInContext(code, s3, { filename: 'app.js' });
+await new Promise(r => setTimeout(r, 50));
+const flowLink = query(get3('nav'), 'a', true).find(a => a.dataset.label === 'Flow');
+flowLink.click();
+await new Promise(r => setTimeout(r, 60));
+
+const texts = query(get3('sections'), 'text', true);
+const titles = query(get3('sections'), 'title', true);
+if (titles.length === 0) fail('no tooltip was produced, so this guard is asserting nothing — fix the fixture');
+for (const t of texts) {
+  if ((t.children || []).some(c => (c.tag || '').toLowerCase() === 'title'))
+    fail('a <title> is inside a <text> — its content is painted onto the chart, not shown as a tooltip');
+}
+
+console.log(`animation: ${on.length} streams on known flow, none on unknown or zero, durations clamped; ${titles.length} tooltip(s), none inside <text>`);
