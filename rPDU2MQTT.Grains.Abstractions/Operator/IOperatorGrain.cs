@@ -34,6 +34,24 @@ public sealed record OperatorReport
     [Id(6)] public string? CheckedAt { get; init; }
     [Id(7)] public string? Message { get; init; }
     [Id(8)] public OperatorSeverity Severity { get; init; }
+
+    /// <summary>
+    /// When the operator last actually rolled the deployment, ISO-8601. Null when it never has.
+    ///
+    /// <para>
+    /// <see cref="Applied"/> alone cannot signal a roll, which is why the GUI's auto-update notice never
+    /// appeared. Anyone tracking a moving tag — <c>unstable</c>, <c>main</c>, <c>edge</c>, the default and
+    /// the common case — gets a new <em>digest</em> under the same tag, so <see cref="Applied"/> reads
+    /// "unstable" before and after and nothing looks like it changed. Only a switch between differently
+    /// named tags was ever visible.
+    /// </para>
+    /// <para>
+    /// A timestamp of the roll itself changes every time, moving-tag or not, and is distinct from
+    /// <see cref="CheckedAt"/> — which advances on every scheduled check and would announce an update once
+    /// an hour whether or not anything happened.
+    /// </para>
+    /// </summary>
+    [Id(9)] public string? AppliedAt { get; init; }
 }
 
 /// <summary>
