@@ -107,6 +107,16 @@
         ]
       },
       {
+        "key": "PublishTimeoutSeconds",
+        "label": "PublishTimeoutSeconds",
+        "description": "Seconds to wait for the broker to acknowledge a publish before abandoning it and failing the pass loudly. Stops one unacknowledged message from silently wedging publishing altogether.",
+        "type": "int",
+        "required": false,
+        "default": 15,
+        "min": 1,
+        "max": 600
+      },
+      {
         "key": "KeepAlive",
         "label": "KeepAlive",
         "description": "The keepalive interval for the MQTT connection in seconds.",
