@@ -89,6 +89,11 @@ spec:
                         type: boolean
                         description: Enables certificate validation
                     description: Connection details for MQTT Broker
+                  PublishTimeoutSeconds:
+                    type: integer
+                    description: Seconds to wait for the broker to acknowledge a publish before abandoning it and failing the pass loudly. Stops one unacknowledged message from silently wedging publishing altogether.
+                    minimum: 1
+                    maximum: 600
                   KeepAlive:
                     type: integer
                     description: The keepalive interval for the MQTT connection in seconds.

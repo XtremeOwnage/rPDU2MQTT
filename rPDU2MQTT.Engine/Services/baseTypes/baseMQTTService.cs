@@ -211,7 +211,11 @@ public abstract class baseMQTTService : IHostedService, IDisposable
 
         // Disconnects are reported by MqttEventHandler and recovered via auto-reconnect;
         // publish failures surface in tick(). No need to check connectivity per message.
-        return mqtt.PublishAsync(msg, cancellationToken);
+        // The wait is bounded; the publish is never cancelled. See Core.PublishTimeout for why that
+        // distinction is the whole point.
+        var seconds = cfg.MQTT.PublishTimeoutSeconds is > 0 and <= 600 ? cfg.MQTT.PublishTimeoutSeconds : 15;
+        return Core.PublishTimeout.RunAsync(
+            () => mqtt.PublishAsync(msg, cancellationToken), TimeSpan.FromSeconds(seconds), msg.Topic, cancellationToken);
     }
 
     /// <summary>

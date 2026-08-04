@@ -37,6 +37,23 @@ public class MQTTConfig
     /// <summary>
     /// Gets or sets the keepalive interval for the MQTT connection in seconds.
     /// </summary>
+    /// <summary>
+    /// How long to wait for the broker to acknowledge a publish before giving up on it.
+    ///
+    /// <para>
+    /// A QoS-1 publish waits for a PUBACK, and nothing in the protocol promises one ever arrives — a broker
+    /// dropping the message on an ACL, or a link that is up but not delivering, simply never answers.
+    /// Awaiting that with no bound does not fail, it stops: the pass never returns, so the timer loop never
+    /// comes round again. Seen on a live system, where the PDU publisher and the energy-flow export each ran
+    /// exactly one pass, hung inside it, and stayed that way with nothing in the log, because a service
+    /// waiting forever is not an error.
+    /// </para>
+    /// </summary>
+    [DefaultValue(15)]
+    [Range(1, 600, ErrorMessage = "PublishTimeoutSeconds must be between 1 and 600.")]
+    [Description("Seconds to wait for the broker to acknowledge a publish before abandoning it and failing the pass loudly. Stops one unacknowledged message from silently wedging publishing altogether.")]
+    public int PublishTimeoutSeconds { get; set; } = 15;
+
     [Range(1, int.MaxValue, ErrorMessage = "KeepAlive must be greater than 0.")]
     [Display(Description = "The keepalive interval for the MQTT connection in seconds.")]
     public int KeepAlive { get; set; } = 60;
