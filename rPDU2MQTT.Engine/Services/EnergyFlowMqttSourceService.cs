@@ -36,6 +36,10 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private readonly ISnapshotSink<MeasurementSnapshot>? sink;
     private long version;
     private long received;
+    // Per (node, topic, direction): whether a source claiming to be a daily counter has actually behaved
+    // like one. In memory only — a restart makes it unproven again until the next rollover, which errs
+    // towards showing the device's number rather than withholding one we haven't yet caught out.
+    private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null)
     {
@@ -175,6 +179,13 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         return true;
     }
 
+    /// <summary>The period a reading now belongs to, on the same boundary the daily accumulator uses.</summary>
+    private string CurrentPeriodKey(DateTime nowUtc)
+    {
+        var agg = cfg.EnergyFlow.Aggregation;
+        return EnergyPeriod.KeyFor(nowUtc, EnergyPeriod.Resolve(agg.PeriodTimeZone), agg.PeriodStartHour);
+    }
+
     private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
         var now = DateTime.UtcNow;
@@ -185,7 +196,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             readings is null ? null : (node, metric, value, stale) =>
             {
                 if (Metrics.TryParse(metric, out var m)) readings.Add(new MeasurementReading(node, m, value, stale));
-            });
+            },
+            periodAudit, CurrentPeriodKey(now), m => Log.Warning(m));
 
         if (sink is not null && readings is { Count: > 0 })
         {
@@ -226,7 +238,10 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     internal static void Apply(
         IReadOnlyDictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings,
         FlowValueCache cache, string? topic, string? payload, DateTime nowUtc,
-        Action<string, string, double, int>? onReading = null)
+        Action<string, string, double, int>? onReading = null,
+        IDictionary<string, PeriodCounterAudit.State>? periodAudit = null,
+        string? periodKey = null,
+        Action<string>? warn = null)
     {
         if (topic is null || !bindings.TryGetValue(topic, out var list) || string.IsNullOrWhiteSpace(payload))
             return;
@@ -248,12 +263,48 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // A 'period' energy counter is reset by the device each day, so it already IS the daily total —
             // store it under the daily metric rather than pretending it is cumulative and measuring its
             // "rise", which loses the whole day every time the device rolls it over.
+            // A source declared 'period' is published as the day's total with no arithmetic in between, so
+            // the claim has to be checked rather than trusted: a counter that resets daily must be lower at
+            // the start of a period than it was at the end of the last one. When it isn't, the number is not
+            // today's — it is a cumulative total, or a value the device stopped updating before the rollover
+            // — and it is dropped rather than stated. The node then reports "no data" for today, which is
+            // the truth, instead of a confident wrong figure.
+            if (periodAudit is not null && periodKey is not null && IsPeriodEnergy(src)
+                && !AllowPeriodReading(periodAudit, periodKey, nodeId, topic, src, value, warn))
+                continue;
+
             foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))
             {
                 cache.Set(nodeId, key, v, src.StaleAfterSeconds, nowUtc);
                 onReading?.Invoke(nodeId, key, v, src.StaleAfterSeconds);
             }
         }
+    }
+
+    /// <summary>A source whose reading is claimed to already be the daily energy total.</summary>
+    private static bool IsPeriodEnergy(EnergyFlowSource src) =>
+        FlowMetricKey.IsPeriod(src.Accumulation) && string.Equals(src.Metric, "energy", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fold the reading into the audit and say whether it may be published as today's total. Warns once per
+    /// transition — a message on every sample would bury the one that matters.
+    /// </summary>
+    private static bool AllowPeriodReading(
+        IDictionary<string, PeriodCounterAudit.State> audit, string periodKey,
+        string nodeId, string topic, EnergyFlowSource src, double value, Action<string>? warn)
+    {
+        var auditKey = $"{nodeId}|{topic}|{src.Direction}";
+        audit.TryGetValue(auditKey, out var prior);
+        var next = PeriodCounterAudit.Observe(prior, value, periodKey);
+        audit[auditKey] = next;
+
+        if (next.Contradicted && prior?.Contradicted != true)
+            warn?.Invoke(PeriodCounterAudit.Explain(nodeId, topic, value, periodKey));
+        else if (!next.Contradicted && prior?.Contradicted == true)
+            warn?.Invoke($"Energy-flow: '{topic}' on node '{nodeId}' reset properly for {periodKey}; it is being "
+                       + "treated as a daily counter again.");
+
+        return !next.Contradicted;
     }
 
     private static string Truncate(string s) => s.Length <= 80 ? s : s[..80] + "…";
