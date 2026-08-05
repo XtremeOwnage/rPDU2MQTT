@@ -138,6 +138,48 @@ public class FlowNoFabricationTests
     }
 
     [Fact]
+    public void AnUnmeasuredNode_SumsItsFeeders_NotOnlyItsChildren()
+    {
+        // Raised on #292: "aggregate aggregates from CHILDREN, and not the parent" — an inverter fed by
+        // measured sources appeared not to take their sum. It does: a node with no reading of its own is
+        // worth the larger of what its known links bring in and what they carry out, so supply settles it
+        // when nothing downstream is measured.
+        //
+        // The part that reads as the value being ignored is the other half: the supply that no measured
+        // child accounts for becomes an explicit "Unmeasured load" leaf rather than being quietly dropped
+        // (which would shrink the inverter) or spread over the children (which would invent figures).
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "solar", Label = "Solar", Kind = "solar", Mode = "static", Value = 5000 },
+                new EnergyFlowNode { Id = "battery", Label = "Battery", Kind = "battery", Mode = "static", Value = 1000 },
+                new EnergyFlowNode { Id = "grid", Label = "Grid", Kind = "grid", Mode = "static", Value = 2000 },
+                new EnergyFlowNode { Id = "inverter", Label = "Inverter", Kind = "inverter" },
+                new EnergyFlowNode { Id = "main", Label = "Main Panel", Kind = "panel" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "solar", To = "inverter" },
+                new EnergyFlowLink { From = "battery", To = "inverter" },
+                new EnergyFlowLink { From = "grid", To = "inverter" },
+                new EnergyFlowLink { From = "inverter", To = "main" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(new PduData(), flow);
+
+        var inverter = graph.Nodes.Single(n => n.Id == "inverter");
+        Assert.Equal(8000, inverter.Value);
+        Assert.Equal(FlowDerivation.Summed, inverter.Derivation);
+
+        // And it is accounted for, not absorbed: the whole 8 kW leaves as unmeasured load, because nothing
+        // downstream measures anything.
+        var slack = graph.Links.Single(l => l.Source == "inverter" && l.Target.EndsWith("#unmeasured"));
+        Assert.Equal(8000, slack.Value);
+    }
+
+    [Fact]
     public void ASingleUnmeasuredFeeder_StillConveys_BecauseConservationLeavesNoChoice()
     {
         // One path in, a metered load downstream: the power demonstrably arrives that way. This is
