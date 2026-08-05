@@ -440,6 +440,14 @@
   /* Why a setting is shown but greyed out — see NotEditableInGuiAttribute. */
   .field-locked { color:var(--warn, #d08700); }
 
+  /* A node whose figure its own flows contradict. Loud on purpose: the previous marker was a small glyph
+     appended to a label printed in the same weight as every honest number on the chart. */
+  .flow-contradiction {
+    border:1px solid var(--warn, #d08700); border-left-width:3px; border-radius:6px;
+    padding:8px 10px; margin:0 0 8px; background:color-mix(in srgb, var(--warn, #d08700) 8%, transparent);
+  }
+  .flow-contradiction > strong { color:var(--warn, #d08700); font-size:12px; }
+
   /* Features page: each capability is a card with its switch, and a way through to its settings. */
   .feature-go { margin-top:var(--sp-2); }
   /* Where a section's on/off switch went, on the page it used to live on. */
