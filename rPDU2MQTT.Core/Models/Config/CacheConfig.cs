@@ -20,6 +20,7 @@ public class CacheConfig
 {
     [DefaultValue(false)]
     [Description("Use a Redis/Valkey instance for shared, durable state (today: the energy accumulator).")]
+    [FeatureToggle]
     public bool Enabled { get; set; }
 
     [DefaultValue("localhost:6379")]

@@ -35,6 +35,7 @@ const MODULES = [
   'sections/ha-energy.ts',
   'sections/ha-cleanup.ts',
   'sections/home.ts',
+  'sections/features.ts',
   'config-form.ts',
   'actions.ts',
   'main.ts',

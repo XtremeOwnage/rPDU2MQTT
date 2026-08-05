@@ -4701,6 +4701,99 @@ function addHomeSection(nav     , sections     ) {
   return { link, load };
 }
 
+// ── sections/features.ts ────────────────────────────────────────
+// One page for every on/off switch in the product (#292).
+//
+// Each feature used to carry its own Enabled toggle on its own config page, so answering "what is this
+// bridge actually doing?" meant opening eight pages and reading eight switches. They are gathered here
+// instead, and removed from the individual pages, so there is exactly one place a feature is turned on and
+// exactly one answer to what is running.
+//
+// The list comes from the schema: the server marks the one setting that turns each capability on
+// ([FeatureToggle]), so a new one appears here without this file changing. It is marked rather than guessed
+// from the name because the names genuinely differ — Gui.Enabled, but HomeAssistant.DiscoveryEnabled and
+// Prometheus.Exporter — and a rule of "the boolean called Enabled" would have dropped the last two.
+// The schema field renderer, so a switch here is the same control as on the section page — same change
+// tracking, same locked-field handling. (The bundle is one shared scope, so this import is erased.)
+
+/// A section's feature switch, if it has one. Exported so the config form filters exactly the property this
+/// page renders — the two must agree, or a toggle is either duplicated or lost entirely.
+function featureToggle(node     )             {
+  if (node?.type !== 'object') return null;
+  return (node.properties || []).find((p     ) => p.isFeatureToggle) || null;
+}
+
+/// Jump to a feature's own settings page. Nav links carry the schema key they edit, so this finds the page
+/// without a second table of where things live.
+function jumpToSection(key        ) {
+  const links        = Array.from(document.querySelectorAll('nav a'));
+  const link = links.find(a => a.dataset && a.dataset.section === key);
+  if (link) link.click();
+}
+
+/// The reverse trip: from a section's "turned on and off on the Features page" note back to this page.
+function jumpToFeatures() {
+  const links        = Array.from(document.querySelectorAll('nav a'));
+  const link = links.find(a => a.dataset && a.dataset.label === 'Features');
+  if (link) link.click();
+}
+
+function addFeaturesSection(nav     , sections     ) {
+  const link = navLink(nav, 'Features', '◉');
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Features' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'Everything this bridge can do, and whether it is doing it. Turning a feature on here does not configure it — use Settings on the card for that.',
+  }));
+
+  const body = el('div');
+  sec.appendChild(body);
+
+  const render = () => {
+    body.innerHTML = '';
+    const grid = el('div', { class: 'grid' });
+
+    const feats = state.schema
+      .map((n     ) => ({ section: n, prop: featureToggle(n) }))
+      .filter((f     ) => f.prop);
+
+    feats.forEach(({ section, prop }     ) => {
+      const label = FEATURE_LABELS[section.key] || section.label || section.key;
+      // The card's identity is the feature, not the word "Enabled" — and the description that explains the
+      // feature is the section's, since the property's own is usually just "turn it on".
+      renderNode({ ...prop, label, description: prop.description || section.description }, ensure(state.data, section.key, {}), grid, [section.key]);
+
+      const card = grid.children[grid.children.length - 1]       ;
+      const go = btn('Settings');
+      go.onclick = () => jumpToSection(section.key);
+      card.appendChild(el('div', { class: 'feature-go' }, go));
+    });
+
+    body.appendChild(grid);
+    if (!feats.length) body.appendChild(el('div', { class: 'desc', text: 'No optional features in this build.' }));
+  };
+
+  // Re-read on every visit: the switches are bound to the live config document, which the section pages and
+  // a reload both change underneath this page.
+  link.onclick = () => { render(); activate(link, sec); };
+  return { link, sec };
+}
+
+// Names that read as a capability rather than as a config section. Anything unlisted keeps its section
+// label, so this is a polish list, not a registry to maintain.
+const FEATURE_LABELS                         = {
+  Gui: 'Web GUI',
+  Api: 'REST API',
+  Health: 'Health endpoints',
+  Modbus: 'Modbus TCP polling',
+  EmonCMS: 'EmonCMS export',
+  HomeAssistant: 'Home Assistant discovery',
+  Prometheus: 'Prometheus metrics',
+  Operator: 'Kubernetes operator',
+  Cache: 'Persistent cache (Valkey/Redis)',
+};
+
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
@@ -4783,6 +4876,10 @@ function renderNode(node     , obj     , container     , path           = []) {
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
+    // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
+    // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
+    // like "Enabled", which several unrelated nested sections legitimately share.
+    f.dataset.path = here.join('.');
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
@@ -4894,7 +4991,7 @@ const NAV_GROUPS                                        = [
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
-  { title: 'System', items: [{ schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -4919,6 +5016,17 @@ function navGroup(nav     , title        ) {
   header.onclick = () => wrap.classList.toggle('collapsed');
   wrap.append(header, items); nav.appendChild(wrap);
   return items;
+}
+
+// Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
+// a missing feature and sends the operator hunting for it.
+function featurePointer(label        ) {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
+  const go = btn('Features');
+  go.onclick = () => jumpToFeatures();
+  wrap.appendChild(go);
+  return wrap;
 }
 
 // Render one schema-driven config section (nav link + panel); returns the nav link.
@@ -4949,7 +5057,16 @@ function renderConfigSection(node     , nav     , sections     ) {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
       // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
-      const props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard') : node.properties;
+      let props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard') : node.properties;
+      // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
+      // removed here rather than duplicated: two switches bound to one value would disagree the moment one
+      // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
+      // inaccuracy this GUI must never show.
+      const feature = featureToggle(node);
+      if (feature) {
+        props = (props || []).filter((p     ) => p !== feature);
+        sec.appendChild(featurePointer(label));
+      }
       renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
     else renderNode(node, state.data, sec, []);

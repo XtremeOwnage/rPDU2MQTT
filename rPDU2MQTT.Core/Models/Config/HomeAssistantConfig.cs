@@ -11,6 +11,7 @@ public class HomeAssistantConfig
     /// Gets or sets a value indicating whether Home Assistant discovery is enabled.
     /// </summary>
     [Display(Description = "Indicates whether Home Assistant discovery is enabled.")]
+    [FeatureToggle]
     public bool DiscoveryEnabled { get; set; } = false;
 
     /// <summary>

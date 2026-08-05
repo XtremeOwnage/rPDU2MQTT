@@ -10,6 +10,7 @@ public class ApiConfig
 {
     [DefaultValue(false)]
     [Description("Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network — it is unauthenticated, like the health endpoints.")]
+    [FeatureToggle]
     public bool Enabled { get; set; } = false;
 
     [DefaultValue(8082)]

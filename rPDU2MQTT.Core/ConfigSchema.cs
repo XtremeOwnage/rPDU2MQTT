@@ -46,6 +46,13 @@ public sealed class SchemaNode
     /// Null when the field is editable as normal.
     /// </summary>
     public string? NotEditableReason { get; set; }
+
+    /// <summary>
+    /// This setting is the on/off switch for a whole capability — see <c>FeatureToggleAttribute</c>. The GUI
+    /// gathers these onto one Features page and omits them from the section's own form.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsFeatureToggle { get; set; }
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -127,6 +134,12 @@ public static class ConfigSchema
         // form does not need its own hardcoded list of which fields those are.
         if (prop.GetCustomAttribute<NotEditableInGuiAttribute>() is { } locked)
             node.NotEditableReason = locked.Reason;
+
+        // The switch that turns a whole capability on or off, gathered onto the GUI's Features page. Declared
+        // on the model because the names differ (Enabled, DiscoveryEnabled, Exporter) and a form-side rule
+        // guessing from the name would quietly drop the ones that don't match.
+        if (prop.GetCustomAttribute<FeatureToggleAttribute>() is not null)
+            node.IsFeatureToggle = true;
 
         // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
         // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).
