@@ -94,6 +94,14 @@ public abstract class baseEntity : IBaseDiscovery
     public string? Icon { get; set; }
 
     /// <summary>
+    /// A topic carrying a JSON object of extra attributes for this entity. Used to hang detail off an
+    /// entity that has nowhere else to put it — an alarm's severity, where the entity itself is a
+    /// binary "problem" and can only say yes or no.
+    /// </summary>
+    [JsonPropertyName("json_attributes_topic")]
+    public string? JsonAttributesTopic { get; set; }
+
+    /// <summary>
     /// Flag which defines if the entity should be enabled when first added.
     /// </summary>
     [JsonPropertyName("enabled_by_default")]

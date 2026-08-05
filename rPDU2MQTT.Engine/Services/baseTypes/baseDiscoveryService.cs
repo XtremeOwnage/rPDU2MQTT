@@ -169,13 +169,23 @@ public abstract class baseDiscoveryService : baseMQTTService
     /// <summary>
     /// Build a "problem" binary sensor reflecting an entity's alarm state.
     /// </summary>
-    public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent)
+    /// <param name="displayName">
+    /// What to call it on the device. Defaults to "Alarm", which is right for the one alarm a device or an
+    /// outlet has — but a measurement's alarm sits on the same HA device as its outlet's, and two entities
+    /// both called "Alarm" cannot be told apart.
+    /// </param>
+    public BinarySensorDiscovery BuildAlarm(NamedEntity item, DiscoveryDevice Parent, string displayName = "Alarm")
     {
         return new BinarySensorDiscovery
         {
             ID = item.Entity_Identifier + "_alarm",
             Name = item.Entity_Name + "_alarm",
-            DisplayName = "Alarm",
+            DisplayName = displayName,
+
+            // Severity (the PDU's own alarm-vs-warning distinction) rides along as an attribute: the entity
+            // is a binary "problem" and can only say yes or no, and a second entity per alarm point to carry
+            // one word would double the count for very little.
+            JsonAttributesTopic = MQTTHelper.JoinPaths(item.GetTopicPath(), MqttPath.AlarmAttributes.ToJsonString()),
 
             Device = Parent,
             EntityType = Models.HomeAssistant.Enums.EntityType.BinarySensor,
