@@ -69,12 +69,18 @@ public class PublishTimeoutTests
     {
         // Cancelling on shutdown is not the broker's fault and must not be logged as one — otherwise every
         // restart leaves a misleading "the broker did not acknowledge" in the log.
+        //
+        // The timeout is minutes and the cancellation is immediate, so the wait can only end one way. Racing
+        // the two on the clock (cancel at 50ms, time out at 80ms) is what an earlier version of this test did,
+        // and it failed roughly one run in five: under load the 80ms timer fired before the 50ms cancellation
+        // callback was scheduled, and reporting a timeout there is the correct answer, not a bug.
         var shutdown = new CancellationTokenSource();
         var hang = new TaskCompletionSource();
-        shutdown.CancelAfter(50);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => PublishTimeout.RunAsync(() => hang.Task, TimeSpan.FromMilliseconds(80), "t", shutdown.Token));
+        var run = PublishTimeout.RunAsync(() => hang.Task, TimeSpan.FromMinutes(5), "t", shutdown.Token);
+        shutdown.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
         hang.SetResult();
     }
