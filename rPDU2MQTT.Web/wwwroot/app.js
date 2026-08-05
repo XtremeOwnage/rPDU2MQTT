@@ -2348,6 +2348,60 @@ function collapseGraph(nodes       , links       )                              
 }
 
 // The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
+// How much of what passes through a node may go unaccounted for before the node's own figure stops being
+// believable.
+//
+// The server already suppresses noise — it only reports a gap at all above 1 unit AND 2% of the reading —
+// so anything that reaches here is a real discrepancy worth a marker. But a marker was ALL it got: a small
+// "⚠" appended to the label while the number itself was printed in the same weight as every honest figure
+// on the chart. A node carrying a 129.9 kWh gap and a node 3% out looked identical.
+//
+// A quarter is the line because it is past arguing about. Rounding, sampling skew and counters read a few
+// seconds apart do not lose a quarter of the energy; a mis-scaled source, a sensor measuring one leg of a
+// node, or a counter that is not what it was declared to be all do. Above it, the figure is not "slightly
+// off" — it is contradicted by the diagram it sits on, and saying so quietly is how a wrong number gets
+// believed for a week.
+const CONTRADICTION_SHARE = 0.25;
+
+/// The banner naming every node whose figure its own flows contradict. Above the chart, not inside it: the
+/// point is to be read before the numbers are, by someone who came to the page to read the numbers.
+function contradictionBanner(items                                                , onFocus                      )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  const n = items.length;
+  box.appendChild(el('strong', {
+    text: n === 1
+      ? '1 node’s figure is contradicted by its own flows'
+      : `${n} nodes’ figures are contradicted by their own flows`,
+  }));
+  box.appendChild(el('div', {
+    class: 'desc',
+    style: { margin: '2px 0 6px' },
+    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
+        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
+        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
+        + 'suspect until the gap is explained.',
+  }));
+  const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
+  items.forEach(it => {
+    const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
+    b.onclick = () => onFocus(it.id);
+    row.appendChild(b);
+  });
+  box.appendChild(row);
+  return box;
+}
+
+/// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
+function contradictionShare(n     , reading               )                {
+  if (n.imbalance == null || reading == null || !isFinite(reading)) return null;
+  // A measured node's gap is throughput − reading, so the throughput is the larger side. Everything else
+  // reports outflow − inflow, where the reading IS the outflow. Either way the denominator is the bigger
+  // of the two sides — the amount the node is claiming to handle.
+  const throughput = n.derivation === 'measured' ? reading + n.imbalance : reading;
+  if (!(throughput > 0)) return null;
+  return Math.min(1, Math.abs(n.imbalance) / throughput);
+}
+
 // Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
 // figures already measured and is never exported (see FlowNode.Synthetic), so hiding it changes what you
 // are looking at and nothing else. On by default — a panel passing 8 kW to 560 W of metered outlets is
@@ -3118,6 +3172,7 @@ function addFlowSection(nav     , sections     ) {
 
     // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
     // where they cross a ribbon).
+    const contradicted                                                 = [];
     nodes.forEach((n     ) => {
       const p = pos[n.id]; if (!p) return;
       const unknownNode = !known(n.id);
@@ -3167,6 +3222,15 @@ function addFlowSection(nav     , sections     ) {
       else if (n.imbalance != null) {
         lab.textContent += ' ⚠';
         const reading = nodeValue(n.id);
+        // Past the line, the label stops looking like every other figure on the chart and the node is
+        // named in a banner above it. The number is still shown — hiding a reading the hardware actually
+        // gave would be its own kind of lying — but it is no longer presented as settled.
+        const share = contradictionShare(n, reading);
+        if (share != null && share >= CONTRADICTION_SHARE) {
+          lab.setAttribute('fill', 'var(--warn, #d08700)');
+          lab.setAttribute('class', 'flow-contradicted');
+          contradicted.push({ id: n.id, label: n.label, share });
+        }
         // Two different discrepancies wear the same marker, and they need different sentences.
         //
         // For a MEASURED node the server sends throughput − reading, so the flows through it exceed what its
@@ -3273,6 +3337,8 @@ function addFlowSection(nav     , sections     ) {
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
       : '';
+    if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
+
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
     wrap.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag to pan · scroll to move · Ctrl/⌘ + scroll to zoom.' }));
