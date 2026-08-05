@@ -58,12 +58,22 @@ const off = await render(false);
 if (off.length !== 0) fail(`animation is off but ${off.length} stream(s) were drawn`);
 
 // --- On: only the links that carry a known, non-zero value.
+//
+// A ribbon is streamed by several thin lanes rather than one stroke as tall as the band — a dashed stroke
+// draws its gaps across the full stroke width, so one full-height stroke turns every dash into a vertical
+// bar and a wide ribbon reads as a venetian blind. So the assertion is over distinct LINKS, not paths.
 const on = await render(true);
-if (on.length !== 2) fail(`expected 2 streams (grid->inverter, inverter->panel), got ${on.length}`);
-
-const pairs = on.map(p => `${p.attrs['data-src']}->${p.attrs['data-dst']}`).sort();
+const pairs = [...new Set(on.map(p => `${p.attrs['data-src']}->${p.attrs['data-dst']}`))].sort();
+if (pairs.length !== 2) fail(`expected 2 streamed links (grid->inverter, inverter->panel), got ${pairs.length}: ${pairs.join(', ')}`);
+if (on.length < pairs.length) fail('a streamed link produced no lane at all');
 const want = ['grid->inverter', 'inverter->panel'];
 if (JSON.stringify(pairs) !== JSON.stringify(want)) fail(`streamed the wrong links: ${pairs.join(', ')}`);
+
+// Lanes must stay inside the band: a lane wider than its share would merge them back into one bar.
+for (const p of on) {
+  const w = parseFloat(p.attrs['stroke-width']);
+  if (!(w >= 1.5 && w <= 3.5)) fail(`a lane is ${w}px wide — outside the range that reads as a particle`);
+}
 
 // The two that must never move: a measured zero, and a link with no data.
 if (pairs.some(p => p.startsWith('solar->'))) fail('a measured zero was animated — 0 W must not look busy');
@@ -102,4 +112,4 @@ for (const t of texts) {
     fail('a <title> is inside a <text> — its content is painted onto the chart, not shown as a tooltip');
 }
 
-console.log(`animation: ${on.length} streams on known flow, none on unknown or zero, durations clamped; ${titles.length} tooltip(s), none inside <text>`);
+console.log(`animation: ${pairs.length} streamed links (${on.length} lanes) on known flow, none on unknown or zero, durations clamped; ${titles.length} tooltip(s), none inside <text>`);
