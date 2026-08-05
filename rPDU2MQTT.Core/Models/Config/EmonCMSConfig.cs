@@ -9,6 +9,7 @@ public class EmonCMSConfig
 {
     [DefaultValue(false)]
     [Description("Push measurements to an EmonCMS server.")]
+    [FeatureToggle]
     public bool Enabled { get; set; }
 
     [DefaultValue(EmonCmsTransport.Http)]

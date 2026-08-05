@@ -439,6 +439,11 @@
 
   /* Why a setting is shown but greyed out — see NotEditableInGuiAttribute. */
   .field-locked { color:var(--warn, #d08700); }
+
+  /* Features page: each capability is a card with its switch, and a way through to its settings. */
+  .feature-go { margin-top:var(--sp-2); }
+  /* Where a section's on/off switch went, on the page it used to live on. */
+  .feature-pointer { display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; }
   .nh-head {
     margin:var(--sp-3) 0 3px; font-size:9.5px; font-weight:750; letter-spacing:.09em;
     text-transform:uppercase; color:var(--faint); border-top:1px solid var(--line-soft); padding-top:6px;

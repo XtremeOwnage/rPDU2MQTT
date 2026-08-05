@@ -13,6 +13,7 @@ public class OperatorConfig
 {
     [DefaultValue(false)]
     [Description("Enable the Kubernetes operator: let this release manage its own Deployment (registry update checks, optional self-update). Requires the Kubernetes config source and the 'operator' role. No effect otherwise.")]
+    [FeatureToggle]
     public bool Enabled { get; set; } = false;
 
     [DefaultValue(true)]

@@ -12,6 +12,7 @@ public class PrometheusConfig
 {
     [DefaultValue(false)]
     [Description("Expose a /metrics endpoint for Prometheus to scrape.")]
+    [FeatureToggle]
     public bool Exporter { get; set; }
 
     /// <summary>Port the /metrics endpoint listens on (Exporter).</summary>

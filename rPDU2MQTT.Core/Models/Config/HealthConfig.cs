@@ -9,6 +9,7 @@ public class HealthConfig
 {
     [DefaultValue(true)]
     [Description("Expose HTTP health-check endpoints: /healthz (liveness) and /readyz (readiness).")]
+    [FeatureToggle]
     public bool Enabled { get; set; } = true;
 
     [DefaultValue(8081)]

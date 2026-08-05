@@ -16,6 +16,7 @@ import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
+import { addFeaturesSection, featureToggle, jumpToFeatures } from './sections/features.js';
 
 // Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
 // stay in step with the document as it is typed.
@@ -80,7 +81,7 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-function renderNode(node: any, obj: any, container: any, path: string[] = []) {
+export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
   const here = [...path, node.key];
   if (node.type === 'object') {
     const target = ensure(obj, node.key, {});
@@ -95,6 +96,10 @@ function renderNode(node: any, obj: any, container: any, path: string[] = []) {
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
+    // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
+    // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
+    // like "Enabled", which several unrelated nested sections legitimately share.
+    f.dataset.path = here.join('.');
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
@@ -206,7 +211,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
-  { title: 'System', items: [{ schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -231,6 +236,17 @@ function navGroup(nav: any, title: string) {
   header.onclick = () => wrap.classList.toggle('collapsed');
   wrap.append(header, items); nav.appendChild(wrap);
   return items;
+}
+
+// Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
+// a missing feature and sends the operator hunting for it.
+function featurePointer(label: string) {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
+  const go = btn('Features');
+  go.onclick = () => jumpToFeatures();
+  wrap.appendChild(go);
+  return wrap;
 }
 
 // Render one schema-driven config section (nav link + panel); returns the nav link.
@@ -261,7 +277,16 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
       // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
-      const props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p: any) => p.key !== 'EnergyDashboard') : node.properties;
+      let props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p: any) => p.key !== 'EnergyDashboard') : node.properties;
+      // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
+      // removed here rather than duplicated: two switches bound to one value would disagree the moment one
+      // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
+      // inaccuracy this GUI must never show.
+      const feature = featureToggle(node);
+      if (feature) {
+        props = (props || []).filter((p: any) => p !== feature);
+        sec.appendChild(featurePointer(label));
+      }
       renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
     else renderNode(node, state.data, sec, []);
