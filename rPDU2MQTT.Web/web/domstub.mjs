@@ -56,10 +56,14 @@ export function makeEl(tag = 'div') {
     set textContent(v) { this._text = String(v); this.children = []; },
     set innerHTML(v) { if (!v) this.children = []; },
     get innerHTML() { return ''; },
-    appendChild(c) { if (c && c.tag) this.children.push(c); return c; },
-    append(...cs) { cs.forEach(c => { if (c && c.tag) this.children.push(c); }); },
-    removeChild(c) { this.children = this.children.filter(x => x !== c); },
-    remove() {}, insertBefore(c) { this.children.push(c); return c; },
+    // Parentage is tracked so remove() actually detaches: a panel mounted on <body> and later closed has
+    // to leave the tree, or a test can't tell an open modal from a closed one.
+    parent: null,
+    appendChild(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
+    append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); } }); },
+    removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
+    remove() { if (this.parent) this.parent.removeChild(this); },
+    insertBefore(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
     // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
     contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
     setAttribute(k, v) { this.attrs[k] = String(v); },
@@ -106,6 +110,11 @@ export function makeDom({ bodies }) {
       querySelector: (s) => query(root, s, false),
       querySelectorAll: (s) => query(root, s, true),
       elementFromPoint: () => null,
+      // Document-level listeners are how a modal picks up Escape; record them so a test can fire one.
+      _on: {},
+      addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
+      removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
+      dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
     },
     window: { addEventListener() { }, removeEventListener() { }, dispatchEvent() { return true; }, prompt: () => null },
     // protocol/hostname are read when building the API docs links (#190).

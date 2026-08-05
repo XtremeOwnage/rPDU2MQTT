@@ -1516,7 +1516,9 @@ const NODE_MODES                             = [
 let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
-function overlay(title        )                                   {
+/// `onClose` fires only on those three — a caller closing the panel itself already knows, and firing it
+/// there would loop when the callback re-renders the surface that owns the panel.
+function overlay(title        , onClose             )                                   {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
   const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
@@ -1529,9 +1531,10 @@ function overlay(title        )                                   {
   document.body.appendChild(back);
 
   const close = () => { back.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e     ) => { if (e.key === 'Escape') close(); };
-  x.onclick = close;
-  back.onclick = (e     ) => { if (e.target === back) close(); };
+  const dismiss = () => { close(); if (onClose) onClose(); };
+  const onKey = (e     ) => { if (e.key === 'Escape') dismiss(); };
+  x.onclick = dismiss;
+  back.onclick = (e     ) => { if (e.target === back) dismiss(); };
   document.addEventListener('keydown', onKey);
   return { body, close };
 }
@@ -1802,13 +1805,9 @@ function field(labelText        , control             , hint         ) {
 function renderNodeEditor(node     , links       , cand                  , rerender                           ) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
-  const box = el('div', { style: { margin: '10px 0 4px', padding: '14px', border: '1px solid var(--accent, #4f8cff)', borderRadius: '8px', background: 'var(--panel2)' } });
-
-  const header = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' } });
-  header.appendChild(el('h4', { text: `Editing ${node.Label || node.Id}`, style: { margin: '0', fontSize: '14px' } }));
-  const close = btn('Close'); close.onclick = () => rerender(true);
-  header.appendChild(close);
-  box.appendChild(header);
+  // No frame and no header of its own: this is rendered into a modal panel that already carries the node's
+  // name and a Close button (#292).
+  const box = el('div', { class: 'node-editor' });
 
   const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
 
@@ -2338,7 +2337,7 @@ function collapseGraph(nodes       , links       )                              
     const s = remap(l.source), t = remap(l.target);
     if (s === t) return;                       // a link fully inside one collapsed group
     present.add(s); present.add(t);
-    const k = s + ' ' + t;
+    const k = s + '\u0000' + t;
     if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
     merged[k].value += (l.value || 0);
     if (l.known === false) merged[k].known = false;
@@ -2543,8 +2542,33 @@ function renderGroupManager(flow     , cand                  , rerender         
   return box;
 }
 
+// The open node editor, as a modal over the table (#292).
+//
+// It used to render beneath the table, which put the form at the bottom of a long page — nowhere near the
+// row you clicked — and forced the table itself to stay wide enough to host it, which small screens can't
+// give. The panel lives on <body>, so it outlives the re-render of the surface underneath it and is rebuilt
+// in place instead: the node object's identity is what the editor holds, and that survives a re-render.
+let nodeModal                                                      = null;
+
+function closeNodeModal() {
+  const m = nodeModal;
+  nodeModal = null;
+  if (m) m.close();
+}
+
+function syncNodeModal(node     , links       , cand                  , editing                       , rerender            ) {
+  if (!node) { closeNodeModal(); return; }
+  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
+  if (!nodeModal) {
+    const o = overlay(`Edit node — ${node.Label || node.Id}`, () => { nodeModal = null; editing.id = null; rerender(); });
+    nodeModal = { id: node.Id, body: o.body, close: o.close };
+  }
+  nodeModal.body.innerHTML = '';
+  nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
+}
+
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
-// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) below the table.
+// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) in a modal.
 // Deleting a node takes its bound sources with it (they live on the node).
 function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
   const box = el('div', { style: { margin: '18px 0' } });
@@ -2552,6 +2576,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
   if (!customNodes.length) {
+    closeNodeModal();
     box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
     return box;
   }
@@ -2631,8 +2656,8 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
   tbl.appendChild(body);
   box.appendChild(tbl);
 
-  const editingNode = editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null;
-  if (editingNode) box.appendChild(renderNodeEditor(editingNode, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
+  // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
+  syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
   return box;
 }
 
@@ -3770,8 +3795,6 @@ function addNodesSection(nav     , sections     ) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    // Groups first: the node manager appends the (tall) per-node editor beneath its table when one is open,
-    // which would otherwise bury the Groups section off the bottom of the page.
     ed.appendChild(renderGroupManager(flow, cand, render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
@@ -3784,6 +3807,9 @@ function addNodesSection(nav     , sections     ) {
     render();
   };
   link.onclick = () => { activate(link, sec); load(); };
+  // The editor panel is mounted on <body>, so switching pages would otherwise leave it floating over
+  // whatever you switched to.
+  nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }
 
 // The Energy overview (#energy-rollup C): an at-a-glance board of where power is flowing right now —

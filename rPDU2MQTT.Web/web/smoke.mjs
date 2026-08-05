@@ -168,13 +168,23 @@ if (!editBtn) fail('the virtual-node manager rendered no Edit button');
 editBtn.click();
 await new Promise(r => setTimeout(r, 20));
 
-const editorText = query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ');
+// The editor opens as a modal on <body>, not inline under the table (#292) — inline put the form at the
+// bottom of a long page, away from the row, and kept the table too wide for a small screen.
+const editor = query(sandbox.document.body, '.node-editor', false);
+if (!editor) fail('opening a node did not open the editor modal');
+if (query(getEl('sections'), '.node-editor', false)) fail('the node editor rendered inline under the table again');
+const editorText = editor.textContent;
 if (!editorText.includes('Live value bindings')) fail('opening a node did not render its bindings editor');
 if (!editorText.includes('Feeders & children')) fail('the node editor did not render the feeders/children wiring');
-if (!query(getEl('sections'), 'input', true).some(i => i.attrs.value === 'solar_assistant/inverter_1/pv_power/state'))
+if (!query(editor, 'input', true).some(i => i.attrs.value === 'solar_assistant/inverter_1/pv_power/state'))
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');
+
+// Escape dismisses it, and dismissing it leaves nothing behind on <body>.
+sandbox.document.dispatch('keydown', { key: 'Escape' });
+await new Promise(r => setTimeout(r, 20));
+if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not close the node editor modal');
 
 // --- Flow node hover card ----------------------------------------------------------------------------
 // The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.
