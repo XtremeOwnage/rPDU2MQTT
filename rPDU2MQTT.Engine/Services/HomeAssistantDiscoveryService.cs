@@ -224,6 +224,15 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         {
             if (BuildMeasurement(measurement, parent) is { } sensor)
                 components.Add(sensor);
+
+            // Its threshold alarm, where the PDU has one (#99) — the high/low limits configured per circuit,
+            // phase, outlet or total. Named after the reading so it can be told apart from the outlet's own
+            // alarm on the same device, and only created where the hardware actually reports one, so a PDU
+            // with no alarms configured gains no entities.
+            if (Core.AlarmPayload.Reported(measurement.Alarm))
+            {
+                components.Add(BuildAlarm(measurement, parent, $"{measurement.Entity_DisplayName} Alarm"));
+            }
         }
         else if (entity is GroupMeasurement groupMeasurement)
         {

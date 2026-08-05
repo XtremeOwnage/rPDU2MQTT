@@ -28,6 +28,16 @@ public abstract class basePublishingService : baseMQTTService
             // #205: in Payload mode the reading is published as {"value": …, "timestamp": …}; otherwise it
             // stays the bare value it has always been.
             await PublishString(topic, Core.MessageTimestamps.Payload(measurement.Value, DataTimestampUtc, cfg.MQTT.MessageTimestamp), cancellationToken);
+
+            // The per-measurement alarm (#99). These are the thresholds the PDU actually lets you configure
+            // — high/low current on a circuit or phase, and the outlet's informational fields — and they
+            // were parsed off the wire and then thrown away.
+            //
+            // Only where the PDU reports one: publishing "none" for every measurement on every pass would
+            // double the topic count of the whole bridge to say nothing, and would invent an alarm-capable
+            // reading where the hardware has none.
+            if (Core.AlarmPayload.Reported(measurement.Alarm))
+                await PublishAlarm(measurement, measurement.Alarm, cancellationToken);
         }
     }
 
@@ -92,13 +102,21 @@ public abstract class basePublishingService : baseMQTTService
     }
 
     /// <summary>
-    /// Publish an entity's alarm state ("none" when there is no active alarm).
+    /// Publish an entity's alarm state ("none" when there is no active alarm), plus a small JSON object of
+    /// detail beside it.
     /// </summary>
+    /// <remarks>
+    /// The severity — the PDU's own distinction between an alarm and a warning — used to be parsed and then
+    /// dropped on the floor. It goes to a sibling topic rather than into the state payload: the plain state
+    /// is what existing installs already subscribe to, and turning it into JSON would break all of them.
+    /// It is published on every pass alongside the state, so the two can never disagree.
+    /// </remarks>
     protected async Task PublishAlarm<T>(T Entity, Alarm? alarm, CancellationToken cancellationToken)
         where T : IMQTTKey
     {
-        var topic = MQTTHelper.JoinPaths(Entity.GetTopicPath(), MqttPath.Alarm.ToJsonString());
-        await PublishString(topic, alarm?.State ?? "none", cancellationToken);
+        var path = Entity.GetTopicPath();
+        await PublishString(MQTTHelper.JoinPaths(path, MqttPath.Alarm.ToJsonString()), Core.AlarmPayload.State(alarm), cancellationToken);
+        await PublishString(MQTTHelper.JoinPaths(path, MqttPath.AlarmAttributes.ToJsonString()), Core.AlarmPayload.Attributes(alarm), cancellationToken);
     }
 
     /// <summary>
