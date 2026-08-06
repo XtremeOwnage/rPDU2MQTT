@@ -2865,6 +2865,9 @@ function addFlowSection(nav     , sections     ) {
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
+    // Which metric is actually on screen, taken from the graph rather than the selector: the two disagree
+    // while a fetch is in flight, and a live push repaints without the selector being touched at all.
+    const lifetimeEnergy = String(graph.metric || metricSel.value || '').toLowerCase() === 'energy';
     const incoming      = {}, outgoing      = {};
     nodes.forEach((n     ) => { incoming[n.id] = []; outgoing[n.id] = []; });
     links.forEach((l     ) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
@@ -3225,7 +3228,13 @@ function addFlowSection(nav     , sections     ) {
         // Past the line, the label stops looking like every other figure on the chart and the node is
         // named in a banner above it. The number is still shown — hiding a reading the hardware actually
         // gave would be its own kind of lying — but it is no longer presented as settled.
-        const share = contradictionShare(n, reading);
+        // Not on lifetime energy. Those counters started whenever each device or binding was first seen —
+        // a PDU's outlet totals have been running for years, an inverter's for weeks, a derived one since
+        // the last restart — so the two sides of a node are answering about different spans and a large
+        // gap is the expected result, not a fault. Checked live: a main panel read 96% "unaccounted" purely
+        // because its outlets have been counting far longer than its feeder. The ⚠ and its tooltip still
+        // say so, and the tooltip already points at "Energy today", where every figure covers one window.
+        const share = lifetimeEnergy ? null : contradictionShare(n, reading);
         if (share != null && share >= CONTRADICTION_SHARE) {
           lab.setAttribute('fill', 'var(--warn, #d08700)');
           lab.setAttribute('class', 'flow-contradicted');

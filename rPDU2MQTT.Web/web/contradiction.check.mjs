@@ -21,8 +21,8 @@ const cfg = { EnergyFlow: { Nodes: [], Links: [] } };
 
 // `imbalance` is what the server reports as unaccounted for. inverter is the live case (a reading of 2.1
 // with 129.9 passing through it); panel is 4% out, which is ordinary.
-const graph = (inverterImbalance) => ({
-  ok: true, metric: 'energytoday', units: 'kWh',
+const graph = (inverterImbalance, metric = 'energytoday') => ({
+  ok: true, metric, units: 'kWh',
   nodes: [
     { id: 'solar', label: 'Solar (PV)', kind: 'solar', value: 129.9, derivation: 'measured', imbalance: null },
     { id: 'inverter', label: 'EG4 FlexBoss 21', kind: 'inverter', value: 2.1, derivation: 'measured', imbalance: inverterImbalance },
@@ -34,14 +34,14 @@ const graph = (inverterImbalance) => ({
   ],
 });
 
-async function render(inverterImbalance) {
+async function render(inverterImbalance, metric) {
   const { sandbox, getEl } = makeDom({
     bodies: (url) =>
       url.includes('/api/schema') ? schema :
       url.includes('/api/instances') ? { ok: true, instances: [] } :
       url.includes('/api/config') ? cfg :
       url.includes('/api/flow/live') ? { ok: true, values: [] } :
-      url.includes('/api/flow') ? graph(inverterImbalance) :
+      url.includes('/api/flow') ? graph(inverterImbalance, metric) :
       { ok: true },
   });
   vm.createContext(sandbox);
@@ -83,5 +83,16 @@ sections = await render(0.12);   // 5% of a 2.22 throughput
 const quiet = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
 if (quiet.length) fail(`a ${'5%'} gap raised a contradiction banner — the threshold is not being applied`);
 
+// --- Lifetime energy: the same enormous gap, and deliberately silent.
+//
+// Those counters started whenever each device or binding was first seen — a PDU's outlet totals have been
+// running for years, an inverter's for weeks — so the two sides of a node describe different spans and a
+// large gap is the expected result. Checked against the live system: a main panel read 96% "unaccounted"
+// for exactly that reason. Banner-ing it would be the crying wolf this threshold exists to avoid, and the
+// ⚠ tooltip already explains it and points at "Energy today".
+sections = await render(129.9, 'energy');
+const lifetime = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
+if (lifetime.length) fail('a lifetime-energy gap raised a contradiction banner — those counters start at different times');
+
 console.log('contradiction: a node whose flows contradict it is named above the chart and marked on it; '
-  + 'ordinary gaps stay quiet');
+  + 'ordinary gaps and lifetime-counter gaps stay quiet');
