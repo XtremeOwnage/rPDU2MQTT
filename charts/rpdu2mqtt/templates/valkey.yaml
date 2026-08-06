@@ -36,10 +36,18 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: valkey
     spec:
+      {{- with .Values.valkey.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: valkey
           image: "{{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag }}"
           imagePullPolicy: {{ .Values.valkey.image.pullPolicy }}
+          {{- with .Values.valkey.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             {{- if .Values.valkey.persistence.enabled }}
             # Append-only file: the totals are small and written every pass, and losing the last few
