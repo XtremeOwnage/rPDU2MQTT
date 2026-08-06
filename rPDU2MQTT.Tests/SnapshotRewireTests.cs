@@ -47,6 +47,43 @@ public class SnapshotRewireTests
     private static Measurement FirstMeasurement(PduData d) => d.Devices[0].Outlets[0].Measurements[0];
 
     [Fact]
+    public void AnActiveAlarmSurvivesTheWire_OnTheDeviceOutletAndMeasurement()
+    {
+        // The publisher emits "none" when the alarm object is absent, so an alarm lost in transit is
+        // published as a no-problem state rather than as an error. The wire contract lists fields
+        // explicitly, so an omitted one is dropped without any diagnostic.
+        var (data, _) = Original();
+        var device = data.Devices[0];
+        var outlet = device.Outlets[0];
+        var measurement = outlet.Measurements[0];
+        device.Alarm = new Alarm { State = "active", Severity = "alarm" };
+        outlet.Alarm = new Alarm { State = "active", Severity = "warning" };
+        measurement.Alarm = new Alarm { State = "active", Severity = "alarm" };
+
+        var rebuilt = RawSnapshotMapper.ToData(RawSnapshotMapper.ToWire("default", DateTime.UtcNow, data));
+
+        Assert.Equal("active", rebuilt.Devices[0].Alarm?.State);
+        Assert.Equal("alarm", rebuilt.Devices[0].Alarm?.Severity);
+        Assert.Equal("active", rebuilt.Devices[0].Outlets[0].Alarm?.State);
+        Assert.Equal("warning", rebuilt.Devices[0].Outlets[0].Alarm?.Severity);
+        Assert.Equal("active", FirstMeasurement(rebuilt).Alarm?.State);
+        Assert.Equal("alarm", FirstMeasurement(rebuilt).Alarm?.Severity);
+    }
+
+    [Fact]
+    public void NoAlarmStaysNoAlarm_RatherThanBecomingAnEmptyOne()
+    {
+        // A missing alarm object must stay missing. A blank one would create an always-off "problem"
+        // entity for every measurement of every outlet.
+        var (data, _) = Original();
+        var rebuilt = RawSnapshotMapper.ToData(RawSnapshotMapper.ToWire("default", DateTime.UtcNow, data));
+
+        Assert.Null(rebuilt.Devices[0].Alarm);
+        Assert.Null(rebuilt.Devices[0].Outlets[0].Alarm);
+        Assert.Null(FirstMeasurement(rebuilt).Alarm);
+    }
+
+    [Fact]
     public void WithoutRewiring_AMeasurementPublishesToTheBareTopic_state()
     {
         // The bug, reproduced. This is the topic the live system was trying to publish to, and the broker
