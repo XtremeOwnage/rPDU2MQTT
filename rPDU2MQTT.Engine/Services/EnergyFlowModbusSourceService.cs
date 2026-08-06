@@ -18,7 +18,7 @@ namespace rPDU2MQTT.Services;
 /// them in the GUI takes effect without a restart. A device is opened per poll (connect → read → close),
 /// which is simplest and robust for the seconds-scale cadence energy monitoring needs.
 /// </summary>
-public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValueSource
+public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValueSource, IWithheldSources
 {
     private readonly Config cfg;
     private readonly FlowValueCache latest = new();
@@ -52,6 +52,9 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     // In memory only, as on the MQTT side — a restart makes it unproven until the next rollover, erring
     // towards showing the device's number rather than withholding one we have not yet caught out.
     private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
+
+    /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
+    public IReadOnlyCollection<WithheldSource> Withheld => PeriodCounterAudit.WithheldIn(periodAudit);
 
     /// <summary>The period a reading belongs to, on the same boundary the daily accumulator uses.</summary>
     private string CurrentPeriodKey(DateTime nowUtc)

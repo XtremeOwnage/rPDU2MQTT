@@ -29,7 +29,12 @@ public static class PeriodCounterAudit
     /// <param name="PeriodKey">The period the last reading fell in.</param>
     /// <param name="HighWater">The largest value seen in that period — what a reset has to fall below.</param>
     /// <param name="Contradicted">The source failed to reset across a boundary, so its reading is not "today".</param>
-    public sealed record State(string PeriodKey, double HighWater, bool Contradicted);
+    /// <param name="Reason">
+    /// Why, in the words shown to whoever has to fix it. Kept on the state rather than only logged, so the
+    /// GUI can say it where the missing number is — a value that vanishes with its explanation in a log file
+    /// is indistinguishable from a binding nobody configured.
+    /// </param>
+    public sealed record State(string PeriodKey, double HighWater, bool Contradicted, string? Reason = null);
 
     /// <summary>
     /// A counter sitting at zero says nothing about whether it resets, so a period that ended at (or near)
@@ -53,7 +58,7 @@ public static class PeriodCounterAudit
             // First sight of this source, or the first reading of a new period — the moment of truth.
             var judgeable = prior is not null && prior.HighWater > Meaningful;
             var didNotReset = judgeable && value >= prior!.HighWater - Meaningful;
-            return new State(periodKey, value, didNotReset);
+            return new State(periodKey, value, didNotReset);   // the caller attaches the wording, which needs its name
         }
 
         // Same period: track the high-water mark. Max rather than last, because a counter that dips and
@@ -84,16 +89,35 @@ public static class PeriodCounterAudit
         var key = $"{nodeId}|{source}|{direction}";
         audit.TryGetValue(key, out var prior);
         var next = Observe(prior, value, periodKey);
+        if (next.Contradicted) next = next with { Reason = Explain(nodeId, source, value, periodKey) };
         audit[key] = next;
 
         // Once per transition, not per sample: a message on every reading buries the one that matters.
         if (next.Contradicted && prior?.Contradicted != true)
-            warn?.Invoke(Explain(nodeId, source, value, periodKey));
+            warn?.Invoke(next.Reason!);
         else if (!next.Contradicted && prior?.Contradicted == true)
             warn?.Invoke($"Energy-flow: '{source}' on node '{nodeId}' reset properly for {periodKey}; it is being "
                        + "treated as a daily counter again.");
 
         return !next.Contradicted;
+    }
+
+    /// <summary>Every binding this audit is currently withholding, for the GUI to show.</summary>
+    public static IReadOnlyCollection<WithheldSource> WithheldIn(IReadOnlyDictionary<string, State> audit)
+    {
+        var outp = new List<WithheldSource>();
+        foreach (var (key, state) in audit)
+        {
+            if (!state.Contradicted) continue;
+            // The key is node|source|direction, and a source name may itself contain '|' — split off the
+            // ends rather than the middle.
+            var first = key.IndexOf('|');
+            var last = key.LastIndexOf('|');
+            if (first < 0 || last <= first) continue;
+            outp.Add(new WithheldSource(key[..first], key[(first + 1)..last], EnergyPeriod.Metric,
+                                        state.Reason ?? "Declared as a daily counter, but it did not reset when the day rolled over."));
+        }
+        return outp;
     }
 
     /// <summary>

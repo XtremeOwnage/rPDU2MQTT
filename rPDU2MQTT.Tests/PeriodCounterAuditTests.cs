@@ -171,6 +171,37 @@ public class PeriodCounterAuditTests
             new rPDU2MQTT.Models.Config.EnergyFlowSource { Metric = metric, Accumulation = accumulation! }));
 
     [Fact]
+    public void WithheldIn_ReportsOnlyTheContradictedBindings_WithTheirReason()
+    {
+        // What the GUI reads to explain a missing number. A withheld value whose reason lives only in a log
+        // line leaves the node reading "no data", indistinguishable from a binding nobody ever configured.
+        var audit = new Dictionary<string, PeriodCounterAudit.State>();
+        PeriodCounterAudit.Allow(audit, "2026-08-04", "solar", "sa/pv_energy", "out", 129.9, null);
+        PeriodCounterAudit.Allow(audit, "2026-08-04", "grid", "sa/grid_energy", "out", 50.0, null);
+        PeriodCounterAudit.Allow(audit, "2026-08-05", "solar", "sa/pv_energy", "out", 130.4, null);   // no reset
+        PeriodCounterAudit.Allow(audit, "2026-08-05", "grid", "sa/grid_energy", "out", 0.0, null);    // reset
+
+        var withheld = PeriodCounterAudit.WithheldIn(audit);
+        var one = Assert.Single(withheld);
+        Assert.Equal("solar", one.Node);
+        Assert.Equal("sa/pv_energy", one.Source);
+        Assert.Contains("did not reset", one.Reason);
+    }
+
+    [Fact]
+    public void WithheldIn_KeepsASourceNameThatContainsASeparator()
+    {
+        // MQTT topics are slash-delimited, but nothing stops a register label or a future source name from
+        // carrying the '|' the key is built with. Splitting on the wrong one silently renames the binding
+        // in the very message meant to help someone find it.
+        var audit = new Dictionary<string, PeriodCounterAudit.State>();
+        PeriodCounterAudit.Allow(audit, "2026-08-04", "solar", "odd|name", "out", 129.9, null);
+        PeriodCounterAudit.Allow(audit, "2026-08-05", "solar", "odd|name", "out", 130.4, null);
+
+        Assert.Equal("odd|name", Assert.Single(PeriodCounterAudit.WithheldIn(audit)).Source);
+    }
+
+    [Fact]
     public void TheExplanationNamesTheSourceAndTheFix()
     {
         // A warning nobody can act on is noise. This one has to identify which binding, and say what to change.

@@ -34,13 +34,14 @@ const graph = (inverterImbalance, metric = 'energytoday') => ({
   ],
 });
 
-async function render(inverterImbalance, metric) {
+async function render(inverterImbalance, metric, withheld = []) {
   const { sandbox, getEl } = makeDom({
     bodies: (url) =>
       url.includes('/api/schema') ? schema :
       url.includes('/api/instances') ? { ok: true, instances: [] } :
       url.includes('/api/config') ? cfg :
       url.includes('/api/flow/live') ? { ok: true, values: [] } :
+      url.includes('/api/flow/withheld') ? { ok: true, sources: withheld } :
       url.includes('/api/flow') ? graph(inverterImbalance, metric) :
       { ok: true },
   });
@@ -94,5 +95,27 @@ sections = await render(129.9, 'energy');
 const lifetime = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
 if (lifetime.length) fail('a lifetime-energy gap raised a contradiction banner — those counters start at different times');
 
-console.log('contradiction: a node whose flows contradict it is named above the chart and marked on it; '
-  + 'ordinary gaps and lifetime-counter gaps stay quiet');
+// --- A withheld source is announced, not silently absent.
+//
+// The bridge drops readings it can show to be wrong — a counter declared daily that never resets. Doing it
+// silently leaves the node reading "no data", which is indistinguishable from a binding nobody configured,
+// and sends the operator hunting for a fault in the wrong place entirely.
+sections = await render(0.12, 'energytoday', [{
+  node: 'solar',
+  source: 'solar_assistant/total/pv_energy/state',
+  metric: 'energytoday',
+  reason: 'Configured as a daily (period) counter, but it did not reset when the day rolled over.',
+}]);
+const notices = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
+if (!notices.length) fail('a withheld source was dropped without saying so anywhere on the page');
+const notice = notices.map(n => n.textContent).join(' ');
+if (!notice.includes('solar_assistant/total/pv_energy/state')) fail('the notice does not name the withheld binding');
+if (!notice.includes('did not reset')) fail('the notice does not say why the binding is withheld');
+
+// And nothing is announced when nothing is being withheld.
+sections = await render(0.12, 'energytoday', []);
+if (query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction')).length)
+  fail('a notice appeared with nothing withheld and no contradiction');
+
+console.log('contradiction: contradicted nodes are named above the chart and marked on it; withheld sources '
+  + 'are announced with their reason; ordinary and lifetime-counter gaps stay quiet');
