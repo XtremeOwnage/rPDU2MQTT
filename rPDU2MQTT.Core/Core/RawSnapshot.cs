@@ -14,24 +14,30 @@ namespace rPDU2MQTT.Core.Transport;
 // (non-idempotent) transform.
 //
 // Scope: devices -> outlets/entities -> measurements. OneView groups are a follow-up.
+//
+// Every field a consumer needs must be listed here explicitly. An omitted field is lost without error: the
+// consumer receives the type default and cannot distinguish it from a real value. Two have been missed so
+// far — Record_Key/Record_Parent (see Rewire below), and `alarm`, which the PDU reports on the device, on
+// each outlet and on each measurement.
 
 public sealed record RawSnapshot(string InstanceId, DateTime TimestampUtc, List<RawDevice> Devices);
 
 public sealed record RawDevice(
     string? Key, string? Name, string? Label, string? EntityName, string? DisplayName,
     string? Make, string? Model, string? State, string? Type,
-    List<RawOutlet> Outlets, List<RawEntity> Entities);
+    List<RawOutlet> Outlets, List<RawEntity> Entities, Alarm? Alarm = null);
 
 public sealed record RawOutlet(
     int Key, string? Name, string? Label, string? EntityName, string? DisplayName,
-    string? Make, string? Model, string? State, List<RawMeasurement> Measurements);
+    string? Make, string? Model, string? State, List<RawMeasurement> Measurements, Alarm? Alarm = null);
 
 public sealed record RawEntity(
     string? Key, string? Name, string? Label, string? EntityName, string? DisplayName,
     List<RawMeasurement> Measurements);
 
 public sealed record RawMeasurement(
-    string? Key, string? Type, string? EntityName, string? DisplayName, string? Value, string? Units, string? State);
+    string? Key, string? Type, string? EntityName, string? DisplayName, string? Value, string? Units, string? State,
+    Alarm? Alarm = null);
 
 /// <summary>Maps between the live <see cref="PduData"/> model and the <see cref="RawSnapshot"/> wire form.</summary>
 public static class RawSnapshotMapper
@@ -42,17 +48,17 @@ public static class RawSnapshotMapper
 
     private static RawDevice ToWire(Device d) => new(
         d.Key, d.Name, d.Label, d.Entity_Name, d.Entity_DisplayName, d.Entity_Make, d.Entity_Model, d.State, d.Type,
-        d.Outlets.Select(ToWire).ToList(), d.Entity.Select(ToWire).ToList());
+        d.Outlets.Select(ToWire).ToList(), d.Entity.Select(ToWire).ToList(), d.Alarm);
 
     private static RawOutlet ToWire(Outlet o) => new(
         o.Key, o.Name, o.Label, o.Entity_Name, o.Entity_DisplayName, o.Entity_Make, o.Entity_Model, o.State,
-        o.Measurements.Select(ToWire).ToList());
+        o.Measurements.Select(ToWire).ToList(), o.Alarm);
 
     private static RawEntity ToWire(Entity e) => new(
         e.Key, e.Name, e.Label, e.Entity_Name, e.Entity_DisplayName, e.Measurements.Select(ToWire).ToList());
 
     private static RawMeasurement ToWire(Measurement m) => new(
-        m.Key, m.Type, m.Entity_Name, m.Entity_DisplayName, m.Value, m.Units, m.State);
+        m.Key, m.Type, m.Entity_Name, m.Entity_DisplayName, m.Value, m.Units, m.State, m.Alarm);
 
     /// <summary>
     /// Re-establish the MQTT topic wiring on a rebuilt <see cref="PduData"/>.
@@ -110,6 +116,7 @@ public static class RawSnapshotMapper
             {
                 Key = d.Key!, Name = d.Name!, Label = d.Label!, State = d.State!, Type = d.Type!,
                 Entity_Name = d.EntityName!, Entity_DisplayName = d.DisplayName!, Entity_Make = d.Make, Entity_Model = d.Model,
+                Alarm = d.Alarm!,
             };
             foreach (var o in d.Outlets)
                 device.Outlets.Add(ToOutlet(o));
@@ -126,6 +133,7 @@ public static class RawSnapshotMapper
         {
             Key = o.Key, Name = o.Name!, Label = o.Label!, State = o.State!,
             Entity_Name = o.EntityName!, Entity_DisplayName = o.DisplayName!, Entity_Make = o.Make, Entity_Model = o.Model,
+            Alarm = o.Alarm!,
         };
         foreach (var m in o.Measurements)
             outlet.Measurements.Add(ToMeasurement(m));
@@ -148,5 +156,6 @@ public static class RawSnapshotMapper
     {
         Key = m.Key!, Type = m.Type!, Value = m.Value!, Units = m.Units!, State = m.State!,
         Entity_Name = m.EntityName!, Entity_DisplayName = m.DisplayName!,
+        Alarm = m.Alarm!,
     };
 }
