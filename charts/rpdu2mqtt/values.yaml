@@ -282,8 +282,22 @@ healthProbes:
 
 resources: {}
 podAnnotations: {}
-podSecurityContext: {}
-securityContext: {}
+
+# Defaults that satisfy the Pod Security Standards "restricted" profile, so the chart installs without
+# warnings into a namespace that enforces it. The image already runs as uid 1654 (non-root), so these
+# describe what the container does rather than constraining it further.
+#
+# readOnlyRootFilesystem is deliberately not set: the file-backed energy store writes its running kWh
+# totals to disk, and a read-only root would silently lose them on a deployment that is not using Valkey.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 nodeSelector: {}
 tolerations: []
 affinity: {}
@@ -295,6 +309,12 @@ affinity: {}
 # Enabling this only deploys the instance; the bridge uses it when config.Cache.Enabled is true. Point
 # config.Cache.Connection at your own instance and leave this disabled to share an existing one.
 valkey:
+  # Left empty by default rather than set to the "restricted" profile like the bridge's own pod above.
+  # The valkey image starts as root, and an existing installation's PVC holds data owned by root: adding
+  # runAsNonRoot to a running deployment would leave valkey unable to read its own append-only file, and
+  # that file is the energy accumulator. Set these on a fresh install, or after chowning the volume.
+  podSecurityContext: {}
+  securityContext: {}
   enabled: true
   image:
     repository: valkey/valkey
