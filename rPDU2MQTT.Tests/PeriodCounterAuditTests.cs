@@ -105,6 +105,72 @@ public class PeriodCounterAuditTests
     }
 
     [Fact]
+    public void Allow_WithholdsAfterTheMissedReset_AndWarnsOnlyOnTheTransition()
+    {
+        // The shared entry point both ingests call. Warning on every sample would bury the one that
+        // matters under a poll-rate stream of identical lines.
+        var audit = new Dictionary<string, PeriodCounterAudit.State>();
+        var warnings = new List<string>();
+        bool Allow(double v, string day) =>
+            PeriodCounterAudit.Allow(audit, day, "solar", "register 40 on inv1", "out", v, warnings.Add);
+
+        Assert.True(Allow(129.9, "2026-08-04"));
+        Assert.Empty(warnings);
+
+        Assert.False(Allow(130.4, "2026-08-05"));
+        Assert.False(Allow(131.0, "2026-08-05"));
+        Assert.False(Allow(131.6, "2026-08-05"));
+        Assert.Single(warnings);
+        Assert.Contains("register 40 on inv1", warnings[0]);
+    }
+
+    [Fact]
+    public void Allow_SaysSoWhenASourceStartsBehavingAgain()
+    {
+        var audit = new Dictionary<string, PeriodCounterAudit.State>();
+        var warnings = new List<string>();
+        bool Allow(double v, string day) =>
+            PeriodCounterAudit.Allow(audit, day, "solar", "sa/pv_energy", "out", v, warnings.Add);
+
+        Allow(129.9, "2026-08-04");
+        Assert.False(Allow(130.4, "2026-08-05"));
+        Allow(140.0, "2026-08-05");
+        Assert.True(Allow(0.0, "2026-08-06"));
+
+        Assert.Equal(2, warnings.Count);
+        Assert.Contains("did not reset", warnings[0]);
+        Assert.Contains("reset properly", warnings[1]);
+    }
+
+    [Fact]
+    public void Allow_JudgesEachBindingSeparately()
+    {
+        // A node's in and out legs are different quantities on the same register, and two nodes can be fed
+        // by one topic. Sharing a verdict between them would convict a counter for its neighbour's sins.
+        var audit = new Dictionary<string, PeriodCounterAudit.State>();
+        bool Allow(string node, string src, string dir, double v, string day) =>
+            PeriodCounterAudit.Allow(audit, day, node, src, dir, v, null);
+
+        Allow("grid", "sa/energy", "out", 50.0, "2026-08-04");
+        Allow("grid", "sa/energy", "in", 20.0, "2026-08-04");
+        Allow("solar", "sa/energy", "out", 80.0, "2026-08-04");
+
+        // Only the out leg fails to reset.
+        Assert.False(Allow("grid", "sa/energy", "out", 51.0, "2026-08-05"));
+        Assert.True(Allow("grid", "sa/energy", "in", 0.0, "2026-08-05"));
+        Assert.True(Allow("solar", "sa/energy", "out", 0.4, "2026-08-05"));
+    }
+
+    [Theory]
+    [InlineData("period", "energy", true)]
+    [InlineData("lifetime", "energy", false)]     // supposed to climb; the daily figure is derived from it
+    [InlineData("period", "realpower", false)]    // instantaneous — nothing accumulates, nothing resets
+    [InlineData(null, "energy", false)]
+    public void Applies_OnlyToAnEnergySourceDeclaredAsADailyCounter(string? accumulation, string metric, bool expected)
+        => Assert.Equal(expected, PeriodCounterAudit.Applies(
+            new rPDU2MQTT.Models.Config.EnergyFlowSource { Metric = metric, Accumulation = accumulation! }));
+
+    [Fact]
     public void TheExplanationNamesTheSourceAndTheFix()
     {
         // A warning nobody can act on is noise. This one has to identify which binding, and say what to change.

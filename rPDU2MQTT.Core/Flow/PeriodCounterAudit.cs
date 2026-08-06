@@ -63,7 +63,41 @@ public static class PeriodCounterAudit
     }
 
     /// <summary>
-    /// How to explain a contradicted source to whoever has to fix it — naming the topic, the reading, and
+    /// Whether this source makes the claim at all. Only an energy source declared <c>period</c> does — a
+    /// lifetime counter is supposed to climb across midnight, and the daily figure is derived from it.
+    /// </summary>
+    public static bool Applies(Models.Config.EnergyFlowSource src) =>
+        FlowMetricKey.IsPeriod(src.Accumulation)
+        && string.Equals(src.Metric, "energy", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fold a reading in and say whether it may be published as today's total, warning once per change of
+    /// verdict. Shared by every ingest: a rule that only one transport applies is a rule with a hole in it,
+    /// and the hole is wherever the user happened to wire the counter.
+    /// </summary>
+    /// <param name="audit">Per-source state, keyed by <paramref name="nodeId"/>/<paramref name="source"/>/direction.</param>
+    /// <param name="source">How to name this binding to whoever has to fix it — a topic, or a register.</param>
+    public static bool Allow(
+        IDictionary<string, State> audit, string periodKey,
+        string nodeId, string source, string? direction, double value, Action<string>? warn)
+    {
+        var key = $"{nodeId}|{source}|{direction}";
+        audit.TryGetValue(key, out var prior);
+        var next = Observe(prior, value, periodKey);
+        audit[key] = next;
+
+        // Once per transition, not per sample: a message on every reading buries the one that matters.
+        if (next.Contradicted && prior?.Contradicted != true)
+            warn?.Invoke(Explain(nodeId, source, value, periodKey));
+        else if (!next.Contradicted && prior?.Contradicted == true)
+            warn?.Invoke($"Energy-flow: '{source}' on node '{nodeId}' reset properly for {periodKey}; it is being "
+                       + "treated as a daily counter again.");
+
+        return !next.Contradicted;
+    }
+
+    /// <summary>
+    /// How to explain a contradicted source to whoever has to fix it — naming the source, the reading, and
     /// what to change. A warning nobody can act on is only noise.
     /// </summary>
     public static string Explain(string nodeId, string source, double value, string periodKey) =>

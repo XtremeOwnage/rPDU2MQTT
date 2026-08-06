@@ -269,8 +269,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // today's — it is a cumulative total, or a value the device stopped updating before the rollover
             // — and it is dropped rather than stated. The node then reports "no data" for today, which is
             // the truth, instead of a confident wrong figure.
-            if (periodAudit is not null && periodKey is not null && IsPeriodEnergy(src)
-                && !AllowPeriodReading(periodAudit, periodKey, nodeId, topic, src, value, warn))
+            if (periodAudit is not null && periodKey is not null && PeriodCounterAudit.Applies(src)
+                && !PeriodCounterAudit.Allow(periodAudit, periodKey, nodeId, topic, src.Direction, value, warn))
                 continue;
 
             foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))
@@ -279,32 +279,6 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
                 onReading?.Invoke(nodeId, key, v, src.StaleAfterSeconds);
             }
         }
-    }
-
-    /// <summary>A source whose reading is claimed to already be the daily energy total.</summary>
-    private static bool IsPeriodEnergy(EnergyFlowSource src) =>
-        FlowMetricKey.IsPeriod(src.Accumulation) && string.Equals(src.Metric, "energy", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Fold the reading into the audit and say whether it may be published as today's total. Warns once per
-    /// transition — a message on every sample would bury the one that matters.
-    /// </summary>
-    private static bool AllowPeriodReading(
-        IDictionary<string, PeriodCounterAudit.State> audit, string periodKey,
-        string nodeId, string topic, EnergyFlowSource src, double value, Action<string>? warn)
-    {
-        var auditKey = $"{nodeId}|{topic}|{src.Direction}";
-        audit.TryGetValue(auditKey, out var prior);
-        var next = PeriodCounterAudit.Observe(prior, value, periodKey);
-        audit[auditKey] = next;
-
-        if (next.Contradicted && prior?.Contradicted != true)
-            warn?.Invoke(PeriodCounterAudit.Explain(nodeId, topic, value, periodKey));
-        else if (!next.Contradicted && prior?.Contradicted == true)
-            warn?.Invoke($"Energy-flow: '{topic}' on node '{nodeId}' reset properly for {periodKey}; it is being "
-                       + "treated as a daily counter again.");
-
-        return !next.Contradicted;
     }
 
     private static string Truncate(string s) => s.Length <= 80 ? s : s[..80] + "…";
