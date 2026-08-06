@@ -17,19 +17,26 @@ namespace rPDU2MQTT.Core.Transport;
 //
 // Every field a consumer needs must be listed here explicitly. An omitted field is lost without error: the
 // consumer receives the type default and cannot distinguish it from a real value. Two have been missed so
-// far — Record_Key/Record_Parent (see Rewire below), and `alarm`, which the PDU reports on the device, on
-// each outlet and on each measurement.
+// far — Record_Key/Record_Parent (see Rewire below), `alarm`, which the PDU reports on the device, on each
+// outlet and on each measurement, and the outlet configuration (onDelay/offDelay/rebootDelay/poaAction),
+// which published as 0 and "" instead of the values the outlet was set to, and the device layout, which
+// Home Assistant discovery reads to find the root entity.
 
 public sealed record RawSnapshot(string InstanceId, DateTime TimestampUtc, List<RawDevice> Devices);
 
 public sealed record RawDevice(
     string? Key, string? Name, string? Label, string? EntityName, string? DisplayName,
     string? Make, string? Model, string? State, string? Type,
-    List<RawOutlet> Outlets, List<RawEntity> Entities, Alarm? Alarm = null);
+    List<RawOutlet> Outlets, List<RawEntity> Entities, Alarm? Alarm = null,
+    // Home Assistant discovery reads layout[0] to pick the device's root entity; without it that entity's
+    // measurements are published to the broker but get no sensors.
+    Dictionary<int, string[]>? Layout = null);
 
 public sealed record RawOutlet(
     int Key, string? Name, string? Label, string? EntityName, string? DisplayName,
-    string? Make, string? Model, string? State, List<RawMeasurement> Measurements, Alarm? Alarm = null);
+    string? Make, string? Model, string? State, List<RawMeasurement> Measurements, Alarm? Alarm = null,
+    // Published by PublishOutletConfig and backing the writable delay/power-on entities in Home Assistant.
+    long OnDelay = 0, long OffDelay = 0, long RebootDelay = 0, string? PoaAction = null);
 
 public sealed record RawEntity(
     string? Key, string? Name, string? Label, string? EntityName, string? DisplayName,
@@ -48,11 +55,12 @@ public static class RawSnapshotMapper
 
     private static RawDevice ToWire(Device d) => new(
         d.Key, d.Name, d.Label, d.Entity_Name, d.Entity_DisplayName, d.Entity_Make, d.Entity_Model, d.State, d.Type,
-        d.Outlets.Select(ToWire).ToList(), d.Entity.Select(ToWire).ToList(), d.Alarm);
+        d.Outlets.Select(ToWire).ToList(), d.Entity.Select(ToWire).ToList(), d.Alarm, d.Layout);
 
     private static RawOutlet ToWire(Outlet o) => new(
         o.Key, o.Name, o.Label, o.Entity_Name, o.Entity_DisplayName, o.Entity_Make, o.Entity_Model, o.State,
-        o.Measurements.Select(ToWire).ToList(), o.Alarm);
+        o.Measurements.Select(ToWire).ToList(), o.Alarm,
+        o.OnDelay, o.OffDelay, o.RebootDelay, o.PoaAction);
 
     private static RawEntity ToWire(Entity e) => new(
         e.Key, e.Name, e.Label, e.Entity_Name, e.Entity_DisplayName, e.Measurements.Select(ToWire).ToList());
@@ -116,7 +124,7 @@ public static class RawSnapshotMapper
             {
                 Key = d.Key!, Name = d.Name!, Label = d.Label!, State = d.State!, Type = d.Type!,
                 Entity_Name = d.EntityName!, Entity_DisplayName = d.DisplayName!, Entity_Make = d.Make, Entity_Model = d.Model,
-                Alarm = d.Alarm!,
+                Alarm = d.Alarm!, Layout = d.Layout!,
             };
             foreach (var o in d.Outlets)
                 device.Outlets.Add(ToOutlet(o));
@@ -134,6 +142,7 @@ public static class RawSnapshotMapper
             Key = o.Key, Name = o.Name!, Label = o.Label!, State = o.State!,
             Entity_Name = o.EntityName!, Entity_DisplayName = o.DisplayName!, Entity_Make = o.Make, Entity_Model = o.Model,
             Alarm = o.Alarm!,
+            OnDelay = o.OnDelay, OffDelay = o.OffDelay, RebootDelay = o.RebootDelay, PoaAction = o.PoaAction!,
         };
         foreach (var m in o.Measurements)
             outlet.Measurements.Add(ToMeasurement(m));

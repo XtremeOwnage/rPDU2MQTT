@@ -25,9 +25,17 @@ public class SnapshotRewireTests
     private static (PduData Data, DummyEntity Root) Original()
     {
         var m = new Measurement { Key = "realpower", Type = "realpower", Value = "61", Units = "W", State = "state" };
-        var outlet = new Outlet { Key = 3, Name = "Outlet 3", Label = "Kube01", State = "on" };
+        var outlet = new Outlet
+        {
+            Key = 3, Name = "Outlet 3", Label = "Kube01", State = "on",
+            OnDelay = 5, OffDelay = 5, RebootDelay = 5, PoaAction = "last",
+        };
         outlet.Measurements.Add(m);
-        var device = new Device { Key = "pdu_1", Name = "Rack-PDU-1", Label = "Rack-PDU-1", State = "on", Type = "rpdu" };
+        var device = new Device
+        {
+            Key = "pdu_1", Name = "Rack-PDU-1", Label = "Rack-PDU-1", State = "on", Type = "rpdu",
+            Layout = new Dictionary<int, string[]> { [0] = ["entity/phase0"], [2] = ["outlet/3"] },
+        };
         device.Outlets.Add(outlet);
 
         var data = new PduData();
@@ -81,6 +89,38 @@ public class SnapshotRewireTests
         Assert.Null(rebuilt.Devices[0].Alarm);
         Assert.Null(rebuilt.Devices[0].Outlets[0].Alarm);
         Assert.Null(FirstMeasurement(rebuilt).Alarm);
+    }
+
+    [Fact]
+    public void TheOutletConfigurationSurvivesTheWire()
+    {
+        // These back the writable delay and power-on-action entities in Home Assistant. Dropped from the
+        // contract, they arrived as 0 and "", so the entities reported defaults rather than what the outlet
+        // was actually set to; on the live PDU the outlet held onDelay/offDelay/rebootDelay of 5 and a
+        // poaAction of "last", and the broker carried 0, 0, 0 and empty.
+        var (data, _) = Original();
+
+        var rebuilt = RawSnapshotMapper.ToData(RawSnapshotMapper.ToWire("default", DateTime.UtcNow, data));
+        var outlet = rebuilt.Devices[0].Outlets[0];
+
+        Assert.Equal(5, outlet.OnDelay);
+        Assert.Equal(5, outlet.OffDelay);
+        Assert.Equal(5, outlet.RebootDelay);
+        Assert.Equal("last", outlet.PoaAction);
+    }
+
+    [Fact]
+    public void TheDeviceLayoutSurvivesTheWire()
+    {
+        // Home Assistant discovery reads layout[0] to identify the device's root entity and discover its
+        // measurements. Without the layout that step is skipped: the readings still reach the broker, but
+        // no sensor is created for them.
+        var (data, _) = Original();
+
+        var rebuilt = RawSnapshotMapper.ToData(RawSnapshotMapper.ToWire("default", DateTime.UtcNow, data));
+
+        Assert.NotNull(rebuilt.Devices[0].Layout);
+        Assert.Equal(["entity/phase0"], rebuilt.Devices[0].Layout[0]);
     }
 
     [Fact]
