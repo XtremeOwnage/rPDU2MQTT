@@ -2363,6 +2363,32 @@ function collapseGraph(nodes       , links       )                              
 // believed for a week.
 const CONTRADICTION_SHARE = 0.25;
 
+/// The banner naming every binding the bridge is dropping, and why. Separate from the contradiction banner
+/// because it is a different statement: that one says a number on the chart disagrees with the chart, this
+/// one says a number is absent on purpose. A node reading "no data" is otherwise indistinguishable from one
+/// nobody ever bound a source to, and the two need completely different fixes.
+function withheldBanner(sources       )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  box.appendChild(el('strong', {
+    text: sources.length === 1
+      ? '1 source is being withheld'
+      : `${sources.length} sources are being withheld`,
+  }));
+  box.appendChild(el('div', {
+    class: 'desc',
+    style: { margin: '2px 0 6px' },
+    text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
+        + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
+  }));
+  sources.forEach((w     ) => {
+    const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
+    row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
+    row.appendChild(el('span', { text: w.reason || '' }));
+    box.appendChild(row);
+  });
+  return box;
+}
+
 /// The banner naming every node whose figure its own flows contradict. Above the chart, not inside it: the
 /// point is to be read before the numbers are, by someone who came to the page to read the numbers.
 function contradictionBanner(items                                                , onFocus                      )              {
@@ -2779,6 +2805,9 @@ function addFlowSection(nav     , sections     ) {
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
   let lastGraph      = null;
+  // Bindings the server is dropping on purpose. Fetched beside the graph rather than folded into it: it
+  // describes the ingest, not the drawing, and it must still be reported when the graph itself is empty.
+  let withheldSources        = [];
 
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
@@ -3346,6 +3375,7 @@ function addFlowSection(nav     , sections     ) {
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
       : '';
+    if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
@@ -3643,7 +3673,8 @@ function addFlowSection(nav     , sections     ) {
   const load = async () => {
     let path = withInstance('/api/flow', instSel);
     if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
-    const r = await api(path);
+    const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
+    withheldSources = (w.body && w.body.ok && w.body.sources) || [];
     if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
     lastGraph = r.body;
     draw(r.body);

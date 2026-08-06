@@ -1608,6 +1608,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json);
         });
 
+        // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be
+        // wrong is the right call; doing it silently is not, because the node then reads "no data" and looks
+        // exactly like a binding nobody ever configured. This is what the diagram reads to say so.
+        app.MapGet("/api/flow/withheld", (HttpContext ctx) =>
+        {
+            var withheld = (live as Core.Flow.IWithheldSources)?.Withheld ?? Array.Empty<Core.Flow.WithheldSource>();
+            return Results.Json(new
+            {
+                ok = true,
+                sources = withheld.Select(w => new { node = w.Node, source = w.Source, metric = w.Metric, reason = w.Reason }),
+            }, ConfigSchema.Json);
+        });
+
         // Preview the generated paths with the posted (unsaved) config applied, so the Overrides
         // editor can show how edits change the HA/Prometheus/EmonCMS paths. Runs the real processing
         // pipeline against a transient PDU so the result matches what would actually be published.

@@ -22,7 +22,7 @@ namespace rPDU2MQTT.Services;
 /// Subscriptions are reconciled on a timer rather than only at startup, so binding a topic in the GUI
 /// takes effect without a restart (matching the rest of the app's live-reload behaviour).
 /// </summary>
-public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics
+public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics, IWithheldSources
 {
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
@@ -40,6 +40,9 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     // like one. In memory only — a restart makes it unproven again until the next rollover, which errs
     // towards showing the device's number rather than withholding one we haven't yet caught out.
     private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
+
+    /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
+    public IReadOnlyCollection<WithheldSource> Withheld => PeriodCounterAudit.WithheldIn(periodAudit);
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null)
     {
