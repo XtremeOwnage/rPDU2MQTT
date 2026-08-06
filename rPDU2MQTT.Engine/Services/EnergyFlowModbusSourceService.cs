@@ -48,6 +48,18 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         catch (OperationCanceledException) { /* shutting down */ }
     }
 
+    // Per (node, register, direction): whether a source claiming to be a daily counter has behaved like one.
+    // In memory only, as on the MQTT side — a restart makes it unproven until the next rollover, erring
+    // towards showing the device's number rather than withholding one we have not yet caught out.
+    private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
+
+    /// <summary>The period a reading belongs to, on the same boundary the daily accumulator uses.</summary>
+    private string CurrentPeriodKey(DateTime nowUtc)
+    {
+        var agg = cfg.EnergyFlow.Aggregation;
+        return EnergyPeriod.KeyFor(nowUtc, EnergyPeriod.Resolve(agg.PeriodTimeZone), agg.PeriodStartHour);
+    }
+
     /// <summary>Poll each due connection, and drop cached readings whose binding has gone away.</summary>
     private void Reconcile(DateTime nowUtc)
     {
@@ -82,8 +94,23 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         // poll on a device that only speaks RTU-over-TCP.
         var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
 
+        var periodKey = CurrentPeriodKey(nowUtc);
+
         ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, conn.TimeoutMs, forConn.Select(f => f.Source).ToList(),
-            onValue: (src, value) => { foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value)) latest.Set(nodeOf[src], key, v, src.StaleAfterSeconds, nowUtc); },
+            onValue: (src, value) =>
+            {
+                // Same check the MQTT ingest applies (#340): a register declared as a daily counter has to
+                // actually reset at the boundary, or whatever it holds is not today's total. A rule only one
+                // transport enforces is a rule with a hole in it, and the hole is wherever the counter
+                // happened to be wired.
+                if (PeriodCounterAudit.Applies(src)
+                    && !PeriodCounterAudit.Allow(periodAudit, periodKey, nodeOf[src],
+                                                 $"register {src.Register} on {conn.Id}", src.Direction, value, m => Log.Warning(m)))
+                    return;
+
+                foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))
+                    latest.Set(nodeOf[src], key, v, src.StaleAfterSeconds, nowUtc);
+            },
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
             onResolved: f => resolvedFraming[conn.Id] = f);
     }
