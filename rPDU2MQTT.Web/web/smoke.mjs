@@ -176,7 +176,7 @@ if (query(getEl('sections'), '.node-editor', false)) fail('the node editor rende
 const editorText = editor.textContent;
 if (!editorText.includes('Live value bindings')) fail('opening a node did not render its bindings editor');
 if (!editorText.includes('Feeders & children')) fail('the node editor did not render the feeders/children wiring');
-if (!query(editor, 'input', true).some(i => i.attrs.value === 'solar_assistant/inverter_1/pv_power/state'))
+if (!query(editor, 'input', true).some(i => i.value === 'solar_assistant/inverter_1/pv_power/state'))
   fail('the node editor did not surface the migrated MQTT binding as an editable topic');
 // The Modbus binding row must render its connection picker, listing the configured connection.
 if (!editorText.includes('Inverter')) fail('the Modbus binding row did not list the configured connection');

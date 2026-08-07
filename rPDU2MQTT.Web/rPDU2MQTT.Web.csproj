@@ -45,6 +45,7 @@
 			<GuiSource Include="web\gauge.check.mjs" />
 			<GuiSource Include="web\contradiction.check.mjs" />
 			<GuiSource Include="web\tags.check.mjs" />
+			<GuiSource Include="web\discover.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -75,6 +76,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/gauge.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/contradiction.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tags.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/discover.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

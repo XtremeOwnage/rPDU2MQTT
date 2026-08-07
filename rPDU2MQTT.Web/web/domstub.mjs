@@ -43,6 +43,10 @@ function* descendants(node) {
 export function makeEl(tag = 'div') {
   const node = {
     tag, children: [], attrs: {}, style: {}, dataset: {}, _text: '',
+    // Form-control properties a real element always has. el() assigns a prop when `k in e` and falls back
+    // to setAttribute otherwise, so without these an input's value silently became an attribute here while
+    // being a property in the browser — and a test reading either one would disagree with the app.
+    value: '', checked: false, disabled: false,
     classList: {
       _s: new Set(),
       add(...c) { c.forEach(x => x && this._s.add(x)); },
