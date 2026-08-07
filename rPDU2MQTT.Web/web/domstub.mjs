@@ -63,8 +63,18 @@ export function makeEl(tag = 'div') {
     // Parentage is tracked so remove() actually detaches: a panel mounted on <body> and later closed has
     // to leave the tree, or a test can't tell an open modal from a closed one.
     parent: null,
-    appendChild(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
-    append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); } }); },
+    appendChild(c) {
+      if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); }
+      return c;
+    },
+    // A <select> reports its first option's value until something sets another. Without this a select
+    // built by appending options reads as '' here while a browser reports the first option.
+    _adoptOption(c) {
+      if (this.tag !== 'select' || !c || c.tag !== 'option' || this.value) return;
+      const v = c.value || (c.attrs && c.attrs.value);
+      if (v) this.value = v;
+    },
+    append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
     remove() { if (this.parent) this.parent.removeChild(this); },
     // Swap this node for another in the parent's child list, keeping its position — used where a toolbar

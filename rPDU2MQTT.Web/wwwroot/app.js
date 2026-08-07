@@ -3902,10 +3902,16 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
   }));
 
   const bar = el('div', { class: 'ld-toolbar' });
+  // Where to look. Discovery states the unit and device class, so it is the default; the topic profiles
+  // exist for publishers that announce nothing, where the shape of the topic is all there is to go on.
+  const srcSel = el('select', { style: { width: 'auto' } })                     ;
+  srcSel.appendChild(el('option', { value: 'discovery', text: 'Home Assistant discovery' }));
+  srcSel.appendChild(el('option', { value: 'esphome', text: 'ESPHome topics' }));
+  srcSel.appendChild(el('option', { value: 'zwavejs', text: 'Z-Wave JS topics' }));
   const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' })                    ;
   const scan = btn('Scan broker', 'primary');
   const addBtn = btn('Add selected');
-  bar.append(scan, el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn);
+  bar.append(srcSel, scan, el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn);
   const note = el('div', { class: 'desc' });
   const list = el('div');
   panel.append(bar, note, list);
@@ -3922,7 +3928,7 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
     if (!readings.length) { note.textContent = 'Nothing importable found. Only power and energy entities are offered.'; return; }
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['', 'Device', 'Reading', 'Metric', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
+    ['', 'Device', 'Reading', 'Metric', 'Unit', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     readings.forEach(r => {
@@ -3935,9 +3941,24 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
       tr.appendChild(el('td', {}, cb));
       tr.appendChild(el('td', { text: r.device || '—' }));
       tr.appendChild(el('td', { text: r.label }));
-      tr.appendChild(el('td', { text: r.metric + (r.unit ? ` (${r.unit})` : '') }));
+      tr.appendChild(el('td', { text: r.metric }));
+
+      // A topic-matched reading has no stated unit — esphome/.../energy_d/state = 3063.783 could be Wh or
+      // kWh, and only the value tells you which. Editable, with the sample beside it.
+      const unitCell = el('td');
+      if (r.unit) {
+        unitCell.appendChild(el('span', { text: r.unit }));
+      } else {
+        const unitIn = el('input', { type: 'text', value: '', placeholder: r.metric === 'energy' ? 'kWh / Wh' : 'W / kW', style: { width: '84px' } })                    ;
+        unitIn.onchange = () => { r.unit = unitIn.value.trim() || undefined; };
+        unitCell.appendChild(unitIn);
+      }
+      tr.appendChild(unitCell);
+
       const topic = el('td');
       topic.appendChild(el('code', { text: r.topic, style: { color: 'var(--muted)' } }));
+      if (r.sample != null && r.sample !== '')
+        topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: `last value: ${String(r.sample).slice(0, 60)}` }));
       if (r.unsupported) topic.appendChild(el('div', { class: 'nh-warn', text: `Cannot import: ${r.unsupported}.` }));
       else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already a node.' }));
       tr.appendChild(topic);
@@ -3949,8 +3970,11 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
 
   let found        = [];
   scan.onclick = async () => {
-    note.textContent = 'Scanning the broker’s retained discovery…';
-    const r = await api('/api/mqtt/importable');
+    const src = srcSel.value;
+    note.textContent = 'Scanning the broker…';
+    const r = await api(src === 'discovery'
+      ? '/api/mqtt/importable'
+      : '/api/mqtt/importable/pattern?profile=' + encodeURIComponent(src));
     if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
     found = r.body.readings || [];
     note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
