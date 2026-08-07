@@ -109,6 +109,20 @@ if (src.Metric !== 'realpower' || src.Unit !== 'W') fail('the binding lost the m
 // And nothing else was added — in particular not the two refused rows.
 if (cfg.EnergyFlow.Nodes.length !== 2) fail(`expected 2 nodes, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
 
+// --- Switching panels, not just closing.
+// Both panels share one container; clicking the other button used to close whatever was open and require
+// a second click to get the panel you asked for.
+buttons().find(b => b.textContent === 'Import device template').click();
+await new Promise(r => setTimeout(r, 50));
+buttons().find(b => b.textContent === 'Discover from MQTT').click();
+await new Promise(r => setTimeout(r, 50));
+if (!buttons().some(b => b.textContent === 'Scan broker'))
+  fail('clicking Discover while the template panel was open closed it instead of switching');
+// And its own button still closes it.
+buttons().find(b => b.textContent === 'Discover from MQTT').click();
+await new Promise(r => setTimeout(r, 50));
+if (buttons().some(b => b.textContent === 'Scan broker')) fail('the panel did not close on its own button');
+
 // --- The topic-profile path.
 // Adding re-renders the Nodes tab, which closes the panel; reopen it.
 buttons().find(b => b.textContent === 'Discover from MQTT').click();
