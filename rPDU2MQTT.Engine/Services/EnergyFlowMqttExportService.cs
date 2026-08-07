@@ -77,8 +77,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
         // Synthetic nodes are for the diagram only — see FlowNode.Synthetic. Publishing one would put a
         // '#' in the topic, which is the MQTT wildcard and not legal in a publish topic.
+        var tagFilter = cfg.EnergyFlow.MqttExportTags;
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
+            // Tag filter (#342): what this destination receives. It never changes a value — the node still
+            // reports on the diagram and still goes to every other destination.
+            if (!tagFilter.Allows(node.Tags)) continue;
+
             // Nothing determines this tier's power — no measurement, and no single path that conservation
             // pins down. Publishing it would put a fabricated 0 W into Home Assistant's history, which is
             // worse than the sensor going unavailable: one is a gap, the other is a lie that gets recorded.
@@ -87,7 +92,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
             var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
-            var parents = FlowExport.Parents(graph, node.Id);          // the tiers that feed this one
+            // Only feeders that are themselves being exported. A via_device pointing at a device this
+            // destination never receives would leave Home Assistant with a dangling parent for every node
+            // whose feeder the tag filter removed.
+            var parents = FlowExport.Parents(graph, node.Id)
+                .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
+                              || tagFilter.Allows(pn.Tags))
+                .ToList();
 
             // The in-direction (charge/export) energy, when this node declares one and a fresh value exists —
             // null otherwise, so HA's energy_in sensor reads unavailable rather than a fabricated 0.

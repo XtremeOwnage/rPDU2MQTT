@@ -362,6 +362,41 @@
             "default": false
           },
           {
+            "key": "NodeTags",
+            "label": "NodeTags",
+            "description": "Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent \u2014 never a value, and never any other destination.",
+            "type": "object",
+            "required": false,
+            "properties": [
+              {
+                "key": "Include",
+                "label": "Include",
+                "description": "Only send nodes carrying at least one of these tags. Empty sends every node.",
+                "type": "list",
+                "required": false,
+                "valueSchema": {
+                  "key": "",
+                  "label": "",
+                  "type": "string",
+                  "required": false
+                }
+              },
+              {
+                "key": "Exclude",
+                "label": "Exclude",
+                "description": "Never send nodes carrying any of these tags. Takes precedence over Include.",
+                "type": "list",
+                "required": false,
+                "valueSchema": {
+                  "key": "",
+                  "label": "",
+                  "type": "string",
+                  "required": false
+                }
+              }
+            ]
+          },
+          {
             "key": "Url",
             "label": "Url",
             "description": "Home Assistant base URL, e.g. http://homeassistant.local:8123 .",
@@ -757,6 +792,41 @@
         "required": false,
         "default": false,
         "isFeatureToggle": true
+      },
+      {
+        "key": "NodeTags",
+        "label": "NodeTags",
+        "description": "Limit the energy-flow metrics to nodes with particular tags. Empty exposes every node. Filtering changes only what is scraped \u2014 never a value, and never any other destination.",
+        "type": "object",
+        "required": false,
+        "properties": [
+          {
+            "key": "Include",
+            "label": "Include",
+            "description": "Only send nodes carrying at least one of these tags. Empty sends every node.",
+            "type": "list",
+            "required": false,
+            "valueSchema": {
+              "key": "",
+              "label": "",
+              "type": "string",
+              "required": false
+            }
+          },
+          {
+            "key": "Exclude",
+            "label": "Exclude",
+            "description": "Never send nodes carrying any of these tags. Takes precedence over Include.",
+            "type": "list",
+            "required": false,
+            "valueSchema": {
+              "key": "",
+              "label": "",
+              "type": "string",
+              "required": false
+            }
+          }
+        ]
       },
       {
         "key": "Port",
@@ -2527,6 +2597,41 @@
         "type": "bool",
         "required": false,
         "default": false
+      },
+      {
+        "key": "MqttExportTags",
+        "label": "MqttExportTags",
+        "description": "Limit the MQTT export to nodes with particular tags. Empty exports every node. Filtering changes only what is sent \u2014 never a value, and never any other destination.",
+        "type": "object",
+        "required": false,
+        "properties": [
+          {
+            "key": "Include",
+            "label": "Include",
+            "description": "Only send nodes carrying at least one of these tags. Empty sends every node.",
+            "type": "list",
+            "required": false,
+            "valueSchema": {
+              "key": "",
+              "label": "",
+              "type": "string",
+              "required": false
+            }
+          },
+          {
+            "key": "Exclude",
+            "label": "Exclude",
+            "description": "Never send nodes carrying any of these tags. Takes precedence over Include.",
+            "type": "list",
+            "required": false,
+            "valueSchema": {
+              "key": "",
+              "label": "",
+              "type": "string",
+              "required": false
+            }
+          }
+        ]
       },
       {
         "key": "MqttTopicTemplate",

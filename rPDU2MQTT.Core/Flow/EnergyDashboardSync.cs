@@ -32,8 +32,14 @@ public enum EnergyDirection
 /// </summary>
 public static class EnergyDashboardSync
 {
+    /// <param name="include">
+    /// Optional per-node gate — the caller's tag filter (#342). Applied here rather than by handing in a
+    /// pruned graph, so parent lookups still see the whole hierarchy: a filtered-out feeder must not turn
+    /// its children into orphans.
+    /// </param>
     public static List<HaDeviceConsumption> BuildDeviceConsumption(FlowGraph graph, Func<string, string?> statFor,
-        IReadOnlyCollection<string>? excludeKinds = null, Func<string, string?>? powerFor = null)
+        IReadOnlyCollection<string>? excludeKinds = null, Func<string, string?>? powerFor = null,
+        Func<FlowNode, bool>? include = null)
     {
         var excluded = excludeKinds is { Count: > 0 }
             ? new HashSet<string>(excludeKinds, StringComparer.OrdinalIgnoreCase)
@@ -42,6 +48,7 @@ public static class EnergyDashboardSync
         // Diagram-only nodes are not devices — see FlowNode.Synthetic.
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
+            if (include is not null && !include(node)) continue;
             // Sources/storage/pass-through (grid, solar, battery, inverter) aren't "device consumption" — they
             // clutter the list and double-count against the dashboard's own grid/solar/battery buckets.
             if (excluded is not null && excluded.Contains(node.Kind ?? "node"))
@@ -70,13 +77,16 @@ public static class EnergyDashboardSync
     /// appears with whichever flow directions resolve.
     /// </para>
     /// </summary>
+    /// <param name="include">Optional per-node gate — the caller's tag filter (#342).</param>
     public static List<JsonObject> BuildEnergySources(FlowGraph graph, Func<string, EnergyDirection, string?> statFor,
-        Func<string, string?>? powerFor = null, Func<string, string?>? socFor = null)
+        Func<string, string?>? powerFor = null, Func<string, string?>? socFor = null,
+        Func<FlowNode, bool>? include = null)
     {
         var sources = new List<JsonObject>();
         // …and they are not energy sources either.
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
+            if (include is not null && !include(node)) continue;
             var outStat = statFor(node.Id, EnergyDirection.Out);
             var inStat = statFor(node.Id, EnergyDirection.In);
             var power = powerFor?.Invoke(node.Id);   // signed power sensor (positive supplying); optional

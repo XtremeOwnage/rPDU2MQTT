@@ -61,7 +61,7 @@ public sealed class HaEnergyDashboardSync
         };
         // Optional real-time power sensor: the outlet/PDU's native power entity, else the energyflow power sensor.
         Func<string, string?> powerFor = id => PowerStat(id, nativePower, entityByUniqueId);
-        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver, excludeKinds, powerFor);
+        return EnergyDashboardSync.BuildDeviceConsumption(graph, resolver, excludeKinds, powerFor, IncludeNode);
     }
 
     /// <summary>Resolve a node's power sensor entity — a native (PDU/outlet) power sensor if it has one, else
@@ -126,8 +126,12 @@ public sealed class HaEnergyDashboardSync
                 ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
                 : Resolve(FlowExport.EnergyInUniqueId(id)),
             powerFor: id => PowerStat(id, nativePower, entityByUniqueId),   // grid/battery real-time power
-            socFor: id => Resolve(FlowExport.SocUniqueId(id)));             // battery state of charge
+            socFor: id => Resolve(FlowExport.SocUniqueId(id)),              // battery state of charge
+            include: IncludeNode);
     }
+
+    /// <summary>The tag filter for this destination (#342). Decides what is synced, never what a node reads.</summary>
+    private bool IncludeNode(Core.Flow.FlowNode node) => config.HASS.EnergyDashboard.NodeTags.Allows(node.Tags);
 
     /// <summary>Merge our hierarchy devices into HA's energy prefs (preserving the user's own). Returns the count synced.</summary>
     public async Task<int> SyncAsync(string url, string token, CancellationToken ct)
