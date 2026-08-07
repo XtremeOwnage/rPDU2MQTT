@@ -33,7 +33,7 @@ const pattern = {
   readings: [
     { id: 'esphome_deep_freezer_energy_d', label: 'deep_freezer energy_d', device: 'deep_freezer',
       topic: 'esphome/devices/deep_freezer/sensor/energy_d/state', metric: 'energy', unit: null,
-      jsonField: null, sample: '3063.783', unsupported: null },
+      units: ['kWh', 'Wh', 'MWh'], jsonField: null, sample: '3063.783', unsupported: null },
   ],
 };
 
@@ -44,6 +44,10 @@ const { sandbox, getEl } = makeDom({
     url.includes('/api/schema') ? schema :
     url.includes('/api/instances') ? { ok: true, instances: [] } :
     url.includes('/api/config') ? cfg :
+    url.includes('/api/mqtt/profiles') ? { ok: true, profiles: [
+      { id: 'esphome', label: 'ESPHome', pattern: 'esphome/devices/{device}/sensor/{measure}/state' },
+      { id: 'custom:Tasmota', label: 'Tasmota', pattern: 'tele/{device}/SENSOR/{measure}' },
+    ] } :
     url.includes('/api/mqtt/importable/pattern') ? pattern :
     url.includes('/api/mqtt/importable') ? importable :
     url.includes('/api/flow/live') ? { ok: true, values: [] } :
@@ -111,6 +115,9 @@ if (cfg.EnergyFlow.Nodes.length !== 2) fail(`expected 2 nodes, got ${cfg.EnergyF
 const sel = query(getEl('sections'), 'select', true)
   .find(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'esphome'));
 if (!sel) fail('no source selector offering the topic profiles');
+// Profiles come from the server, so one defined in config appears without a rebuild.
+const opts = (sel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!opts.includes('custom:Tasmota')) fail(`a configured profile is missing from the source list: ${opts.join(', ')}`);
 sel.value = 'esphome';
 buttons().find(b => b.textContent === 'Scan broker').click();
 await new Promise(r => setTimeout(r, 200));
@@ -119,9 +126,15 @@ const patRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.incl
 if (!patRow) fail('the topic-profile scan rendered no row');
 // The sampled value is shown, because it is the only thing that distinguishes Wh from kWh.
 if (!patRow.textContent.includes('3063.783')) fail('the row does not show the sampled value');
-// And the unit is an input, not an assumption.
-const unitBox = query(patRow, 'input', true).find(i => i.attrs?.type === 'text' || i.type === 'text');
+// The unit is asked for, as a dropdown of what the converter accepts — not free text, where a typo binds
+// a source whose readings are then silently never converted.
+const unitBox = query(patRow, 'select', true)[0];
 if (!unitBox) fail('a topic-matched reading was offered without asking for its unit');
+const unitOpts = (unitBox.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!unitOpts.includes('Wh') || !unitOpts.includes('kWh'))
+  fail(`the unit list does not come from the metric's converter table: ${unitOpts.join(', ')}`);
+// Nothing preselected: the sampled value is the only evidence of which unit applies.
+if (unitBox.value) fail(`a unit was preselected (${unitBox.value}) rather than asked for`);
 
 unitBox.value = 'Wh';
 unitBox.onchange({});

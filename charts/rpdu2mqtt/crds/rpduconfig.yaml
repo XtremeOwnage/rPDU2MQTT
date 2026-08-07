@@ -56,6 +56,31 @@ spec:
                   ClientID:
                     type: string
                     description: The client-id used when connecting to MQTT.
+                  ImportProfiles:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Name:
+                          type: string
+                          description: Name shown in the MQTT Import source list.
+                        Filter:
+                          type: string
+                          description: "Subscription filter to browse, e.g. 'tele/#'. Narrow it: a broker's ACL may refuse '#'."
+                        Pattern:
+                          type: string
+                          description: Topic shape, with {device} and {measure} marking the parts to capture and '+' matching any single segment. e.g. 'tele/{device}/SENSOR/{measure}'.
+                        JsonField:
+                          type: string
+                          description: Field holding the value when the payload is JSON — dotted for nesting. Leave blank when the payload is the bare number.
+                        Metrics:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          additionalProperties:
+                            type: string
+                          description: Captured {measure} -> metric name (realpower, apparentpower, energy, current, voltage, frequency, powerfactor). Measures not listed are ignored.
+                    description: Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.
                   ParentTopic:
                     type: string
                     description: The parent topic for MQTT messages.

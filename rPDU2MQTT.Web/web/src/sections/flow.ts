@@ -2470,8 +2470,9 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
   const panel = el('div', { class: 'tpl-import' });
   panel.appendChild(el('div', {
     class: 'desc',
-    text: 'Power and energy readings other integrations publish to this broker. Pick the ones to add as '
-        + 'nodes; nothing is created until you do, and nothing is saved until you press Save.',
+    text: 'Readings other integrations publish to this broker — power, energy, current, voltage, frequency. '
+        + 'Pick the ones to add as nodes; nothing is created until you do, and nothing is saved until you '
+        + 'press Save. Add topic shapes for other publishers under MQTT → ImportProfiles.',
   }));
 
   const bar = el('div', { class: 'ld-toolbar' });
@@ -2479,8 +2480,11 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
   // exist for publishers that announce nothing, where the shape of the topic is all there is to go on.
   const srcSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   srcSel.appendChild(el('option', { value: 'discovery', text: 'Home Assistant discovery' }));
-  srcSel.appendChild(el('option', { value: 'esphome', text: 'ESPHome topics' }));
-  srcSel.appendChild(el('option', { value: 'zwavejs', text: 'Z-Wave JS topics' }));
+  // The rest come from the server: built-in profiles plus MQTT.ImportProfiles.
+  api('/api/mqtt/profiles').then((r: any) => {
+    ((r.body && r.body.profiles) || []).forEach((p: any) =>
+      srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
+  });
   const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' }) as HTMLInputElement;
   const scan = btn('Scan broker', 'primary');
   const addBtn = btn('Add selected');
@@ -2498,7 +2502,14 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
 
   const render = (readings: any[]) => {
     list.innerHTML = '';
-    if (!readings.length) { note.textContent = 'Nothing importable found. Only power and energy entities are offered.'; return; }
+    if (!readings.length) {
+      note.textContent = srcSel.value === 'discovery'
+        ? 'No importable entities in the broker’s Home Assistant discovery. Publishers that announce nothing '
+          + 'will not appear here — try a topic profile instead.'
+        : 'No topics matched this profile’s shape. Check the pattern against what the publisher actually '
+          + 'sends, or add one under MQTT → ImportProfiles.';
+      return;
+    }
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
     ['', 'Device', 'Reading', 'Metric', 'Unit', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
@@ -2516,15 +2527,21 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
       tr.appendChild(el('td', { text: r.label }));
       tr.appendChild(el('td', { text: r.metric }));
 
-      // A topic-matched reading has no stated unit — esphome/.../energy_d/state = 3063.783 could be Wh or
-      // kWh, and only the value tells you which. Editable, with the sample beside it.
+      // A topic-matched reading carries no unit. The choices are the units FlowUnits accepts for this
+      // metric; an unlisted string would not convert.
       const unitCell = el('td');
       if (r.unit) {
         unitCell.appendChild(el('span', { text: r.unit }));
       } else {
-        const unitIn = el('input', { type: 'text', value: '', placeholder: r.metric === 'energy' ? 'kWh / Wh' : 'W / kW', style: { width: '84px' } }) as HTMLInputElement;
-        unitIn.onchange = () => { r.unit = unitIn.value.trim() || undefined; };
-        unitCell.appendChild(unitIn);
+        const choices: string[] = r.units || [];
+        const unitSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+        // Blank and selected by default; the sampled payload is shown in the topic cell.
+        unitSel.appendChild(el('option', { value: '', text: '— pick —' }));
+        choices.forEach(u => unitSel.appendChild(el('option', { value: u, text: u })));
+        unitSel.value = '';
+        unitSel.onchange = () => { r.unit = unitSel.value || undefined; };
+        unitCell.appendChild(unitSel);
+        if (!choices.length) unitCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'no units for this metric' }));
       }
       tr.appendChild(unitCell);
 

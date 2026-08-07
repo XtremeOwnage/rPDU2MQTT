@@ -43,6 +43,63 @@
         "required": false
       },
       {
+        "key": "ImportProfiles",
+        "label": "ImportProfiles",
+        "description": "Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.",
+        "type": "list",
+        "required": false,
+        "valueSchema": {
+          "key": "",
+          "label": "",
+          "type": "object",
+          "required": false,
+          "properties": [
+            {
+              "key": "Name",
+              "label": "Name",
+              "description": "Name shown in the MQTT Import source list.",
+              "type": "string",
+              "required": false
+            },
+            {
+              "key": "Filter",
+              "label": "Filter",
+              "description": "Subscription filter to browse, e.g. 'tele/#'. Narrow it: a broker's ACL may refuse '#'.",
+              "type": "string",
+              "required": false
+            },
+            {
+              "key": "Pattern",
+              "label": "Pattern",
+              "description": "Topic shape, with {device} and {measure} marking the parts to capture and '+' matching any single segment. e.g. 'tele/{device}/SENSOR/{measure}'.",
+              "type": "string",
+              "required": false
+            },
+            {
+              "key": "JsonField",
+              "label": "JsonField",
+              "description": "Field holding the value when the payload is JSON \u2014 dotted for nesting. Leave blank when the payload is the bare number.",
+              "type": "string",
+              "required": false
+            },
+            {
+              "key": "Metrics",
+              "label": "Metrics",
+              "description": "Captured {measure} -> metric name (realpower, apparentpower, energy, current, voltage, frequency, powerfactor). Measures not listed are ignored.",
+              "type": "dictionary",
+              "required": false,
+              "valueSchema": {
+                "key": "",
+                "label": "",
+                "type": "string",
+                "required": false
+              },
+              "keyType": "string"
+            }
+          ]
+        }
+      },
+      {
         "key": "ParentTopic",
         "label": "ParentTopic",
         "description": "The parent topic for MQTT messages.",

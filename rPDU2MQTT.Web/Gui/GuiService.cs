@@ -1274,6 +1274,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         id = Core.Flow.MqttDiscoveryImport.NodeId(r.UniqueId),
                         uniqueId = r.UniqueId, label = r.Label, device = r.Device,
                         topic = r.StateTopic, metric = r.Metric, unit = r.Unit,
+                        units = Core.Flow.FlowUnits.UnitsFor(r.Metric),
                         jsonField = r.JsonField, unsupported = r.Unsupported,
                     }),
                 }, ConfigSchema.Json);
@@ -1288,7 +1289,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             try
             {
-                var profile = Core.Flow.MqttTopicProfile.ById(ctx.Request.Query["profile"].ToString());
+                var profile = Core.Flow.MqttTopicProfile.Resolve(ctx.Request.Query["profile"].ToString(), config.MQTT.ImportProfiles);
                 if (profile is null)
                     return Results.Json(new { ok = false, message = "Unknown topic profile." }, ConfigSchema.Json);
 
@@ -1308,6 +1309,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         label = $"{m.Device} {m.Measure}",
                         device = m.Device,
                         topic = m.Topic, metric = m.Metric, unit = (string?)null,
+                        units = Core.Flow.FlowUnits.UnitsFor(m.Metric ?? ""),
                         jsonField = m.JsonField, sample = m.Sample, unsupported = (string?)null,
                     }),
                 }, ConfigSchema.Json);
@@ -1318,7 +1320,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/mqtt/profiles", () => Results.Json(new
         {
             ok = true,
-            profiles = Core.Flow.MqttTopicProfile.BuiltIn.Select(p => new { id = p.Id, label = p.Label, pattern = p.Pattern }),
+            profiles = Core.Flow.MqttTopicProfile.BuiltIn
+                .Select(p => new { id = p.Id, label = p.Label, pattern = p.Pattern })
+                .Concat((config.MQTT.ImportProfiles ?? new())
+                    .Where(p => !string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Pattern))
+                    .Select(p => new { id = "custom:" + p.Name, label = p.Name, pattern = p.Pattern })),
         }, ConfigSchema.Json));
 
         app.MapGet("/api/ha/orphans", async () =>

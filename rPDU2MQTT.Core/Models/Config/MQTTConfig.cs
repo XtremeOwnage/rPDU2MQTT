@@ -22,6 +22,12 @@ public class MQTTConfig
     /// <summary>
     /// Gets or sets the parent topic for MQTT messages.
     /// </summary>
+    /// <summary>
+    /// Topic shapes for the MQTT Import page, in addition to the built-in ESPHome and Z-Wave JS profiles.
+    /// </summary>
+    [Description("Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.")]
+    public List<MqttImportProfile> ImportProfiles { get; set; } = new();
+
     [Required(ErrorMessage = "ParentTopic is required.")]
     [Display(Description = "The parent topic for MQTT messages.")]
     [DefaultValue("rPDU2MQTT")]
