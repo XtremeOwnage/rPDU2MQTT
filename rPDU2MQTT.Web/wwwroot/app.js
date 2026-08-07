@@ -3889,6 +3889,106 @@ function instantiateTemplate(tpl     , prefix        , host        , unitId     
 
 // The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit, and drop the
 // pre-wired nodes into the config for review.
+/// Import power/energy readings other integrations announce over Home Assistant MQTT discovery.
+///
+/// Discovery is used rather than per-integration topic patterns because it states the unit, the device
+/// class and the payload shape.
+function renderDiscoverPanel(flow     , existingIds             , rerender            )              {
+  const panel = el('div', { class: 'tpl-import' });
+  panel.appendChild(el('div', {
+    class: 'desc',
+    text: 'Power and energy readings other integrations publish to this broker. Pick the ones to add as '
+        + 'nodes; nothing is created until you do, and nothing is saved until you press Save.',
+  }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' })                    ;
+  const scan = btn('Scan broker', 'primary');
+  const addBtn = btn('Add selected');
+  bar.append(scan, el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn);
+  const note = el('div', { class: 'desc' });
+  const list = el('div');
+  panel.append(bar, note, list);
+
+  // Tagged on import so the per-destination filters can exclude them. A reading imported from Home
+  // Assistant and re-exported to it arrives back as a second copy.
+  tagIn.title = 'Applied to every node added here. Use it in a destination’s tag filter to avoid '
+              + 'exporting these readings back to where they came from.';
+
+  const picked = new Set        ();
+
+  const render = (readings       ) => {
+    list.innerHTML = '';
+    if (!readings.length) { note.textContent = 'Nothing importable found. Only power and energy entities are offered.'; return; }
+    const tbl = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['', 'Device', 'Reading', 'Metric', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
+    tbl.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    readings.forEach(r => {
+      const tr = el('tr');
+      const cb = el('input', { type: 'checkbox', class: 'switch' })                    ;
+      const already = existingIds.has(r.id);
+      // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
+      cb.disabled = !!r.unsupported || already;
+      cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); };
+      tr.appendChild(el('td', {}, cb));
+      tr.appendChild(el('td', { text: r.device || '—' }));
+      tr.appendChild(el('td', { text: r.label }));
+      tr.appendChild(el('td', { text: r.metric + (r.unit ? ` (${r.unit})` : '') }));
+      const topic = el('td');
+      topic.appendChild(el('code', { text: r.topic, style: { color: 'var(--muted)' } }));
+      if (r.unsupported) topic.appendChild(el('div', { class: 'nh-warn', text: `Cannot import: ${r.unsupported}.` }));
+      else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already a node.' }));
+      tr.appendChild(topic);
+      body.appendChild(tr);
+    });
+    tbl.appendChild(body);
+    list.appendChild(tbl);
+  };
+
+  let found        = [];
+  scan.onclick = async () => {
+    note.textContent = 'Scanning the broker’s retained discovery…';
+    const r = await api('/api/mqtt/importable');
+    if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
+    found = r.body.readings || [];
+    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
+    render(found);
+  };
+
+  addBtn.onclick = () => {
+    const take = found.filter(r => picked.has(r.id) && !r.unsupported && !existingIds.has(r.id));
+    if (!take.length) { toast('Nothing selected.', false); return; }
+    const tag = tagIn.value.trim();
+    const nodes = ensure(flow, 'Nodes', []);
+    take.forEach(r => {
+      const node      = {
+        Id: r.id,
+        Label: r.label,
+        // 'none': an imported node is valued by its own binding. 'auto' would aggregate children it does
+        // not have.
+        Mode: 'none',
+        Sources: [{
+          Type: 'mqtt', Topic: r.topic, Metric: r.metric,
+          // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
+          // reset detection. 'period' declared wrongly publishes a cumulative total as today's.
+          Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
+          Unit: r.unit || undefined,
+          JsonField: r.jsonField || undefined,
+        }],
+      };
+      if (tag) node.Tags = [tag];
+      nodes.push(node);
+      existingIds.add(r.id);
+    });
+    toast(`Added ${take.length} node(s). Wire their feeders on the Nodes tab, then Save.`, true);
+    rerender();
+  };
+
+  return panel;
+}
+
 function renderImportPanel(flow     , existingIds             , rerender            )              {
   const panel = el('div', { class: 'tpl-import' });
   panel.appendChild(el('div', { class: 'desc', text: 'Import a known device to pre-fill its nodes and register bindings. Review and Save afterwards; addresses are community starting points — verify against your firmware.' }));
@@ -3962,6 +4062,7 @@ function addNodesSection(nav     , sections     ) {
     NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
     const addBtn = btn('Add node', 'primary');
     const importBtn = btn('Import device template');
+    const discoverBtn = btn('Discover from MQTT');
     const save = btn('Save', 'primary');
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
@@ -3973,7 +4074,7 @@ function addNodesSection(nav     , sections     ) {
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
     save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, discoverBtn, save); ed.appendChild(addBar);
 
     // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
     const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
@@ -3981,6 +4082,10 @@ function addNodesSection(nav     , sections     ) {
     importBtn.onclick = () => {
       if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
       impWrap.appendChild(renderImportPanel(flow, existingIds, render));
+    };
+    discoverBtn.onclick = () => {
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
+      impWrap.appendChild(renderDiscoverPanel(flow, existingIds, render));
     };
 
     const cand = flowCandidates(lastGraph, customNodes);

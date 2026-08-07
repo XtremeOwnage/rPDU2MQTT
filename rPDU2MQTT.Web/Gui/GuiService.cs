@@ -1206,6 +1206,50 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         //
         // Two endpoints on purpose. Deleting devices from someone's Home Assistant is not something to do on
         // a timer or at startup — GET says exactly what would go, POST does it, and the operator decides.
+        // Power/energy readings other integrations already announce over Home Assistant MQTT discovery
+        // (ESPHome, Z-Wave JS, Tasmota, Shelly, zigbee2mqtt all publish it). Offered for import as
+        // energy-flow nodes; nothing is created until the operator picks from the list.
+        app.MapGet("/api/mqtt/importable", async () =>
+        {
+            try
+            {
+                var prefix = config.HASS.DiscoveryTopic;
+                if (string.IsNullOrWhiteSpace(prefix))
+                    return Results.Json(new { ok = false, message = "No Home Assistant discovery prefix is configured, so there is nothing to scan." }, ConfigSchema.Json);
+
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var filter = prefix.Trim().Trim('/') + "/#";
+                await index.Renew(filter);
+                var retained = await index.Search(null, 5000);
+
+                var rootId = string.IsNullOrWhiteSpace(config.Overrides?.rPDU2MQTT?.ID) ? "rPDU2MQTT" : config.Overrides!.rPDU2MQTT!.ID!;
+                string[] ours = [Core.Flow.FlowExport.DeviceIdPrefix, rootId + "_"];
+
+                var found = retained
+                    .Where(t => t.Topic.EndsWith("/config", StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(t => Core.Flow.MqttDiscoveryImport.Parse(t.Payload ?? "", ours))
+                    .GroupBy(r => r.UniqueId, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .OrderBy(r => r.Device, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(r => r.Label, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                return Results.Json(new
+                {
+                    ok = true,
+                    scanned = retained.Count,
+                    readings = found.Select(r => new
+                    {
+                        id = Core.Flow.MqttDiscoveryImport.NodeId(r.UniqueId),
+                        uniqueId = r.UniqueId, label = r.Label, device = r.Device,
+                        topic = r.StateTopic, metric = r.Metric, unit = r.Unit,
+                        jsonField = r.JsonField, unsupported = r.Unsupported,
+                    }),
+                }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         app.MapGet("/api/ha/orphans", async () =>
         {
             try
