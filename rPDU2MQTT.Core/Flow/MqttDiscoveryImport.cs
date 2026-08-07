@@ -29,11 +29,16 @@ public readonly record struct DiscoveredReading(
 /// </summary>
 public static class MqttDiscoveryImport
 {
-    /// <summary>Device-class values we can bind, mapped to our metric names.</summary>
+    /// <summary>Home Assistant device classes mapped to the metric vocabulary in <see cref="Abstractions.Flow.Metric"/>.</summary>
     private static readonly Dictionary<string, string> Metrics = new(StringComparer.OrdinalIgnoreCase)
     {
         ["power"] = "realpower",
         ["energy"] = "energy",
+        ["current"] = "current",
+        ["voltage"] = "voltage",
+        ["frequency"] = "frequency",
+        ["apparent_power"] = "apparentpower",
+        ["power_factor"] = "powerfactor",
     };
 
     /// <summary>

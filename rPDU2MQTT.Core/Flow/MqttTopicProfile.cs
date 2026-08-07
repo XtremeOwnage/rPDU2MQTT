@@ -36,12 +36,15 @@ public static class MqttTopicProfile
     private static readonly Dictionary<string, string> EsphomeMetrics = new(StringComparer.OrdinalIgnoreCase)
     {
         ["power"] = "realpower",
+        ["apparent_power"] = "apparentpower",
         ["energy"] = "energy",
         ["energy_d"] = "energy",
         ["daily_energy"] = "energy",
         ["total_energy"] = "energy",
         ["current"] = "current",
         ["voltage"] = "voltage",
+        ["frequency"] = "frequency",
+        ["power_factor"] = "powerfactor",
     };
 
     // Z-Wave meter readings are numbered, not named: command class 50 (Meter), property 66049 = watts and
@@ -62,6 +65,31 @@ public static class MqttTopicProfile
 
     public static Profile? ById(string? id) =>
         BuiltIn.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// A built-in profile, or one defined in <c>MQTT.ImportProfiles</c>. Configured profiles are addressed
+    /// as <c>custom:&lt;name&gt;</c>, keeping them in a separate id space from the built-ins.
+    /// </summary>
+    public static Profile? Resolve(string? id, IEnumerable<Models.Config.MqttImportProfile>? configured)
+    {
+        if (ById(id) is { } builtIn) return builtIn;
+
+        const string prefix = "custom:";
+        if (id is null || !id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+
+        var name = id[prefix.Length..];
+        var p = configured?.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (p is null || string.IsNullOrWhiteSpace(p.Pattern)) return null;
+
+        // A blank filter falls back to the pattern's root rather than '#', which some broker ACLs refuse.
+        var filter = string.IsNullOrWhiteSpace(p.Filter)
+            ? p.Pattern.Split('/')[0] + "/#"
+            : p.Filter.Trim();
+
+        return new Profile(id, string.IsNullOrWhiteSpace(p.Name) ? "Custom" : p.Name, filter, p.Pattern.Trim(),
+                           string.IsNullOrWhiteSpace(p.JsonField) ? null : p.JsonField.Trim(),
+                           new Dictionary<string, string>(p.Metrics ?? new(), StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Match one topic against a pattern. Segment counts must agree exactly — a pattern is a shape, and a
@@ -95,18 +123,15 @@ public static class MqttTopicProfile
     /// <summary>
     /// Every reading a profile finds in <paramref name="topics"/>, ordered by device then measure.
     /// </summary>
-    /// <param name="rollupOnly">
-    /// Keep only measures that map to a metric. Voltage and current are matched but are not part of the
-    /// energy roll-up, so the picker offers power and energy by default.
-    /// </param>
+    /// <param name="mappedOnly">Keep only measures the profile maps to a metric (drops uptime, wifi signal, and the like).</param>
     public static IReadOnlyList<PatternMatch> Scan(
-        Profile profile, IEnumerable<(string Topic, string? Payload)> topics, bool rollupOnly = true)
+        Profile profile, IEnumerable<(string Topic, string? Payload)> topics, bool mappedOnly = true)
     {
         var found = new List<PatternMatch>();
         foreach (var (topic, payload) in topics)
         {
             if (Match(profile.Pattern, topic, profile.JsonField, profile.Metrics, payload) is not { } m) continue;
-            if (rollupOnly && m.Metric is not ("realpower" or "energy")) continue;
+            if (mappedOnly && m.Metric is null) continue;
             found.Add(m);
         }
         return found

@@ -89,18 +89,22 @@ public class MqttTopicProfileTests
     }
 
     [Fact]
-    public void ScanKeepsOnlyRollupMetricsByDefault()
+    public void EveryMappedMetricIsOffered_NotJustPowerAndEnergy()
     {
-        // Voltage and current are matched by the profile but are not part of the energy roll-up.
+        // A node binds any of the seven metrics, not only the two that feed the roll-up.
         (string, string?)[] topics =
         [
             ("esphome/devices/fan/sensor/voltage/state", "122.7"),
             ("esphome/devices/fan/sensor/current/state", "0.8"),
             ("esphome/devices/fan/sensor/power/state", "101.8"),
+            ("esphome/devices/fan/sensor/wifi_signal/state", "-70"),   // no metric for this
         ];
 
-        Assert.Equal("realpower", Assert.Single(MqttTopicProfile.Scan(Esphome, topics)).Metric);
-        Assert.Equal(3, MqttTopicProfile.Scan(Esphome, topics, rollupOnly: false).Count);
+        var found = MqttTopicProfile.Scan(Esphome, topics);
+
+        Assert.Equal(["current", "realpower", "voltage"], found.Select(f => f.Metric).Order());
+        // Unmapped measures are dropped by default.
+        Assert.Equal(4, MqttTopicProfile.Scan(Esphome, topics, mappedOnly: false).Count);
     }
 
     [Fact]
