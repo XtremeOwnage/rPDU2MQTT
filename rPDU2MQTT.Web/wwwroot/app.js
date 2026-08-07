@@ -3927,8 +3927,13 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
 
   const picked = new Set        ();
 
+  // Rows and their unit selectors, so the bulk controls can drive them without a re-render.
+  let boxes                                            = [];
+  let unitSels                                             = [];
+
   const render = (readings       ) => {
     list.innerHTML = '';
+    boxes = []; unitSels = [];
     if (!readings.length) {
       note.textContent = srcSel.value === 'discovery'
         ? 'No importable entities in the broker’s Home Assistant discovery. Publishers that announce nothing '
@@ -3949,6 +3954,7 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
       // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
       cb.disabled = !!r.unsupported || already;
       cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); };
+      if (!cb.disabled) boxes.push({ reading: r, box: cb });
       tr.appendChild(el('td', {}, cb));
       tr.appendChild(el('td', { text: r.device || '—' }));
       tr.appendChild(el('td', { text: r.label }));
@@ -3962,12 +3968,15 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
       } else {
         const choices           = r.units || [];
         const unitSel = el('select', { style: { width: 'auto' } })                     ;
-        // Blank and selected by default; the sampled payload is shown in the topic cell.
         unitSel.appendChild(el('option', { value: '', text: '— pick —' }));
         choices.forEach(u => unitSel.appendChild(el('option', { value: u, text: u })));
-        unitSel.value = '';
+        // Pre-filled with the metric's canonical unit. It is a form default the operator reviews against
+        // the sampled payload in the topic cell, and the bulk setters above change a whole metric at once.
+        r.unit = r.unit || r.canonicalUnit || '';
+        unitSel.value = r.unit || '';
         unitSel.onchange = () => { r.unit = unitSel.value || undefined; };
         unitCell.appendChild(unitSel);
+        unitSels.push({ reading: r, sel: unitSel });
         if (!choices.length) unitCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'no units for this metric' }));
       }
       tr.appendChild(unitCell);
@@ -3982,7 +3991,44 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
       body.appendChild(tr);
     });
     tbl.appendChild(body);
+    list.appendChild(bulkBar(readings));
     list.appendChild(tbl);
+  };
+
+  /// Select-all, and one unit setter per metric present, so twenty rows are not twenty clicks.
+  const bulkBar = (readings       ) => {
+    const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 6px' } });
+
+    const all = btn('Select all');
+    all.onclick = () => {
+      const turnOn = boxes.some(b => !b.box.checked);
+      boxes.forEach(b => {
+        b.box.checked = turnOn;
+        turnOn ? picked.add(b.reading.id) : picked.delete(b.reading.id);
+      });
+      all.textContent = turnOn ? 'Select none' : 'Select all';
+    };
+    row.appendChild(all);
+
+    // One setter per metric in the results: the answer is usually the same for every row of a metric
+    // (every ESPHome power sensor is W), and differs between metrics.
+    const metrics = [...new Set(readings.filter(r => !r.unit || r.units?.length).map(r => r.metric))].sort();
+    metrics.forEach(metric => {
+      const choices           = (readings.find(r => r.metric === metric) || {}).units || [];
+      if (choices.length < 2) return;   // nothing to choose between
+      const sel = el('select', { style: { width: 'auto' } })                     ;
+      choices.forEach(u => sel.appendChild(el('option', { value: u, text: u })));
+      sel.value = (readings.find(r => r.metric === metric) || {}).canonicalUnit || choices[0];
+      sel.onchange = () => {
+        unitSels.filter(u => u.reading.metric === metric).forEach(u => {
+          u.sel.value = sel.value;
+          u.reading.unit = sel.value;
+        });
+      };
+      row.append(el('span', { class: 'desc', style: { margin: '0' }, text: `all ${metric}:` }), sel);
+    });
+
+    return row;
   };
 
   let found        = [];

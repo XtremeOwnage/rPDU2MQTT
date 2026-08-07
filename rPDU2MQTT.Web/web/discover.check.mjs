@@ -33,7 +33,13 @@ const pattern = {
   readings: [
     { id: 'esphome_deep_freezer_energy_d', label: 'deep_freezer energy_d', device: 'deep_freezer',
       topic: 'esphome/devices/deep_freezer/sensor/energy_d/state', metric: 'energy', unit: null,
-      units: ['kWh', 'Wh', 'MWh'], jsonField: null, sample: '3063.783', unsupported: null },
+      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '3063.783', unsupported: null },
+    { id: 'esphome_fridge_energy_d', label: 'fridge energy_d', device: 'fridge',
+      topic: 'esphome/devices/fridge/sensor/energy_d/state', metric: 'energy', unit: null,
+      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '1365.109', unsupported: null },
+    { id: 'esphome_fridge_power', label: 'fridge power', device: 'fridge',
+      topic: 'esphome/devices/fridge/sensor/power/state', metric: 'realpower', unit: null,
+      units: ['W', 'kW', 'MW'], canonicalUnit: 'W', jsonField: null, sample: '97.6', unsupported: null },
   ],
 };
 
@@ -126,21 +132,40 @@ const patRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.incl
 if (!patRow) fail('the topic-profile scan rendered no row');
 // The sampled value is shown, because it is the only thing that distinguishes Wh from kWh.
 if (!patRow.textContent.includes('3063.783')) fail('the row does not show the sampled value');
-// The unit is asked for, as a dropdown of what the converter accepts — not free text, where a typo binds
-// a source whose readings are then silently never converted.
+// The unit is a dropdown of what the converter accepts, defaulted to the metric's canonical unit.
 const unitBox = query(patRow, 'select', true)[0];
-if (!unitBox) fail('a topic-matched reading was offered without asking for its unit');
+if (!unitBox) fail('a topic-matched reading has no unit control');
 const unitOpts = (unitBox.children || []).map(o => o.value || (o.attrs && o.attrs.value));
 if (!unitOpts.includes('Wh') || !unitOpts.includes('kWh'))
   fail(`the unit list does not come from the metric's converter table: ${unitOpts.join(', ')}`);
-// Nothing preselected: the sampled value is the only evidence of which unit applies.
-if (unitBox.value) fail(`a unit was preselected (${unitBox.value}) rather than asked for`);
+if (unitBox.value !== 'kWh') fail(`expected the canonical unit as the default, got '${unitBox.value}'`);
 
-unitBox.value = 'Wh';
-unitBox.onchange({});
-const patBox = query(patRow, 'input', true)[0];
-patBox.checked = true;
-patBox.onchange({});
+// Select all: one click rather than one per row.
+buttons().find(b => b.textContent === 'Select all').click();
+await new Promise(r => setTimeout(r, 20));
+const allRows = query(getEl('sections'), 'tr', true).filter(r => query(r, 'input', true).length);
+const checkable = allRows.map(r => query(r, 'input', true)[0]).filter(b => !b.disabled);
+if (!checkable.every(b => b.checked)) fail('Select all left rows unchecked');
+
+// Per-metric unit setter: changing it moves every row of that metric, and leaves the others alone.
+const bulkSels = query(getEl('sections'), 'select', true)
+  .filter(sel => (sel.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'Wh'));
+const bulkEnergy = bulkSels[0];
+if (!bulkEnergy) fail('no per-metric unit setter for energy');
+bulkEnergy.value = 'Wh';
+bulkEnergy.onchange({});
+await new Promise(r => setTimeout(r, 20));
+
+const energyRows = allRows.filter(r => r.textContent.includes('energy_d'));
+for (const row of energyRows) {
+  const sel = query(row, 'select', true)[0];
+  if (sel.value !== 'Wh') fail(`the bulk setter missed an energy row: ${sel.value}`);
+}
+const powerRow = allRows.find(r => r.textContent.includes('fridge power'));
+if (query(powerRow, 'select', true)[0].value !== 'W') fail('the energy bulk setter changed a power row');
+
+// Import straight from the bulk setting, without touching the row's own control: the bulk change has to
+// reach the reading, not just the dropdown that displays it.
 buttons().find(b => b.textContent === 'Add selected').click();
 await new Promise(r => setTimeout(r, 100));
 
