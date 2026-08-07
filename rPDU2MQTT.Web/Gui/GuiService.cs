@@ -1275,6 +1275,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         uniqueId = r.UniqueId, label = r.Label, device = r.Device,
                         topic = r.StateTopic, metric = r.Metric, unit = r.Unit,
                         units = Core.Flow.FlowUnits.UnitsFor(r.Metric),
+                        canonicalUnit = Core.Flow.FlowUnits.Canonical(r.Metric),
                         jsonField = r.JsonField, unsupported = r.Unsupported,
                     }),
                 }, ConfigSchema.Json);
@@ -1310,6 +1311,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         device = m.Device,
                         topic = m.Topic, metric = m.Metric, unit = (string?)null,
                         units = Core.Flow.FlowUnits.UnitsFor(m.Metric ?? ""),
+                        canonicalUnit = Core.Flow.FlowUnits.Canonical(m.Metric ?? ""),
                         jsonField = m.JsonField, sample = m.Sample, unsupported = (string?)null,
                     }),
                 }, ConfigSchema.Json);
