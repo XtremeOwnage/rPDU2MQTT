@@ -4013,6 +4013,41 @@ function renderDiscoverPanel(flow     , existingIds             , rerender      
   return panel;
 }
 
+/// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
+/// is used once when wiring something up, so it does not belong on the node editor's toolbar.
+function addMqttImportSection(nav     , sections     ) {
+  const link = navLink(nav, 'MQTT Import', '⇤');
+  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
+  link.dataset.section = 'EnergyFlow';
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'MQTT Import' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'Add energy-flow nodes from readings other integrations already publish to this broker — by their '
+        + 'Home Assistant discovery where they announce it, or by topic shape where they do not.',
+  }));
+
+  const host = el('div');
+  sec.appendChild(host);
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const nodes = ensure(flow, 'Nodes', []);
+    const existingIds = new Set        (nodes.map((n     ) => n.Id));
+    host.innerHTML = '';
+    host.appendChild(renderDiscoverPanel(flow, existingIds, render));
+    const bar = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(() => render());
+    bar.appendChild(save);
+    host.appendChild(bar);
+  };
+
+  link.onclick = () => { render(); activate(link, sec); };
+  return { link, sec };
+}
+
 function renderImportPanel(flow     , existingIds             , rerender            )              {
   const panel = el('div', { class: 'tpl-import' });
   panel.appendChild(el('div', { class: 'desc', text: 'Import a known device to pre-fill its nodes and register bindings. Review and Save afterwards; addresses are community starting points — verify against your firmware.' }));
@@ -4086,7 +4121,6 @@ function addNodesSection(nav     , sections     ) {
     NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
     const addBtn = btn('Add node', 'primary');
     const importBtn = btn('Import device template');
-    const discoverBtn = btn('Discover from MQTT');
     const save = btn('Save', 'primary');
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
@@ -4098,22 +4132,15 @@ function addNodesSection(nav     , sections     ) {
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
     };
     save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, discoverBtn, save); ed.appendChild(addBar);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
 
     // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
     const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
     const impWrap = el('div'); ed.appendChild(impWrap);
-    // Both panels share one container. Clicking the button of the panel already open closes it; clicking
-    // the other switches to it, rather than closing and requiring a second click.
-    let openPanel                = null;
-    const togglePanel = (which        , build                   ) => {
-      impWrap.innerHTML = '';
-      if (openPanel === which) { openPanel = null; return; }
-      openPanel = which;
-      impWrap.appendChild(build());
+    importBtn.onclick = () => {
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
+      impWrap.appendChild(renderImportPanel(flow, existingIds, render));
     };
-    importBtn.onclick = () => togglePanel('template', () => renderImportPanel(flow, existingIds, render));
-    discoverBtn.onclick = () => togglePanel('discover', () => renderDiscoverPanel(flow, existingIds, render));
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
@@ -5310,7 +5337,7 @@ const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
+  { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
