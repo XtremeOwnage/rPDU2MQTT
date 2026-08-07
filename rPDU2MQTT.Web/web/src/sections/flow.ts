@@ -2486,9 +2486,20 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
       srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
   });
   const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' }) as HTMLInputElement;
+  // Where the imported nodes hang. Without a feeder a new node is an island on the diagram: it has a value
+  // but nothing carries it, so it sits apart from the hierarchy.
+  const feedSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+  feedSel.appendChild(el('option', { value: '', text: '— not wired —' }));
+  (flow.Nodes || []).forEach((n: any) =>
+    feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
   const scan = btn('Scan broker', 'primary');
   const addBtn = btn('Add selected');
-  bar.append(srcSel, scan, el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn);
+  const copyBtn = btn('Copy this profile to config');
+  copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
+                + 'metric map can be edited.';
+  bar.append(srcSel, scan,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'Feeds:' }), feedSel,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
   const note = el('div', { class: 'desc' });
   const list = el('div');
   panel.append(bar, note, list);
@@ -2604,6 +2615,26 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
     return row;
   };
 
+  copyBtn.onclick = async () => {
+    const id = srcSel.value;
+    if (!id || id === 'discovery' || id.startsWith('custom:')) {
+      toast('Pick a built-in topic profile first.', false);
+      return;
+    }
+    const r = await api('/api/mqtt/profile?id=' + encodeURIComponent(id));
+    if (!r.body || !r.body.ok) { toast((r.body && r.body.message) || 'Could not read that profile.', false); return; }
+    const p = r.body.profile;
+    const mqtt = ensure(state.data, 'MQTT', {});
+    const list = ensure(mqtt, 'ImportProfiles', []);
+    if (list.some((x: any) => (x.Name || '').toLowerCase() === (p.label || '').toLowerCase())) {
+      toast(`'${p.label}' is already in ImportProfiles.`, false);
+      return;
+    }
+    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined, Metrics: p.metrics });
+    toast(`Copied '${p.label}' into MQTT → ImportProfiles. Edit it there, then Save.`, true);
+    refreshDirty();
+  };
+
   let found: any[] = [];
   scan.onclick = async () => {
     const src = srcSel.value;
@@ -2641,6 +2672,8 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
       if (tag) node.Tags = [tag];
       nodes.push(node);
       existingIds.add(r.id);
+      // One link per imported node, so it is part of the hierarchy rather than a disconnected node.
+      if (feedSel.value) ensure(flow, 'Links', []).push({ From: r.id, To: feedSel.value });
     });
     toast(`Added ${take.length} node(s). Wire their feeders on the Nodes tab, then Save.`, true);
     rerender();

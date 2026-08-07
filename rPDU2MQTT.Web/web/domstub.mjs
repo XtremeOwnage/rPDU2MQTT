@@ -67,12 +67,12 @@ export function makeEl(tag = 'div') {
       if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); }
       return c;
     },
-    // A <select> reports its first option's value until something sets another. Without this a select
-    // built by appending options reads as '' here while a browser reports the first option.
+    // A <select> reports its first option's value until something sets another — including when that
+    // value is the empty string, which is how a leading "— pick —" option works.
     _adoptOption(c) {
-      if (this.tag !== 'select' || !c || c.tag !== 'option' || this.value) return;
-      const v = c.value || (c.attrs && c.attrs.value);
-      if (v) this.value = v;
+      if (this.tag !== 'select' || !c || c.tag !== 'option' || this._adopted) return;
+      this._adopted = true;
+      this.value = c.value || (c.attrs && c.attrs.value) || '';
     },
     append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
