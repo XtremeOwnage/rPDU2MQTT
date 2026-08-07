@@ -3970,7 +3970,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
   (flow.Nodes || []).forEach((n     ) =>
     feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
   const scan = btn('Scan broker', 'primary');
-  const addBtn = btn('Add selected');
+  const addBtn = btn('Add selected', 'primary');
   const copyBtn = btn('Copy this profile to config');
   copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
                 + 'metric map can be edited.';
@@ -4023,7 +4023,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
       const already = boundTopics.has(r.topic);
       // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
       cb.disabled = !!r.unsupported || already;
-      cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); };
+      cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); syncCount(); };
       if (!cb.disabled) boxes.push({ reading: r, box: cb });
       tr.appendChild(el('td', {}, cb));
       tr.appendChild(el('td', { text: r.device || '—' }));
@@ -4063,6 +4063,23 @@ function renderDiscoverPanel(flow     , rerender            )              {
     tbl.appendChild(body);
     list.appendChild(bulkBar(readings));
     list.appendChild(tbl);
+    // Repeated below the table. With twenty rows the toolbar scrolls off the top, leaving the page's Save
+    // button as the only visible action — and Save without Add writes a config with no imported nodes.
+    const footer = el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } });
+    const addAgain = btn('Add selected', 'primary');
+    addAgain.onclick = () => addBtn.onclick ({}       );
+    footer.append(addAgain, el('span', { class: 'desc', style: { margin: '0' }, text: 'Adds the ticked rows as nodes. Save writes them to the config.' }));
+    list.appendChild(footer);
+    syncCount();
+  };
+
+  /// Keep both Add buttons showing how many rows are ticked.
+  const syncCount = () => {
+    const n = picked.size;
+    const label = n ? `Add ${n} selected` : 'Add selected';
+    [addBtn, ...Array.from(list.querySelectorAll('button'))].forEach((b     ) => {
+      if (b && /^Add \d* ?selected$/.test(b.textContent || '')) b.textContent = label;
+    });
   };
 
   /// Select-all, and one unit setter per metric present, so twenty rows are not twenty clicks.
@@ -4077,6 +4094,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
         turnOn ? picked.add(b.reading.id) : picked.delete(b.reading.id);
       });
       all.textContent = turnOn ? 'Select none' : 'Select all';
+      syncCount();
     };
     row.appendChild(all);
 
