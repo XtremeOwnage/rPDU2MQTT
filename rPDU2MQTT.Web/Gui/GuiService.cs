@@ -1319,6 +1319,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
+        // One profile's full definition, for copying a built-in into MQTT.ImportProfiles to edit.
+        app.MapGet("/api/mqtt/profile", (HttpContext ctx) =>
+        {
+            var p = Core.Flow.MqttTopicProfile.Resolve(ctx.Request.Query["id"].ToString(), config.MQTT.ImportProfiles);
+            if (p is null) return Results.Json(new { ok = false, message = "Unknown topic profile." }, ConfigSchema.Json);
+            return Results.Json(new
+            {
+                ok = true,
+                profile = new { id = p.Id, label = p.Label, filter = p.Filter, pattern = p.Pattern, jsonField = p.JsonField, metrics = p.Metrics },
+            }, ConfigSchema.Json);
+        });
+
         app.MapGet("/api/mqtt/profiles", () => Results.Json(new
         {
             ok = true,

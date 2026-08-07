@@ -43,13 +43,23 @@ const pattern = {
   ],
 };
 
-const cfg = { EnergyFlow: { Nodes: [{ Id: 'solar', Label: 'Solar' }], Links: [] } };
+const cfg = { EnergyFlow: { Nodes: [{ Id: 'solar', Label: 'Solar' }, { Id: 'main_panel', Label: 'Main Panel' }], Links: [] } };
+
+const builtIn = {
+  ok: true,
+  profile: {
+    id: 'esphome', label: 'ESPHome', filter: 'esphome/#',
+    pattern: 'esphome/devices/{device}/sensor/{measure}/state', jsonField: null,
+    metrics: { power: 'realpower', energy_d: 'energy' },
+  },
+};
 
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
     url.includes('/api/schema') ? schema :
     url.includes('/api/instances') ? { ok: true, instances: [] } :
     url.includes('/api/config') ? cfg :
+    url.includes('/api/mqtt/profile?') ? builtIn :
     url.includes('/api/mqtt/profiles') ? { ok: true, profiles: [
       { id: 'esphome', label: 'ESPHome', pattern: 'esphome/devices/{device}/sensor/{measure}/state' },
       { id: 'custom:Tasmota', label: 'Tasmota', pattern: 'tele/{device}/SENSOR/{measure}' },
@@ -115,7 +125,7 @@ if (src.Topic !== 'esphome/garage/sensor/power/state') fail('the binding does no
 if (src.Metric !== 'realpower' || src.Unit !== 'W') fail('the binding lost the metric or unit');
 
 // And nothing else was added — in particular not the two refused rows.
-if (cfg.EnergyFlow.Nodes.length !== 2) fail(`expected 2 nodes, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
+if (cfg.EnergyFlow.Nodes.length !== 3) fail(`expected the two seeded nodes plus one import, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
 
 // --- The topic-profile path.
 const sel = query(getEl('sections'), 'select', true)
@@ -139,6 +149,13 @@ const unitOpts = (unitBox.children || []).map(o => o.value || (o.attrs && o.attr
 if (!unitOpts.includes('Wh') || !unitOpts.includes('kWh'))
   fail(`the unit list does not come from the metric's converter table: ${unitOpts.join(', ')}`);
 if (unitBox.value !== 'kWh') fail(`expected the canonical unit as the default, got '${unitBox.value}'`);
+
+// Wire the imports into an existing node, so they join the hierarchy rather than sitting apart from it.
+const feeds = query(getEl('sections'), 'select', true)
+  .find(sl => (sl.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'main_panel'));
+if (!feeds) fail('no feeder selector offering the configured nodes');
+if (feeds.value !== '') fail(`the feeder defaulted to '${feeds.value}' rather than leaving nodes unwired`);
+feeds.value = 'main_panel';
 
 // Select all: one click rather than one per row.
 buttons().find(b => b.textContent === 'Select all').click();
@@ -174,5 +191,25 @@ if (!imported) fail('the topic-matched reading was not added');
 if ((imported.Sources[0] || {}).Unit !== 'Wh') fail('the unit the operator entered was not carried onto the binding');
 if ((imported.Sources[0] || {}).Accumulation !== 'lifetime') fail('an imported energy counter must default to lifetime');
 
-console.log('discover: discovery and topic-profile scans both import; refusals are shown with a reason; a '
-  + 'topic-matched reading asks for its unit and carries it onto the binding');
+// Every imported node is wired to the chosen feeder.
+const links = cfg.EnergyFlow.Links || [];
+for (const id of ['esphome_deep_freezer_energy_d', 'esphome_fridge_power']) {
+  const link = links.find(l => l.From === id);
+  if (!link) fail(`${id} was imported with no link, leaving it disconnected on the diagram`);
+  if (link.To !== 'main_panel') fail(`${id} was wired to '${link.To}' rather than the chosen feeder`);
+}
+
+// --- A built-in profile can be copied into config to edit.
+// The add re-rendered the panel, so re-select the source first.
+const srcAgain = query(getEl('sections'), 'select', true)
+  .find(sl => (sl.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'esphome'));
+srcAgain.value = 'esphome';
+buttons().find(b => b.textContent === 'Copy this profile to config').click();
+await new Promise(r => setTimeout(r, 100));
+const copied = ((cfg.MQTT || {}).ImportProfiles || []).find(p => p.Name === 'ESPHome');
+if (!copied) fail('copying a built-in profile put nothing into MQTT.ImportProfiles');
+if (copied.Pattern !== 'esphome/devices/{device}/sensor/{measure}/state') fail('the copied profile lost its pattern');
+if (!copied.Metrics || copied.Metrics.power !== 'realpower') fail('the copied profile lost its metric map');
+
+console.log('discover: both scans import; refusals shown with a reason; units default and set in bulk; '
+  + 'imported nodes are wired to the chosen feeder; a built-in profile copies into config');
