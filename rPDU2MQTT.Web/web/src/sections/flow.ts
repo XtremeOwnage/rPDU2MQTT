@@ -2676,14 +2676,17 @@ export function addNodesSection(nav: any, sections: any) {
     // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
     const existingIds = new Set<string>([...customNodes.map((n: any) => n.Id), ...((lastGraph?.nodes || []).map((n: any) => n.id))]);
     const impWrap = el('div'); ed.appendChild(impWrap);
-    importBtn.onclick = () => {
-      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
-      impWrap.appendChild(renderImportPanel(flow, existingIds, render));
+    // Both panels share one container. Clicking the button of the panel already open closes it; clicking
+    // the other switches to it, rather than closing and requiring a second click.
+    let openPanel: string | null = null;
+    const togglePanel = (which: string, build: () => HTMLElement) => {
+      impWrap.innerHTML = '';
+      if (openPanel === which) { openPanel = null; return; }
+      openPanel = which;
+      impWrap.appendChild(build());
     };
-    discoverBtn.onclick = () => {
-      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
-      impWrap.appendChild(renderDiscoverPanel(flow, existingIds, render));
-    };
+    importBtn.onclick = () => togglePanel('template', () => renderImportPanel(flow, existingIds, render));
+    discoverBtn.onclick = () => togglePanel('discover', () => renderDiscoverPanel(flow, existingIds, render));
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
