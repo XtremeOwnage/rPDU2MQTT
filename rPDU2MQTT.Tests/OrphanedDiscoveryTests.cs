@@ -20,6 +20,43 @@ public class OrphanedDiscoveryTests
     ];
 
     [Fact]
+    public void NativeDeviceIdsAreScannedUnderTheirOwnPrefix()
+    {
+        // Seen live: a PDU stopped exposing its OneView groups and left fourteen entities in Home Assistant
+        // that could never receive a value again. The energyflow sweep does not cover that family of ids, so
+        // nothing but "clear all discovery" could remove them.
+        string[] retained =
+        [
+            "homeassistant/device/rPDU2MQTT_A0AE_outlets_4/config",              // still published — keep
+            "homeassistant/device/rPDU2MQTT_Groups_0_measurements_energy/config", // group is gone — orphan
+            "homeassistant/device/rPDU2MQTT_Groups_total/config",                 // group is gone — orphan
+            "homeassistant/device/energyflow_grid/config",                        // other family, not this scan
+            "homeassistant/sensor/acurite_attic/config",                          // someone else entirely
+        ];
+
+        var orphans = FlowExport.OrphanedDiscoveryTopics(
+            retained, new[] { "rPDU2MQTT_A0AE_outlets_4" }, "homeassistant", "rPDU2MQTT_");
+
+        Assert.Equal(new[]
+        {
+            "homeassistant/device/rPDU2MQTT_Groups_0_measurements_energy/config",
+            "homeassistant/device/rPDU2MQTT_Groups_total/config",
+        }, orphans);
+    }
+
+    [Fact]
+    public void AnEmptyIdPrefixMatchesNothing()
+    {
+        // The prefix is the entire safety boundary. If it ever arrives blank — an unset override, a
+        // trimmed-to-nothing config — the scan must return nothing rather than treat every retained config
+        // on the broker as ours to delete.
+        string[] retained = ["homeassistant/device/anything_at_all/config", "homeassistant/device/acurite/config"];
+
+        Assert.Empty(FlowExport.OrphanedDiscoveryTopics(retained, Array.Empty<string>(), "homeassistant", ""));
+        Assert.Empty(FlowExport.OrphanedDiscoveryTopics(retained, Array.Empty<string>(), "homeassistant", "   "));
+    }
+
+    [Fact]
     public void OnlyOurOwnStaleDevicesAreListed()
     {
         var orphans = FlowExport.OrphanedDiscoveryTopics(Retained, new[] { "energyflow_grid" }, "homeassistant");

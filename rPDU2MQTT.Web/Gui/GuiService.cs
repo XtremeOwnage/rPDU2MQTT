@@ -396,7 +396,24 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             .Where(n => !n.Synthetic && !native.ContainsKey(n.Id))
             .Select(n => Core.Flow.FlowExport.DeviceId(n.Id));
 
-        return Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix);
+        var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
+
+        // Native PDU discovery too (#: a PDU that stopped exposing OneView groups left fourteen entities in
+        // Home Assistant that could never receive a value again, and the energyflow sweep deliberately does
+        // not touch that family of ids).
+        //
+        // The "current" set is what the discovery service actually published, not a second reconstruction of
+        // it: this decides whether to delete a device out of Home Assistant, and a reconstruction that
+        // disagreed with the publisher by one id would delete a live device. If it has not completed a pass,
+        // it has no opinion and nothing native is reported.
+        var published = discovery.PublishedDevices?.Invoke();
+        if (published is { HasPublished: true, Ids.Count: > 0 })
+        {
+            var rootId = string.IsNullOrWhiteSpace(config.Overrides?.rPDU2MQTT?.ID) ? "rPDU2MQTT" : config.Overrides!.rPDU2MQTT!.ID!;
+            orphans.AddRange(Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, published.Value.Ids, prefix, rootId + "_"));
+        }
+
+        return orphans;
     }
 
     private async Task<object> BuildBoardAsync()

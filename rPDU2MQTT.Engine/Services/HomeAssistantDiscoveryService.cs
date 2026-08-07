@@ -25,6 +25,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
     {
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
+        coordinator.PublishedDevices = () => (HasPublished, PublishedDeviceIds);
         coordinator.RediscoverRequested += Execute;
         // Allow the "Clear discovery" action (GUI) to remove the retained discovery messages.
         coordinator.ClearRequested += ClearDiscoveries;
