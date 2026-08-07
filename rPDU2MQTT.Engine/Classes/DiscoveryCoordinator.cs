@@ -19,6 +19,17 @@ public sealed class DiscoveryCoordinator
         this.pdu = pdu;
     }
 
+    /// <summary>
+    /// What native discovery published on its last pass, set by the discovery service.
+    ///
+    /// <para>
+    /// Null, or a false <c>HasPublished</c>, means "no opinion" and callers must not conclude anything is
+    /// stale: before the first pass nothing has been published, so every retained config on the broker
+    /// would look orphaned and clearing them would delete every device out of Home Assistant.
+    /// </para>
+    /// </summary>
+    public Func<(bool HasPublished, IReadOnlyCollection<string> Ids)>? PublishedDevices { get; set; }
+
     /// <summary>Invoked when a rediscovery is requested. The discovery service subscribes to this.</summary>
     public event Func<CancellationToken, Task>? RediscoverRequested;
 

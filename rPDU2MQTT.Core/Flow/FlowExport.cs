@@ -123,7 +123,22 @@ public static class FlowExport
     /// <param name="discoveryPrefix">The configured Home Assistant discovery prefix (e.g. "homeassistant").</param>
     public static IReadOnlyList<string> OrphanedDiscoveryTopics(
         IEnumerable<string> retainedTopics, IEnumerable<string> currentDeviceIds, string discoveryPrefix)
+        => OrphanedDiscoveryTopics(retainedTopics, currentDeviceIds, discoveryPrefix, DeviceIdPrefix);
+
+    /// <summary>
+    /// The same scan for a different family of device ids — native PDU discovery uses the configured root
+    /// identifier rather than <see cref="DeviceIdPrefix"/>.
+    /// </summary>
+    /// <param name="deviceIdPrefix">
+    /// Only ids starting with this are considered. It is the entire safety boundary: everything else on the
+    /// broker belongs to another integration, and clearing one of those deletes someone's devices out of
+    /// Home Assistant with nothing to put them back.
+    /// </param>
+    public static IReadOnlyList<string> OrphanedDiscoveryTopics(
+        IEnumerable<string> retainedTopics, IEnumerable<string> currentDeviceIds, string discoveryPrefix,
+        string deviceIdPrefix)
     {
+        if (string.IsNullOrWhiteSpace(deviceIdPrefix)) return Array.Empty<string>();
         var keep = new HashSet<string>(currentDeviceIds, StringComparer.OrdinalIgnoreCase);
         var root = (discoveryPrefix ?? "").Trim().Trim('/');
         if (root.Length == 0) return Array.Empty<string>();
@@ -140,7 +155,7 @@ public static class FlowExport
             if (!string.Equals(parts[3], "config", StringComparison.OrdinalIgnoreCase)) continue;
 
             var id = parts[2];
-            if (!id.StartsWith(DeviceIdPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!id.StartsWith(deviceIdPrefix, StringComparison.OrdinalIgnoreCase)) continue;
             if (keep.Contains(id)) continue;
 
             orphans.Add(topic);

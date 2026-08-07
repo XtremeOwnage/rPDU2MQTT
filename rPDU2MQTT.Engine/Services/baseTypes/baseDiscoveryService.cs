@@ -270,6 +270,22 @@ public abstract class baseDiscoveryService : baseMQTTService
     private readonly HashSet<string> publishedDeviceTopics = new();
 
     /// <summary>
+    /// The device ids this service published on its last pass, and whether it has completed one.
+    ///
+    /// <para>
+    /// Observed rather than recomputed on purpose. Deciding a retained config is stale means deleting a
+    /// device out of Home Assistant, so the comparison has to be against what this process actually
+    /// published — not against what a second reconstruction thinks it would have published. Before the
+    /// first pass the set is empty and <c>HasPublished</c> is false, which callers must treat as "no
+    /// opinion": at that moment everything on the broker looks orphaned.
+    /// </para>
+    /// </summary>
+    public bool HasPublished { get; private set; }
+
+    public IReadOnlyCollection<string> PublishedDeviceIds =>
+        publishedDeviceTopics.Select(t => t.Split('/') is { Length: 4 } p ? p[2] : "").Where(id => id.Length > 0).ToList();
+
+    /// <summary>
     /// Publish device-based discovery: one retained message per device containing all of its
     /// entities as components. Devices that were published previously but are no longer present
     /// have their retained discovery message cleared so they don't linger in Home Assistant.
@@ -298,6 +314,7 @@ public abstract class baseDiscoveryService : baseMQTTService
 
         publishedDeviceTopics.Clear();
         publishedDeviceTopics.UnionWith(currentTopics);
+        HasPublished = true;
     }
 
     /// <summary>
