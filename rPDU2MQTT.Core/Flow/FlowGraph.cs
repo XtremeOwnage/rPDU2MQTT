@@ -54,7 +54,7 @@ public static class FlowDerivation
 /// </param>
 public sealed record FlowNode(
     string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
-    string Derivation = FlowDerivation.Unknown)
+    string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null)
 {
     /// <summary>
     /// A node the builder invented for the diagram, rather than one the operator configured: a

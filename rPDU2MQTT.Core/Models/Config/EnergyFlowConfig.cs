@@ -153,6 +153,18 @@ public class EnergyFlowNode
     [Description("Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed.")]
     public double? Max { get; set; }
 
+    /// <summary>
+    /// Free-form labels for grouping nodes across the hierarchy (#342) — "upstairs", "critical", "rack-1".
+    ///
+    /// <para>
+    /// Deliberately unvalidated and with no fixed vocabulary: the useful groupings cut across the wiring
+    /// (everything on a UPS, everything in one room) and nobody can guess them in advance. A tag never
+    /// affects a value or a roll-up; it only decides what a view shows.
+    /// </para>
+    /// </summary>
+    [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
+    public List<string> Tags { get; set; } = new();
+
     /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
     /// diagram/state-of-charge display; does not affect the power roll-up.</summary>
     [Description("For a battery node: usable storage capacity in kWh (display metadata; optional).")]

@@ -756,6 +756,11 @@ spec:
                         Max:
                           type: number
                           description: Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed.
+                        Tags:
+                          type: array
+                          items:
+                            type: string
+                          description: Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.
                         StorageKwh:
                           type: number
                           description: 'For a battery node: usable storage capacity in kWh (display metadata; optional).'

@@ -63,6 +63,16 @@ export function makeEl(tag = 'div') {
     append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
     remove() { if (this.parent) this.parent.removeChild(this); },
+    // Swap this node for another in the parent's child list, keeping its position — used where a toolbar
+    // rebuilds itself in place.
+    replaceWith(next) {
+      const p = this.parent;
+      if (!p) return;
+      const i = p.children.indexOf(this);
+      if (i < 0) return;
+      if (next && next.tag) { next.parent = p; p.children[i] = next; } else p.children.splice(i, 1);
+      this.parent = null;
+    },
     insertBefore(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
     // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
     contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
