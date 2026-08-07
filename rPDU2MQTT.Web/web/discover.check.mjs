@@ -215,12 +215,16 @@ if (JSON.stringify(metrics) !== JSON.stringify(['energy', 'realpower'])) fail(`w
 if (fridge.Sources.find(x => x.Metric === 'energy').Unit !== 'Wh') fail('the energy source lost its unit');
 if (fridge.Sources.find(x => x.Metric === 'realpower').Unit !== 'W') fail('the power source lost its unit');
 
-// Every imported node is wired to the chosen feeder.
+// Every imported node is wired to the chosen node, as a load drawn from it.
+//
+// Direction matters: an appliance monitor draws from the panel. Wiring it as a feeder adds its draw to the
+// panel's total while the appliance is still inside the panel's unmeasured remainder, counting it twice.
 const links = cfg.EnergyFlow.Links || [];
 for (const id of ['deep_freezer', 'fridge']) {
-  const link = links.find(l => l.From === id);
+  const link = links.find(l => l.To === id);
   if (!link) fail(`${id} was imported with no link, leaving it disconnected on the diagram`);
-  if (link.To !== 'main_panel') fail(`${id} was wired to '${link.To}' rather than the chosen feeder`);
+  if (link.From !== 'main_panel') fail(`${id} was wired from '${link.From}' rather than the chosen node`);
+  if (links.some(l => l.From === id)) fail(`${id} was wired as a feeder, inflating what it draws from`);
 }
 
 // --- A built-in profile can be copied into config to edit.

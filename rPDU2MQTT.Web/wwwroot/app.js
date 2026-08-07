@@ -3954,8 +3954,12 @@ function renderDiscoverPanel(flow     , rerender            )              {
       srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
   });
   const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' })                    ;
-  // Where the imported nodes hang. Without a feeder a new node is an island on the diagram: it has a value
-  // but nothing carries it, so it sits apart from the hierarchy.
+  // Where the imported nodes hang, and which way round. An appliance monitor is a load: the panel supplies
+  // the fridge, not the reverse. Wiring it the other way adds its draw to the panel's total and counts it
+  // twice, since the appliance is already inside the panel's unmeasured remainder.
+  const dirSel = el('select', { style: { width: 'auto' } })                     ;
+  dirSel.appendChild(el('option', { value: 'load', text: 'drawn from' }));
+  dirSel.appendChild(el('option', { value: 'source', text: 'feeding' }));
   const feedSel = el('select', { style: { width: 'auto' } })                     ;
   feedSel.appendChild(el('option', { value: '', text: '— not wired —' }));
   (flow.Nodes || []).forEach((n     ) =>
@@ -3966,7 +3970,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
   copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
                 + 'metric map can be edited.';
   bar.append(srcSel, scan,
-    el('span', { class: 'desc', style: { margin: '0' }, text: 'Feeds:' }), feedSel,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
   const note = el('div', { class: 'desc' });
   const list = el('div');
@@ -4171,8 +4175,13 @@ function renderDiscoverPanel(flow     , rerender            )              {
       if (tag) node.Tags = [tag];
       nodes.push(node);
       added++;
-      // One link per node, so it is part of the hierarchy rather than standing apart from it.
-      if (feedSel.value) ensure(flow, 'Links', []).push({ From: id, To: feedSel.value });
+      // One link per node, in the direction chosen. 'drawn from' makes the node a child of the target,
+      // which is what an appliance monitor is.
+      if (feedSel.value) {
+        ensure(flow, 'Links', []).push(dirSel.value === 'source'
+          ? { From: id, To: feedSel.value }
+          : { From: feedSel.value, To: id });
+      }
     });
 
     const parts = [added ? `${added} node(s)` : '', extended ? `${extended} extended` : ''].filter(Boolean);
