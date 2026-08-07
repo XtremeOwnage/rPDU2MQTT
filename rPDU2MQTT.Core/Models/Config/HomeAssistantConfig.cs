@@ -76,6 +76,10 @@ public class HomeAssistantEnergyDashboardConfig
     [Description("Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.")]
     public bool Enabled { get; set; }
 
+    /// <summary>Which energy-flow nodes are synced into the Energy Dashboard (#342).</summary>
+    [Description("Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent — never a value, and never any other destination.")]
+    public NodeTagFilter NodeTags { get; set; } = new();
+
     [Description("Home Assistant base URL, e.g. http://homeassistant.local:8123 .")]
     public string? Url { get; set; }
 

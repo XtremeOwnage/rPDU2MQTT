@@ -71,6 +71,10 @@ public class EnergyFlowConfig
     [Description("Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.")]
     public bool MqttExport { get; set; }
 
+    /// <summary>Which nodes the MQTT export (and the Home Assistant discovery built from it) receives (#342).</summary>
+    [Description("Limit the MQTT export to nodes with particular tags. Empty exports every node. Filtering changes only what is sent — never a value, and never any other destination.")]
+    public NodeTagFilter MqttExportTags { get; set; } = new();
+
     /// <summary>Template for the per-node MQTT topic. Placeholders: {parent} {id} {label} {kind} {metric} {units}.</summary>
     [DefaultValue("{parent}/energyflow/{id}")]
     [Description("Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'.")]

@@ -15,6 +15,10 @@ public class PrometheusConfig
     [FeatureToggle]
     public bool Exporter { get; set; }
 
+    /// <summary>Which energy-flow nodes appear as metrics (#342).</summary>
+    [Description("Limit the energy-flow metrics to nodes with particular tags. Empty exposes every node. Filtering changes only what is scraped — never a value, and never any other destination.")]
+    public NodeTagFilter NodeTags { get; set; } = new();
+
     /// <summary>Port the /metrics endpoint listens on (Exporter).</summary>
     [DefaultValue(9184)]
     [Description("Port the /metrics endpoint listens on (Exporter).")]

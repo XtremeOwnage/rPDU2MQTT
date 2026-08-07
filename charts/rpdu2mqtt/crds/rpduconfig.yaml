@@ -203,6 +203,21 @@ spec:
                       Enabled:
                         type: boolean
                         description: Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.
+                      NodeTags:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          Include:
+                            type: array
+                            items:
+                              type: string
+                            description: Only send nodes carrying at least one of these tags. Empty sends every node.
+                          Exclude:
+                            type: array
+                            items:
+                              type: string
+                            description: Never send nodes carrying any of these tags. Takes precedence over Include.
+                        description: Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent — never a value, and never any other destination.
                       Url:
                         type: string
                         description: Home Assistant base URL, e.g. http://homeassistant.local:8123 .
@@ -382,6 +397,21 @@ spec:
                   Exporter:
                     type: boolean
                     description: Expose a /metrics endpoint for Prometheus to scrape.
+                  NodeTags:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Include:
+                        type: array
+                        items:
+                          type: string
+                        description: Only send nodes carrying at least one of these tags. Empty sends every node.
+                      Exclude:
+                        type: array
+                        items:
+                          type: string
+                        description: Never send nodes carrying any of these tags. Takes precedence over Include.
+                    description: Limit the energy-flow metrics to nodes with particular tags. Empty exposes every node. Filtering changes only what is scraped — never a value, and never any other destination.
                   Port:
                     type: integer
                     description: Port the /metrics endpoint listens on (Exporter).
@@ -1008,6 +1038,21 @@ spec:
                   MqttExport:
                     type: boolean
                     description: Publish each energy-hierarchy tier's rolled-up value to MQTT every poll.
+                  MqttExportTags:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Include:
+                        type: array
+                        items:
+                          type: string
+                        description: Only send nodes carrying at least one of these tags. Empty sends every node.
+                      Exclude:
+                        type: array
+                        items:
+                          type: string
+                        description: Never send nodes carrying any of these tags. Takes precedence over Include.
+                    description: Limit the MQTT export to nodes with particular tags. Empty exports every node. Filtering changes only what is sent — never a value, and never any other destination.
                   MqttTopicTemplate:
                     type: string
                     description: "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'."

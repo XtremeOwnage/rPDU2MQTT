@@ -142,6 +142,8 @@ public class PrometheusExportService : baseMQTTService
                     // Synthetic nodes (…#in, …#unmeasured) describe an arithmetic result, not a device — the
                     // same rule the MQTT export applies, and for the same reason.
                     if (node.Synthetic) continue;
+                    // Tag filter (#342): which nodes this scrape carries. Never changes a value.
+                    if (!cfg.Prometheus.NodeTags.Allows(node.Tags)) continue;
                     // Unknown is not zero. A tier nothing determines must be absent from the scrape, so a
                     // dashboard shows a gap rather than recording a confident 0 that was never measured.
                     if (node.Value is not { } v) continue;
