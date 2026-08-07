@@ -284,13 +284,25 @@ resources: {}
 podAnnotations: {}
 
 # Defaults that satisfy the Pod Security Standards "restricted" profile, so the chart installs without
-# warnings into a namespace that enforces it. The image already runs as uid 1654 (non-root), so these
-# describe what the container does rather than constraining it further.
+# warnings into a namespace that enforces it. The image runs as uid 1654 (non-root), so these describe what
+# the container does rather than constraining it further.
+#
+# runAsUser is set explicitly and must stay that way (#349). runAsNonRoot on its own makes kubelet verify
+# the image's own USER, which it can only do when that USER is numeric. Against an image whose USER is a
+# name, the container does not start:
+#
+#   Error: container has runAsNonRoot and image has non-numeric user (app), cannot verify user is non-root
+#
+# The image was given a numeric USER in the same change that added this default, which is precisely the
+# problem: a chart upgrade reaches a cluster before the new image does, and a pinned or mirrored older
+# image keeps failing afterwards. Naming the uid here removes the dependency on the image.
 #
 # readOnlyRootFilesystem is deliberately not set: the file-backed energy store writes its running kWh
 # totals to disk, and a read-only root would silently lose them on a deployment that is not using Valkey.
 podSecurityContext:
   runAsNonRoot: true
+  runAsUser: 1654
+  runAsGroup: 1654
   seccompProfile:
     type: RuntimeDefault
 securityContext:
