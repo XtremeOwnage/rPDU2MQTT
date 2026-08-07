@@ -2466,7 +2466,7 @@ function instantiateTemplate(tpl: any, prefix: string, host: string, unitId: num
 ///
 /// Discovery is used rather than per-integration topic patterns because it states the unit, the device
 /// class and the payload shape.
-function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () => void): HTMLElement {
+function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   const panel = el('div', { class: 'tpl-import' });
   panel.appendChild(el('div', {
     class: 'desc',
@@ -2510,6 +2510,15 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
               + 'exporting these readings back to where they came from.';
 
   const picked = new Set<string>();
+  // Topics already bound anywhere in the config: a reading is "already imported" when its topic is bound,
+  // not when some node happens to share its id. That lets a device's remaining metrics be added later.
+  const boundTopics = new Set<string>();
+  (flow.Nodes || []).forEach((n: any) =>
+    (n.Sources || []).forEach((src: any) => { if (src.Topic) boundTopics.add(src.Topic); }));
+
+  /// The node a reading belongs to: its device, not its individual measure.
+  const nodeIdFor = (r: any) =>
+    String(r.device || r.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || r.id;
 
   // Rows and their unit selectors, so the bulk controls can drive them without a re-render.
   let boxes: { reading: any, box: HTMLInputElement }[] = [];
@@ -2534,7 +2543,7 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
     readings.forEach(r => {
       const tr = el('tr');
       const cb = el('input', { type: 'checkbox', class: 'switch' }) as HTMLInputElement;
-      const already = existingIds.has(r.id);
+      const already = boundTopics.has(r.topic);
       // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
       cb.disabled = !!r.unsupported || already;
       cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); };
@@ -2570,7 +2579,7 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
       if (r.sample != null && r.sample !== '')
         topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: `last value: ${String(r.sample).slice(0, 60)}` }));
       if (r.unsupported) topic.appendChild(el('div', { class: 'nh-warn', text: `Cannot import: ${r.unsupported}.` }));
-      else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already a node.' }));
+      else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already bound.' }));
       tr.appendChild(topic);
       body.appendChild(tr);
     });
@@ -2649,33 +2658,58 @@ function renderDiscoverPanel(flow: any, existingIds: Set<string>, rerender: () =
   };
 
   addBtn.onclick = () => {
-    const take = found.filter(r => picked.has(r.id) && !r.unsupported && !existingIds.has(r.id));
+    const take = found.filter(r => picked.has(r.id) && !r.unsupported && !boundTopics.has(r.topic));
     if (!take.length) { toast('Nothing selected.', false); return; }
     const tag = tagIn.value.trim();
     const nodes = ensure(flow, 'Nodes', []);
+
+    // One node per device, with a source per metric. A device publishing power, energy, current and
+    // voltage is one thing with four readings, matching how a PDU outlet or an inverter is modelled.
+    const byDevice = new Map<string, any[]>();
     take.forEach(r => {
+      const key = nodeIdFor(r);
+      if (!byDevice.has(key)) byDevice.set(key, []);
+      byDevice.get(key)!.push(r);
+    });
+
+    let added = 0, extended = 0;
+    byDevice.forEach((readings, id) => {
+      const sources = readings.map(r => ({
+        Type: 'mqtt', Topic: r.topic, Metric: r.metric,
+        // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
+        // reset detection. 'period' declared wrongly publishes a cumulative total as today's.
+        Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
+        Unit: r.unit || undefined,
+        JsonField: r.jsonField || undefined,
+      }));
+      readings.forEach(r => boundTopics.add(r.topic));
+
+      // A second pass over the same device adds its remaining readings to the node already there.
+      const existing = nodes.find((n: any) => n.Id === id);
+      if (existing) {
+        ensure(existing, 'Sources', []).push(...sources);
+        extended++;
+        return;
+      }
+
       const node: any = {
-        Id: r.id,
-        Label: r.label,
-        // 'none': an imported node is valued by its own binding. 'auto' would aggregate children it does
+        Id: id,
+        Label: readings[0].device || id,
+        // 'none': an imported node is valued by its own bindings. 'auto' would aggregate children it does
         // not have.
         Mode: 'none',
-        Sources: [{
-          Type: 'mqtt', Topic: r.topic, Metric: r.metric,
-          // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
-          // reset detection. 'period' declared wrongly publishes a cumulative total as today's.
-          Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
-          Unit: r.unit || undefined,
-          JsonField: r.jsonField || undefined,
-        }],
+        Sources: sources,
       };
       if (tag) node.Tags = [tag];
       nodes.push(node);
-      existingIds.add(r.id);
-      // One link per imported node, so it is part of the hierarchy rather than a disconnected node.
-      if (feedSel.value) ensure(flow, 'Links', []).push({ From: r.id, To: feedSel.value });
+      added++;
+      // One link per node, so it is part of the hierarchy rather than standing apart from it.
+      if (feedSel.value) ensure(flow, 'Links', []).push({ From: id, To: feedSel.value });
     });
-    toast(`Added ${take.length} node(s). Wire their feeders on the Nodes tab, then Save.`, true);
+
+    const parts = [added ? `${added} node(s)` : '', extended ? `${extended} extended` : ''].filter(Boolean);
+    toast(`Added ${parts.join(', ')} from ${take.length} reading(s). Press Save to write them to the config.`, true);
+    picked.clear();
     rerender();
   };
 
@@ -2703,9 +2737,8 @@ export function addMqttImportSection(nav: any, sections: any) {
     const flow = ensure(state.data, 'EnergyFlow', {});
     migrateEnergyFlow(flow);
     const nodes = ensure(flow, 'Nodes', []);
-    const existingIds = new Set<string>(nodes.map((n: any) => n.Id));
     host.innerHTML = '';
-    host.appendChild(renderDiscoverPanel(flow, existingIds, render));
+    host.appendChild(renderDiscoverPanel(flow, render));
     const bar = el('div', { class: 'ld-toolbar' });
     const save = btn('Save', 'primary');
     save.onclick = () => saveConfig(() => render());

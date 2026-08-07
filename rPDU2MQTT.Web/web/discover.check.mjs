@@ -43,7 +43,16 @@ const pattern = {
   ],
 };
 
-const cfg = { EnergyFlow: { Nodes: [{ Id: 'solar', Label: 'Solar' }, { Id: 'main_panel', Label: 'Main Panel' }], Links: [] } };
+// 'solar' already binds the topic the discovery scan offers, so that row is not importable again.
+const cfg = {
+  EnergyFlow: {
+    Nodes: [
+      { Id: 'solar', Label: 'Solar', Sources: [{ Type: 'mqtt', Topic: 'sa/pv_power', Metric: 'realpower' }] },
+      { Id: 'main_panel', Label: 'Main Panel' },
+    ],
+    Links: [],
+  },
+};
 
 const builtIn = {
   ok: true,
@@ -108,7 +117,7 @@ if (!bad.row.textContent.includes('Cannot import')) fail('the refused row does n
 // Already modelled: shown, disabled, and says so.
 const dup = boxFor('Solar');
 if (!dup.box.disabled) fail('a reading that is already a node was offered again');
-if (!dup.row.textContent.includes('Already a node')) fail('the duplicate row does not say why');
+if (!dup.row.textContent.includes('Already bound')) fail('the duplicate row does not say why');
 
 // Taking the importable one adds a node, tagged, valued only by its own binding.
 good.box.checked = true;
@@ -116,7 +125,8 @@ good.box.onchange({});
 buttons().find(b => b.textContent === 'Add selected').click();
 await new Promise(r => setTimeout(r, 100));
 
-const added = cfg.EnergyFlow.Nodes.find(n => n.Id === 'esp_garage_power');
+// The node id comes from the device, not the reading: "Garage Meter" -> garage_meter.
+const added = cfg.EnergyFlow.Nodes.find(n => n.Id === 'garage_meter');
 if (!added) fail('selecting a reading did not add a node');
 if (JSON.stringify(added.Tags) !== JSON.stringify(['imported'])) fail(`the imported node was not tagged: ${JSON.stringify(added.Tags)}`);
 if (added.Mode !== 'none') fail('an imported node must not be set to aggregate children it does not have');
@@ -125,7 +135,7 @@ if (src.Topic !== 'esphome/garage/sensor/power/state') fail('the binding does no
 if (src.Metric !== 'realpower' || src.Unit !== 'W') fail('the binding lost the metric or unit');
 
 // And nothing else was added — in particular not the two refused rows.
-if (cfg.EnergyFlow.Nodes.length !== 3) fail(`expected the two seeded nodes plus one import, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
+if (cfg.EnergyFlow.Nodes.length !== 3) fail(`expected the two seeded nodes plus one device, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
 
 // --- The topic-profile path.
 const sel = query(getEl('sections'), 'select', true)
@@ -186,14 +196,28 @@ if (query(powerRow, 'select', true)[0].value !== 'W') fail('the energy bulk sett
 buttons().find(b => b.textContent === 'Add selected').click();
 await new Promise(r => setTimeout(r, 100));
 
-const imported = cfg.EnergyFlow.Nodes.find(n => n.Id === 'esphome_deep_freezer_energy_d');
+const imported = cfg.EnergyFlow.Nodes.find(n => n.Id === 'deep_freezer');
 if (!imported) fail('the topic-matched reading was not added');
-if ((imported.Sources[0] || {}).Unit !== 'Wh') fail('the unit the operator entered was not carried onto the binding');
-if ((imported.Sources[0] || {}).Accumulation !== 'lifetime') fail('an imported energy counter must default to lifetime');
+const energySrc = (imported.Sources || []).find(x => x.Metric === 'energy') || {};
+if (energySrc.Unit !== 'Wh') fail('the unit set in bulk was not carried onto the binding');
+if (energySrc.Accumulation !== 'lifetime') fail('an imported energy counter must default to lifetime');
+
+// One node per device with a source per metric, not one node per reading. The fridge publishes two.
+const fridge = cfg.EnergyFlow.Nodes.find(n => n.Id === 'fridge');
+if (!fridge) fail(`no node for the fridge device: ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
+if (cfg.EnergyFlow.Nodes.filter(n => n.Id.startsWith('fridge')).length !== 1)
+  fail('the fridge device produced more than one node');
+if ((fridge.Sources || []).length !== 2)
+  fail(`fridge should carry one source per selected metric, got ${(fridge.Sources || []).length}`);
+const metrics = fridge.Sources.map(x => x.Metric).sort();
+if (JSON.stringify(metrics) !== JSON.stringify(['energy', 'realpower'])) fail(`wrong metrics on the device node: ${metrics}`);
+// Each source keeps its own unit: the energy one set in bulk, the power one its default.
+if (fridge.Sources.find(x => x.Metric === 'energy').Unit !== 'Wh') fail('the energy source lost its unit');
+if (fridge.Sources.find(x => x.Metric === 'realpower').Unit !== 'W') fail('the power source lost its unit');
 
 // Every imported node is wired to the chosen feeder.
 const links = cfg.EnergyFlow.Links || [];
-for (const id of ['esphome_deep_freezer_energy_d', 'esphome_fridge_power']) {
+for (const id of ['deep_freezer', 'fridge']) {
   const link = links.find(l => l.From === id);
   if (!link) fail(`${id} was imported with no link, leaving it disconnected on the diagram`);
   if (link.To !== 'main_panel') fail(`${id} was wired to '${link.To}' rather than the chosen feeder`);
