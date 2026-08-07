@@ -87,6 +87,7 @@ public static class FlowGraphBuilder
         flow ??= new EnergyFlowConfig();
         var label = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var kind = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var tags = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var leaf = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);   // outlet id -> measured value
         var outgoing = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var units = "";
@@ -180,6 +181,15 @@ public static class FlowGraphBuilder
                 // The node's declared kind (battery, inverter, panel, …) styles the diagram; fall back to
                 // the generic "node" when unset. Don't override an auto id that already resolved to pdu/outlet.
                 if (!kind.ContainsKey(n.Id)) kind[n.Id] = string.IsNullOrWhiteSpace(n.Kind) ? "node" : n.Kind.Trim().ToLowerInvariant();
+                // Tags travel with the node so a view can filter on them (#342). Trimmed, blanks dropped and
+                // de-duplicated case-insensitively, because they are hand-typed and "Rack 1" arriving twice
+                // as two chips is just noise. They never take part in any calculation.
+                var tagged = (n.Tags ?? [])
+                    .Select(t => t?.Trim() ?? "")
+                    .Where(t => t.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (tagged.Count > 0) tags[n.Id] = tagged;
                 if (live is not null && live.TryGetValue(n.Id, metric, out var liveValue))
                 {
                     // A live reading is authoritative even at 0: solar at night generates nothing, and the
@@ -581,7 +591,8 @@ public static class FlowGraphBuilder
         var nodes = label.Keys
             .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
-                                       ValueOf(id), ImbalanceOf(id), DerivationOf(id)))
+                                       ValueOf(id), ImbalanceOf(id), DerivationOf(id),
+                                       tags.TryGetValue(id, out var t) ? t : null))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

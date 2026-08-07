@@ -2033,6 +2033,19 @@
               "required": false
             },
             {
+              "key": "Tags",
+              "label": "Tags",
+              "description": "Free-form tags for filtering the diagram and the energy views \u2014 e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.",
+              "type": "list",
+              "required": false,
+              "valueSchema": {
+                "key": "",
+                "label": "",
+                "type": "string",
+                "required": false
+              }
+            },
+            {
               "key": "StorageKwh",
               "label": "StorageKwh",
               "description": "For a battery node: usable storage capacity in kWh (display metadata; optional).",

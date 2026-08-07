@@ -1842,6 +1842,20 @@ function renderNodeEditor(node     , links       , cand                  , reren
   // kind: a dial belongs on something with a rating (an array's peak, an inverter, a main breaker), and
   // offering it everywhere invites a number that means nothing.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
+    // Tags (#342): free text, comma-separated. No fixed vocabulary and no validation — the groupings worth
+    // having cut across the wiring ("everything on the UPS", "upstairs") and nobody can guess them up front.
+    const tagsIn = el('input', { type: 'text', value: (node.Tags || []).join(', '), placeholder: 'critical, rack-1' });
+    tagsIn.onchange = () => {
+      const list = tagsIn.value.split(',').map((t        ) => t.trim()).filter((t        ) => t);
+      // De-duplicated case-insensitively: they are hand-typed, and the same tag twice is two identical chips.
+      const seen = new Set        ();
+      node.Tags = list.filter((t        ) => { const k = t.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
+      if (!node.Tags.length) node.Tags = undefined;
+      rerender();
+    };
+    grid.appendChild(field('Tags', tagsIn,
+      'Comma-separated labels for filtering the Energy page and highlighting the diagram. A tag never changes a reading.'));
+
     const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });
     maxIn.onchange = () => { const v = +maxIn.value; node.Max = (maxIn.value !== '' && !isNaN(v) && v > 0) ? v : undefined; };
     grid.appendChild(field('Gauge max (W)', maxIn,
@@ -2484,6 +2498,39 @@ function animateToggle(onToggle            )              {
   return lbl;
 }
 
+// The tag selected on the diagram, kept across redraws: the Sankey repaints on every live push, and a
+// highlight that cleared itself every few seconds would be unusable.
+let activeTag                = null;
+
+/// Chips for every tag in use, highlighting the nodes carrying it (#342).
+function tagToggles(nodes       , svg     , apply                              )                     {
+  const all = new Map                ();   // lower-case key -> first spelling seen
+  nodes.forEach(n => (n.tags || []).forEach((t        ) => {
+    const k = t.toLowerCase();
+    if (!all.has(k)) all.set(k, t);
+  }));
+  if (!all.size) return null;   // nothing tagged: an empty row of controls is just clutter
+
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Tags:' }));
+  [...all.values()].sort((a, b) => a.localeCompare(b)).forEach(tag => {
+    const on = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
+    const chip = btn(tag, on ? 'primary' : undefined);
+    chip.title = on
+      ? 'Showing every node with this tag; click to clear.'
+      : `Highlight the nodes tagged “${tag}”. Nothing is hidden and no figure changes — the rest are dimmed.`;
+    // Read the state at click time, not the value captured when the chip was built: the row is rebuilt on
+    // every toggle, but a chip that outlives its rebuild would keep re-selecting the tag it already has.
+    chip.onclick = () => {
+      const selected = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
+      activeTag = selected ? null : tag;
+      apply(activeTag);
+    };
+    row.appendChild(chip);
+  });
+  return row;
+}
+
 function groupToggles(onToggle            )                     {
   const groups = flowGroups();
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
@@ -2663,8 +2710,9 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Bindings', ''].forEach(h => {
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Bindings', ''].forEach(h => {
     const th = el('th', { text: h });
+    if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
     if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
@@ -2680,6 +2728,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { text: n.Mode || 'auto' }));
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
     tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
+    tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
     // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
@@ -3375,6 +3424,20 @@ function addFlowSection(nav     , sections     ) {
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
       : '';
+    // Tag chips, above the banners: they change what is emphasised, not what is being reported.
+    const taggedById = new Map             (nodes.map((n     ) => [n.id, n]));
+    const applyTag = (tag               ) => {
+      if (tag) focusTag(svg, taggedById, tag); else clearFocus(svg);
+      const fresh = tagToggles(nodes, svg, applyTag);
+      if (fresh && tagRow.parentNode) { tagRow.replaceWith(fresh); tagRow = fresh; }
+    };
+    let tagRow = tagToggles(nodes, svg, applyTag)       ;
+    if (tagRow) {
+      wrap.appendChild(tagRow);
+      // Re-apply across the live repaint, so the selection survives a push.
+      if (activeTag) focusTag(svg, taggedById, activeTag);
+    }
+
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
@@ -3725,6 +3788,26 @@ function focusPath(svg     , incoming     , id        ) {
     e.classList[onPath.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
   svg.querySelectorAll('[data-src]').forEach((e     ) =>
     e.classList[links.has(e.getAttribute('data-src') + '' + e.getAttribute('data-dst')) ? 'add' : 'remove']('on-path'));
+  svg.classList.add('flow-focus');
+}
+
+/// Highlight every node carrying `tag`, dimming the rest (#342).
+///
+/// A highlight and not a filter: removing nodes from a Sankey removes the ribbons into them too, so a
+/// node whose feeders were hidden would read as unsourced and the totals along the remaining chain would
+/// no longer add up. Dimming answers "which of these are tagged X" without changing a single figure.
+function focusTag(svg     , nodesById                  , tag        ) {
+  const tagged = new Set        ();
+  nodesById.forEach((n, id) => {
+    if ((n.tags || []).some((t        ) => t.toLowerCase() === tag.toLowerCase())) tagged.add(id);
+  });
+
+  focusedNode = null;
+  svg.querySelectorAll('[data-node]').forEach((e     ) =>
+    e.classList[tagged.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
+  // Ribbons stay dim throughout: a link is not tagged, and lighting one because an end happens to be
+  // would say the flow itself is part of the selection.
+  svg.querySelectorAll('[data-src]').forEach((e     ) => e.classList.remove('on-path'));
   svg.classList.add('flow-focus');
 }
 
