@@ -1250,6 +1250,48 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
+        // Readings matched by topic shape, for publishers that do not announce Home Assistant discovery.
+        // A raw topic states no unit, so the sampled payload is returned with each match and the operator
+        // sets the unit before importing.
+        app.MapGet("/api/mqtt/importable/pattern", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var profile = Core.Flow.MqttTopicProfile.ById(ctx.Request.Query["profile"].ToString());
+                if (profile is null)
+                    return Results.Json(new { ok = false, message = "Unknown topic profile." }, ConfigSchema.Json);
+
+                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                await index.Renew(profile.Filter);
+                var samples = await index.Search(null, 5000);
+
+                var matches = Core.Flow.MqttTopicProfile.Scan(
+                    profile, samples.Select(t => (t.Topic, t.Payload)));
+
+                return Results.Json(new
+                {
+                    ok = true,
+                    scanned = samples.Count,
+                    profile = profile.Id,
+                    readings = matches.Select(m => new
+                    {
+                        id = Core.Flow.MqttDiscoveryImport.NodeId($"{profile.Id}_{m.Device}_{m.Measure}"),
+                        label = $"{m.Device} {m.Measure}",
+                        device = m.Device,
+                        topic = m.Topic, metric = m.Metric, unit = (string?)null,
+                        jsonField = m.JsonField, sample = m.Sample, unsupported = (string?)null,
+                    }),
+                }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        app.MapGet("/api/mqtt/profiles", () => Results.Json(new
+        {
+            ok = true,
+            profiles = Core.Flow.MqttTopicProfile.BuiltIn.Select(p => new { id = p.Id, label = p.Label, pattern = p.Pattern }),
+        }, ConfigSchema.Json));
+
         app.MapGet("/api/ha/orphans", async () =>
         {
             try
