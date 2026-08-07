@@ -186,6 +186,27 @@ sandbox.document.dispatch('keydown', { key: 'Escape' });
 await new Promise(r => setTimeout(r, 20));
 if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not close the node editor modal');
 
+// --- Wiring from the Nodes table (no dragging) ---
+// The Flow tab's canvas needs a node's port dragged onto its target, which means scrolling a tall column.
+nodesLink.click();
+await new Promise(r => setTimeout(r, 50));
+
+const feedRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.includes('panel'));
+if (!feedRow) fail('no row for the panel node in the virtual-node table');
+const feedSel = query(feedRow, 'select', true)[0];
+if (!feedSel) fail('the node table offers no way to set what a node feeds without dragging');
+
+// Its options are the other nodes, and it reflects the wiring already in the config.
+const feedOpts = (feedSel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!feedOpts.includes('solar')) fail(`the feeds control does not offer the other nodes: ${feedOpts.join(', ')}`);
+
+// A loop is refused: solar already feeds panel, so panel feeding solar would close a cycle.
+feedSel.value = 'solar';
+feedSel.onchange({});
+await new Promise(r => setTimeout(r, 20));
+const looped = (config.EnergyFlow.Links || []).some(l => l.From === 'panel' && l.To === 'solar');
+if (looped) fail('the feeds control accepted a wiring that closes a feeder loop');
+
 // --- Features page (#292) -----------------------------------------------------------------------------
 // Every capability's on/off switch on one page, and NOT also on its own config page: two switches bound to
 // one value disagree the moment either is clicked, and a page showing "Off" for something that is on is

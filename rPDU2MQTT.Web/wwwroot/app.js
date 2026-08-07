@@ -2175,15 +2175,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab.', style: { margin: '0 0 6px' } }));
 
   const nm = (id        ) => (cand.get(id) || {}).label || id;
-  const wouldLoop = (from        , to        ) => {
-    const adj      = {}; links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
-    const stack = [to]; const seen = new Set        ();
-    while (stack.length) { const x = stack.pop() ; if (x === from) return true; if (seen.has(x)) continue; seen.add(x); (adj[x] || []).forEach((t        ) => stack.push(t)); }
-    return false;
-  };
   const addLink = (from        , to        ) => {
     if (from === to || links.some(l => l.From === from && l.To === to)) return;
-    if (wouldLoop(from, to)) { toast('That would create a feeder loop.', false); return; }
+    if (wouldLoop(links, from, to)) { toast('That would create a feeder loop.', false); return; }
     links.push({ From: from, To: to });
   };
   const removeLink = (from        , to        ) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
@@ -2694,6 +2688,22 @@ function syncNodeModal(node     , links       , cand                  , editing 
   nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
 }
 
+/// Would adding from -> to close a cycle? The builder walks whatever it is handed, so a loop expressed in
+/// config would recurse rather than fail.
+function wouldLoop(links       , from        , to        ) {
+  const adj      = {};
+  links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
+  const stack = [to]; const seen = new Set        ();
+  while (stack.length) {
+    const x = stack.pop() ;
+    if (x === from) return true;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    (adj[x] || []).forEach((t        ) => stack.push(t));
+  }
+  return false;
+}
+
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
 // node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) in a modal.
 // Deleting a node takes its bound sources with it (they live on the node).
@@ -2710,9 +2720,10 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Bindings', ''].forEach(h => {
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Feeds', 'Bindings', ''].forEach(h => {
     const th = el('th', { text: h });
     if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
+    if (h === 'Feeds') th.title = 'What this node feeds. The same wiring as dragging on the Flow tab, without the dragging.';
     if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
@@ -2729,6 +2740,36 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
     tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
+
+    // Wiring without dragging. The Flow tab's canvas needs the target dragged onto, which means scrolling a
+    // tall column to reach it; a node with several targets keeps them and is edited in its own editor.
+    const outgoing = links.filter((l     ) => l.From === n.Id).map((l     ) => l.To);
+    const feedsCell = el('td');
+    if (outgoing.length > 1) {
+      feedsCell.appendChild(el('span', { text: outgoing.map((t        ) => (cand.get(t) || {}).label || t).join(', ') }));
+    } else {
+      const sel = el('select', { style: { width: 'auto' } })                     ;
+      sel.appendChild(el('option', { value: '', text: '— none —' }));
+      [...cand.keys()]
+        .filter(id => id !== n.Id && !String(id).includes('#'))
+        .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
+        .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
+      sel.value = outgoing[0] || '';
+      sel.onchange = () => {
+        const target = sel.value;
+        if (target && wouldLoop(links.filter((l     ) => l.From !== n.Id), n.Id, target)) {
+          toast('That would create a feeder loop.', false);
+          sel.value = outgoing[0] || '';
+          return;
+        }
+        // One outgoing link is what this control manages: drop the old one, add the new.
+        for (let i = links.length - 1; i >= 0; i--) if (links[i].From === n.Id) links.splice(i, 1);
+        if (target) links.push({ From: n.Id, To: target });
+        rerender();
+      };
+      feedsCell.appendChild(sel);
+    }
+    tr.appendChild(feedsCell);
     // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
