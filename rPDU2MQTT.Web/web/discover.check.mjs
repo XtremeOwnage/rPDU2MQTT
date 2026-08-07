@@ -55,16 +55,14 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
 
-const nav = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Nodes');
-if (!nav) fail('no Nodes tab');
+// Its own page under Integrations, not the node editor's toolbar: it reads the broker rather than the PDU.
+const nav = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'MQTT Import');
+if (!nav) fail('no MQTT Import page in the nav');
 nav.click();
 await new Promise(r => setTimeout(r, 200));
 
 const buttons = () => query(getEl('sections'), 'button', true);
-const discover = buttons().find(b => b.textContent === 'Discover from MQTT');
-if (!discover) fail('no "Discover from MQTT" button on the Nodes tab');
-discover.click();
-await new Promise(r => setTimeout(r, 50));
+if (!buttons().some(b => b.textContent === 'Scan broker')) fail('the MQTT Import page rendered no scan control');
 
 buttons().find(b => b.textContent === 'Scan broker').click();
 await new Promise(r => setTimeout(r, 200));
@@ -109,25 +107,7 @@ if (src.Metric !== 'realpower' || src.Unit !== 'W') fail('the binding lost the m
 // And nothing else was added — in particular not the two refused rows.
 if (cfg.EnergyFlow.Nodes.length !== 2) fail(`expected 2 nodes, got ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
 
-// --- Switching panels, not just closing.
-// Both panels share one container; clicking the other button used to close whatever was open and require
-// a second click to get the panel you asked for.
-buttons().find(b => b.textContent === 'Import device template').click();
-await new Promise(r => setTimeout(r, 50));
-buttons().find(b => b.textContent === 'Discover from MQTT').click();
-await new Promise(r => setTimeout(r, 50));
-if (!buttons().some(b => b.textContent === 'Scan broker'))
-  fail('clicking Discover while the template panel was open closed it instead of switching');
-// And its own button still closes it.
-buttons().find(b => b.textContent === 'Discover from MQTT').click();
-await new Promise(r => setTimeout(r, 50));
-if (buttons().some(b => b.textContent === 'Scan broker')) fail('the panel did not close on its own button');
-
 // --- The topic-profile path.
-// Adding re-renders the Nodes tab, which closes the panel; reopen it.
-buttons().find(b => b.textContent === 'Discover from MQTT').click();
-await new Promise(r => setTimeout(r, 50));
-
 const sel = query(getEl('sections'), 'select', true)
   .find(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'esphome'));
 if (!sel) fail('no source selector offering the topic profiles');

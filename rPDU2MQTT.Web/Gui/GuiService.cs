@@ -1223,10 +1223,27 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         //
         // Two endpoints on purpose. Deleting devices from someone's Home Assistant is not something to do on
         // a timer or at startup — GET says exactly what would go, POST does it, and the operator decides.
+        // Renew() only *asks* for a subscription: the process holding the broker connection polls for the
+        // wanted filter every few seconds, subscribes, and the retained messages arrive after that. Reading
+        // the index immediately therefore always returns nothing. Wait for it to fill and settle instead —
+        // two consecutive equal counts, or the deadline.
+        async Task<IReadOnlyList<Grains.Abstractions.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
+        {
+            var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+            return await Core.Flow.TopicIndexScan.SettleAsync<Grains.Abstractions.Discovery.TopicSample>(
+                renew: () => index.Renew(filter),
+                search: async () => await index.Search(null, 5000),
+                delay: d => Task.Delay(d, ct),
+                pollEvery: TimeSpan.FromMilliseconds(750),
+                deadline: DateTime.UtcNow.AddSeconds(12),
+                now: () => DateTime.UtcNow,
+                ct: ct);
+        }
+
         // Power/energy readings other integrations already announce over Home Assistant MQTT discovery
         // (ESPHome, Z-Wave JS, Tasmota, Shelly, zigbee2mqtt all publish it). Offered for import as
         // energy-flow nodes; nothing is created until the operator picks from the list.
-        app.MapGet("/api/mqtt/importable", async () =>
+        app.MapGet("/api/mqtt/importable", async (HttpContext ctx) =>
         {
             try
             {
@@ -1234,10 +1251,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 if (string.IsNullOrWhiteSpace(prefix))
                     return Results.Json(new { ok = false, message = "No Home Assistant discovery prefix is configured, so there is nothing to scan." }, ConfigSchema.Json);
 
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                var filter = prefix.Trim().Trim('/') + "/#";
-                await index.Renew(filter);
-                var retained = await index.Search(null, 5000);
+                var retained = await ScanAsync(prefix.Trim().Trim('/') + "/#", ctx.RequestAborted);
 
                 var rootId = string.IsNullOrWhiteSpace(config.Overrides?.rPDU2MQTT?.ID) ? "rPDU2MQTT" : config.Overrides!.rPDU2MQTT!.ID!;
                 string[] ours = [Core.Flow.FlowExport.DeviceIdPrefix, rootId + "_"];
@@ -1278,9 +1292,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 if (profile is null)
                     return Results.Json(new { ok = false, message = "Unknown topic profile." }, ConfigSchema.Json);
 
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                await index.Renew(profile.Filter);
-                var samples = await index.Search(null, 5000);
+                var samples = await ScanAsync(profile.Filter, ctx.RequestAborted);
 
                 var matches = Core.Flow.MqttTopicProfile.Scan(
                     profile, samples.Select(t => (t.Topic, t.Payload)));

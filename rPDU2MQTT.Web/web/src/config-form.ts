@@ -10,7 +10,7 @@ import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
-import { addFlowSection, addNodesSection, addEnergyOverviewSection } from './sections/flow.js';
+import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImportSection } from './sections/flow.js';
 import { addNodeDataSection } from './sections/nodedata.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
@@ -209,7 +209,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ schema: 'MQTT' }, { schema: 'Modbus' }] },
+  { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
