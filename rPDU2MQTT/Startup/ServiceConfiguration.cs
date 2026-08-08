@@ -356,6 +356,9 @@ public static class ServiceConfiguration
                 : new Services.PrometheusFlowHistory(historyHttp, cfg));
         }
 
+        // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.
+        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp => new Hosting.GrainPeriodAuditor(sp.GetRequiredService<IGrainFactory>()));
+
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)
         {

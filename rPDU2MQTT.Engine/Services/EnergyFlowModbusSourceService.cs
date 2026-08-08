@@ -26,10 +26,10 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     // For 'auto' connections: the framing that actually read, so we don't re-probe both every poll.
     private readonly Dictionary<string, string> resolvedFraming = new(StringComparer.Ordinal);
 
-    public EnergyFlowModbusSourceService(Config cfg, IPeriodAuditStore? auditStore = null)
+    public EnergyFlowModbusSourceService(Config cfg, IPeriodAuditor? auditor = null)
     {
         this.cfg = cfg;
-        this.auditStore = auditStore ?? new MemoryPeriodAuditStore();
+        this.auditor = auditor;
     }
 
     public bool TryGetValue(string nodeId, string metric, out double value)
@@ -52,15 +52,28 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         catch (OperationCanceledException) { /* shutting down */ }
     }
 
-    // Per (node, register, direction): whether a source claiming to be a daily counter has behaved like one.
-    // Persisted, as on the MQTT side: a restart must not erase the previous period and leave every source
-    // unproven until the next rollover.
-    private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
-    private readonly IPeriodAuditStore auditStore;
-    private bool auditLoaded;
+    // The verdicts belong to one owner cluster-wide, not to this process — see IPeriodAuditor.
+    private readonly IPeriodAuditor? auditor;
+    private volatile WithheldSource[] withheld = [];
 
     /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
-    public IReadOnlyCollection<WithheldSource> Withheld => PeriodCounterAudit.WithheldIn(periodAudit);
+    public IReadOnlyCollection<WithheldSource> Withheld => withheld;
+
+    /// <summary>Ask the audit's owner; an unreachable owner leaves the reading published, as before the audit existed.</summary>
+    private bool Audit(string nodeId, string source, string? direction, string periodKey, double value)
+    {
+        try
+        {
+            var allowed = auditor!.Allow(nodeId, source, direction, periodKey, value);
+            withheld = [.. auditor.Withheld];
+            return allowed;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Energy-flow Modbus: could not consult the period audit ({ex.Message}).");
+            return true;
+        }
+    }
 
     /// <summary>The period a reading belongs to, on the same boundary the daily accumulator uses.</summary>
     private string CurrentPeriodKey(DateTime nowUtc)
@@ -104,12 +117,6 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
         var framing = resolvedFraming.TryGetValue(conn.Id, out var cached) ? cached : conn.Framing;
 
         var periodKey = CurrentPeriodKey(nowUtc);
-        if (!auditLoaded)
-        {
-            auditLoaded = true;
-            foreach (var (k, v) in auditStore.Load()) periodAudit[k] = v;
-        }
-        var auditBefore = periodAudit.Count == 0 ? "" : string.Join('|', periodAudit.Select(kv => $"{kv.Key}={kv.Value.PeriodKey}:{kv.Value.HighWater}:{kv.Value.Contradicted}").OrderBy(x => x, StringComparer.Ordinal));
 
         ReadBatch(conn.Host, conn.Port, conn.UnitId, framing, conn.TimeoutMs, forConn.Select(f => f.Source).ToList(),
             onValue: (src, value) =>
@@ -118,9 +125,8 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
                 // actually reset at the boundary, or whatever it holds is not today's total. A rule only one
                 // transport enforces is a rule with a hole in it, and the hole is wherever the counter
                 // happened to be wired.
-                if (PeriodCounterAudit.Applies(src)
-                    && !PeriodCounterAudit.Allow(periodAudit, periodKey, nodeOf[src],
-                                                 $"register {src.Register} on {conn.Id}", src.Direction, value, m => Log.Warning(m)))
+                if (auditor is not null && PeriodCounterAudit.Applies(src)
+                    && !Audit(nodeOf[src], $"register {src.Register} on {conn.Id}", src.Direction, periodKey, value))
                     return;
 
                 foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))
@@ -129,9 +135,6 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
             onError: (src, msg) => Log.Debug($"Energy-flow Modbus: node '{nodeOf[src]}' register {src.Register} on {conn.Id} — {msg}"),
             onResolved: f => resolvedFraming[conn.Id] = f);
 
-        // Only when something moved: a poll that changes nothing must not write the cache.
-        var auditAfter = periodAudit.Count == 0 ? "" : string.Join('|', periodAudit.Select(kv => $"{kv.Key}={kv.Value.PeriodKey}:{kv.Value.HighWater}:{kv.Value.Contradicted}").OrderBy(x => x, StringComparer.Ordinal));
-        if (auditBefore != auditAfter) auditStore.Save(new Dictionary<string, PeriodCounterAudit.State>(periodAudit));
     }
 
     /// <summary>
