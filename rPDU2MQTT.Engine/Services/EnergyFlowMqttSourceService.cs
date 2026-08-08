@@ -37,20 +37,24 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private long version;
     private long received;
     // Per (node, topic, direction): whether a source claiming to be a daily counter has actually behaved
-    // like one. In memory only — a restart makes it unproven again until the next rollover, which errs
-    // towards showing the device's number rather than withholding one we haven't yet caught out.
+    // like one. Loaded from the store on first use and written back when a verdict changes, so a restart
+    // does not erase the previous period and leave every source unproven until the next rollover.
     private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
+    private readonly IPeriodAuditStore auditStore;
+    private bool auditLoaded;
 
     /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
     public IReadOnlyCollection<WithheldSource> Withheld => PeriodCounterAudit.WithheldIn(periodAudit);
 
-    public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null)
+    public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null,
+                                       IPeriodAuditStore? auditStore = null)
     {
         // OnMessageReceived lives on the concrete client, not the interface.
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for energy-flow MQTT sources.");
         cfg = deps.Cfg;
         this.sink = sink;
+        this.auditStore = auditStore ?? new MemoryPeriodAuditStore();
     }
 
     public bool TryGetValue(string nodeId, string metric, out double value)
@@ -182,6 +186,14 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         return true;
     }
 
+    /// <summary>
+    /// A cheap comparison of the audit's contents, to decide whether it is worth persisting. The
+    /// high-water mark changes on most readings, so the store is written only when something did.
+    /// </summary>
+    private static string Snapshot(Dictionary<string, PeriodCounterAudit.State> audit)
+        => string.Join('\u0001', audit.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => $"{kv.Key}={kv.Value.PeriodKey}:{kv.Value.HighWater}:{kv.Value.Contradicted}"));
+
     /// <summary>The period a reading now belongs to, on the same boundary the daily accumulator uses.</summary>
     private string CurrentPeriodKey(DateTime nowUtc)
     {
@@ -195,12 +207,24 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         // Collect the readings this message produced (only if a sink is wired) and push them to the flow grain
         // event-driven — the "subscription manager routes events to the recipient grain" (#v3).
         List<MeasurementReading>? readings = sink is null ? null : new();
+        // Loaded lazily: the store may be a cache that is not up yet when the service starts, and the first
+        // message is the first moment a verdict is needed.
+        if (!auditLoaded)
+        {
+            auditLoaded = true;
+            foreach (var (k, v) in auditStore.Load()) periodAudit[k] = v;
+        }
+
+        var auditBefore = Snapshot(periodAudit);
         Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, now,
             readings is null ? null : (node, metric, value, stale) =>
             {
                 if (Metrics.TryParse(metric, out var m)) readings.Add(new MeasurementReading(node, m, value, stale));
             },
             periodAudit, CurrentPeriodKey(now), m => Log.Warning(m));
+        // Only on a change: the high-water mark moves on most readings, and writing the cache per message
+        // would put a round-trip on every publish the broker sends us.
+        if (auditBefore != Snapshot(periodAudit)) auditStore.Save(new Dictionary<string, PeriodCounterAudit.State>(periodAudit));
 
         if (sink is not null && readings is { Count: > 0 })
         {
