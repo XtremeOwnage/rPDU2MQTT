@@ -95,6 +95,13 @@ nav.click();
 await new Promise(r => setTimeout(r, 200));
 
 const buttons = () => query(getEl('sections'), 'button', true);
+// The label carries the count once rows are ticked, so match on the prefix.
+const addButtons = () => buttons().filter(b => /^Add( \d+)? selected$/.test(b.textContent || ''));
+const addButton = () => {
+  const b = addButtons()[0];
+  if (!b) fail('no "Add selected" control');
+  return b;
+};
 if (!buttons().some(b => b.textContent === 'Scan broker')) fail('the MQTT Import page rendered no scan control');
 
 buttons().find(b => b.textContent === 'Scan broker').click();
@@ -126,7 +133,7 @@ if (!dup.row.textContent.includes('Already bound')) fail('the duplicate row does
 // Taking the importable one adds a node, tagged, valued only by its own binding.
 good.box.checked = true;
 good.box.onchange({});
-buttons().find(b => b.textContent === 'Add selected').click();
+addButton().click();
 await new Promise(r => setTimeout(r, 100));
 
 // The node id comes from the device, not the reading: "Garage Meter" -> garage_meter.
@@ -178,6 +185,13 @@ const allRows = query(getEl('sections'), 'tr', true).filter(r => query(r, 'input
 const checkable = allRows.map(r => query(r, 'input', true)[0]).filter(b => !b.disabled);
 if (!checkable.every(b => b.checked)) fail('Select all left rows unchecked');
 
+// The action is repeated below the table: with twenty rows the toolbar scrolls out of view, leaving the
+// page's Save button as the only visible control.
+if (addButtons().length < 2) fail('the Add action is not repeated below the table');
+// The label counts what is ticked, so the button states what pressing it will do.
+if (!addButtons().some(b => /^Add \d+ selected$/.test(b.textContent)))
+  fail(`the Add button does not show how many rows are ticked: ${addButtons().map(b => b.textContent).join(' | ')}`);
+
 // Per-metric unit setter: changing it moves every row of that metric, and leaves the others alone.
 const bulkSels = query(getEl('sections'), 'select', true)
   .filter(sel => (sel.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'Wh'));
@@ -197,7 +211,7 @@ if (query(powerRow, 'select', true)[0].value !== 'W') fail('the energy bulk sett
 
 // Import straight from the bulk setting, without touching the row's own control: the bulk change has to
 // reach the reading, not just the dropdown that displays it.
-buttons().find(b => b.textContent === 'Add selected').click();
+addButton().click();
 await new Promise(r => setTimeout(r, 100));
 
 const imported = cfg.EnergyFlow.Nodes.find(n => n.Id === 'deep_freezer');
