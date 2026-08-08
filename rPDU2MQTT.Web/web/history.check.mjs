@@ -25,6 +25,16 @@ const past = {
   links: [{ source: 'grid', target: 'panel', value: 1234 }],
 };
 
+// A week of daily totals, summed by the server, with one node short of the window.
+const week = {
+  ok: true, metric: 'energytoday', units: 'kWh', historical: true,
+  at: '2026-08-08T04:59:59Z', source: 'prometheus', spanDays: 7,
+  incomplete: [{ node: 'panel', days: 5 }],
+  nodes: [{ id: 'grid', label: 'Grid', kind: 'grid', value: 210, derivation: 'measured' },
+          { id: 'panel', label: 'Panel', kind: 'panel', value: 150, derivation: 'measured' }],
+  links: [{ source: 'grid', target: 'panel', value: 150 }],
+};
+
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
@@ -34,6 +44,7 @@ const { sandbox, getEl } = makeDom({
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
       : url.includes('/api/flow/live') ? { ok: true, values: [] }
       : url.includes('/api/flow/withheld') ? { ok: true, sources: [] }
+      : url.includes('span=7') ? week
       : url.includes('at=') ? past
       : url.includes('/api/flow') ? live
       : { ok: true };
@@ -141,6 +152,31 @@ if (metricSel.value !== 'realpower') fail('stepping a day discarded the chosen m
 
 metricSel.value = 'energytoday';
 metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+
+// A span adds up whole days: a week is the sum of seven daily totals, which is a question the single-instant
+// view could not ask at all.
+const spanSel = query(flowSection(), 'select', true)
+  .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === '7'));
+if (!spanSel) fail('no way to ask for more than one day');
+spanSel.value = '7';
+spanSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+
+const spanned = decodeURIComponent(asked.filter(u => u.includes('span=')).at(-1) || '');
+if (!spanned) fail(`choosing a span asked for no window: ${asked.slice(-3).join(' | ')}`);
+if (!spanned.includes('span=7')) fail(`the window was not requested: ${spanned}`);
+// Only the daily total can be added across days, so asking for a week asks for that metric.
+if (!spanned.includes('metric=energytoday')) fail(`a span was requested on a metric that cannot be summed: ${spanned}`);
+if (!labels().includes('210')) fail('the diagram does not show the summed window');
+
+// A window with days missing from it is not that window.
+const spanNote = query(flowSection(), 'span', true).map(x => x.textContent).join(' ');
+if (!/7 days to/.test(spanNote)) fail(`the page does not say it is showing a window: ${spanNote.slice(0, 160)}`);
+if (!/panel 5\/7d/.test(spanNote)) fail(`a short window is not declared: ${spanNote.slice(0, 200)}`);
+
+spanSel.value = '1';
+spanSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 
 // Live returns to now and drops the note.

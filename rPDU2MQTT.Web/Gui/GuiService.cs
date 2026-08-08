@@ -504,7 +504,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     }
 
     /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
-    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null)
+    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null, int spanDays = 1)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(20));
@@ -527,6 +527,33 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
                 var ids = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
                     .Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+
+                if (spanDays > 1)
+                {
+                    // Only the daily total adds up across days. Summing lifetime counters or instantaneous
+                    // power would produce a number, and the number would mean nothing.
+                    if (m != FlowSpan.SpannableMetric)
+                        return new { ok = false, message = $"A span of days only means something for the daily total ({FlowSpan.SpannableMetric}); '{m}' cannot be added across days." };
+
+                    var perDay = new List<IReadOnlyDictionary<string, double>>();
+                    foreach (var day in FlowSpan.Days(at, spanDays))
+                        perDay.Add(await history.ValuesAtAsync(ids, m, day, cts.Token));
+
+                    var (totals, covered) = FlowSpan.Fold(perDay);
+                    if (totals.Count == 0)
+                        return new { ok = false, message = $"No history for the {spanDays} days to {at:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+
+                    var graphOverDays = FlowGraphBuilder.Build(data, config.EnergyFlow, m, new HistoricalFlowValueSource(totals, m));
+                    return new
+                    {
+                        ok = true, graphOverDays.Nodes, graphOverDays.Links, graphOverDays.Metric, graphOverDays.Units,
+                        at = atUtc, historical = true, source = history.Id, spanDays,
+                        // Days a node was missing are days missing from its total, so say which rather than
+                        // presenting a short window as a whole one.
+                        incomplete = FlowSpan.Incomplete(covered, spanDays).Select(x => new { node = x.Node, days = x.Days }).ToList(),
+                    };
+                }
+
                 var past = await history.ValuesAtAsync(ids, m, at, ct);
                 if (past.Count == 0)
                     return new { ok = false, message = $"No history for {at:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
@@ -1811,7 +1838,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             DateTime? at = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : null;
-            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at), ConfigSchema.Json);
+            // ?span=<days> sums that many daily totals, ending at ?at.
+            var span = int.TryParse(ctx.Request.Query["span"].ToString(), out var d) ? Math.Clamp(d, 1, 366) : 1;
+            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at, span), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be

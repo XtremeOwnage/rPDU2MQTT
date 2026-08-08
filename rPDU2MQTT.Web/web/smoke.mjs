@@ -183,6 +183,14 @@ for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'D
   if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
 }
 
+// The roll-up is a table: nothing on it is drawn and nothing animates, so the switches that change how a
+// diagram is drawn described a diagram that was not on the page.
+const rollupLink = navLinksNow().find(a => a.dataset.label === 'Roll-up');
+rollupLink.click();
+await new Promise(r => setTimeout(r, 50));
+for (const sw of ['Animate flow', 'Unmeasured load'])
+  if (activeSec().textContent.includes(sw)) fail(`the roll-up table offers "${sw}", which does nothing there`);
+
 // Each of those settings has exactly one control. Left behind as well as moved, two controls would be
 // bound to one value and would disagree the moment either was used. Counted as controls, not as text —
 // another page is free to mention a setting and say where it lives.
@@ -234,21 +242,33 @@ if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not cl
 nodesLink.click();
 await new Promise(r => setTimeout(r, 50));
 
-const feedRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.includes('panel'));
-if (!feedRow) fail('no row for the panel node in the virtual-node table');
-const feedSel = query(feedRow, 'select', true)[0];
-if (!feedSel) fail('the node table offers no way to set what a node feeds without dragging');
+// The column is "Fed by", the direction the hierarchy is built in: you put a thing under its feeder, so
+// the control is on the thing. The other way round, a row read "— none —" for a node that plainly had a
+// feeder, and re-parenting it meant finding the parent's row.
+// By the row's id cell, not by its text: every row's dropdown lists every other node, so matching on text
+// finds whichever row happens to mention the name first.
+const nodeRow = (id) => query(getEl('sections'), 'tr', true).find(r => query(r, 'code')?.textContent === id);
+const solarRow = nodeRow('solar');
+if (!solarRow) fail('no row for the solar node in the virtual-node table');
+const fedBySel = query(solarRow, 'select', true)[0];
+if (!fedBySel) fail('the node table offers no way to set what feeds a node without dragging');
 
-// Its options are the other nodes, and it reflects the wiring already in the config.
-const feedOpts = (feedSel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
-if (!feedOpts.includes('solar')) fail(`the feeds control does not offer the other nodes: ${feedOpts.join(', ')}`);
+const feedOpts = (fedBySel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!feedOpts.includes('panel')) fail(`the fed-by control does not offer the other nodes: ${feedOpts.join(', ')}`);
 
-// A loop is refused: solar already feeds panel, so panel feeding solar would close a cycle.
-feedSel.value = 'solar';
-feedSel.onchange({});
+// Solar already feeds panel, so panel feeding solar would close a cycle.
+fedBySel.value = 'panel';
+fedBySel.onchange({});
 await new Promise(r => setTimeout(r, 20));
 const looped = (config.EnergyFlow.Links || []).some(l => l.From === 'panel' && l.To === 'solar');
-if (looped) fail('the feeds control accepted a wiring that closes a feeder loop');
+if (looped) fail('the fed-by control accepted a wiring that closes a feeder loop');
+
+// And a legitimate feeder is written the right way round: panel is fed by solar, not the reverse.
+const panelRow = nodeRow('panel');
+const panelFedBy = query(panelRow, 'select', true)[0];
+if (!panelFedBy) fail('no fed-by control on the panel row');
+if (panelFedBy.value !== 'solar')
+  fail(`the fed-by control shows the wrong direction: panel reads as fed by "${panelFedBy.value}"`);
 
 // --- Features page (#292) -----------------------------------------------------------------------------
 // Every capability's on/off switch on one page, and NOT also on its own config page: two switches bound to
