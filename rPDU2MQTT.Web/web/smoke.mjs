@@ -54,7 +54,14 @@ const liveValues = { ok: true, values: [
   { node: 'solar', metric: 'energy', value: null, reported: 91.5, atUtc: new Date(Date.now() - 7200e3).toISOString(), ageSeconds: 7200, fresh: false, staleAfterSeconds: 120 },
 ] };
 
+// A save that could not reach the running process: two settings are on disk but not in memory.
+const status = {
+  ok: true, version: 'test', configWritable: true,
+  restart: { required: true, settings: ['MQTT.Connection.Host', 'Gui.Port'] },
+};
+
 const bodies = (url) =>
+  url.includes('/api/status') ? status :
   url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
@@ -97,6 +104,17 @@ for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', '
 if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the config nav');
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
+
+// Settings saved but not running are announced in the header until a restart applies them — most of the
+// configuration is read once at startup, so a save changes the file and nothing else, and a single toast
+// as the only warning leaves the GUI showing values the bridge is not using.
+const restartPill = getEl('st-restart');
+if (restartPill.classList.contains('is-hidden'))
+  fail('the header says nothing about settings that were saved but are not running');
+if (!restartPill.textContent.includes('Restart required'))
+  fail(`the restart badge does not say what it is: "${restartPill.textContent}"`);
+if (!(restartPill.title || '').includes('MQTT.Connection.Host'))
+  fail('the restart badge does not name the settings waiting on it');
 
 // --- The shell: unsaved-change tracking, theme, palette ---------------------------------------------
 // These are the parts with no section of their own, so nothing else would notice them breaking.

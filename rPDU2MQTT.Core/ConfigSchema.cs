@@ -87,6 +87,10 @@ public static class ConfigSchema
 
     // Used for the config payload itself. Keys are the model's real (PascalCase) property names so
     // they line up exactly with the schema's Key values the form binds against.
+    /// <summary>The options the config payload itself round-trips through. Exposed so anything comparing two
+    /// configuration documents (see <see cref="ConfigApply"/>) uses the same field names the GUI binds to.</summary>
+    public static JsonSerializerOptions ConfigJsonOptions => ConfigJson;
+
     private static readonly JsonSerializerOptions ConfigJson = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

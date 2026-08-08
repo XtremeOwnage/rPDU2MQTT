@@ -111,6 +111,8 @@ public static class ServiceConfiguration
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
+        // What a save could not apply to this process — read by the status payload and the header badge.
+        services.AddSingleton<Core.RestartPending>();
         // EmonCMS export health (last attempt/success/error) — read by the GUI even when disabled.
         // Optional features that were switched on but can't run. Registered before anything checks, so a
         // fault recorded during setup is visible to the Status board rather than only in the log.

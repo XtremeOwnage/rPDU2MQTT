@@ -50,6 +50,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly Core.Flow.IFlowValueSource? live;
     private readonly Core.Flow.IFlowHistory? history;
+    // What the last save could not apply to this process. Reported on the status card and in the header.
+    private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
     // Created on the first /api/events connection; the pump only runs while a tab is watching.
@@ -58,10 +60,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IFlowHistory? history = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IFlowHistory? history = null, Core.RestartPending? pending = null)
     {
         this.live = live;
         this.history = history;
+        this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
         this.config = config;
         this.mqtt = mqtt;
@@ -359,6 +362,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         user,
         // Operator update state (#210) for the header indicator; null when no operator is reporting.
         update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),
+        // Settings that were saved but cannot reach this process until it restarts. On the status payload
+        // rather than only in the save's reply, so the header says so on every page and in every browser.
+        restart = new { required = pending.Required, settings = pending.Settings },
     };
 
     /// <summary>
@@ -641,6 +647,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
             try
             {
+                // What this process is running, before any of it is replaced below. Everything that differs
+                // and is not in ConfigApply.AppliedLive is a setting the save cannot reach.
+                var stranded = ConfigApply.NeedingRestart(config, parsed);
+
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
 
@@ -655,6 +665,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // And the EmonCMS feed-provisioning settings, so AutoConfigure + the per-type feed config
                 // take effect on the next provisioning pass without a restart (#163).
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
+                // And the history backend: FlowHistoryRouter reads the provider and its settings per call,
+                // so turning history on or pointing it at another server needed no restart — except that
+                // nothing copied the saved values in, so it behaved as though it did.
+                config.History = reloaded.History;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
@@ -671,10 +685,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     Log.Warning($"Could not reconcile PDU instances after save ({ex.Message}); a restart will apply them.");
                 }
 
+                pending.Set(stranded);
+
                 var message = (configSource.IsGitOpsManaged
                     ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Credentials are stored in the companion Secret. Press 'Republish discovery' to apply override/name/template changes; restart for primary connection/credential changes (incl. OIDC)."
                     : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for primary connection changes (host/port).") + instanceMessage;
-                return Results.Json(new { ok = true, message, gitops = configSource.IsGitOpsManaged });
+                return Results.Json(new
+                {
+                    ok = true,
+                    message,
+                    gitops = configSource.IsGitOpsManaged,
+                    // So the GUI can offer the restart then and there, and name what is waiting on it.
+                    restartRequired = stranded.Count > 0,
+                    restartSettings = stranded,
+                }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
