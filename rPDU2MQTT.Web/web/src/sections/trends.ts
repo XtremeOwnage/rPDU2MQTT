@@ -55,6 +55,7 @@ function hideCard() { if (card) card.classList.remove('show'); }
  */
 function barChart(opts: {
   days: string[]; lines: Line[]; units: string; stacked: boolean; max?: number; pct?: boolean;
+  partial?: string | null;
 }): { svg: any; gaps: number } {
   const { days, lines, units, stacked } = opts;
   const has = (d: number) => lines.some(l => l.values[d] != null);
@@ -87,32 +88,43 @@ function barChart(opts: {
   days.forEach((day, d) => {
     if (!has(d)) {
       gaps++;
-      const g = svgTag('rect', { x: x(d) + (slot - barW) / 2, y: padT, width: barW, height: plotH, fill: 'var(--line)', opacity: 0.25 });
+      const g = svgTag('rect', {
+        x: x(d) + (slot - barW) / 2, y: padT, width: barW, height: plotH,
+        fill: 'var(--line)', opacity: 0.25, class: 'trend-gap',
+      });
       const title = document.createElementNS(SVG, 'title');
       title.textContent = `${day} — no reading from the history backend`;
       g.appendChild(title);
       svg.appendChild(g);
-    } else if (stacked) {
-      let base = 0;
-      lines.forEach(l => {
-        const v = l.values[d];
-        if (v == null || v <= 0) return;
-        svg.appendChild(svgTag('rect', {
-          x: x(d) + (slot - barW) / 2, y: y(base + v), width: barW,
-          height: Math.max(1, (v / peak) * plotH), fill: l.color,
-        }));
-        base += v;
-      });
     } else {
-      const each = barW / lines.length;
-      lines.forEach((l, i) => {
-        const v = l.values[d];
-        if (v == null || v <= 0) return;
-        svg.appendChild(svgTag('rect', {
-          x: x(d) + (slot - barW) / 2 + each * i, y: y(v), width: Math.max(1, each - 1),
-          height: Math.max(1, (v / peak) * plotH), fill: l.color,
-        }));
-      });
+      // The period still in progress is drawn faded: it is a real reading of an unfinished day, and beside
+      // finished ones at full strength it reads as a quiet day rather than an early one.
+      const partial = day === opts.partial;
+      const paint = (attrs: Record<string, any>) => {
+        const r = svgTag('rect', partial ? { ...attrs, opacity: 0.55 } : attrs);
+        if (partial) {
+          const t = document.createElementNS(SVG, 'title');
+          t.textContent = `${day} — still in progress, not a full day`;
+          r.appendChild(t);
+        }
+        svg.appendChild(r);
+      };
+      if (stacked) {
+        let base = 0;
+        lines.forEach(l => {
+          const v = l.values[d];
+          if (v == null || v <= 0) return;
+          paint({ x: x(d) + (slot - barW) / 2, y: y(base + v), width: barW, height: Math.max(1, (v / peak) * plotH), fill: l.color });
+          base += v;
+        });
+      } else {
+        const each = barW / lines.length;
+        lines.forEach((l, i) => {
+          const v = l.values[d];
+          if (v == null || v <= 0) return;
+          paint({ x: x(d) + (slot - barW) / 2 + each * i, y: y(v), width: Math.max(1, each - 1), height: Math.max(1, (v / peak) * plotH), fill: l.color });
+        });
+      }
     }
 
     const every = Math.ceil(days.length / 12);
@@ -134,7 +146,9 @@ function barChart(opts: {
     const show = (ev: any) => {
       const c = hoverCard();
       c.innerHTML = '';
-      c.appendChild(el('div', { class: 'nh-title', text: day }));
+      c.appendChild(el('div', { class: 'nh-title', text: day + (day === opts.partial ? ' · so far' : '') }));
+      if (day === opts.partial)
+        c.appendChild(el('div', { class: 'desc', style: { margin: '0 0 2px' }, text: 'still in progress — not a full day' }));
       if (!has(d)) {
         c.appendChild(el('div', { class: 'nh-warn', text: 'no reading from the history backend' }));
       } else {
@@ -328,6 +342,9 @@ export function addTrendsSection(nav: any, sections: any) {
     const days: string[] = body.days || [];
     const series = shown();
     const units = body.units || 'kWh';
+    // The last period has not ended. Every chart fades it, and the totals leave it out — averaging a
+    // part-day in with finished ones drags the mean down by however early in the day you happen to look.
+    const partial: string | null = body.partial || null;
 
     // --- Per node, as chosen ---------------------------------------------------------------------
     // The only chart the node selection governs. Emptying it used to hide the whole page, which said the
@@ -337,8 +354,9 @@ export function addTrendsSection(nav: any, sections: any) {
       const lines: Line[] = series.map((s: any, i: number) => ({
         label: s.label || s.node, color: colorFor(s.kind, i), values: s.values,
       }));
-      gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node', 'The nodes selected above.',
-        barChart({ days, lines, units, stacked: modeSel.value === 'stack' }), lines);
+      gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node',
+        'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it is not in the totals below.' : ''),
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
       box.appendChild(el('h3', { text: intraDay() ? 'Power by node' : 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
@@ -357,7 +375,7 @@ export function addTrendsSection(nav: any, sections: any) {
         'Every grid node, whatever is selected above. Drawn from the grid — export is not charted: '
         + 'the return lane is a derived node and the exporter does not publish those, so there is nothing '
         + 'in history to subtract.',
-        barChart({ days, lines: gridLines, units, stacked: false }), gridLines);
+        barChart({ days, lines: gridLines, units, stacked: false, partial }), gridLines);
     }
 
     // --- Self-sufficiency ---------------------------------------------------------------------------
@@ -388,7 +406,7 @@ export function addTrendsSection(nav: any, sections: any) {
           + 'The share of the home’s energy that did not come from the grid'
           + (load ? '.' : ', with the home taken as the balance of the measured sources.')
           + ' A day missing either figure is left empty rather than estimated.',
-          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true }), ssLines);
+          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial }), ssLines);
       }
     }
 
@@ -400,7 +418,7 @@ export function addTrendsSection(nav: any, sections: any) {
       const supplyLines: Line[] = supply.map(s => ({ label: s.label, color: KIND_COLOR[s.k], values: s.values }));
       section(intraDay() ? 'Where the power is coming from' : 'Where the day’s energy came from',
         'Each source summed across every node of that kind, whatever is selected above.',
-        barChart({ days, lines: supplyLines, units, stacked: true }), supplyLines);
+        barChart({ days, lines: supplyLines, units, stacked: true, partial }), supplyLines);
     }
 
     // --- Totals ----------------------------------------------------------------------------------
@@ -419,7 +437,9 @@ export function addTrendsSection(nav: any, sections: any) {
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
     series.forEach((s: any) => {
-      const vals = s.values.map((v: any, d: number) => [v, days[d]] as [number | null, string]).filter(([v]: any) => v != null);
+      const vals = s.values
+        .map((v: any, d: number) => [v, days[d]] as [number | null, string])
+        .filter(([v, day]: any) => v != null && day !== partial);
       const total = vals.reduce((a: number, [v]: any) => a + v, 0);
       const best = vals.reduce((a: any, b: any) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as any);
       const tr = el('tr');
@@ -429,7 +449,7 @@ export function addTrendsSection(nav: any, sections: any) {
         ? (best ? formatNum(Number(best[0].toFixed(2))) : '—')
         : formatNum(Number(total.toFixed(2))) }));
       tr.appendChild(el('td', { class: 'num', text: vals.length ? formatNum(Number((total / vals.length).toFixed(2))) : '—' }));
-      tr.appendChild(el('td', { class: 'num', text: `${vals.length} of ${days.length}` }));
+      tr.appendChild(el('td', { class: 'num', text: `${vals.length} of ${days.length - (partial ? 1 : 0)}` }));
       tr.appendChild(el('td', { text: best ? `${best[1]} · ${formatNum(best[0])}` : '—' }));
       tb.appendChild(tr);
     });
@@ -437,7 +457,8 @@ export function addTrendsSection(nav: any, sections: any) {
     table.appendChild(t);
 
     status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`
-      + (gaps ? ` · ${gaps} with no reading` : '');
+      + (gaps ? ` · ${gaps} with no reading` : '')
+      + (partial ? ` · ${partial} still in progress` : '');
     status.title = gaps
       ? 'Those days are drawn as empty slots and left out of the totals. The backend holds nothing for them.'
       : '';

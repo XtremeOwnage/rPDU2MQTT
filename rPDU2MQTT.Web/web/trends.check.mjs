@@ -17,6 +17,8 @@ const fail = (m) => { console.error('trends check FAILED: ' + m); process.exit(1
 const series = {
   ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus',
   days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
+  // The last one has not ended: it is today so far, and must not be read as a finished day.
+  partial: '2026-08-07',
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [30, 32, null, null, 28, null, 35] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [5, 4, null, null, 9, 6, 3] },
@@ -72,7 +74,7 @@ const bars = query(byNode, 'rect', true);
 if (!bars.length) fail('no bars were drawn');
 
 // Two days have no reading from anything. They are slots on the axis, marked, not bars of zero.
-const gapBars = bars.filter(r => (r.attrs.opacity || '') !== '' && Number(r.attrs.opacity) < 1);
+const gapBars = bars.filter(r => (r.attrs.class || '') === 'trend-gap');
 if (gapBars.length !== 2) fail(`expected 2 empty days, drew ${gapBars.length}`);
 for (const g of gapBars) {
   const t = query(g, 'title');
@@ -125,6 +127,16 @@ const allChip = query(sec, 'button', true).find(b => b.textContent === 'All');
 allChip.click();
 await new Promise(r => setTimeout(r, 50));
 
+// The period still in progress is a real reading of an unfinished day. Drawn beside finished ones at full
+// strength it reads as a quiet day rather than an early one, and averaged in with them it drags the mean
+// down by however early you happen to be looking.
+const todayHit = hits.find(h => h.attrs['data-day'] === '2026-08-07');
+todayHit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
+const todayText = query(sandbox.document.body, '.trend-card').textContent;
+if (!/so far|in progress/.test(todayText)) fail(`the unfinished day is not marked: "${todayText}"`);
+const faded = query(byNode, 'rect', true).filter(r => r.attrs.opacity === '0.55');
+if (!faded.length) fail('the unfinished day is drawn exactly like a finished one');
+
 // And it is said in words too, not only in the drawing.
 const status = query(sec, 'span', true).map(s => s.textContent).join(' ');
 if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: ${status.slice(0, 200)}`);
@@ -134,13 +146,14 @@ if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: $
 const rows = query(sec, 'tr', true);
 const solarRow = rows.find(r => r.textContent.includes('Solar'));
 if (!solarRow) fail('no totals row for solar');
-if (!solarRow.textContent.includes('125')) fail(`solar's total is not the sum of the days it had: ${solarRow.textContent}`);
-if (!/4 of 7/.test(solarRow.textContent)) fail(`solar's total does not say how many days it covers: ${solarRow.textContent}`);
+if (!solarRow.textContent.includes('90')) fail(`solar's total is not the sum of its finished days: ${solarRow.textContent}`);
+if (/125/.test(solarRow.textContent)) fail(`the day still in progress was counted in the total: ${solarRow.textContent}`);
+if (!/3 of 6/.test(solarRow.textContent)) fail(`solar's total does not say how many finished days it covers: ${solarRow.textContent}`);
 const gridRow = rows.find(r => r.textContent.includes('Grid'));
-if (!/5 of 7/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${gridRow.textContent}`);
+if (!/4 of 6/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${gridRow.textContent}`);
 
 // Its peak day is named, so "when did this happen" does not need a spreadsheet.
-if (!solarRow.textContent.includes('2026-08-07')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
+if (!solarRow.textContent.includes('2026-08-02')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
 
 // The node selection governs the by-node chart and the totals — and nothing else. Emptying it used to hide
 // every chart, which said the selection drove them all, while they went on summing every node regardless.

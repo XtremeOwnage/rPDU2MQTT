@@ -512,7 +512,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// which is a claim about that day rather than an admission that nobody recorded it.
     /// </para>
     /// </summary>
-    private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when, string labelFormat, CancellationToken ct)
+    private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
+                                                IReadOnlyList<string> labels, string? partialLabel, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -558,9 +559,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 metric,
                 units = FlowUnits.Canonical(metric),
                 source = history.Id,
-                // Labelled in the browser's terms by the caller: a day is a date, a moment within one is a
-                // clock time, and the chart's axis is whichever it asked for.
-                days = when.Select(w => w.ToLocalTime().ToString(labelFormat)).ToList(),
+                // Labelled by the caller: a day is the period key the counters re-base on, a moment within
+                // one is a clock time.
+                days = labels,
+                // The last bar is a period still in progress. Named so the chart can say so rather than
+                // showing a part-day beside finished ones as though they were the same thing.
+                partial = partialLabel,
                 stepSeconds = when.Count > 1 ? (int)(when[1] - when[0]).TotalSeconds : 0,
                 series,
             };
@@ -1926,13 +1930,21 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 var steps = new List<DateTime>();
                 for (var t = end - span; t <= end; t = t.AddSeconds(step)) steps.Add(t);
-                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps, "HH:mm", ctx.RequestAborted), ConfigSchema.Json);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps,
+                    steps.Select(t => t.ToLocalTime().ToString("HH:mm")).ToList(), null, ctx.RequestAborted), ConfigSchema.Json);
             }
 
             var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
             var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
+
+            // Each day read at its own rollover, not at whatever time of day it happens to be now. The
+            // boundary is the server's — the same one the counters re-base on — so a bar is the day the
+            // bridge means by that date.
+            var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
+            var periods = EnergyPeriod.RecentPeriodEnds(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days);
             return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
-                FlowSpan.Days(end, days).ToList(), "yyyy-MM-dd", ctx.RequestAborted), ConfigSchema.Json);
+                periods.Select(p => p.AtUtc).ToList(), periods.Select(p => p.Day).ToList(),
+                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be
