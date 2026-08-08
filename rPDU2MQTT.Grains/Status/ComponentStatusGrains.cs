@@ -122,6 +122,25 @@ public sealed class CacheStatusGrain : ComponentStatusGrainBase, ICacheStatusGra
 }
 
 /// <summary>
+/// The history backend. Its verdict comes from a probe, not from the config claiming a URL: "configured
+/// but unreachable" is the state worth surfacing, because the pages look normal until someone picks a date.
+/// </summary>
+public sealed class HistoryStatusGrain : ComponentStatusGrainBase, IHistoryStatusGrain
+{
+    protected override int Order => 56;
+    protected override string DefaultTitle => "History";
+
+    protected override Verdict Evaluate(DateTime nowUtc)
+    {
+        if (!report.Enabled) return new(StatusLevel.Off, "Not configured", report.Detail);
+        if (report.Ok is null) return new(StatusLevel.Warn, "Checking", report.Detail);
+        return report.Ok == false
+            ? new(StatusLevel.Bad, "Unreachable", report.Detail)
+            : new(StatusLevel.Good, report.State ?? "Connected", report.Detail);
+    }
+}
+
+/// <summary>
 /// One process in the fleet. It reports itself; the base turns its silence amber and eventually retires the
 /// card — which is the whole "is that replica still there?" question, answered without a heartbeat topic.
 /// </summary>

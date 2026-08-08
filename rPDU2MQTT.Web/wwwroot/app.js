@@ -2497,21 +2497,48 @@ function animateToggle(onToggle            )              {
 /// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
 /// the page renders whatever it gets back — a historical view is the same diagram built from the values of
 /// that instant, not a second rendering path.
-function historyControl(onChange            )                                                                       {
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  const input = el('input', { type: 'datetime-local', style: { width: 'auto' } })                    ;
+function historyControl(onChange            )                                                                                          {
+  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  // A date, not a datetime: a datetime-local reports '' until BOTH halves are filled, so picking a day and
+  // leaving the time blank sent nothing and the page silently stayed live.
+  const input = el('input', { type: 'date', style: { width: 'auto' } })                    ;
+  const prev = btn('◀');
+  const next = btn('▶');
   const live = btn('Live', 'primary');
   const note = el('span', { class: 'desc', style: { margin: '0' } });
+  prev.title = 'Previous day';
+  next.title = 'Next day';
+  live.title = 'Back to the current reading';
 
-  const apply = () => onChange();
-  input.onchange = apply;
-  live.onclick = () => { input.value = ''; note.textContent = ''; apply(); };
+  const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
+  const step = (days        ) => {
+    const from = input.value || today();
+    const d = new Date(from + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
+    d.setDate(d.getDate() + days);
+    const iso = d.toLocaleDateString('en-CA');
+    input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
+    onChange();
+  };
 
-  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), input, live, note);
+  input.onchange = () => onChange();
+  prev.onclick = () => step(-1);
+  next.onclick = () => step(1);
+  live.onclick = () => { input.value = ''; note.textContent = ''; onChange(); };
+
+  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Day:' }), prev, input, next, live, note);
   return {
     row,
-    // A datetime-local carries no zone; it is the browser's local time, so convert before sending.
-    at: () => input.value ? new Date(input.value).toISOString() : '',
+    /// The instant to ask for: the end of the chosen local day, or now when it is today.
+    ///
+    /// A daily total is only complete at the day's end, and asking for midnight would return the total a
+    /// moment after it re-based — zero. For today there is no end yet, so the current reading is the answer.
+    at: () => {
+      if (!input.value) return '';
+      const end = new Date(input.value + 'T23:59:59');
+      const now = new Date();
+      return (end > now ? now : end).toISOString();
+    },
+    day: () => input.value,
     setNote: (t        ) => { note.textContent = t; },
   };
 }
@@ -3806,6 +3833,9 @@ function addFlowSection(nav     , sections     ) {
   };
 
   const load = async () => {
+    // A past day is an energy question. Power at one instant of a day gone by says almost nothing, and it
+    // is not what the day picker implies, so choosing a day moves the metric with it.
+    if (hist.day() && metricSel.value === 'realpower') { metricSel.value = 'energytoday'; showDayNote(); }
     let path = withInstance('/api/flow', instSel);
     if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
     const at = hist.at();
@@ -4627,6 +4657,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // The whole board reads one metric (#371). Power and energy-today are the same shape — a value per
     // node plus an in-direction for the bidirectional ones — so the tiles are built once and the metric
     // decides what they mean.
+    // A past day is an energy question, so choosing one moves the metric with it.
+    if (hist.day() && showSel.value === 'realpower') showSel.value = 'energytoday';
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
     let r     ;

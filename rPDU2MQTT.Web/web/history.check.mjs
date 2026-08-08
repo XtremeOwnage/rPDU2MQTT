@@ -53,18 +53,30 @@ if (!flowSection()) fail('could not find the Flow section');
 const labels = () => query(flowSection(), 'text', true).map(t => t.textContent).join(' ');
 if (!labels().includes('7,080')) fail(`the live view did not render: ${labels().slice(0, 120)}`);
 
-const at = query(flowSection(), 'input', true).find(i => i.attrs?.type === 'datetime-local' || i.type === 'datetime-local');
-if (!at) fail('no moment control on the Flow page');
+// A date, not a datetime: a datetime-local reads '' until both halves are filled, so picking a day and
+// leaving the time blank sent nothing and the page silently stayed live.
+const at = query(flowSection(), 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
+if (!at) fail('no day control on the Flow page');
 
-at.value = '2026-08-07T12:00';
+at.value = '2026-08-03';
 at.onchange({});
 await new Promise(r => setTimeout(r, 300));
 
 // The request carried the moment, as an absolute instant rather than the browser's wall clock.
 const withAt = asked.filter(u => u.includes('at='));
-if (!withAt.length) fail(`no request carried the moment: ${asked.join(' | ')}`);
+if (!withAt.length) fail(`no request carried the day: ${asked.join(' | ')}`);
 if (!/at=\d{4}-\d{2}-\d{2}T[^&]*Z/.test(decodeURIComponent(withAt.at(-1))))
-  fail(`the moment was not sent as a UTC instant: ${withAt.at(-1)}`);
+  fail(`the day was not sent as a UTC instant: ${withAt.at(-1)}`);
+// A past day is an energy question, so the metric moved with it.
+if (!withAt.at(-1).includes('metric=energytoday'))
+  fail(`choosing a day did not switch the metric to energy: ${withAt.at(-1)}`);
+
+// The arrows step a day without touching the picker.
+const stepBack = query(flowSection(), 'button', true).find(b => b.textContent === '◀');
+if (!stepBack) fail('no previous-day control');
+stepBack.click();
+await new Promise(r => setTimeout(r, 300));
+if (at.value !== '2026-08-02') fail(`the previous-day arrow did not step the date: ${at.value}`);
 
 // The diagram is the past one...
 if (!labels().includes('1,234')) fail('the diagram did not switch to the historical values');

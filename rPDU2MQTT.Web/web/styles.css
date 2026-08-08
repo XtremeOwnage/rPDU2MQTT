@@ -448,6 +448,13 @@
   }
   .flow-contradiction > strong { color:var(--warn, #d08700); font-size:12px; }
 
+  /* Day picker: the arrows sit tight against the date so they read as one control. */
+  .history-bar input[type="date"] {
+    width:auto; padding:3px 6px; color-scheme:light dark;
+    background:var(--panel2); border:1px solid var(--line); border-radius:4px;
+  }
+  .history-bar button.small { min-width:28px; }
+
   /* Features page: each capability is a card with its switch, and a way through to its settings. */
   .feature-go { margin-top:var(--sp-2); }
   /* Where a section's on/off switch went, on the page it used to live on. */

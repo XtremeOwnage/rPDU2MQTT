@@ -19,6 +19,25 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
 {
     public string Id => "prometheus";
 
+    public async Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
+    {
+        var baseUrl = (cfg.History.PrometheusUrl ?? "").TrimEnd('/');
+        if (baseUrl.Length == 0) return (false, "no PrometheusUrl set");
+        try
+        {
+            // Its own readiness endpoint: cheap, and it answers whether the server is up rather than
+            // whether one query happens to match anything.
+            var response = await http.GetAsync($"{baseUrl}/-/ready", ct);
+            return response.IsSuccessStatusCode
+                ? (true, baseUrl)
+                : (false, $"{baseUrl} answered {(int)response.StatusCode}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (false, $"{baseUrl}: {ex.Message}");
+        }
+    }
+
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {
@@ -65,6 +84,16 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
     private DateTime feedsAt;
 
     public string Id => "emoncms";
+
+    public async Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
+    {
+        var baseUrl = (cfg.EmonCMS.Url ?? "").TrimEnd('/');
+        if (baseUrl.Length == 0) return (false, "no EmonCMS URL set");
+        var list = await FeedsAsync(baseUrl, cfg.EmonCMS.ApiKey ?? "", ct);
+        // Reachable but with no feeds is still a working backend with nothing to show, and saying so is
+        // more use than a bare "ok".
+        return list.Count > 0 ? (true, $"{baseUrl} · {list.Count} feed(s)") : (false, $"{baseUrl}: no feeds readable");
+    }
 
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)

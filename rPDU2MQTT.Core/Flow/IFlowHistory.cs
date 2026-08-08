@@ -24,6 +24,12 @@ public interface IFlowHistory
     /// </summary>
     Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct);
+
+    /// <summary>
+    /// Is the backend answering? Reported on the Status board, so a history source that cannot be reached
+    /// says so there rather than only when someone picks a date and gets nothing.
+    /// </summary>
+    Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct);
 }
 
 /// <summary>
