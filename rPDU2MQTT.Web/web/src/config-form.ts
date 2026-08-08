@@ -12,6 +12,7 @@ import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
 import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImportSection } from './sections/flow.js';
 import { addNodeDataSection } from './sections/nodedata.js';
+import { addTrendsSection } from './sections/trends.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
@@ -29,7 +30,18 @@ function scalarInput(node: any, obj: any): any {
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
-    (node.enumValues || []).forEach((v: string) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
+    const choices: string[] = (node.enumValues || []).slice();
+    // A saved value the build does not offer stays on the list, named as unrecognised. Dropping it would
+    // show a blank control over a config that still holds the value, and the first edit of any other field
+    // on the page would look like the user chose to clear it.
+    const current = obj[node.key];
+    if (current != null && current !== '' && !choices.includes(String(current))) choices.push(String(current));
+    choices.forEach((v: string) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v === '' ? '(default)' : v + ((node.enumValues || []).includes(v) ? '' : ' — not recognised');
+      el.appendChild(o);
+    });
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'int' || node.type === 'double') {
@@ -247,7 +259,7 @@ type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },

@@ -165,6 +165,11 @@ public static class FlowGraphBuilder
 
                 label[outletId] = outlet.Entity_DisplayName; kind[outletId] = "outlet"; leaf[outletId] = value;
                 label[pduId] = device.Entity_DisplayName; kind[pduId] = "pdu";
+                // Derived nodes have no config entry to carry tags, so theirs come from the rules (#342).
+                var outletTags = AutoTags.For(flow.AutoTags, outletId);
+                if (outletTags.Count > 0) tags[outletId] = outletTags.ToList();
+                var pduTags = AutoTags.For(flow.AutoTags, pduId);
+                if (pduTags.Count > 0) tags[pduId] = pduTags.ToList();
                 // Skip the auto PDU link when the user has wired an explicit feeder for this outlet.
                 if (!explicitlyFed.Contains(outletId))
                     AddEdge(pduId, outletId);

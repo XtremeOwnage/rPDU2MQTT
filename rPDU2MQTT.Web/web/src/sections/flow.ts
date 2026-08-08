@@ -1309,6 +1309,68 @@ function flowCandidates(lastGraph: any, customNodes: any[]) {
   return cand;
 }
 
+// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
+// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
+// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
+function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: () => void) {
+  const rules = ensure(flow, 'AutoTags', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Tags for PDUs and outlets', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes the bridge derives from what it polls have no row of their own to tag. Match them by id, with * for any run of characters: “outlet:rack_pdu_1:*” tags every outlet on that PDU, “pdu:*” every PDU, and a full id one outlet. A tag never changes a reading — only what a view shows and what the exports may carry.' }));
+
+  const ids = [...cand.keys()].filter(id => id.startsWith('pdu:') || id.startsWith('outlet:'));
+
+  const t = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Match', 'Tags', 'Matches now', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  t.appendChild(el('thead', {}, head));
+  const tb = el('tbody');
+
+  rules.forEach((r: any, i: number) => {
+    const tr = el('tr');
+    const matchIn = el('input', { type: 'text', value: r.Match || '', placeholder: 'outlet:rack_pdu_1:*' }) as HTMLInputElement;
+    matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, matchIn));
+
+    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' }) as HTMLInputElement;
+    tagsIn.onchange = () => {
+      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
+      refreshDirty(); rerender();
+    };
+    tr.appendChild(el('td', {}, tagsIn));
+
+    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
+    // is the whole failure mode here — it looks configured and does nothing.
+    const hits = ids.filter(id => globMatches(r.Match || '', id));
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
+      text: hits.length ? `${hits.length} node(s)` : 'nothing',
+      title: hits.length ? hits.slice(0, 20).join('\n') + (hits.length > 20 ? `\n…and ${hits.length - 20} more` : '')
+        : 'No PDU or outlet on the current graph has an id this matches.',
+    })));
+
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { rules.splice(i, 1); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, del));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  if (rules.length) box.appendChild(t);
+
+  const add = btn('+ Add tag rule');
+  add.onclick = () => { rules.push({ Match: '', Tags: [] }); refreshDirty(); rerender(); };
+  box.appendChild(add);
+  return box;
+}
+
+/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
+/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
+function globMatches(pattern: string, id: string): boolean {
+  if (!pattern) return false;
+  const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+  return new RegExp(rx, 'i').test(id);
+}
+
 // Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
 // export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
 function renderGroupManager(flow: any, cand: Map<string, any>, rerender: () => void) {
@@ -3189,6 +3251,7 @@ export function addNodesSection(nav: any, sections: any) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
+    ed.appendChild(renderAutoTagRules(flow, cand, render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 

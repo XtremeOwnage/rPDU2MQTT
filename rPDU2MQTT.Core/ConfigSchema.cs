@@ -98,6 +98,21 @@ public static class ConfigSchema
         Converters = { new JsonStringEnumConverter() },
     };
 
+    /// <summary>
+    /// The metrics a live source may be bound to — read from <c>EnergyFlowSource.Metric</c>, which is what
+    /// actually validates a binding.
+    ///
+    /// <para>
+    /// Not every metric in the unit table: <c>energytoday</c> is derived by the aggregation service from a
+    /// counter's rise, so offering it as something to bind would produce a binding the source validation
+    /// then rejects. Taken from the property rather than retyped so the offer and the rule cannot drift.
+    /// </para>
+    /// </summary>
+    private static readonly string[] BindableMetrics =
+        typeof(EnergyFlowSource).GetProperty(nameof(EnergyFlowSource.Metric))!
+            .GetCustomAttribute<AllowedValuesAttribute>()!.Values
+            .Select(v => v?.ToString() ?? "").ToArray();
+
     /// <summary>Build the schema for the whole configuration model.</summary>
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
 
@@ -185,6 +200,22 @@ public static class ConfigSchema
         }
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
+
+        // A closed set of answers for a collection's items. The element of a list and the value of a
+        // dictionary have no property to annotate, so this is where their choices arrive.
+        if (node.ValueSchema is { } vs)
+        {
+            if (prop.GetCustomAttribute<ItemAllowedValuesAttribute>() is { } items)
+            {
+                vs.EnumValues = items.Values;
+                vs.Type = "enum";
+            }
+            else if (prop.GetCustomAttribute<MetricItemChoicesAttribute>() is not null)
+            {
+                vs.EnumValues = BindableMetrics;
+                vs.Type = "enum";
+            }
+        }
         return node;
     }
 

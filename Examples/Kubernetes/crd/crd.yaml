@@ -79,7 +79,16 @@ spec:
                           x-kubernetes-preserve-unknown-fields: true
                           additionalProperties:
                             type: string
-                          description: Captured {measure} -> metric name (realpower, apparentpower, energy, current, voltage, frequency, powerfactor). Measures not listed are ignored.
+                            enum:
+                            - realpower
+                            - apparentpower
+                            - energy
+                            - current
+                            - voltage
+                            - frequency
+                            - powerfactor
+                            - soc
+                          description: Captured {measure} -> the metric it supplies. Measures not listed are ignored.
                     description: Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.
                   ParentTopic:
                     type: string
@@ -447,6 +456,17 @@ spec:
                     type: array
                     items:
                       type: string
+                      enum:
+                      - device
+                      - device_name
+                      - source
+                      - name
+                      - number
+                      - type
+                      - type_name
+                      - units
+                      - instance
+                      - hierarchy
                     description: "Labels attached to every exported metric. Available: device, device_name (the device's display name), source, name (the outlet/entity's display name), number, type, type_name (the measurement said in English, e.g. 'Real Power'), units, instance (PDU instance key), hierarchy (the energy-flow tier feeding it). Changing this changes every metric's label set."
                   Pushgateway:
                     type: object
@@ -1043,6 +1063,21 @@ spec:
                           type: string
                           description: Target node id — energy flows into here.
                     description: Directed energy-flow links (From feeds To). Allows multiple feeders per node and producer inputs.
+                  AutoTags:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Match:
+                          type: string
+                          description: Node id to match, with '*' matching any run of characters. e.g. 'outlet:rack_pdu_1:*' for every outlet on that PDU, 'pdu:*' for every PDU, or a single outlet's full id.
+                        Tags:
+                          type: array
+                          items:
+                            type: string
+                          description: Tags to apply to every node the pattern matches. A tag never changes a reading — only what a view shows and what the exports may carry.
+                    description: Tags for derived nodes (PDUs and outlets), which have no entry of their own to carry them. Matched by node id with '*' as a wildcard, e.g. 'outlet:rack_pdu_1:*'.
                   Groups:
                     type: array
                     items:

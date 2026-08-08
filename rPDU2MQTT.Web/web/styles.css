@@ -88,6 +88,9 @@
   a { color:var(--accent); }
   code, kbd, .mono { font-family:var(--mono); }
   .is-hidden { display:none !important; }
+  /* Trends: the bars are the data, so the chart carries no decoration of its own. */
+  .trend-chart { display:block; max-width:none; }
+  .trend-chart rect { shape-rendering:crispEdges; }
   /* The verdict from a section's test button, kept on the page after the toast has gone. */
   .test-result { margin:4px 2px 0; min-height:1em; }
   .test-result.test-ok { color:var(--good, #46c46a); }

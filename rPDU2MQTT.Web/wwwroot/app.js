@@ -2734,6 +2734,68 @@ function flowCandidates(lastGraph     , customNodes       ) {
   return cand;
 }
 
+// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
+// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
+// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
+function renderAutoTagRules(flow     , cand                  , rerender            ) {
+  const rules = ensure(flow, 'AutoTags', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Tags for PDUs and outlets', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes the bridge derives from what it polls have no row of their own to tag. Match them by id, with * for any run of characters: “outlet:rack_pdu_1:*” tags every outlet on that PDU, “pdu:*” every PDU, and a full id one outlet. A tag never changes a reading — only what a view shows and what the exports may carry.' }));
+
+  const ids = [...cand.keys()].filter(id => id.startsWith('pdu:') || id.startsWith('outlet:'));
+
+  const t = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Match', 'Tags', 'Matches now', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  t.appendChild(el('thead', {}, head));
+  const tb = el('tbody');
+
+  rules.forEach((r     , i        ) => {
+    const tr = el('tr');
+    const matchIn = el('input', { type: 'text', value: r.Match || '', placeholder: 'outlet:rack_pdu_1:*' })                    ;
+    matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, matchIn));
+
+    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' })                    ;
+    tagsIn.onchange = () => {
+      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
+      refreshDirty(); rerender();
+    };
+    tr.appendChild(el('td', {}, tagsIn));
+
+    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
+    // is the whole failure mode here — it looks configured and does nothing.
+    const hits = ids.filter(id => globMatches(r.Match || '', id));
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
+      text: hits.length ? `${hits.length} node(s)` : 'nothing',
+      title: hits.length ? hits.slice(0, 20).join('\n') + (hits.length > 20 ? `\n…and ${hits.length - 20} more` : '')
+        : 'No PDU or outlet on the current graph has an id this matches.',
+    })));
+
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { rules.splice(i, 1); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, del));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  if (rules.length) box.appendChild(t);
+
+  const add = btn('+ Add tag rule');
+  add.onclick = () => { rules.push({ Match: '', Tags: [] }); refreshDirty(); rerender(); };
+  box.appendChild(add);
+  return box;
+}
+
+/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
+/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
+function globMatches(pattern        , id        )          {
+  if (!pattern) return false;
+  const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+  return new RegExp(rx, 'i').test(id);
+}
+
 // Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
 // export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
 function renderGroupManager(flow     , cand                  , rerender            ) {
@@ -4613,6 +4675,7 @@ function addNodesSection(nav     , sections     ) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
+    ed.appendChild(renderAutoTagRules(flow, cand, render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
@@ -5238,6 +5301,281 @@ function addNodeDataSection(nav     , sections     ) {
   return link;
 }
 
+// ── sections/trends.ts ──────────────────────────────────────────
+// Trends: usage over time, as bars per day.
+//
+// Every other view answers "what is happening now" or "what happened at this moment". Neither answers
+// "is this getting worse", which is the question a month of daily totals answers at a glance and no
+// single-instant view ever can.
+//
+// Two rules the chart is built around. A day the backend has no reading for is a GAP, drawn as an empty
+// slot and counted in the footer — never a zero-height bar, because "nobody recorded it" and "nothing was
+// used that day" are different facts and the second one is a claim. And the totals under the chart cover
+// only the days that actually reported, with the count beside them, so a short month cannot read as a
+// cheap one.
+
+// The kinds worth a colour of their own; anything else shares the neutral one. Matches the Sankey's
+// vocabulary so a node is the same colour wherever it appears.
+const KIND_COLOR                         = {
+  solar: 'var(--warn, #d08700)',
+  battery: 'var(--good, #46c46a)',
+  grid: 'var(--accent, #4f8cff)',
+  load: '#b06fd0',
+  outlet: '#7f8ea3',
+  pdu: '#5c7fa3',
+  panel: '#c98b3f',
+  inverter: '#3fb0a8',
+};
+const colorFor = (kind        , i        ) =>
+  KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
+
+function addTrendsSection(nav     , sections     ) {
+  const link = navLink(nav, 'Trends', '▦');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' }); sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Trends' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'Daily energy over time, read from the history backend. One bar per day per node; a day the '
+      + 'backend has no reading for is left empty rather than drawn as zero, because nothing recorded is '
+      + 'not the same as nothing used.',
+  }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const refresh = btn('Refresh');
+  const instSel = instanceSelector(() => load());
+
+  const rangeSel = el('select', { title: 'How far back to chart.' })                     ;
+  [['7', 'last 7 days'], ['14', 'last 14 days'], ['30', 'last 30 days'], ['90', 'last 90 days']]
+    .forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
+  rangeSel.value = '30';
+  rangeSel.onchange = () => load();
+
+  // Stacked reads as "where did the day's energy go"; side by side compares nodes against each other.
+  const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' })                     ;
+  [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
+  modeSel.onchange = () => draw();
+
+  const status = el('span', { class: 'ld-count' });
+  bar.append(refresh, el('label', { class: 'ld-inst' }, 'Show ', rangeSel), el('label', { class: 'ld-inst' }, 'as ', modeSel), instSel.wrap, status);
+  sec.appendChild(bar);
+
+  // Which nodes are on the chart. Everything the backend answered for, minus what you switch off — a
+  // hierarchy double-counts by design (a panel and its outlets are the same watts twice), so charting all
+  // of it at once and stacking would draw a total that is true of nothing.
+  const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  sec.appendChild(picker);
+
+  const chart = el('div'); sec.appendChild(chart);
+  const table = el('div'); sec.appendChild(table);
+
+  let body      = null;
+  const off = new Set        ();
+
+  const load = async () => {
+    status.textContent = 'loading…';
+    chart.innerHTML = ''; table.innerHTML = ''; picker.innerHTML = '';
+    let path = withInstance('/api/flow/series?days=' + encodeURIComponent(rangeSel.value), instSel);
+    let r     ;
+    try { r = await api(path); }
+    catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
+    body = r.body;
+    if (!body || !body.ok) {
+      status.textContent = '';
+      chart.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' },
+        text: (body && body.message) || 'Could not load the series.' }));
+      return;
+    }
+    // Default to the leaves of the hierarchy the Energy board already treats as the whole picture, so the
+    // first thing on screen adds up rather than counting the same energy at three tiers.
+    if (!off.size) {
+      const kinds = new Set(body.series.map((s     ) => s.kind));
+      const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
+      if (preferred.length >= 2) body.series.forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
+    }
+    draw();
+  };
+
+  const shown = () => (body?.series || []).filter((s     ) => !off.has(s.node));
+
+  const drawPicker = () => {
+    picker.innerHTML = '';
+    picker.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Nodes:' }));
+    (body?.series || []).forEach((s     , i        ) => {
+      const on = !off.has(s.node);
+      const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
+      chip.title = on ? 'On the chart — click to take it off' : 'Off the chart — click to add it';
+      if (on) chip.style.borderColor = colorFor(s.kind, i);
+      chip.onclick = () => { if (on) off.add(s.node); else off.delete(s.node); draw(); };
+      picker.appendChild(chip);
+    });
+    const all = btn('All');
+    all.onclick = () => { off.clear(); draw(); };
+    picker.appendChild(all);
+  };
+
+  const draw = () => {
+    drawPicker();
+    chart.innerHTML = ''; table.innerHTML = '';
+    if (!body?.ok) return;
+
+    const days           = body.days || [];
+    const series = shown();
+    const units = body.units || 'kWh';
+    if (!series.length) {
+      chart.appendChild(el('div', { class: 'desc', text: 'No nodes selected — pick one above.' }));
+      status.textContent = '';
+      return;
+    }
+
+    const stacked = modeSel.value === 'stack';
+    // A day is missing only when NOTHING reported it. A node that has no value on a day it did report is
+    // that node's gap, not the day's.
+    const dayTotal = (d        ) => series.reduce((sum        , s     ) => sum + (s.values[d] ?? 0), 0);
+    const dayHasAny = (d        ) => series.some((s     ) => s.values[d] != null);
+    const peak = stacked
+      ? Math.max(...days.map((_, d) => (dayHasAny(d) ? dayTotal(d) : 0)), 0)
+      : Math.max(...series.flatMap((s     ) => s.values.map((v     ) => v ?? 0)), 0);
+
+    const W = Math.max(720, days.length * 26);
+    const H = 260, padL = 56, padB = 42, padT = 12, padR = 8;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const x = (d        ) => padL + (plotW / days.length) * d;
+    const slot = plotW / days.length;
+    const barW = Math.max(3, slot * 0.72);
+    const y = (v        ) => padT + plotH - (peak > 0 ? (v / peak) * plotH : 0);
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width', String(W));
+    svg.setAttribute('height', String(H));
+    svg.setAttribute('class', 'trend-chart');
+
+    const svgEl2 = (tag        , attrs                     ) => {
+      const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+      Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
+      return e;
+    };
+
+    // A scale, or the bars are decoration.
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const v = (peak / ticks) * i;
+      const yy = y(v);
+      svg.appendChild(svgEl2('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
+      const t = svgEl2('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
+      t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0)));
+      svg.appendChild(t);
+    }
+
+    let gaps = 0;
+    days.forEach((day, d) => {
+      if (!dayHasAny(d)) {
+        gaps++;
+        // An empty slot, marked. Nothing recorded that day is a fact about the record, not about the day.
+        const g = svgEl2('rect', {
+          x: x(d) + (slot - barW) / 2, y: padT, width: barW, height: plotH,
+          fill: 'var(--line)', opacity: 0.25,
+        });
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = `${day} — no reading from the history backend`;
+        g.appendChild(title);
+        svg.appendChild(g);
+        return;
+      }
+
+      if (stacked) {
+        let base = 0;
+        series.forEach((s     , i        ) => {
+          const v = s.values[d];
+          if (v == null || v <= 0) return;
+          const h = (v / peak) * plotH;
+          const rect = svgEl2('rect', {
+            x: x(d) + (slot - barW) / 2, y: y(base + v), width: barW, height: Math.max(1, h),
+            fill: colorFor(s.kind, i),
+          });
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          title.textContent = `${day} · ${s.label || s.node}: ${formatNum(v)} ${units}`;
+          rect.appendChild(title);
+          svg.appendChild(rect);
+          base += v;
+        });
+      } else {
+        const each = barW / series.length;
+        series.forEach((s     , i        ) => {
+          const v = s.values[d];
+          if (v == null || v <= 0) return;
+          const rect = svgEl2('rect', {
+            x: x(d) + (slot - barW) / 2 + each * i, y: y(v), width: Math.max(1, each - 1),
+            height: Math.max(1, (v / peak) * plotH), fill: colorFor(s.kind, i),
+          });
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          title.textContent = `${day} · ${s.label || s.node}: ${formatNum(v)} ${units}`;
+          rect.appendChild(title);
+          svg.appendChild(rect);
+        });
+      }
+
+      // Every few days, so the axis stays readable at 90.
+      const every = Math.ceil(days.length / 12);
+      if (d % every === 0) {
+        const t = svgEl2('text', {
+          x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11,
+        });
+        t.textContent = day.slice(5);
+        svg.appendChild(t);
+      }
+    });
+
+    const axis = svgEl2('line', { x1: padL, y1: padT + plotH, x2: W - padR, y2: padT + plotH, stroke: 'var(--line)', 'stroke-width': 1 });
+    svg.appendChild(axis);
+
+    const scroll = el('div', { style: { overflowX: 'auto', paddingBottom: '4px' } });
+    scroll.appendChild(svg);
+    chart.appendChild(scroll);
+
+    // Legend, in the chart's own colours.
+    const legend = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '10px' } });
+    series.forEach((s     , i        ) => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+      el('span', { style: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '2px', background: colorFor(s.kind, i), marginRight: '4px' } }),
+      s.label || s.node)));
+    chart.appendChild(legend);
+
+    // Totals, over the days that reported. The count is part of the figure: a total over 22 of 30 days is
+    // not a month, and presenting it as one is how a gap turns into a saving.
+    const t = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['Node', `Total (${units})`, `Mean per day (${units})`, 'Days with data', 'Peak day'].forEach((h, i) =>
+      head.appendChild(el('th', { class: i > 0 && i < 4 ? 'num' : '', text: h })));
+    t.appendChild(el('thead', {}, head));
+    const tb = el('tbody');
+    series.forEach((s     ) => {
+      const vals = s.values.map((v     , d        ) => [v, days[d]]                           ).filter(([v]     ) => v != null);
+      const total = vals.reduce((a        , [v]     ) => a + v, 0);
+      const best = vals.reduce((a     , b     ) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null       );
+      const tr = el('tr');
+      tr.appendChild(el('td', { text: s.label || s.node }));
+      tr.appendChild(el('td', { class: 'num', text: formatNum(Number(total.toFixed(2))) }));
+      tr.appendChild(el('td', { class: 'num', text: vals.length ? formatNum(Number((total / vals.length).toFixed(2))) : '—' }));
+      tr.appendChild(el('td', { class: 'num', text: `${vals.length} of ${days.length}` }));
+      tr.appendChild(el('td', { text: best ? `${best[1]} · ${formatNum(best[0])}` : '—' }));
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    table.appendChild(t);
+
+    status.textContent = `${days.length} day(s) from ${body.source}`
+      + (gaps ? ` · ${gaps} with no reading` : '');
+    status.title = gaps
+      ? 'Those days are drawn as empty slots and left out of the totals. The backend holds nothing for them.'
+      : '';
+  };
+
+  refresh.onclick = () => load();
+  link.onclick = () => { activate(link, sec); if (!body) load(); };
+  return { link, sec };
+}
+
 // ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
@@ -5695,7 +6033,18 @@ function scalarInput(node     , obj     )      {
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
-    (node.enumValues || []).forEach((v        ) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
+    const choices           = (node.enumValues || []).slice();
+    // A saved value the build does not offer stays on the list, named as unrecognised. Dropping it would
+    // show a blank control over a config that still holds the value, and the first edit of any other field
+    // on the page would look like the user chose to clear it.
+    const current = obj[node.key];
+    if (current != null && current !== '' && !choices.includes(String(current))) choices.push(String(current));
+    choices.forEach((v        ) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v === '' ? '(default)' : v + ((node.enumValues || []).includes(v) ? '' : ' — not recognised');
+      el.appendChild(o);
+    });
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'int' || node.type === 'double') {
@@ -5913,7 +6262,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },

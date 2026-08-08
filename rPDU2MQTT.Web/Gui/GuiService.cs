@@ -503,6 +503,68 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// One value per node per day across a window — the daily totals, kept apart rather than summed.
+    ///
+    /// <para>
+    /// A day the backend has nothing for is <see langword="null"/> in the series and stays a gap all the way
+    /// to the chart. Drawing it as zero would put a bar of "nothing was used" next to bars of real days,
+    /// which is a claim about that day rather than an admission that nobody recorded it.
+    /// </para>
+    /// </summary>
+    private async Task<object> BuildSeriesAsync(string? instance, string metric, DateTime endUtc, int days, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
+        try
+        {
+            if (!config.History.Enabled || history is null)
+                return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
+
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+
+            // The shape of the graph comes from the live build — its nodes, labels and kinds. Only the
+            // values come from history, exactly as the single-moment view does it.
+            var shape = FlowGraphBuilder.Build(data, config.EnergyFlow, metric, live);
+            var ids = shape.Nodes.Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+            if (ids.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
+
+            var when = FlowSpan.Days(endUtc, days);
+            var perDay = new List<IReadOnlyDictionary<string, double>>();
+            foreach (var day in when) perDay.Add(await history.ValuesAtAsync(ids, metric, day, cts.Token));
+
+            var series = shape.Nodes
+                .Where(n => !n.Synthetic)
+                .Select(n => new
+                {
+                    node = n.Id,
+                    label = n.Label,
+                    kind = n.Kind,
+                    tags = n.Tags,
+                    values = perDay.Select(day => day.TryGetValue(n.Id, out var v) ? (double?)v : null).ToList(),
+                })
+                // A node with nothing across the whole window is not a line on a chart; it is a node the
+                // backend has no history for, and drawing an empty series for it says nothing.
+                .Where(s => s.values.Any(v => v is not null))
+                .ToList();
+
+            if (series.Count == 0)
+                return new { ok = false, message = $"No history for the {days} days to {endUtc:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+
+            return new
+            {
+                ok = true,
+                metric,
+                units = FlowUnits.Canonical(metric),
+                source = history.Id,
+                days = when.Select(w => w.ToString("yyyy-MM-dd")).ToList(),
+                series,
+            };
+        }
+        catch (Exception ex) { return new { ok = false, message = $"Could not build the series: {ex.Message}" }; }
+    }
+
     /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
     private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null, int spanDays = 1)
     {
@@ -1841,6 +1903,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // ?span=<days> sums that many daily totals, ending at ?at.
             var span = int.TryParse(ctx.Request.Query["span"].ToString(), out var d) ? Math.Clamp(d, 1, 366) : 1;
             return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at, span), ConfigSchema.Json);
+        });
+
+        // One value per node per day over a window — what the Trends page charts. The same daily totals the
+        // span view sums, kept apart instead of added up.
+        app.MapGet("/api/flow/series", async (HttpContext ctx) =>
+        {
+            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
+            var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
+            DateTime end = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
+                ? parsed : DateTime.UtcNow;
+            return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric, end, days, ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be
