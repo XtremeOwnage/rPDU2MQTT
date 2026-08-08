@@ -356,6 +356,8 @@ public static class ServiceConfiguration
             services.AddSingleton<Services.ICacheClient>(sp => sp.GetRequiredService<Services.RedisCacheClient>());
             services.AddSingleton<Core.Flow.IEnergyStore>(sp => new Services.RedisEnergyStore(
                 sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
+            services.AddSingleton<Core.Flow.IPeriodAuditStore>(sp => new Services.RedisPeriodAuditStore(
+                sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
         }
         else
         {
@@ -363,6 +365,8 @@ public static class ServiceConfiguration
             // the property that actually matters. It just can't be shared between replicas.
             services.AddSingleton<Core.Flow.IEnergyStore>(_ => new Core.Flow.FileEnergyStore(
                 Path.Combine(AppContext.BaseDirectory, "energy-totals.json"), m => Log.Warning(m)));
+            services.AddSingleton<Core.Flow.IPeriodAuditStore>(_ => new Core.Flow.FilePeriodAuditStore(
+                Path.Combine(AppContext.BaseDirectory, "period-audit.json"), m => Log.Warning(m)));
         }
     }
 }
