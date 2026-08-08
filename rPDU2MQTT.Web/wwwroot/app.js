@@ -4150,7 +4150,8 @@ function renderDiscoverPanel(flow     , rerender            )              {
     });
 
     let added = 0, extended = 0;
-    byDevice.forEach((readings, id) => {
+    byDevice.forEach((readings, deviceId) => {
+      let id = deviceId;
       const sources = readings.map(r => ({
         Type: 'mqtt', Topic: r.topic, Metric: r.metric,
         // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
@@ -4161,8 +4162,21 @@ function renderDiscoverPanel(flow     , rerender            )              {
       }));
       readings.forEach(r => boundTopics.add(r.topic));
 
-      // A second pass over the same device adds its remaining readings to the node already there.
-      const existing = nodes.find((n     ) => n.Id === id);
+      // A second pass over the same device adds its remaining readings to the node already there. The node
+      // has to be that device though: an ESPHome device called "grid" sanitises to the id of an existing
+      // grid node, and appending an appliance's topics to it would bind one device's readings onto another.
+      // Sameness is decided by the topics this scan found for the device, which is what an earlier import
+      // of it would have bound.
+      const deviceTopics = new Set(found.filter((f     ) => nodeIdFor(f) === id).map((f     ) => f.topic));
+      let existing = nodes.find((n     ) => n.Id === id);
+      if (existing && !(existing.Sources || []).some((src     ) => deviceTopics.has(src.Topic))) {
+        // Same id, different thing. Take the next free id rather than merging or overwriting.
+        let free = id, i = 2;
+        while (nodes.some((n     ) => n.Id === free)) free = `${id}_${i++}`;
+        toast(`A node named '${id}' already exists and is something else — imported as '${free}'.`, false);
+        id = free;
+        existing = undefined;
+      }
       if (existing) {
         ensure(existing, 'Sources', []).push(...sources);
         extended++;
