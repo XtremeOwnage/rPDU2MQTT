@@ -5483,11 +5483,22 @@ function addTrendsSection(nav     , sections     ) {
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
 
-  const rangeSel = el('select', { title: 'How far back to chart.' })                     ;
-  [['7', 'last 7 days'], ['14', 'last 14 days'], ['30', 'last 30 days'], ['90', 'last 90 days']]
-    .forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
-  rangeSel.value = '30';
+  // Two kinds of range, and they answer different questions with different metrics. Within a day the
+  // question is power — a daily energy counter charted through the day only ever climbs, which says
+  // nothing about when the load was. Across days it is the daily total, the one figure that adds up.
+  const RANGES                             = [
+    ['minutes=360&step=300', 'last 6 hours', 'power'],
+    ['minutes=1440&step=900', 'last 24 hours', 'power'],
+    ['days=7', 'last 7 days', 'energy'],
+    ['days=14', 'last 14 days', 'energy'],
+    ['days=30', 'last 30 days', 'energy'],
+    ['days=90', 'last 90 days', 'energy'],
+  ];
+  const rangeSel = el('select', { title: 'How far back to chart. Within a day the charts show power; across days, the daily energy totals.' })                     ;
+  RANGES.forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
+  rangeSel.value = 'days=30';
   rangeSel.onchange = () => load();
+  const intraDay = () => (RANGES.find(r => r[0] === rangeSel.value) || [])[2] === 'power';
 
   const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' })                     ;
   [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
@@ -5511,7 +5522,7 @@ function addTrendsSection(nav     , sections     ) {
   const load = async () => {
     status.textContent = 'loading…';
     charts.innerHTML = ''; table.innerHTML = ''; picker.innerHTML = ''; tagRow.innerHTML = '';
-    const path = withInstance('/api/flow/series?days=' + encodeURIComponent(rangeSel.value), instSel);
+    const path = withInstance('/api/flow/series?' + rangeSel.value, instSel);
     let r     ;
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
@@ -5628,11 +5639,11 @@ function addTrendsSection(nav     , sections     ) {
       const lines         = series.map((s     , i        ) => ({
         label: s.label || s.node, color: colorFor(s.kind, i), values: s.values,
       }));
-      gaps = section('Daily energy by node', 'The nodes selected above.',
+      gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node', 'The nodes selected above.',
         barChart({ days, lines, units, stacked: modeSel.value === 'stack' }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
-      box.appendChild(el('h3', { text: 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
+      box.appendChild(el('h3', { text: intraDay() ? 'Power by node' : 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
       box.appendChild(el('div', { class: 'desc', text: 'No nodes selected — pick one above, or press Reset. The charts below are about the whole system and are not affected by the selection.' }));
       charts.appendChild(box);
     }
@@ -5644,8 +5655,8 @@ function addTrendsSection(nav     , sections     ) {
     const gridIn = byKind('grid');
     if (gridIn) {
       const gridLines         = [{ label: 'Grid import', color: KIND_COLOR.grid, values: gridIn }];
-      section('Grid import per day',
-        'Every grid node, whatever is selected above. Energy drawn from the grid — export is not charted: '
+      section(intraDay() ? 'Grid power' : 'Grid import per day',
+        'Every grid node, whatever is selected above. Drawn from the grid — export is not charted: '
         + 'the return lane is a derived node and the exporter does not publish those, so there is nothing '
         + 'in history to subtract.',
         barChart({ days, lines: gridLines, units, stacked: false }), gridLines);
@@ -5655,7 +5666,10 @@ function addTrendsSection(nav     , sections     ) {
     // The share of the home's energy that did not come from the grid, per day. Drawn only for days where
     // both figures are present: a percentage computed from a missing number is not a measurement.
     const solar = byKind('solar'), batt = byKind('battery'), load = byKind('load');
-    if (gridIn && (load || solar)) {
+    // Self-sufficiency is a share of energy over a period. The same arithmetic on instantaneous power is a
+    // different quantity — the share of this second's supply — and putting it under the same name would
+    // invite reading a momentary grid draw as a bad day.
+    if (!intraDay() && gridIn && (load || solar)) {
       // Only the kinds that exist here. A system with no battery has no battery series, which is not the
       // same as a battery that failed to report — treating the two alike blanked the whole chart.
       const present = [solar, batt, gridIn].filter((k)                         => !!k);
@@ -5686,20 +5700,23 @@ function addTrendsSection(nav     , sections     ) {
       .filter(x => x.values)                                                             ;
     if (supply.length > 1) {
       const supplyLines         = supply.map(s => ({ label: s.label, color: KIND_COLOR[s.k], values: s.values }));
-      section('Where the day’s energy came from',
+      section(intraDay() ? 'Where the power is coming from' : 'Where the day’s energy came from',
         'Each source summed across every node of that kind, whatever is selected above.',
         barChart({ days, lines: supplyLines, units, stacked: true }), supplyLines);
     }
 
     // --- Totals ----------------------------------------------------------------------------------
     if (!series.length) {
-      status.textContent = `${days.length} day(s) from ${body.source}`;
+      status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`;
       return;
     }
 
     const t = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Node', `Total (${units})`, `Mean per day (${units})`, 'Days with data', 'Peak day'].forEach((h, i) =>
+    const per = intraDay() ? 'sample' : 'day';
+    [intraDay() ? 'Node' : 'Node', intraDay() ? `Peak (${units})` : `Total (${units})`,
+     `Mean per ${per} (${units})`, `${intraDay() ? 'Samples' : 'Days'} with data`,
+     intraDay() ? 'Peak at' : 'Peak day'].forEach((h, i) =>
       head.appendChild(el('th', { class: i > 0 && i < 4 ? 'num' : '', text: h })));
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
@@ -5709,7 +5726,10 @@ function addTrendsSection(nav     , sections     ) {
       const best = vals.reduce((a     , b     ) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null       );
       const tr = el('tr');
       tr.appendChild(el('td', { text: s.label || s.node }));
-      tr.appendChild(el('td', { class: 'num', text: formatNum(Number(total.toFixed(2))) }));
+      // Adding up power samples would produce a number in watts that is not a quantity of anything.
+      tr.appendChild(el('td', { class: 'num', text: intraDay()
+        ? (best ? formatNum(Number(best[0].toFixed(2))) : '—')
+        : formatNum(Number(total.toFixed(2))) }));
       tr.appendChild(el('td', { class: 'num', text: vals.length ? formatNum(Number((total / vals.length).toFixed(2))) : '—' }));
       tr.appendChild(el('td', { class: 'num', text: `${vals.length} of ${days.length}` }));
       tr.appendChild(el('td', { text: best ? `${best[1]} · ${formatNum(best[0])}` : '—' }));
@@ -5718,7 +5738,8 @@ function addTrendsSection(nav     , sections     ) {
     t.appendChild(tb);
     table.appendChild(t);
 
-    status.textContent = `${days.length} day(s) from ${body.source}` + (gaps ? ` · ${gaps} with no reading` : '');
+    status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`
+      + (gaps ? ` · ${gaps} with no reading` : '');
     status.title = gaps
       ? 'Those days are drawn as empty slots and left out of the totals. The backend holds nothing for them.'
       : '';

@@ -512,7 +512,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// which is a claim about that day rather than an admission that nobody recorded it.
     /// </para>
     /// </summary>
-    private async Task<object> BuildSeriesAsync(string? instance, string metric, DateTime endUtc, int days, CancellationToken ct)
+    private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when, string labelFormat, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -530,9 +530,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             var ids = shape.Nodes.Where(n => !n.Synthetic).Select(n => n.Id).ToList();
             if (ids.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
 
-            var when = FlowSpan.Days(endUtc, days);
-            var perDay = new List<IReadOnlyDictionary<string, double>>();
-            foreach (var day in when) perDay.Add(await history.ValuesAtAsync(ids, metric, day, cts.Token));
+            // One request where the backend can answer a range, so a chart of 72 five-minute samples is not
+            // 72 round trips.
+            var perDay = await history.SeriesAsync(ids, metric, when, cts.Token);
 
             var series = shape.Nodes
                 .Where(n => !n.Synthetic)
@@ -550,7 +550,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 .ToList();
 
             if (series.Count == 0)
-                return new { ok = false, message = $"No history for the {days} days to {endUtc:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+                return new { ok = false, message = $"No history between {when[0]:u} and {when[^1]:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
 
             return new
             {
@@ -558,7 +558,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 metric,
                 units = FlowUnits.Canonical(metric),
                 source = history.Id,
-                days = when.Select(w => w.ToString("yyyy-MM-dd")).ToList(),
+                // Labelled in the browser's terms by the caller: a day is a date, a moment within one is a
+                // clock time, and the chart's axis is whichever it asked for.
+                days = when.Select(w => w.ToLocalTime().ToString(labelFormat)).ToList(),
+                stepSeconds = when.Count > 1 ? (int)(when[1] - when[0]).TotalSeconds : 0,
                 series,
             };
         }
@@ -1909,12 +1912,27 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // span view sums, kept apart instead of added up.
         app.MapGet("/api/flow/series", async (HttpContext ctx) =>
         {
-            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
-            var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
             DateTime end = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : DateTime.UtcNow;
-            return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric, end, days, ctx.RequestAborted), ConfigSchema.Json);
+
+            // Two shapes of question, and they are not the same question. ?days is the daily total, one
+            // sample per day. ?minutes is what is happening within a day, sampled every ?step seconds —
+            // power, because a cumulative daily counter charted through the day only ever climbs.
+            if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
+            {
+                var step = int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? Math.Clamp(st, 60, 3600) : 300;
+                var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, 60 * 48));
+                var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
+                var steps = new List<DateTime>();
+                for (var t = end - span; t <= end; t = t.AddSeconds(step)) steps.Add(t);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps, "HH:mm", ctx.RequestAborted), ConfigSchema.Json);
+            }
+
+            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
+            var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
+            return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
+                FlowSpan.Days(end, days).ToList(), "yyyy-MM-dd", ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be

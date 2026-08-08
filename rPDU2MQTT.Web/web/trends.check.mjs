@@ -23,10 +23,21 @@ const series = {
   ],
 };
 
+// The same window asked about within a day: power every 5 minutes, not a daily total. A cumulative daily
+// counter charted through the day only ever climbs, so this is a different metric, not a finer one.
+const power = {
+  ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
+  days: ['13:00', '13:05', '13:10', '13:15'],
+  series: [
+    { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [4200, 4400, null, 3900] },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: [0, 0, null, 120] },
+  ],
+};
+
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
-    if (url.includes('/api/flow/series')) { asked.push(url); return series; }
+    if (url.includes('/api/flow/series')) { asked.push(url); return url.includes('minutes=') ? power : series; }
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -46,6 +57,7 @@ const sec = query(getEl('sections'), '.section', true).find(s => s.classList.con
 if (!sec) fail('clicking Trends activated no section');
 if (!asked.length) fail('the page charted nothing — no series was requested');
 if (!/days=30/.test(asked[0])) fail(`the default range was not requested: ${asked[0]}`);
+if (!/stepSeconds|days=/.test(asked[0])) fail('the range was not expressed in the query');
 
 // The charts are found by their headings — several are drawn from one fetch, and each is a different
 // question about the same days.
@@ -162,6 +174,34 @@ if (query(sec, 'rect', true).length >= before) fail('taking a node off the chart
 if (query(sec, 'tr', true).some(r => r.textContent.includes('Grid') && r.textContent.includes('of 7')))
   fail('a node taken off the chart is still in the totals');
 
+// --- Within a day: power, sampled, and no self-sufficiency ------------------------------------------
+const rangeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => (o.value || '').includes('minutes=')));
+if (!rangeSel) fail('no intra-day range offered');
+rangeSel.value = 'minutes=360&step=300';
+rangeSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+
+const intra = decodeURIComponent(asked.at(-1));
+if (!/minutes=360/.test(intra) || !/step=300/.test(intra)) fail(`the intra-day window was not requested: ${intra}`);
+
+const intraHeads = query(sec, 'h3', true).map(h => h.textContent);
+if (!intraHeads.includes('Power by node')) fail(`the intra-day view is not labelled as power: ${intraHeads.join(', ')}`);
+// Self-sufficiency is a share of energy over a period. The same arithmetic on instantaneous power is a
+// different quantity, and giving it the same name invites reading a momentary grid draw as a bad day.
+if (intraHeads.includes('Self-sufficiency per day'))
+  fail('self-sufficiency was drawn from instantaneous power');
+
+// A total of power samples is a number in watts that is a quantity of nothing, so the column is the peak.
+const intraRows = query(sec, 'th', true).map(h => h.textContent);
+if (!intraRows.some(h => /Peak \(W\)/.test(h))) fail(`power samples are being totalled: ${intraRows.join(', ')}`);
+if (!intraRows.some(h => /Samples with data/.test(h))) fail(`the intra-day table still counts days: ${intraRows.join(', ')}`);
+
+// The clock is the axis, and a missing sample is still a gap.
+const intraCard = query(sec, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
+intraCard.find(h => h.attrs['data-day'] === '13:05').dispatch('mouseenter', { clientX: 5, clientY: 5 });
+const intraText = query(sandbox.document.body, '.trend-card').textContent;
+if (!intraText.includes('13:05') || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
-  + 'many days they cover');
+  + 'many days they cover; within a day it charts power instead');

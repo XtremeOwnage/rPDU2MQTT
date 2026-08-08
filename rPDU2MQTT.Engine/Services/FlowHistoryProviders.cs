@@ -45,6 +45,46 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         }
     }
 
+    /// <summary>
+    /// The whole range in one request. Prometheus has an endpoint for exactly this question, and the
+    /// alternative — an instant query per step — is what made a chart of anything finer than a day
+    /// impractical.
+    /// </summary>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
+    {
+        var empty = steps.Select(_ => (IReadOnlyDictionary<string, double>)new Dictionary<string, double>()).ToList();
+        var baseUrl = (cfg.History.PrometheusUrl ?? "").TrimEnd('/');
+        if (baseUrl.Length == 0 || nodeIds.Count == 0 || steps.Count == 0) return empty;
+
+        var unix = steps.Select(s => new DateTimeOffset(DateTime.SpecifyKind(s, DateTimeKind.Utc)).ToUnixTimeSeconds()).ToList();
+        // The step Prometheus is asked for has to be the one the caller wants back, or the samples land
+        // between the slots they were meant for.
+        var stride = steps.Count > 1 ? Math.Max(1, unix[1] - unix[0]) : 1;
+
+        var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
+        var query = $"{name}{{node=~\"{HistoryParsing.NodeMatcher(nodeIds)}\"}}";
+        var url = $"{baseUrl}/api/v1/query_range?query={Uri.EscapeDataString(query)}"
+                + $"&start={unix[0]}&end={unix[^1]}&step={stride}s";
+
+        try
+        {
+            var response = await http.GetAsync(url, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} over {steps.Count} step(s).");
+                return empty;
+            }
+            return HistoryParsing.PrometheusRange(body, unix);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning($"Flow history: could not reach Prometheus at {baseUrl} ({ex.Message}).");
+            return empty;
+        }
+    }
+
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {
@@ -194,4 +234,8 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IFlowHistor
 
     public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
         => cfg.History.Enabled ? Current.ProbeAsync(ct) : Task.FromResult((false, "history is turned off"));
+
+    public Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
+        => Current.SeriesAsync(nodeIds, metric, steps, ct);
 }

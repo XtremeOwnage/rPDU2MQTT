@@ -22,6 +22,28 @@ public interface IFlowHistory
     /// The value each node held at <paramref name="atUtc"/>, keyed by node id. Nodes with no data are
     /// omitted.
     /// </summary>
+    /// <summary>
+    /// One reading per node at each of <paramref name="steps"/>.
+    ///
+    /// <para>
+    /// A chart asks for tens or hundreds of moments at once, and asking for them one at a time is a
+    /// timeout rather than a chart — six hours at five-minute resolution is 72 round trips. A backend that
+    /// can answer a range in one request overrides this; the default keeps the seam honest for one that
+    /// cannot.
+    /// </para>
+    /// <para>
+    /// A step with no reading is an absent entry, never a carried-forward value: a flat line drawn through
+    /// a gap cannot be told from a reading that genuinely did not change.
+    /// </para>
+    /// </summary>
+    async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
+    {
+        var out_ = new List<IReadOnlyDictionary<string, double>>(steps.Count);
+        foreach (var at in steps) out_.Add(await ValuesAtAsync(nodeIds, metric, at, ct));
+        return out_;
+    }
+
     Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct);
 

@@ -10,6 +10,68 @@ namespace rPDU2MQTT.Core.Flow;
 public static class HistoryParsing
 {
     /// <summary>
+    /// A Prometheus range answer: one series per node, each a list of [timestamp, value] pairs, folded onto
+    /// the step boundaries the caller asked for.
+    ///
+    /// <para>
+    /// One request instead of one per step. A six-hour view at five-minute resolution is 72 samples, and 72
+    /// sequential instant queries is not a chart, it is a timeout — the same reason a month of daily totals
+    /// is slow enough to notice.
+    /// </para>
+    /// <para>
+    /// A step Prometheus returned nothing for stays absent rather than carrying the previous value forward.
+    /// A flat line drawn through a gap is indistinguishable from a reading that genuinely did not change.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyDictionary<string, double>> PrometheusRange(string json, IReadOnlyList<long> stepsUnix)
+    {
+        var steps = stepsUnix.Count;
+        var slots = new List<Dictionary<string, double>>(steps);
+        for (var i = 0; i < steps; i++) slots.Add(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase));
+        if (steps == 0) return slots;
+
+        // Which slot a sample belongs to. Prometheus aligns to the step it was given, but a server clock or
+        // a rounded start can land a sample a second either side of the boundary.
+        var index = new Dictionary<long, int>();
+        for (var i = 0; i < steps; i++) index[stepsUnix[i]] = i;
+        var first = stepsUnix[0];
+        var stride = steps > 1 ? stepsUnix[1] - stepsUnix[0] : 1;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return slots;
+            if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array) return slots;
+
+            foreach (var seriesEl in result.EnumerateArray())
+            {
+                if (!seriesEl.TryGetProperty("metric", out var m) || !m.TryGetProperty("node", out var nodeEl)) continue;
+                var node = nodeEl.GetString();
+                if (string.IsNullOrEmpty(node)) continue;
+                if (!seriesEl.TryGetProperty("values", out var values) || values.ValueKind != JsonValueKind.Array) continue;
+
+                foreach (var pair in values.EnumerateArray())
+                {
+                    if (pair.ValueKind != JsonValueKind.Array || pair.GetArrayLength() < 2) continue;
+                    var at = (long)pair[0].GetDouble();
+                    var raw = pair[1].GetString();
+                    if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v)) continue;
+
+                    if (!index.TryGetValue(at, out var slot))
+                    {
+                        if (stride <= 0) continue;
+                        slot = (int)Math.Round((double)(at - first) / stride);
+                        if (slot < 0 || slot >= steps) continue;
+                    }
+                    slots[slot][node] = v;
+                }
+            }
+        }
+        catch (JsonException) { /* an unparseable answer is no history, not a crash */ }
+        return slots;
+    }
+
+    /// <summary>
     /// Prometheus instant-query result: <c>data.result[]</c>, each with <c>metric.node</c> and a
     /// <c>[timestamp, "value"]</c> pair.
     /// </summary>
