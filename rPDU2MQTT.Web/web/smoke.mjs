@@ -150,8 +150,33 @@ const flowLink = navLinks.find(a => a.dataset.label === 'Flow');
 if (!flowLink) fail('no Flow tab');
 flowLink.click();
 await new Promise(r => setTimeout(r, 50));
-if (!query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ').includes('Hierarchy'))
-  fail('the Flow tab did not render the hierarchy editor');
+const activeSec = () => query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+if (!query(activeSec(), 'rect', true).some(r => r.attrs['data-node']))
+  fail('the Flow tab did not render the diagram');
+
+// The roll-up table, the wiring editor and the roll-up settings are three pages of their own under Energy
+// Flow, reachable without going through the diagram first.
+for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'Drag from a node'], ['Settings', 'Track daily totals']]) {
+  const l = navLinksNow().find(a => a.dataset.label === label);
+  if (!l) fail(`no ${label} page under Energy Flow`);
+  if (l.dataset.section !== 'EnergyFlow') fail(`the ${label} page does not carry EnergyFlow's unsaved-edit count`);
+  l.click();
+  await new Promise(r => setTimeout(r, 50));
+  if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
+}
+
+// Each of those settings has exactly one control. Left behind as well as moved, two controls would be
+// bound to one value and would disagree the moment either was used. Counted as controls, not as text —
+// another page is free to mention a setting and say where it lives.
+const everyLabel = () => query(getEl('sections'), 'label', true).map(l => l.textContent);
+for (const setting of ['Export tiers to MQTT', 'Track daily totals', 'Infer from a single supply path',
+                       'Derive kWh from power']) {
+  const on = everyLabel().filter(t => t.includes(setting)).length;
+  if (on !== 1) fail(`"${setting}" has ${on} controls; it belongs in exactly one place`);
+}
+
+flowLink.click();
+await new Promise(r => setTimeout(r, 50));
 
 // Node configuration now lives on its own Nodes tab. Open it, open the 'solar' node's editor, and confirm
 // it surfaces the migrated MQTT topic, the Modbus connection picker, and the feeders/children wiring.

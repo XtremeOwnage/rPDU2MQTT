@@ -1525,8 +1525,30 @@ export function addFlowSection(nav: any, sections: any) {
   const hist = historyControl(() => load());
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
-  const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
-  const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
+
+  // Three separate jobs used to be stacked below the diagram on this one page: a table of what each node
+  // grain rolled up, the editor that wires the hierarchy, and the settings that govern the roll-up. Each
+  // gets its own page under Energy Flow, so the Flow page is the diagram.
+  const subPage = (label: string, icon: string, desc: string) => {
+    const l = navLink(nav, label, icon);
+    l.classList.add('nav-child');
+    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
+    l.dataset.section = 'EnergyFlow';
+    const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
+    s.appendChild(el('h2', { text: label }));
+    s.appendChild(el('div', { class: 'desc', text: desc }));
+    const body = document.createElement('div'); s.appendChild(body);
+    return { link: l, sec: s, body };
+  };
+
+  const treePage = subPage('Roll-up', '∑',
+    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+  const treePanel = treePage.body;
+  const edPage = subPage('Hierarchy', '⑃',
+    'How the nodes are wired together. Energy flows left → right.');
+  const ed: any = edPage.body;
+  const settingsPage = subPage('Settings', '⚙',
+    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose. Fetched beside the graph rather than folded into it: it
   // describes the ingest, not the drawing, and it must still be reported when the graph itself is empty.
@@ -2127,47 +2149,39 @@ export function addFlowSection(nav: any, sections: any) {
     attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
   };
 
-  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
-  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
-  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
-  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
-  const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
-  const NW = 190, NH = 46;
-
-  const renderEditor = () => {
-    if (ed._cleanup) ed._cleanup();
+  // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.
+  //
+  // The generic config form deliberately hides EnergyFlow (these visual editors replace it), so each of
+  // these had been dropped onto whichever page it affected — the MQTT export and the day boundary under
+  // the hierarchy editor, the rest further down the same page. Answering "how is this rolled up?" meant
+  // scrolling a diagram editor. They are the same controls, bound to the same document, in one place.
+  const renderSettings = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
     migrateEnergyFlow(flow);
-    const customNodes = ensure(flow, 'Nodes', []);
-    const links = ensure(flow, 'Links', []);
-    ed.innerHTML = '';
+    const agg = ensure(flow, 'Aggregation', {});
+    const body = settingsPage.body;
+    body.innerHTML = '';
 
-    ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
-
-    const bar2 = el('div', { class: 'ld-toolbar' });
+    const bar3 = el('div', { class: 'ld-toolbar' });
     const save = btn('Save', 'primary');
     save.onclick = () => saveConfig(load);
-    bar2.append(save); ed.appendChild(bar2);
+    bar3.append(save); body.appendChild(bar3);
 
-    // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll. Saved with
-    // the hierarchy (the Save button posts the whole config).
+    // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll.
+    body.appendChild(el('h3', { text: 'MQTT export', style: { margin: '14px 0 4px' } }));
     const exportRow = el('div', { class: 'ld-toolbar' });
     const topicIn = el('input', { type: 'text', placeholder: '{parent}/energyflow/{id}', style: { width: '280px' } });
     topicIn.value = flow.MqttTopicTemplate || '';
     topicIn.disabled = !flow.MqttExport;
-    topicIn.onchange = () => { flow.MqttTopicTemplate = topicIn.value.trim() || undefined; };
+    topicIn.onchange = () => { flow.MqttTopicTemplate = topicIn.value.trim() || undefined; refreshDirty(); };
     const expChk = el('input', { type: 'checkbox' }); expChk.checked = !!flow.MqttExport;
-    expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; };
+    expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; refreshDirty(); };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
-    ed.appendChild(exportRow);
+    body.appendChild(exportRow);
 
-    // How the energy roll-up is accumulated, and when the day ends. These live under EnergyFlow, which the
-    // generic config form deliberately hides (this visual editor replaces it) — so without a panel here they
-    // had no UI at all and could only be set by hand-editing the config.
-    const agg = ensure(flow, 'Aggregation', {});
-    ed.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
-    ed.appendChild(el('div', { class: 'desc' },
+    // How the energy roll-up is accumulated, and when the day ends.
+    body.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
+    body.appendChild(el('div', { class: 'desc' },
       'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
       + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
       + 'Draw the diagram with Show → “Energy today”.'));
@@ -2204,13 +2218,13 @@ export function addFlowSection(nav: any, sections: any) {
     aggRow.append(
       el('label', {}, trackChk, ' Track daily totals'),
       el('span', { class: 'desc', style: { margin: '0' }, text: 'Day ends at:' }), hourSel, zoneSel);
-    ed.appendChild(aggRow);
+    body.appendChild(aggRow);
 
     // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
     // container it is UTC unless someone set TZ. Not knowing that is how "Energy today" appears to reset at
     // 7pm for no reason.
     const clock = el('div', { class: 'desc' }) as HTMLElement;
-    ed.appendChild(clock);
+    body.appendChild(clock);
     api('/api/time').then((r: any) => {
       const t = r.body; if (!t || !t.ok || !t.host || !t.period) return;
       const p = t.period;
@@ -2227,6 +2241,8 @@ export function addFlowSection(nav: any, sections: any) {
       }
     }).catch(() => { });
 
+    body.appendChild(el('h3', { text: 'What the diagram may state', style: { margin: '14px 0 4px' } }));
+
     // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
     // nothing measured — sound arithmetic about the hierarchy you drew, and only as true as that hierarchy.
     const inferRow = el('div', { class: 'desc' }) as HTMLElement;
@@ -2235,16 +2251,45 @@ export function addFlowSection(nav: any, sections: any) {
     inferChk.onchange = () => { flow.InferFromConservation = inferChk.checked ? undefined : false; refreshDirty(); };
     inferRow.append(el('label', {}, inferChk,
       ' Infer from a single supply path — fill in an unmeasured node from what it feeds, when only one path could have supplied it. Results are labelled “inferred”; off shows “no data”.'));
-    ed.appendChild(inferRow);
+    body.appendChild(inferRow);
 
-    // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
     const aggIntegrate = el('div', { class: 'desc' }) as HTMLElement;
     const intChk = el('input', { type: 'checkbox' }) as HTMLInputElement;
     intChk.checked = !!agg.Enabled;
     intChk.onchange = () => { agg.Enabled = intChk.checked; refreshDirty(); };
     aggIntegrate.append(el('label', {}, intChk,
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
-    ed.appendChild(aggIntegrate);
+    body.appendChild(aggIntegrate);
+
+    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram
+    // itself. They change what you are looking at rather than what is configured, they are per-viewer
+    // (browser-local, never saved), and a view switch on another page is one you cannot see the effect of.
+    body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
+      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
+      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+  };
+
+  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
+  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
+  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
+  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
+  const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
+  const NW = 190, NH = 46;
+
+  const renderEditor = () => {
+    if (ed._cleanup) ed._cleanup();
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const customNodes = ensure(flow, 'Nodes', []);
+    const links = ensure(flow, 'Links', []);
+    ed.innerHTML = '';
+
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
+
+    const bar2 = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(load);
+    bar2.append(save); ed.appendChild(bar2);
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = flowCandidates(lastGraph, customNodes);
@@ -2423,15 +2468,32 @@ export function addFlowSection(nav: any, sections: any) {
     if (at) path += (path.includes('?') ? '&' : '?') + 'at=' + encodeURIComponent(at);
     const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
     withheldSources = (w.body && w.body.ok && w.body.sources) || [];
-    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
+    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; redrawSubPages(); return; }
     // Say plainly that this is not now. A past diagram that looks like the live one is the worst outcome.
     hist.setNote(r.body.historical ? `showing ${new Date(r.body.at).toLocaleString()} from ${r.body.source}` : '');
     lastGraph = r.body;
     draw(r.body);
-    renderEditor();
-    renderTree();
+    redrawSubPages();
   };
   refresh.onclick = load;
+
+  // A sub-page repaints with the data only while it is the page you are on — saving from the hierarchy
+  // editor reloads the graph, and rebuilding a page nobody is looking at would drop a drag in progress.
+  const redrawSubPages = () => {
+    if (edPage.sec.classList.contains('active')) renderEditor();
+    if (treePage.sec.classList.contains('active')) renderTree();
+  };
+
+  // The editor draws every node the diagram knows about, not just the configured ones, so it needs the
+  // graph — reachable now without going via the Flow page first.
+  const openSubPage = async (page: any, render: () => void) => {
+    activate(page.link, page.sec);
+    if (!lastGraph) await load();
+    render();
+  };
+  treePage.link.onclick = () => openSubPage(treePage, renderTree);
+  edPage.link.onclick = () => openSubPage(edPage, renderEditor);
+  settingsPage.link.onclick = () => { activate(settingsPage.link, settingsPage.sec); renderSettings(); };
 
   // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
   // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
