@@ -98,6 +98,8 @@
   .trend-card { min-width:180px; }
   .trend-card .nh-total { border-top:1px solid var(--line); margin-top:2px; padding-top:3px; font-weight:600; }
   .trend-swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:baseline; }
+  th.sortable { cursor:pointer; user-select:none; }
+  th.sortable:hover { color:var(--fg); }
   /* The verdict from a section's test button, kept on the page after the toast has gone. */
   .test-result { margin:4px 2px 0; min-height:1em; }
   .test-result.test-ok { color:var(--good, #46c46a); }

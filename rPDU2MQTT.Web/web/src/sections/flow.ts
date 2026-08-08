@@ -3606,21 +3606,27 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
         : metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
     } else try {
-      const er = await api(withInstance('/api/flow?metric=energy', instSel));
+      // Today, not all time. On the power view this asked for lifetime energy, so the bar under a board of
+      // live watts described every kWh since each counter was first bound — a figure that barely moves and
+      // answers a question nobody was asking. Today is the window the rest of the board is about.
+      const er = await api(withInstance('/api/flow?metric=energytoday', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
         eUnits = er.body.units || 'kWh';
+        // From the answer, not from what was asked for. Hardcoding "today" here meant the label kept
+        // saying today no matter which metric came back, so it could not be wrong and could not be caught.
+        eWindow = er.body.metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
         const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
-        // In-direction (charge/export) energy from the same live cache, keyed energy#in.
+        // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy: Record<string, number> = {};
-        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy#in' }));
+        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energytoday#in' }));
         if (eq.length) {
           try {
             const elr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(eq) });
             (elr.body?.values || []).forEach((v: any) => { if (typeof v.value === 'number') eInBy[`${v.node}|${v.metric}`] = v.value; });
           } catch { /* no live cache — energy#in just stays absent */ }
         }
-        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
+        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energytoday#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
         const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;

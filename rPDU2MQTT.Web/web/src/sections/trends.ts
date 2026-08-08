@@ -230,6 +230,9 @@ export function addTrendsSection(nav: any, sections: any) {
 
   let body: any = null;
   const off = new Set<string>();
+  // Which column the table is ordered by. Numeric columns start at the biggest, which is the number being
+  // looked for; the node name starts at A.
+  const sort = { col: 1, desc: true };
 
   const load = async () => {
     status.textContent = 'loading…';
@@ -427,30 +430,72 @@ export function addTrendsSection(nav: any, sections: any) {
       return;
     }
 
-    const t = el('table', { class: 'ld' });
-    const head = el('tr');
-    const per = intraDay() ? 'sample' : 'day';
-    [intraDay() ? 'Node' : 'Node', intraDay() ? `Peak (${units})` : `Total (${units})`,
-     `Mean per ${per} (${units})`, `${intraDay() ? 'Samples' : 'Days'} with data`,
-     intraDay() ? 'Peak at' : 'Peak day'].forEach((h, i) =>
-      head.appendChild(el('th', { class: i > 0 && i < 4 ? 'num' : '', text: h })));
-    t.appendChild(el('thead', {}, head));
-    const tb = el('tbody');
-    series.forEach((s: any) => {
+    const step = Number(body.stepSeconds) || 0;
+    const rows = series.map((s: any) => {
       const vals = s.values
         .map((v: any, d: number) => [v, days[d]] as [number | null, string])
         .filter(([v, day]: any) => v != null && day !== partial);
-      const total = vals.reduce((a: number, [v]: any) => a + v, 0);
+      const sum = vals.reduce((a: number, [v]: any) => a + v, 0);
       const best = vals.reduce((a: any, b: any) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as any);
+      // Energy from power samples: each sample stands for one step of time. Rectangle integration, so it
+      // is an estimate — and only over the samples that exist, since an interval with no reading is an
+      // interval nobody measured rather than one where nothing was drawn.
+      const kwh = intraDay() && step > 0 ? (sum * step) / 3_600_000 : null;
+      return {
+        label: s.label || s.node,
+        headline: intraDay() ? (best ? best[0] : null) : sum,
+        kwh,
+        mean: vals.length ? sum / vals.length : null,
+        covered: vals.length,
+        peakAt: best ? best[1] : '',
+        peakValue: best ? best[0] : null,
+      };
+    });
+
+    const denom = days.length - (partial ? 1 : 0);
+    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string }[] = [
+      { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
+      { head: intraDay() ? `Peak (${units})` : `Total (${units})`, num: true,
+        text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
+        sort: r => r.headline ?? -Infinity,
+        // Adding up power samples gives a number in watts that is a quantity of nothing.
+        title: intraDay() ? 'The highest sample in the window. Power samples are not added up — that would give a number in watts that is a quantity of nothing.' : 'Summed over the days that reported.' },
+      ...(intraDay() ? [{ head: 'Energy (kWh, est.)', num: true,
+        text: (r: any) => r.kwh == null ? '—' : formatNum(Number(r.kwh.toFixed(3))),
+        sort: (r: any) => r.kwh ?? -Infinity,
+        title: `Each sample held for its ${step}s step and added up. An estimate: it assumes the power between samples was the sampled value, and it covers only the samples that exist.` }] : []),
+      { head: `Mean per ${intraDay() ? 'sample' : 'day'} (${units})`, num: true,
+        text: r => r.mean == null ? '—' : formatNum(Number(r.mean.toFixed(2))), sort: r => r.mean ?? -Infinity },
+      { head: `${intraDay() ? 'Samples' : 'Days'} with data`, num: true,
+        text: r => `${r.covered} of ${denom}`, sort: r => r.covered },
+      { head: intraDay() ? 'Peak at' : 'Peak day', num: false,
+        text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}` : '—', sort: r => r.peakAt },
+    ];
+
+    // Sorted by whichever column you clicked. Twelve nodes over ninety days is a table you read by
+    // scanning for the biggest number, and scanning is what sorting is for.
+    if (sort.col >= cols.length) sort.col = 0;
+    const key = cols[sort.col].sort;
+    rows.sort((a: any, b: any) => {
+      const x = key(a), y = key(b);
+      const c = typeof x === 'string' ? String(x).localeCompare(String(y)) : (x < y ? -1 : x > y ? 1 : 0);
+      return sort.desc ? -c : c;
+    });
+
+    const t = el('table', { class: 'ld' });
+    const head = el('tr');
+    cols.forEach((c, i) => {
+      const th = el('th', { class: c.num ? 'num sortable' : 'sortable' });
+      th.append(c.head + (sort.col === i ? (sort.desc ? ' ▾' : ' ▴') : ''));
+      th.title = (c.title ? c.title + '\n' : '') + 'Click to sort by this column.';
+      th.onclick = () => { if (sort.col === i) sort.desc = !sort.desc; else { sort.col = i; sort.desc = c.num; } draw(); };
+      head.appendChild(th);
+    });
+    t.appendChild(el('thead', {}, head));
+    const tb = el('tbody');
+    rows.forEach((r: any) => {
       const tr = el('tr');
-      tr.appendChild(el('td', { text: s.label || s.node }));
-      // Adding up power samples would produce a number in watts that is not a quantity of anything.
-      tr.appendChild(el('td', { class: 'num', text: intraDay()
-        ? (best ? formatNum(Number(best[0].toFixed(2))) : '—')
-        : formatNum(Number(total.toFixed(2))) }));
-      tr.appendChild(el('td', { class: 'num', text: vals.length ? formatNum(Number((total / vals.length).toFixed(2))) : '—' }));
-      tr.appendChild(el('td', { class: 'num', text: `${vals.length} of ${days.length - (partial ? 1 : 0)}` }));
-      tr.appendChild(el('td', { text: best ? `${best[1]} · ${formatNum(best[0])}` : '—' }));
+      cols.forEach(c => tr.appendChild(el('td', { class: c.num ? 'num' : '', text: c.text(r) })));
       tb.appendChild(tr);
     });
     t.appendChild(tb);

@@ -27,6 +27,14 @@ const today = {
   links: [],
 };
 
+// Lifetime energy: what self-sufficiency used to be computed from on the power view. Distinct figures, so
+// a chart built from the wrong one is visible rather than plausible.
+const lifetime = {
+  ok: true, metric: 'energy', units: 'kWh',
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 9000 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 }],
+  links: [],
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
     url.includes('/api/schema') ? schema :
@@ -34,6 +42,7 @@ const { sandbox, getEl } = makeDom({
     url.includes('/api/config') ? cfg :
     url.includes('/api/flow/live') ? { ok: true, values: [{ node: 'grid', metric: 'energytoday#in', value: 7.5 }] } :
     url.includes('metric=energytoday') ? today :
+    url.includes('metric=energy') ? lifetime :
     url.includes('/api/flow') ? power :
     { ok: true },
 });
@@ -56,6 +65,14 @@ const histBar = query(getEl('sections'), 'div', true).filter(d => cn(d).includes
 if (!histBar.length) fail('the board never built a history control');
 if (!histBar.every(b => cn(b).includes('is-hidden')))
   fail('the date picker is offered while the History feature is off');
+
+// On the power view, self-sufficiency covers TODAY. It used to fetch lifetime energy, so a board of live
+// watts carried a figure describing every kWh since each counter was first bound — one that barely moves
+// and answers a question nobody was asking.
+const ssLive = query(getEl('sections'), 'div', true).find(d => cn(d).includes('energy-selfsuff'));
+if (!ssLive) fail('no self-sufficiency figure on the power view');
+if (/lifetime/.test(ssLive.textContent)) fail(`self-sufficiency on the power view still covers all time: ${ssLive.textContent}`);
+if (!/today/.test(ssLive.textContent)) fail(`self-sufficiency does not say it covers today: ${ssLive.textContent}`);
 
 // Power: dials are drawn against the stated Max.
 if (!query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge'))) fail('no gauge on the power view');

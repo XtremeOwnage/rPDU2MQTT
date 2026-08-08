@@ -204,10 +204,17 @@ if (!intraHeads.includes('Power by node')) fail(`the intra-day view is not label
 if (intraHeads.includes('Self-sufficiency per day'))
   fail('self-sufficiency was drawn from instantaneous power');
 
-// A total of power samples is a number in watts that is a quantity of nothing, so the column is the peak.
+// A total of power samples is a number in watts that is a quantity of nothing, so the column is the peak —
+// and the quantity people actually want, kWh, is integrated from the samples instead.
 const intraRows = query(sec, 'th', true).map(h => h.textContent);
 if (!intraRows.some(h => /Peak \(W\)/.test(h))) fail(`power samples are being totalled: ${intraRows.join(', ')}`);
 if (!intraRows.some(h => /Samples with data/.test(h))) fail(`the intra-day table still counts days: ${intraRows.join(', ')}`);
+if (!intraRows.some(h => /Energy \(kWh/.test(h))) fail(`no energy column on the power view: ${intraRows.join(', ')}`);
+
+// Solar: 4200 + 4400 + 3900 = 12,500 W of samples, each holding for a 300s step —
+// 12500 * 300 / 3,600,000 = 1.042 kWh. The missing sample contributes nothing rather than being filled in.
+const solarIntra = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
+if (!solarIntra.textContent.includes('1.042')) fail(`the energy estimate is wrong: ${solarIntra.textContent}`);
 
 // The clock is the axis, and a missing sample is still a gap.
 const intraCard = query(sec, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
@@ -215,6 +222,22 @@ intraCard.find(h => h.attrs['data-day'] === '13:05').dispatch('mouseenter', { cl
 const intraText = query(sandbox.document.body, '.trend-card').textContent;
 if (!intraText.includes('13:05') || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
 
+// Columns sort. Twelve nodes over ninety days is a table you read by scanning for the biggest number.
+// Every node back on first: a one-row table is sorted whatever the code does, which is no test at all.
+query(sec, 'button', true).find(b => b.textContent === 'All').click();
+await new Promise(r => setTimeout(r, 50));
+if (query(sec, 'tbody tr', true).length < 2) fail('the sort test needs more than one row to mean anything');
+const heads = query(sec, 'th', true);
+const nameHead = heads.find(h => h.textContent.startsWith('Node'));
+nameHead.onclick();
+await new Promise(r => setTimeout(r, 50));
+const order = () => query(sec, 'tbody tr', true).map(r => query(r, 'td')?.textContent);
+const byName = order();
+if (byName.join() !== [...byName].sort().join()) fail(`sorting by node did not order the rows: ${byName.join(', ')}`);
+nameHead.onclick();
+await new Promise(r => setTimeout(r, 50));
+if (order().join() !== [...byName].reverse().join()) fail('clicking the same column again did not reverse it');
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
-  + 'many days they cover; within a day it charts power instead');
+  + 'many days they cover; within a day it charts power and integrates kWh; the table sorts');
