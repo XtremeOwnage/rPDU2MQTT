@@ -286,8 +286,21 @@ if (!guiSwitch.textContent.includes('lock you out')) fail('the locked GUI switch
 const emon = query(featureSec, '.field', true).find(f => f.dataset.path === 'EmonCMS.Enabled');
 if (!emon) fail('the Features page does not list the EmonCMS export');
 const emonSwitch = query(emon, '.switch', true)[0];
+if (emonSwitch.checked) fail('the fixture was meant to have the EmonCMS export switched off');
+
+// A page of settings for a capability that is off has no nav entry — the Features page is what answers
+// "what is on?". It is still built and still in the palette; only the nav entry waits for the switch.
+const emonNav = navLinksNow().find(a => a.dataset.section === 'EmonCMS');
+if (!emonNav) fail('no EmonCMS page was built');
+if (!emonNav.classList.contains('is-hidden'))
+  fail('a switched-off feature still lists its settings page in the nav');
+if (!query(getEl('sections'), '.section', true).some(s => query(s, 'h2')?.textContent === 'EmonCMS'))
+  fail('hiding the nav entry also took away the page');
+
 emonSwitch.checked = !emonSwitch.checked;
 emonSwitch.onchange({});
+if (emonNav.classList.contains('is-hidden'))
+  fail('turning a feature on did not bring its settings page back, so it could only be configured after a reload');
 if (!emon.classList.contains('dirty')) fail('toggling a feature was not marked as an unsaved edit');
 const emonLink = navLinks.find(a => a.dataset.section === 'EmonCMS');
 if (emonLink && !query(emonLink, '.nav-badge', false))

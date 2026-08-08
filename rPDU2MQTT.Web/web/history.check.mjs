@@ -31,7 +31,7 @@ const { sandbox, getEl } = makeDom({
     if (url.includes('/api/flow?') || url.endsWith('/api/flow')) asked.push(url);
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
-      : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] } }
+      : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
       : url.includes('/api/flow/live') ? { ok: true, values: [] }
       : url.includes('/api/flow/withheld') ? { ok: true, sources: [] }
       : url.includes('at=') ? past

@@ -5621,6 +5621,12 @@ function wireVisibility(props       , target     , fields                  ) {
 // so a sync never outlives the element it hides.
 let visibilitySyncs                 = [];
 let visibilityOff      = null;
+const runVisibilitySyncs = () => visibilitySyncs.forEach(s => s());
+
+// Leaving a page can change what belongs in the nav too: a page kept visible only because you were on it
+// (its feature switched off from inside it) drops out once you go somewhere else. Registered once — the
+// list it runs is rebuilt with the form, this listener is not.
+window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm     , on         ) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
@@ -5809,6 +5815,25 @@ function wireHistoryProvider(sec     ) {
   visibilitySyncs.push(sync);
 }
 
+// A settings page for a capability that is switched off is a page of settings for something that is not
+// running. Its nav entry is hidden until the feature is turned on.
+//
+// Hidden, not removed: the page is still built, still reachable from the Features card's Settings button
+// and from the command palette, and its entry returns the instant the switch is flipped — no save, no
+// reload. The Features page is the one place that answers "what is this bridge doing?", and the nav now
+// agrees with it instead of listing ten pages for things that are off.
+function hideWhileOff(link     , sectionKey        , feature     ) {
+  const sync = () => {
+    const cur = (state.data[sectionKey] || {})[feature.key];
+    const on = cur == null ? !!feature.default : !!cur;
+    // Never hide the page being looked at: switching a feature off from its own settings page is exactly
+    // when its nav entry would vanish under you, which reads as the GUI breaking.
+    show(link, on || link.classList.contains('active'));
+  };
+  sync();
+  visibilitySyncs.push(sync);
+}
+
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node     , nav     , sections     ) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
@@ -5846,6 +5871,7 @@ function renderConfigSection(node     , nav     , sections     ) {
       if (feature) {
         props = (props || []).filter((p     ) => p !== feature);
         sec.appendChild(featurePointer(label));
+        hideWhileOff(link, node.key, feature);
       }
       renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
@@ -5906,7 +5932,7 @@ function build() {
   // One subscription for every conditional field, so changing the setting they hang off takes effect as
   // soon as it is picked rather than after a save and reload.
   visibilityOff?.();
-  visibilityOff = onDirty(() => visibilitySyncs.forEach(s => s()));
+  visibilityOff = onDirty(runVisibilitySyncs);
 
   wireNavBadges(nav);
 }
