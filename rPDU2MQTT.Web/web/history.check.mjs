@@ -81,6 +81,12 @@ if (!flowSection()) fail('could not find the Flow section');
 const labels = () => query(flowSection(), 'text', true).map(t => t.textContent).join(' ');
 if (!labels().includes('7,080')) fail(`the live view did not render: ${labels().slice(0, 120)}`);
 
+// Which of the two you are looking at, said in one place. An empty date reads as "not set yet" as easily
+// as "now", and a diagram of last Tuesday looks exactly like a diagram of this second.
+const badge = () => query(flowSection(), 'span', true).find(x => /^(LIVE|HISTORICAL)$/.test(x.textContent));
+if (!badge()) fail('nothing says whether the page is showing live or historical data');
+if (badge().textContent !== 'LIVE') fail(`the page opened on live data but reads "${badge().textContent}"`);
+
 // A date, not a datetime: a datetime-local reads '' until both halves are filled, so picking a day and
 // leaving the time blank sent nothing and the page silently stayed live.
 const at = query(flowSection(), 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
@@ -98,6 +104,8 @@ if (!/at=\d{4}-\d{2}-\d{2}T[^&]*Z/.test(decodeURIComponent(withAt.at(-1))))
 // A past day is an energy question, so the metric moved with it.
 if (!withAt.at(-1).includes('metric=energytoday'))
   fail(`choosing a day did not switch the metric to energy: ${withAt.at(-1)}`);
+
+if (badge().textContent !== 'HISTORICAL') fail('a past moment is still badged as live data');
 
 // The arrows step a day without touching the picker.
 const stepBack = query(flowSection(), 'button', true).find(b => b.textContent === '◀');
@@ -175,6 +183,15 @@ const spanNote = query(flowSection(), 'span', true).map(x => x.textContent).join
 if (!/7 days to/.test(spanNote)) fail(`the page does not say it is showing a window: ${spanNote.slice(0, 160)}`);
 if (!/panel 5\/7d/.test(spanNote)) fail(`a short window is not declared: ${spanNote.slice(0, 200)}`);
 
+// The arrows move by what is on screen: a week at a time on a week, not a day at a time. Stepping one day
+// through a 30-day window is 30 presses, each of them a fresh set of history queries.
+const beforeStep = at.value;
+stepBack.click();
+await new Promise(r => setTimeout(r, 300));
+const days = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 86400000);
+if (days(beforeStep, at.value) !== 7)
+  fail(`the arrow stepped ${days(beforeStep, at.value)} day(s) on a 7-day window, not 7`);
+
 spanSel.value = '1';
 spanSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
@@ -185,6 +202,7 @@ if (!liveBtn) fail('no Live control to return to now');
 liveBtn.click();
 await new Promise(r => setTimeout(r, 300));
 if (!labels().includes('7,080')) fail('Live did not return to the current values');
+if (badge().textContent !== 'LIVE') fail('returning to live left the page badged as historical');
 if (/showing .* from/.test(query(flowSection(), 'span', true).map(s => s.textContent).join(' ')))
   fail('the historical note survived returning to live');
 

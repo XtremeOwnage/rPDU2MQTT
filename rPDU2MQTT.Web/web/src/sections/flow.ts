@@ -92,7 +92,10 @@ let pickerSeq = 0;
 /// there would loop when the callback re-renders the surface that owns the panel.
 function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
-  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
+  // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings — type,
+  // metric, counter, unit and a full MQTT topic — and at 860px the topic column was cut off mid-string on
+  // the machines this is actually used from. The floor keeps it usable on a narrow screen.
+  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'max(min(75vw, 1600px), min(860px, 92vw))', maxHeight: '80vh', overflow: 'auto' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -1112,17 +1115,25 @@ function historyControl(onChange: (what: HistoryPick) => void): {
   const prev = btn('◀');
   const next = btn('▶');
   const live = btn('Live', 'primary');
+  // Which of the two things you are looking at, said plainly and in the same place every time. The date
+  // control alone does not answer it at a glance — an empty date reads as "not set yet" as easily as "now",
+  // and a diagram of last Tuesday looks exactly like a diagram of this second.
+  const badge = el('span', { class: 'pill good', text: 'LIVE' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
-  prev.title = 'Previous day';
-  next.title = 'Next day';
+
 
   live.title = 'Back to the current reading';
 
   const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
-  const step = (days: number) => {
+  const spanDays = () => Math.max(1, Number(spanSel.value) || 1);
+
+  // The arrows move by whatever is being shown: a day at a time on a single day, a week at a time on a
+  // week, a month on a month. Stepping one day through a 30-day window means 30 presses to see the window
+  // before it, and every one of those presses is a fresh set of history queries.
+  const step = (dir: number) => {
     const from = input.value || today();
     const d = new Date(from + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
-    d.setDate(d.getDate() + days);
+    d.setDate(d.getDate() + dir * spanDays());
     const iso = d.toLocaleDateString('en-CA');
     input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
     onChange('day');
@@ -1132,6 +1143,7 @@ function historyControl(onChange: (what: HistoryPick) => void): {
   timeIn.onchange = () => onChange('time');
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
+  const stepLabel = () => { const n = spanDays(); return n === 1 ? 'day' : n === 7 ? 'week' : `${n} days`; };
   live.onclick = () => { input.value = ''; timeIn.value = ''; spanSel.value = '1'; syncSpan(); note.textContent = ''; onChange('live'); };
 
   // The picker exists only if there is a backend to read from. With History switched off, a date control
@@ -1162,7 +1174,9 @@ function historyControl(onChange: (what: HistoryPick) => void): {
 
   // A time within the day says nothing about a week of them, so the two cannot both be set.
   const syncSpan = () => {
-    const many = (Number(spanSel.value) || 1) > 1;
+    prev.title = 'Previous ' + stepLabel();
+    next.title = 'Next ' + stepLabel();
+    const many = spanDays() > 1;
     timeIn.disabled = many;
     if (many) timeIn.value = '';
     timeIn.title = many
@@ -1170,7 +1184,7 @@ function historyControl(onChange: (what: HistoryPick) => void): {
       : 'Optional. Leave blank for the end of the day — the day’s complete totals.';
   };
 
-  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
+  row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'covering' }), spanSel, live, note);
   syncSpan();
   syncEnabled();
@@ -1191,8 +1205,16 @@ function historyControl(onChange: (what: HistoryPick) => void): {
     day: () => (historyOn() ? input.value : ''),
     time: () => timeIn.value,
     /// Days to add up, ending on the chosen day. 1 is the plain "that moment" view.
-    span: () => (historyOn() && input.value ? Math.max(1, Number(spanSel.value) || 1) : 1),
-    setNote: (t: string) => { note.textContent = t; },
+    span: () => (historyOn() && input.value ? spanDays() : 1),
+    setNote: (t: string) => {
+      note.textContent = t;
+      // The badge follows what was actually rendered, not what the picker says: a date that produced no
+      // answer leaves the live view on screen, and calling that historical would be a lie about the figures.
+      const past = !!t;
+      badge.className = 'pill ' + (past ? 'warn' : 'good');
+      badge.textContent = past ? 'HISTORICAL' : 'LIVE';
+      badge.title = past ? t : 'These are the latest readings.';
+    },
   };
 }
 
@@ -2162,6 +2184,11 @@ export function addFlowSection(nav: any, sections: any) {
               : 'summed from what it feeds'));
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
+        // A sensor on one leg of a bidirectional device — an inverter measuring its AC load while also
+        // charging a battery. Its flows reconcile, so this is a note about coverage, not a warning.
+        if (n.throughput != null)
+          rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
+            text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;

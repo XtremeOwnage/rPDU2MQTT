@@ -24,7 +24,8 @@ const config = {
       // source-type branches of the binding row.
       { Id: 'solar', Label: 'Solar',
         Mqtt: [{ Topic: 'solar_assistant/inverter_1/pv_power/state', Metric: 'realpower' }],
-        Sources: [{ Type: 'modbus', Connection: 'inv1', Register: 100, Metric: 'energy', DataType: 'float32' }] },
+        Sources: [{ Type: 'modbus', Connection: 'inv1', Register: 100, Metric: 'energy', DataType: 'float32' },
+                  { Type: 'modbus', Connection: 'inv1', Register: 104, Metric: 'undated', DataType: 'float32' }] },
       { Id: 'panel', Label: 'Panel', Value: 100 },
     ],
     Links: [{ From: 'solar', To: 'panel' }],
@@ -48,10 +49,12 @@ const flowGraph = {
   metric: 'realpower', units: 'W',
 };
 
-// One fresh reading and one that expired, so the Node Data page has both states to render.
+// One fresh reading, one that expired, and one from a source that cannot date its readings — the Node Data
+// page has to tell all three apart.
 const liveValues = { ok: true, values: [
   { node: 'solar', metric: 'realpower', value: 4237, reported: 4237, atUtc: new Date().toISOString(), ageSeconds: 3, fresh: true, staleAfterSeconds: 120 },
   { node: 'solar', metric: 'energy', value: null, reported: 91.5, atUtc: new Date(Date.now() - 7200e3).toISOString(), ageSeconds: 7200, fresh: false, staleAfterSeconds: 120 },
+  { node: 'solar', metric: 'undated', value: 1234, reported: null, atUtc: null, ageSeconds: null, fresh: null, staleAfterSeconds: null },
 ] };
 
 // A save that could not reach the running process: two settings are on disk but not in memory.
@@ -397,6 +400,11 @@ if (!dataText.includes('solar_assistant/inverter_1/pv_power/state'))
 const dots = query(dataSec, '.dot', true);
 if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
 if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
+
+// A value whose source cannot date it is still a value. Reading only the dated field showed "—/never" for
+// every row on a deployment whose ingest offers no timestamps, beside a diagram drawing those same numbers.
+if (!dataText.includes('1,234')) fail('a reading with no timestamp was not shown at all');
+if (!dataText.includes('no timestamp')) fail('a reading with no timestamp is reported as never having arrived');
 
 // --- Stylesheet: the toggle switch's specificity ---------------------------------------------------
 // Nothing here renders CSS, so a cascade bug ships invisibly — this one did. `input[type=checkbox]` is
