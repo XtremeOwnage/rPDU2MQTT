@@ -1070,16 +1070,19 @@ function animateToggle(onToggle: () => void): HTMLElement {
 /// the page renders whatever it gets back — a historical view is the same diagram built from the values of
 /// that instant, not a second rendering path.
 function historyControl(onChange: () => void): { row: HTMLElement, at: () => string, day: () => string, setNote: (t: string) => void } {
-  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  // A date, not a datetime: a datetime-local reports '' until BOTH halves are filled, so picking a day and
-  // leaving the time blank sent nothing and the page silently stayed live.
-  const input = el('input', { type: 'date', style: { width: 'auto' } }) as HTMLInputElement;
+  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
+  // Separate date and time inputs, not a datetime-local: that control reports '' until BOTH halves are
+  // filled, so picking a day and leaving the time blank sent nothing and the page silently stayed live.
+  // Split, the time is genuinely optional — blank means the end of the chosen day.
+  const input = el('input', { type: 'date' }) as HTMLInputElement;
+  const timeIn = el('input', { type: 'time', step: '1' }) as HTMLInputElement;
   const prev = btn('◀');
   const next = btn('▶');
   const live = btn('Live', 'primary');
   const note = el('span', { class: 'desc', style: { margin: '0' } });
   prev.title = 'Previous day';
   next.title = 'Next day';
+  timeIn.title = 'Optional. Leave blank for the end of the day — the day’s complete totals.';
   live.title = 'Back to the current reading';
 
   const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
@@ -1093,22 +1096,27 @@ function historyControl(onChange: () => void): { row: HTMLElement, at: () => str
   };
 
   input.onchange = () => onChange();
+  timeIn.onchange = () => onChange();
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
-  live.onclick = () => { input.value = ''; note.textContent = ''; onChange(); };
+  live.onclick = () => { input.value = ''; timeIn.value = ''; note.textContent = ''; onChange(); };
 
-  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Day:' }), prev, input, next, live, note);
+  // One control rather than five: the arrows and inputs share a border and only the outer corners round,
+  // so the group reads as a single thing instead of a row of loose buttons.
+  const group = el('div', { class: 'input-group' }, prev, input, timeIn, next);
+  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group, live, note);
   return {
     row,
-    /// The instant to ask for: the end of the chosen local day, or now when it is today.
+    /// The instant to ask for.
     ///
-    /// A daily total is only complete at the day's end, and asking for midnight would return the total a
-    /// moment after it re-based — zero. For today there is no end yet, so the current reading is the answer.
+    /// With a time, that time on the chosen day. Without one, the end of the day: a daily total is only
+    /// complete then, and midnight would return the total a moment after it re-based, which is zero. Either
+    /// way an instant still ahead of now is clamped to now, because nothing is recorded past it.
     at: () => {
       if (!input.value) return '';
-      const end = new Date(input.value + 'T23:59:59');
+      const when = new Date(`${input.value}T${timeIn.value || '23:59:59'}`);
       const now = new Date();
-      return (end > now ? now : end).toISOString();
+      return (when > now ? now : when).toISOString();
     },
     day: () => input.value,
     setNote: (t: string) => { note.textContent = t; },
@@ -2427,9 +2435,12 @@ export function addFlowSection(nav: any, sections: any) {
 
   // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
   // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
+  //
+  // Updates are ignored while a past moment is on screen. A push carries the current readings, and painting
+  // them under a chosen date shows live figures labelled as that date — the plainest way to mislead.
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body: any) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
+    (body: any) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
@@ -3429,8 +3440,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   // The board is assembled from several reads (the graph, the in-direction live values, the energy graph),
   // so the push is used as a *trigger*: when the server says the flow moved, rebuild the board. That keeps
   // one source of truth for how the figures are derived while making the page react in ~2s instead of 8.
-  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''), () => load());
+  // Both the push and the fallback timer are held while a past moment is on screen: a reload would fetch
+  // the chosen instant again, but it would also overwrite a view the operator is reading with a fresh one
+  // every couple of seconds.
+  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''),
+    () => { if (!hist.day()) load(); });
   // Fallback for when the stream isn't up; it does nothing while it is.
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 8000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }

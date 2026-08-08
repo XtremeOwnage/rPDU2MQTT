@@ -39,6 +39,23 @@ const { sandbox, getEl } = makeDom({
       : { ok: true };
   },
 });
+// This check is the one place the push channel has to be real: the bug it guards against is a live push
+// landing on a page that is showing a past moment. The shared stub leaves EventSource out so every other
+// check exercises the polling fallback, so the stream is supplied here and nowhere else.
+const streams = [];
+sandbox.EventSource = class {
+  constructor(url) { this.url = url; this._on = {}; streams.push(this); setTimeout(() => this.onopen?.(), 0); }
+  addEventListener(type, fn) { (this._on[type] ||= []).push(fn); }
+  close() { this.closed = true; }
+};
+const pushLive = (data) => {
+  const open = streams.filter(s => !s.closed);
+  if (!open.length) fail('the page never opened a push stream, so the live-update path is untested');
+  let delivered = 0;
+  open.forEach(s => Object.values(s._on).forEach(fns => fns.forEach(fn => { delivered++; fn({ data: JSON.stringify(data) }); })));
+  if (!delivered) fail('the push stream carried no feed, so the live-update path is untested');
+};
+
 vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
@@ -84,6 +101,27 @@ if (!labels().includes('1,234')) fail('the diagram did not switch to the histori
 const shown = query(flowSection(), 'span', true).map(s => s.textContent).join(' ');
 if (!/showing .* from prometheus/.test(shown)) fail(`the page does not say it is showing a past moment: ${shown.slice(0, 160)}`);
 
+// A live push must not overwrite a past view: it carries the current readings, and painting them under a
+// chosen date shows live figures labelled as that date.
+pushLive(live);
+await new Promise(r => setTimeout(r, 100));
+if (labels().includes('7,080')) fail('a live update replaced the historical view');
+if (!labels().includes('1,234')) fail('the historical view was lost');
+
+// An optional time: blank means the end of the day, so the day's totals are complete.
+const instantOf = (u) => Date.parse(decodeURIComponent(u).match(/at=([^&]+)/)[1]);
+const endOfDay = instantOf(asked.filter(u => u.includes('at=')).at(-1));
+
+const timeIn = query(flowSection(), 'input', true).find(i => (i.attrs?.type || i.type) === 'time');
+if (!timeIn) fail('no optional time control beside the day');
+timeIn.value = '06:30:00';
+timeIn.onchange({});
+await new Promise(r => setTimeout(r, 200));
+const withTime = instantOf(asked.filter(u => u.includes('at=')).at(-1));
+// 06:30:00 rather than the 23:59:59 a blank time means — the same day, 17h29m59s earlier.
+if (endOfDay - withTime !== 62999_000)
+  fail(`a chosen time was not the moment asked for: ${new Date(withTime).toISOString()} vs end of day ${new Date(endOfDay).toISOString()}`);
+
 // Live returns to now and drops the note.
 const liveBtn = query(flowSection(), 'button', true).find(b => b.textContent === 'Live');
 if (!liveBtn) fail('no Live control to return to now');
@@ -93,5 +131,37 @@ if (!labels().includes('7,080')) fail('Live did not return to the current values
 if (/showing .* from/.test(query(flowSection(), 'span', true).map(s => s.textContent).join(' ')))
   fail('the historical note survived returning to live');
 
+// --- The settings page shows the chosen provider's settings, and only those --------------------------
+//
+// It carried the Prometheus URL whichever provider was picked, which reads as the URL that will be queried.
+const historyLink = query(getEl('nav'), 'a', true).find(a => a.dataset.section === 'History');
+if (!historyLink) fail('no History settings page');
+historyLink.click();
+await new Promise(r => setTimeout(r, 100));
+const historySection = query(getEl('sections'), '.section', true).find(s => query(s, 'h2').textContent === 'History');
+
+const hidden = (elm) => elm.classList.contains('is-hidden');
+const promField = query(historySection, '.field', true).find(f => f.textContent.includes('PrometheusUrl'));
+const emonPointer = query(historySection, '.feature-pointer', true).find(d => d.textContent.includes('EmonCMS history'));
+if (!promField) fail('the History page does not render the Prometheus URL at all');
+if (!emonPointer) fail('the History page never points at where EmonCMS is configured');
+
+// Unset provider means the default (prometheus), not "no provider" — its URL still has to be reachable.
+if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
+if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while Prometheus is the provider');
+
+const provider = query(historySection, 'select', true)[0];
+if (!provider) fail('no provider control on the History page');
+provider.value = 'emoncms';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (!hidden(promField)) fail('the Prometheus URL stayed on the page after switching to EmonCMS');
+if (hidden(emonPointer)) fail('switching to EmonCMS did not say where EmonCMS is configured');
+
+provider.value = 'prometheus';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (hidden(promField)) fail('switching back to Prometheus did not bring its URL back');
+
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
-  + 'came from, and returns to live');
+  + 'came from, and returns to live; the settings page shows only the chosen provider\'s settings');

@@ -514,7 +514,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             var values = live;
             if (atUtc is { } at)
             {
-                if (history is null)
+                // Read the live flag, not whether a provider was wired at startup: the toggle takes effect
+                // on the next request.
+                if (!config.History.Enabled || history is null)
                     return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
 
                 var ids = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
@@ -1571,6 +1573,22 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     };
                 });
                 return Results.Json(new { ok = true, values }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // Does the history backend actually answer? The Status card says so on a timer; this is the same
+        // probe on demand, next to the settings being edited.
+        app.MapPost("/api/test/history", async (HttpContext ctx) =>
+        {
+            if (!config.History.Enabled)
+                return Results.Json(new { ok = false, message = "History is turned off. Enable it under Features." }, ConfigSchema.Json);
+            if (history is null)
+                return Results.Json(new { ok = false, message = "No history backend is wired in this process." }, ConfigSchema.Json);
+            try
+            {
+                var (ok, detail) = await history.ProbeAsync(ctx.RequestAborted);
+                return Results.Json(new { ok, message = ok ? $"{history.Id}: reachable — {detail}" : $"{history.Id}: {detail}" }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });

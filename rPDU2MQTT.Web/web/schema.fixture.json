@@ -995,7 +995,13 @@
         "label": "PrometheusUrl",
         "description": "Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.",
         "type": "string",
-        "required": false
+        "required": false,
+        "visibleWhen": {
+          "key": "Provider",
+          "values": [
+            "prometheus"
+          ]
+        }
       },
       {
         "key": "ToleranceSeconds",

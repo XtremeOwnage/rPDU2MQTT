@@ -347,14 +347,11 @@ public static class ServiceConfiguration
         // rather than the card simply being absent — an absent card looks like a feature that doesn't
         // exist, which is exactly the confusion this is meant to remove.
         // History reads whatever the readings were already exported to; the bridge stores none itself (#372).
-        if (cfg.History.Enabled)
-        {
-            // A dashboard read must not hang the page when the backend is down or slow.
-            var historyHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            services.AddSingleton<Core.Flow.IFlowHistory>(_ => string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase)
-                ? new Services.EmonCmsFlowHistory(historyHttp, cfg)
-                : new Services.PrometheusFlowHistory(historyHttp, cfg));
-        }
+        // Registered unconditionally, and the router reads Enabled and Provider per call — turning history
+        // on, or switching backend, takes effect on the next request rather than at the next restart.
+        // A dashboard read must not hang the page when the backend is down or slow.
+        services.AddSingleton<Core.Flow.IFlowHistory>(_ =>
+            new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg));
 
         // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.
         services.AddSingleton<Core.Flow.IPeriodAuditor>(sp => new Hosting.GrainPeriodAuditor(sp.GetRequiredService<IGrainFactory>()));

@@ -28,6 +28,7 @@ public class HistoryConfig
     /// Base URL of the Prometheus that scrapes this bridge — the server, not the exporter here.
     /// </summary>
     [Description("Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.")]
+    [VisibleWhen(nameof(Provider), "prometheus")]
     public string? PrometheusUrl { get; set; }
 
     [DefaultValue(30)]

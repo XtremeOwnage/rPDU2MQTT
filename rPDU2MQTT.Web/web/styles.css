@@ -448,12 +448,19 @@
   }
   .flow-contradiction > strong { color:var(--warn, #d08700); font-size:12px; }
 
-  /* Day picker: the arrows sit tight against the date so they read as one control. */
-  .history-bar input[type="date"] {
-    width:auto; padding:3px 6px; color-scheme:light dark;
-    background:var(--panel2); border:1px solid var(--line); border-radius:4px;
+  /* A row of controls joined into one: shared borders, only the outer corners rounded. */
+  .input-group { display:inline-flex; align-items:stretch; }
+  .input-group > * {
+    margin:0; border-radius:0; position:relative;
+    border:1px solid var(--line); background:var(--panel2); color:var(--fg);
   }
-  .history-bar button.small { min-width:28px; }
+  .input-group > *:not(:first-child) { margin-left:-1px; }
+  .input-group > *:first-child { border-top-left-radius:4px; border-bottom-left-radius:4px; }
+  .input-group > *:last-child { border-top-right-radius:4px; border-bottom-right-radius:4px; }
+  /* The focused or hovered member sits above its neighbours so its own border is the one drawn. */
+  .input-group > *:focus, .input-group > *:hover { z-index:1; }
+  .input-group input { padding:3px 6px; color-scheme:light dark; }
+  .input-group button.small { min-width:30px; padding:3px 8px; }
 
   /* Features page: each capability is a card with its switch, and a way through to its settings. */
   .feature-go { margin-top:var(--sp-2); }

@@ -53,10 +53,23 @@ public sealed class SchemaNode
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsFeatureToggle { get; set; }
+
+    /// <summary>
+    /// This setting only applies when a sibling setting has one of these values — see
+    /// <c>VisibleWhenAttribute</c>. The GUI hides it the rest of the time. Null when it always applies.
+    /// </summary>
+    public VisibleWhenRule? VisibleWhen { get; set; }
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
     public string? KeyType { get; set; }
+}
+
+/// <summary>When a setting applies: the sibling property that decides, and the values it applies to.</summary>
+public class VisibleWhenRule
+{
+    public string Key { get; set; } = "";
+    public string[] Values { get; set; } = [];
 }
 
 /// <summary>
@@ -140,6 +153,11 @@ public static class ConfigSchema
         // guessing from the name would quietly drop the ones that don't match.
         if (prop.GetCustomAttribute<FeatureToggleAttribute>() is not null)
             node.IsFeatureToggle = true;
+
+        // A setting that belongs to one choice of another setting — the Prometheus URL when the history
+        // provider is Prometheus. The form hides it otherwise.
+        if (prop.GetCustomAttribute<VisibleWhenAttribute>() is { } vis)
+            node.VisibleWhen = new VisibleWhenRule { Key = vis.Key, Values = vis.Values };
 
         // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
         // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).

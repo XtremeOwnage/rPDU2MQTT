@@ -152,3 +152,33 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
         return feeds ?? new Dictionary<string, string>();
     }
 }
+
+/// <summary>
+/// Chooses the backend per call from the live configuration.
+///
+/// <para>
+/// Registered unconditionally. Binding the choice at startup — one provider constructed only when
+/// <c>History.Enabled</c> was already true — meant turning history on, or switching backend, did nothing
+/// until the process restarted. Every other toggle in this project takes effect on the next pass, and the
+/// config the GUI edits is the same instance read here.
+/// </para>
+/// </summary>
+public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IFlowHistory
+{
+    private readonly PrometheusFlowHistory prometheus = new(http, cfg);
+    private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
+
+    private IFlowHistory Current =>
+        string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase) ? emoncms : prometheus;
+
+    public string Id => Current.Id;
+
+    public Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
+        => cfg.History.Enabled
+            ? Current.ValuesAtAsync(nodeIds, metric, atUtc, ct)
+            : Task.FromResult<IReadOnlyDictionary<string, double>>(new Dictionary<string, double>());
+
+    public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
+        => cfg.History.Enabled ? Current.ProbeAsync(ct) : Task.FromResult((false, "history is turned off"));
+}

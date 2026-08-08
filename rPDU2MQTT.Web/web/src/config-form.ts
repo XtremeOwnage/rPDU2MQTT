@@ -5,7 +5,7 @@ import { state } from './state.js';
 import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -74,11 +74,44 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
   const complex = (properties || []).filter(isComplex);
   if (scalars.length) {
     const grid = document.createElement('div'); grid.className = 'grid';
-    scalars.forEach(child => renderNode(child, target, grid, path));
+    const fields = new Map<string, any>();
+    scalars.forEach(child => {
+      renderNode(child, target, grid, path);
+      fields.set(child.key, grid.children[grid.children.length - 1]);
+    });
     container.appendChild(grid);
+    wireVisibility(scalars, target, fields);
   }
   complex.forEach(child => renderNode(child, target, container, path));
 }
+
+// A setting that only applies to one choice of another setting (schema visibleWhen) — the Prometheus URL,
+// when the history provider is Prometheus. Hidden the rest of the time rather than shown greyed out: an
+// EmonCMS page carrying a Prometheus URL reads as if that is what will be queried.
+//
+// Which fields these are comes from the schema, so the form holds no list of provider-specific settings.
+function wireVisibility(props: any[], target: any, fields: Map<string, any>) {
+  props.filter(p => p.visibleWhen).forEach(p => {
+    const field = fields.get(p.key);
+    if (!field) return;
+    // Unset means the deciding setting is at its default, not that it is blank — leaving History.Provider
+    // alone still means Prometheus, and the URL has to be reachable.
+    const decider = props.find((x: any) => x.key === p.visibleWhen.key);
+    const sync = () => {
+      const cur = target[p.visibleWhen.key] ?? decider?.default ?? '';
+      show(field, p.visibleWhen.values.includes(String(cur)));
+    };
+    sync();
+    visibilitySyncs.push(sync);
+  });
+}
+
+// Every conditional field's re-check, run together whenever the document is edited. Rebuilt with the form,
+// so a sync never outlives the element it hides.
+let visibilitySyncs: (() => void)[] = [];
+let visibilityOff: any = null;
+
+function show(elm: any, on: boolean) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
 export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
@@ -249,6 +282,22 @@ function featurePointer(label: string) {
   return wrap;
 }
 
+// Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
+// names — so there is nothing to configure for it here. Point at the page that does configure it rather
+// than leave the page looking empty, or worse, duplicate the server and key into a second place to edit.
+function wireHistoryProvider(sec: any) {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  wrap.appendChild(el('span', { text: 'EmonCMS history reads the feeds the EmonCMS export writes. Its server, API key and feed names are configured on the EmonCMS page. ' }));
+  const go = btn('EmonCMS');
+  go.onclick = () => jumpToSection('EmonCMS');
+  wrap.appendChild(go);
+  sec.appendChild(wrap);
+
+  const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
+  sync();
+  visibilitySyncs.push(sync);
+}
+
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node: any, nav: any, sections: any) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
@@ -292,6 +341,7 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     else renderNode(node, state.data, sec, []);
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
+    if (node.key === 'History') wireHistoryProvider(sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
@@ -306,6 +356,7 @@ export function build() {
   nav.innerHTML = ''; sections.innerHTML = '';
   // Everything registered against the old DOM is gone with it.
   clearFieldRegistry();
+  visibilitySyncs = [];
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
@@ -340,6 +391,11 @@ export function build() {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
+
+  // One subscription for every conditional field, so changing the setting they hang off takes effect as
+  // soon as it is picked rather than after a save and reload.
+  visibilityOff?.();
+  visibilityOff = onDirty(() => visibilitySyncs.forEach(s => s()));
 
   wireNavBadges(nav);
 }
@@ -594,6 +650,7 @@ function sectionActions(node: any) {
   const add = (label: string, fn: any, cls?: string) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  else if (node.key === 'History') add('Test history backend', testHistory);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') {
