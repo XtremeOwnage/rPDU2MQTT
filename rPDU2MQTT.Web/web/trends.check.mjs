@@ -130,6 +130,27 @@ if (!/5 of 7/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${grid
 // Its peak day is named, so "when did this happen" does not need a spreadsheet.
 if (!solarRow.textContent.includes('2026-08-07')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
 
+// The node selection governs the by-node chart and the totals — and nothing else. Emptying it used to hide
+// every chart, which said the selection drove them all, while they went on summing every node regardless.
+const noneBtn = query(sec, 'button', true).find(b => b.textContent === 'None');
+if (!noneBtn) fail('no way to clear the node selection');
+noneBtn.click();
+await new Promise(r => setTimeout(r, 50));
+const emptyHeads = query(sec, 'h3', true).map(h => h.textContent);
+for (const want of ['Grid import per day', 'Self-sufficiency per day'])
+  if (!emptyHeads.includes(want)) fail(`clearing the node selection hid "${want}", which is not about the selection`);
+if (query(sec, 'tr', true).some(r => r.textContent.includes('of 7')))
+  fail('the totals still list nodes after the selection was cleared');
+if (!sec.textContent.includes('No nodes selected')) fail('nothing says the by-node chart is empty on purpose');
+
+// Reset puts back what the page opened with, rather than leaving you to tick nodes one at a time.
+const resetBtn = query(sec, 'button', true).find(b => b.textContent === 'Reset');
+if (!resetBtn) fail('no way to reset the node selection');
+resetBtn.click();
+await new Promise(r => setTimeout(r, 50));
+const backRows = query(sec, 'tr', true).map(r => r.textContent).join(' ');
+if (!backRows.includes('Solar') || !backRows.includes('Grid')) fail(`Reset did not restore the default selection: ${backRows}`);
+
 // A node can be taken off the chart — a hierarchy counts the same watts at several tiers, so charting
 // everything at once and stacking would draw a total that is true of nothing.
 const gridChip = query(sec, 'button', true).find(b => b.textContent.includes('Grid'));

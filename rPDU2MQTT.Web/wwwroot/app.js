@@ -5521,17 +5521,20 @@ function addTrendsSection(nav     , sections     ) {
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (body && body.message) || 'Could not load the series.' }));
       return;
     }
-    // Start on the leaves the Energy board treats as the whole picture, so the first thing on screen adds
-    // up rather than counting the same energy at three tiers.
-    if (!off.size) {
-      const kinds = new Set(body.series.map((s     ) => s.kind));
-      const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
-      if (preferred.length >= 2) body.series.forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
-    }
+    if (!off.size) resetSelection();
     draw();
   };
 
   const shown = () => (body?.series || []).filter((s     ) => !off.has(s.node));
+
+  /// The selection the page opens with: the leaves the Energy board treats as the whole picture, so what
+  /// is on screen first adds up instead of counting the same energy at three tiers.
+  const resetSelection = () => {
+    off.clear();
+    const kinds = new Set((body?.series || []).map((s     ) => s.kind));
+    const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
+    if (preferred.length >= 2) (body?.series || []).forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
+  };
 
   const drawTags = () => {
     tagRow.innerHTML = '';
@@ -5568,8 +5571,15 @@ function addTrendsSection(nav     , sections     ) {
       picker.appendChild(chip);
     });
     const all = btn('All');
+    all.title = 'Chart every node. A hierarchy counts the same energy at several tiers, so read a stack of all of them with that in mind.';
     all.onclick = () => { off.clear(); draw(); };
-    picker.appendChild(all);
+    const none = btn('None');
+    none.title = 'Take every node off the by-node chart. The system charts below are unaffected.';
+    none.onclick = () => { (body?.series || []).forEach((s     ) => off.add(s.node)); draw(); };
+    const reset = btn('Reset', 'primary');
+    reset.title = 'Back to the default selection: solar, battery, grid and the loads.';
+    reset.onclick = () => { resetSelection(); draw(); };
+    picker.append(all, none, reset);
   };
 
   /// Sum one kind across the window, day by day. Null where no node of that kind reported that day —
@@ -5609,17 +5619,23 @@ function addTrendsSection(nav     , sections     ) {
     const days           = body.days || [];
     const series = shown();
     const units = body.units || 'kWh';
-    if (!series.length) {
-      charts.appendChild(el('div', { class: 'desc', text: 'No nodes selected — pick one above.' }));
-      status.textContent = '';
-      return;
-    }
 
     // --- Per node, as chosen ---------------------------------------------------------------------
-    const lines         = series.map((s     , i        ) => ({
-      label: s.label || s.node, color: colorFor(s.kind, i), values: s.values,
-    }));
-    const gaps = section('Daily energy by node', '', barChart({ days, lines, units, stacked: modeSel.value === 'stack' }), lines);
+    // The only chart the node selection governs. Emptying it used to hide the whole page, which said the
+    // selection drove everything below — while those charts went on summing every node regardless.
+    let gaps = 0;
+    if (series.length) {
+      const lines         = series.map((s     , i        ) => ({
+        label: s.label || s.node, color: colorFor(s.kind, i), values: s.values,
+      }));
+      gaps = section('Daily energy by node', 'The nodes selected above.',
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack' }), lines);
+    } else {
+      const box = el('div', { style: { margin: '18px 0 4px' } });
+      box.appendChild(el('h3', { text: 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
+      box.appendChild(el('div', { class: 'desc', text: 'No nodes selected — pick one above, or press Reset. The charts below are about the whole system and are not affected by the selection.' }));
+      charts.appendChild(box);
+    }
 
     // --- Grid ------------------------------------------------------------------------------------
     // What the backend holds for the grid is the import direction. The export lane is a synthetic node and
@@ -5629,8 +5645,9 @@ function addTrendsSection(nav     , sections     ) {
     if (gridIn) {
       const gridLines         = [{ label: 'Grid import', color: KIND_COLOR.grid, values: gridIn }];
       section('Grid import per day',
-        'Energy drawn from the grid. Export is not charted: the return lane is a derived node and the '
-        + 'exporter does not publish those, so there is nothing in history to subtract.',
+        'Every grid node, whatever is selected above. Energy drawn from the grid — export is not charted: '
+        + 'the return lane is a derived node and the exporter does not publish those, so there is nothing '
+        + 'in history to subtract.',
         barChart({ days, lines: gridLines, units, stacked: false }), gridLines);
     }
 
@@ -5655,7 +5672,8 @@ function addTrendsSection(nav     , sections     ) {
       if (pct.some(v => v != null)) {
         const ssLines         = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
         section('Self-sufficiency per day',
-          'The share of the home’s energy that did not come from the grid'
+          'Every node, whatever is selected above — a share of a subset would not be self-sufficiency. '
+          + 'The share of the home’s energy that did not come from the grid'
           + (load ? '.' : ', with the home taken as the balance of the measured sources.')
           + ' A day missing either figure is left empty rather than estimated.',
           barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true }), ssLines);
@@ -5668,11 +5686,17 @@ function addTrendsSection(nav     , sections     ) {
       .filter(x => x.values)                                                             ;
     if (supply.length > 1) {
       const supplyLines         = supply.map(s => ({ label: s.label, color: KIND_COLOR[s.k], values: s.values }));
-      section('Where the day’s energy came from', 'Each source summed across every node of that kind.',
+      section('Where the day’s energy came from',
+        'Each source summed across every node of that kind, whatever is selected above.',
         barChart({ days, lines: supplyLines, units, stacked: true }), supplyLines);
     }
 
     // --- Totals ----------------------------------------------------------------------------------
+    if (!series.length) {
+      status.textContent = `${days.length} day(s) from ${body.source}`;
+      return;
+    }
+
     const t = el('table', { class: 'ld' });
     const head = el('tr');
     ['Node', `Total (${units})`, `Mean per day (${units})`, 'Days with data', 'Peak day'].forEach((h, i) =>
