@@ -24,7 +24,8 @@ const config = {
       // source-type branches of the binding row.
       { Id: 'solar', Label: 'Solar',
         Mqtt: [{ Topic: 'solar_assistant/inverter_1/pv_power/state', Metric: 'realpower' }],
-        Sources: [{ Type: 'modbus', Connection: 'inv1', Register: 100, Metric: 'energy', DataType: 'float32' }] },
+        Sources: [{ Type: 'modbus', Connection: 'inv1', Register: 100, Metric: 'energy', DataType: 'float32' },
+                  { Type: 'modbus', Connection: 'inv1', Register: 104, Metric: 'undated', DataType: 'float32' }] },
       { Id: 'panel', Label: 'Panel', Value: 100 },
     ],
     Links: [{ From: 'solar', To: 'panel' }],
@@ -48,13 +49,22 @@ const flowGraph = {
   metric: 'realpower', units: 'W',
 };
 
-// One fresh reading and one that expired, so the Node Data page has both states to render.
+// One fresh reading, one that expired, and one from a source that cannot date its readings — the Node Data
+// page has to tell all three apart.
 const liveValues = { ok: true, values: [
   { node: 'solar', metric: 'realpower', value: 4237, reported: 4237, atUtc: new Date().toISOString(), ageSeconds: 3, fresh: true, staleAfterSeconds: 120 },
   { node: 'solar', metric: 'energy', value: null, reported: 91.5, atUtc: new Date(Date.now() - 7200e3).toISOString(), ageSeconds: 7200, fresh: false, staleAfterSeconds: 120 },
+  { node: 'solar', metric: 'undated', value: 1234, reported: null, atUtc: null, ageSeconds: null, fresh: null, staleAfterSeconds: null },
 ] };
 
+// A save that could not reach the running process: two settings are on disk but not in memory.
+const status = {
+  ok: true, version: 'test', configWritable: true,
+  restart: { required: true, settings: ['MQTT.Connection.Host', 'Gui.Port'] },
+};
+
 const bodies = (url) =>
+  url.includes('/api/status') ? status :
   url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
@@ -97,6 +107,17 @@ for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', '
 if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the config nav');
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
+
+// Settings saved but not running are announced in the header until a restart applies them — most of the
+// configuration is read once at startup, so a save changes the file and nothing else, and a single toast
+// as the only warning leaves the GUI showing values the bridge is not using.
+const restartPill = getEl('st-restart');
+if (restartPill.classList.contains('is-hidden'))
+  fail('the header says nothing about settings that were saved but are not running');
+if (!restartPill.textContent.includes('Restart required'))
+  fail(`the restart badge does not say what it is: "${restartPill.textContent}"`);
+if (!(restartPill.title || '').includes('MQTT.Connection.Host'))
+  fail('the restart badge does not name the settings waiting on it');
 
 // --- The shell: unsaved-change tracking, theme, palette ---------------------------------------------
 // These are the parts with no section of their own, so nothing else would notice them breaking.
@@ -150,8 +171,41 @@ const flowLink = navLinks.find(a => a.dataset.label === 'Flow');
 if (!flowLink) fail('no Flow tab');
 flowLink.click();
 await new Promise(r => setTimeout(r, 50));
-if (!query(getEl('sections'), '.section', true).map(s => s.textContent).join(' ').includes('Hierarchy'))
-  fail('the Flow tab did not render the hierarchy editor');
+const activeSec = () => query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+if (!query(activeSec(), 'rect', true).some(r => r.attrs['data-node']))
+  fail('the Flow tab did not render the diagram');
+
+// The roll-up table, the wiring editor and the roll-up settings are three pages of their own under Energy
+// Flow, reachable without going through the diagram first.
+for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'Drag from a node'], ['Settings', 'Track daily totals']]) {
+  const l = navLinksNow().find(a => a.dataset.label === label);
+  if (!l) fail(`no ${label} page under Energy Flow`);
+  if (l.dataset.section !== 'EnergyFlow') fail(`the ${label} page does not carry EnergyFlow's unsaved-edit count`);
+  l.click();
+  await new Promise(r => setTimeout(r, 50));
+  if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
+}
+
+// The roll-up is a table: nothing on it is drawn and nothing animates, so the switches that change how a
+// diagram is drawn described a diagram that was not on the page.
+const rollupLink = navLinksNow().find(a => a.dataset.label === 'Roll-up');
+rollupLink.click();
+await new Promise(r => setTimeout(r, 50));
+for (const sw of ['Animate flow', 'Unmeasured load'])
+  if (activeSec().textContent.includes(sw)) fail(`the roll-up table offers "${sw}", which does nothing there`);
+
+// Each of those settings has exactly one control. Left behind as well as moved, two controls would be
+// bound to one value and would disagree the moment either was used. Counted as controls, not as text —
+// another page is free to mention a setting and say where it lives.
+const everyLabel = () => query(getEl('sections'), 'label', true).map(l => l.textContent);
+for (const setting of ['Export tiers to MQTT', 'Track daily totals', 'Infer from a single supply path',
+                       'Derive kWh from power']) {
+  const on = everyLabel().filter(t => t.includes(setting)).length;
+  if (on !== 1) fail(`"${setting}" has ${on} controls; it belongs in exactly one place`);
+}
+
+flowLink.click();
+await new Promise(r => setTimeout(r, 50));
 
 // Node configuration now lives on its own Nodes tab. Open it, open the 'solar' node's editor, and confirm
 // it surfaces the migrated MQTT topic, the Modbus connection picker, and the feeders/children wiring.
@@ -191,21 +245,33 @@ if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not cl
 nodesLink.click();
 await new Promise(r => setTimeout(r, 50));
 
-const feedRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.includes('panel'));
-if (!feedRow) fail('no row for the panel node in the virtual-node table');
-const feedSel = query(feedRow, 'select', true)[0];
-if (!feedSel) fail('the node table offers no way to set what a node feeds without dragging');
+// The column is "Fed by", the direction the hierarchy is built in: you put a thing under its feeder, so
+// the control is on the thing. The other way round, a row read "— none —" for a node that plainly had a
+// feeder, and re-parenting it meant finding the parent's row.
+// By the row's id cell, not by its text: every row's dropdown lists every other node, so matching on text
+// finds whichever row happens to mention the name first.
+const nodeRow = (id) => query(getEl('sections'), 'tr', true).find(r => query(r, 'code')?.textContent === id);
+const solarRow = nodeRow('solar');
+if (!solarRow) fail('no row for the solar node in the virtual-node table');
+const fedBySel = query(solarRow, 'select', true)[0];
+if (!fedBySel) fail('the node table offers no way to set what feeds a node without dragging');
 
-// Its options are the other nodes, and it reflects the wiring already in the config.
-const feedOpts = (feedSel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
-if (!feedOpts.includes('solar')) fail(`the feeds control does not offer the other nodes: ${feedOpts.join(', ')}`);
+const feedOpts = (fedBySel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!feedOpts.includes('panel')) fail(`the fed-by control does not offer the other nodes: ${feedOpts.join(', ')}`);
 
-// A loop is refused: solar already feeds panel, so panel feeding solar would close a cycle.
-feedSel.value = 'solar';
-feedSel.onchange({});
+// Solar already feeds panel, so panel feeding solar would close a cycle.
+fedBySel.value = 'panel';
+fedBySel.onchange({});
 await new Promise(r => setTimeout(r, 20));
 const looped = (config.EnergyFlow.Links || []).some(l => l.From === 'panel' && l.To === 'solar');
-if (looped) fail('the feeds control accepted a wiring that closes a feeder loop');
+if (looped) fail('the fed-by control accepted a wiring that closes a feeder loop');
+
+// And a legitimate feeder is written the right way round: panel is fed by solar, not the reverse.
+const panelRow = nodeRow('panel');
+const panelFedBy = query(panelRow, 'select', true)[0];
+if (!panelFedBy) fail('no fed-by control on the panel row');
+if (panelFedBy.value !== 'solar')
+  fail(`the fed-by control shows the wrong direction: panel reads as fed by "${panelFedBy.value}"`);
 
 // --- Features page (#292) -----------------------------------------------------------------------------
 // Every capability's on/off switch on one page, and NOT also on its own config page: two switches bound to
@@ -256,11 +322,26 @@ if (!query(guiSwitch, '.switch', true).some(i => i.disabled)) fail('the GUI swit
 if (!guiSwitch.textContent.includes('lock you out')) fail('the locked GUI switch does not say why');
 
 // Toggling here edits the real document, so the change shows up as an unsaved edit against its section.
-const emon = query(featureSec, '.field', true).find(f => f.textContent.includes('EmonCMS'));
+// By config path, not by label text: another feature's description mentioning EmonCMS would otherwise
+// match first, and the assertion below would be about the wrong card.
+const emon = query(featureSec, '.field', true).find(f => f.dataset.path === 'EmonCMS.Enabled');
 if (!emon) fail('the Features page does not list the EmonCMS export');
 const emonSwitch = query(emon, '.switch', true)[0];
+if (emonSwitch.checked) fail('the fixture was meant to have the EmonCMS export switched off');
+
+// A page of settings for a capability that is off has no nav entry — the Features page is what answers
+// "what is on?". It is still built and still in the palette; only the nav entry waits for the switch.
+const emonNav = navLinksNow().find(a => a.dataset.section === 'EmonCMS');
+if (!emonNav) fail('no EmonCMS page was built');
+if (!emonNav.classList.contains('is-hidden'))
+  fail('a switched-off feature still lists its settings page in the nav');
+if (!query(getEl('sections'), '.section', true).some(s => query(s, 'h2')?.textContent === 'EmonCMS'))
+  fail('hiding the nav entry also took away the page');
+
 emonSwitch.checked = !emonSwitch.checked;
 emonSwitch.onchange({});
+if (emonNav.classList.contains('is-hidden'))
+  fail('turning a feature on did not bring its settings page back, so it could only be configured after a reload');
 if (!emon.classList.contains('dirty')) fail('toggling a feature was not marked as an unsaved edit');
 const emonLink = navLinks.find(a => a.dataset.section === 'EmonCMS');
 if (emonLink && !query(emonLink, '.nav-badge', false))
@@ -319,6 +400,11 @@ if (!dataText.includes('solar_assistant/inverter_1/pv_power/state'))
 const dots = query(dataSec, '.dot', true);
 if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
 if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
+
+// A value whose source cannot date it is still a value. Reading only the dated field showed "—/never" for
+// every row on a deployment whose ingest offers no timestamps, beside a diagram drawing those same numbers.
+if (!dataText.includes('1,234')) fail('a reading with no timestamp was not shown at all');
+if (!dataText.includes('no timestamp')) fail('a reading with no timestamp is reported as never having arrived');
 
 // --- Stylesheet: the toggle switch's specificity ---------------------------------------------------
 // Nothing here renders CSS, so a cascade bug ships invisibly — this one did. `input[type=checkbox]` is

@@ -24,6 +24,9 @@ public class MqttImportProfile
     [Description("Field holding the value when the payload is JSON — dotted for nesting. Leave blank when the payload is the bare number.")]
     public string? JsonField { get; set; }
 
-    [Description("Captured {measure} -> metric name (realpower, apparentpower, energy, current, voltage, frequency, powerfactor). Measures not listed are ignored.")]
+    [Description("Captured {measure} -> the metric it supplies. Measures not listed are ignored.")]
+    // The choices come from the unit table rather than a list written out here, so a metric added there is
+    // offered here without this file changing — and cannot be offered here without being understood there.
+    [MetricItemChoices]
     public Dictionary<string, string> Metrics { get; set; } = new();
 }

@@ -37,6 +37,21 @@ public class EnergyFlowConfig
     /// other tier when <see cref="MqttExport"/> is on. Collapse/expand is a per-viewer UI state; this only
     /// defines which nodes belong together.
     /// </summary>
+    /// <summary>
+    /// Tags for nodes that have no configuration of their own — the PDUs and outlets the bridge derives
+    /// from what it polls.
+    ///
+    /// <para>
+    /// A custom node carries its own <c>Tags</c>, but an outlet has no entry to put them on: there are
+    /// hundreds of them and they appear because the PDU reports them. A rule matches by node id, so one
+    /// line tags a whole PDU and everything under it (<c>outlet:rack_pdu_1:*</c>) and another tags a single
+    /// outlet — without inventing an inheritance nobody can see. Tags never change a reading; they change
+    /// what a view shows and what the exports are allowed to carry.
+    /// </para>
+    /// </summary>
+    [Description("Tags for derived nodes (PDUs and outlets), which have no entry of their own to carry them. Matched by node id with '*' as a wildcard, e.g. 'outlet:rack_pdu_1:*'.")]
+    public List<AutoTagRule> AutoTags { get; set; } = new();
+
     [Description("Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.")]
     public List<EnergyFlowGroup> Groups { get; set; } = new();
 
@@ -87,6 +102,16 @@ public class EnergyFlowConfig
 /// (#groups). The members are unchanged — they keep their links and export individually; the group is an
 /// overlay plus a rolled-up total.
 /// </summary>
+/// <summary>Tags applied to every derived node whose id matches a pattern.</summary>
+public class AutoTagRule
+{
+    [Description("Node id to match, with '*' matching any run of characters. e.g. 'outlet:rack_pdu_1:*' for every outlet on that PDU, 'pdu:*' for every PDU, or a single outlet's full id.")]
+    public string Match { get; set; } = "";
+
+    [Description("Tags to apply to every node the pattern matches. A tag never changes a reading — only what a view shows and what the exports may carry.")]
+    public List<string> Tags { get; set; } = new();
+}
+
 public class EnergyFlowGroup
 {
     [Description("Stable unique id for the group (used in the group's exported topic/metric).")]

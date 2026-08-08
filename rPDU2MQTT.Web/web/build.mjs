@@ -31,6 +31,7 @@ const MODULES = [
   'sections/livedata.ts',
   'sections/flow.ts',
   'sections/nodedata.ts',
+  'sections/trends.ts',
   'sections/export.ts',
   'sections/ha-energy.ts',
   'sections/ha-cleanup.ts',

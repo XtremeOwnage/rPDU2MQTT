@@ -28,8 +28,9 @@ public sealed class StatusReporter : BackgroundService
     private readonly Core.Flow.CacheHealth? cacheHealth;
     private readonly Core.Startup.ConfigurationFaults? faults;
     private readonly Services.ICacheClient? cacheProbe;
+    private readonly Core.Flow.IFlowHistory? history;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IFlowHistory? history = null)
     {
         this.grains = grains;
         this.config = config;
@@ -40,6 +41,7 @@ public sealed class StatusReporter : BackgroundService
         this.cacheHealth = cacheHealth;
         this.faults = faults;
         this.cacheProbe = cacheProbe;
+        this.history = history;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -122,6 +124,28 @@ public sealed class StatusReporter : BackgroundService
             Detail = config.Cache.Enabled
                 ? (cacheHealth?.Reachable == false ? (cacheHealth.Error ?? "no connection") : config.Cache.Connection)
                 : "Energy totals kept in a local file",
+        });
+
+        // The history backend, probed for the same reason the cache is: the pages look entirely normal
+        // until someone picks a date and gets nothing back.
+        var historyOk = history is null ? (bool?)null : null;
+        var historyDetail = config.History.Enabled ? config.History.Provider : "Flow and Energy show live values only";
+        if (config.History.Enabled && history is not null)
+        {
+            try
+            {
+                var probe = await history.ProbeAsync(CancellationToken.None);
+                historyOk = probe.Ok;
+                historyDetail = $"{history.Id} · {probe.Detail}";
+            }
+            catch (Exception ex) { historyOk = false; historyDetail = ex.Message; }
+        }
+        await grains.GetGrain<IHistoryStatusGrain>("history").Report(new ComponentReport
+        {
+            Enabled = config.History.Enabled,
+            Ok = config.History.Enabled ? historyOk : null,
+            State = history?.Id,
+            Detail = historyDetail,
         });
 
         // This process. Its silence is what tells the board a replica has gone.

@@ -50,9 +50,9 @@ vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
 
 const nav = getEl('nav');
-const flowLink = query(nav, 'a', true).find(a => a.dataset.label === 'Flow');
-if (!flowLink) { console.error('layout check FAILED: no Flow tab'); process.exit(1); }
-flowLink.click();
+const edLink = query(nav, 'a', true).find(a => a.dataset.label === 'Hierarchy');
+if (!edLink) { console.error('layout check FAILED: no Hierarchy tab'); process.exit(1); }
+edLink.click();
 await new Promise(r => setTimeout(r, 50));
 
 // Every hierarchy node is a <g dataset.id> translated to its column's x.

@@ -26,3 +26,25 @@ public interface IWithheldSources
     /// <summary>Every binding currently being withheld. Empty when everything is being believed.</summary>
     IReadOnlyCollection<WithheldSource> Withheld { get; }
 }
+
+/// <summary>
+/// The port the ingests use to consult the period-counter audit, implemented by whatever owns it.
+///
+/// <para>
+/// Engine talks to this rather than to a grain directly, the same way it takes an
+/// <c>ISnapshotSink</c>: the host decides that the owner is a single-activation grain, and the ingest
+/// neither knows nor needs to.
+/// </para>
+/// <para>
+/// Synchronous because the ingest's message callback is. Only a source declared <c>period</c> reaches it,
+/// so an install with none never calls it and it is not on a per-message path.
+/// </para>
+/// </summary>
+public interface IPeriodAuditor
+{
+    /// <summary>Fold a reading in; false means it may not be published as the day's total.</summary>
+    bool Allow(string nodeId, string source, string? direction, string periodKey, double value);
+
+    /// <summary>Every binding currently withheld.</summary>
+    IReadOnlyCollection<WithheldSource> Withheld { get; }
+}

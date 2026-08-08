@@ -52,9 +52,20 @@ public static class FlowDerivation
 /// provenance is part of the number: an inferred figure is not wrong, but it is not a measurement either,
 /// and rendering it identically to a metered reading is how a diagram states something it cannot back up.
 /// </param>
+/// <param name="Throughput">
+/// What passes through the node, when that is more than its own reading covers — an inverter measuring its
+/// AC-load leg while also charging a battery. <see langword="null"/> when the reading covers the throughput,
+/// when the node is not measured, or when there is not enough on both sides to tell.
+///
+/// <para>
+/// Not an <see cref="Imbalance"/>: the flows here reconcile perfectly and nothing is unaccounted for. The
+/// two were conflated, and the diagram warned that a node's figure was "contradicted by its own flows" for
+/// the ordinary case of a sensor sitting on one leg of a bidirectional device.
+/// </para>
+/// </param>
 public sealed record FlowNode(
     string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
-    string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null)
+    string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null, double? Throughput = null)
 {
     /// <summary>
     /// A node the builder invented for the diagram, rather than one the operator configured: a

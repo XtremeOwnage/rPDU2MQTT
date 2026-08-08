@@ -5,13 +5,14 @@ import { state } from './state.js';
 import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
 import { addLiveDataSection } from './sections/livedata.js';
 import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImportSection } from './sections/flow.js';
 import { addNodeDataSection } from './sections/nodedata.js';
+import { addTrendsSection } from './sections/trends.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
@@ -29,7 +30,18 @@ function scalarInput(node: any, obj: any): any {
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
-    (node.enumValues || []).forEach((v: string) => { const o = document.createElement('option'); o.value = v; o.textContent = v === '' ? '(default)' : v; el.appendChild(o); });
+    const choices: string[] = (node.enumValues || []).slice();
+    // A saved value the build does not offer stays on the list, named as unrecognised. Dropping it would
+    // show a blank control over a config that still holds the value, and the first edit of any other field
+    // on the page would look like the user chose to clear it.
+    const current = obj[node.key];
+    if (current != null && current !== '' && !choices.includes(String(current))) choices.push(String(current));
+    choices.forEach((v: string) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = v === '' ? '(default)' : v + ((node.enumValues || []).includes(v) ? '' : ' — not recognised');
+      el.appendChild(o);
+    });
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'int' || node.type === 'double') {
@@ -74,11 +86,50 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
   const complex = (properties || []).filter(isComplex);
   if (scalars.length) {
     const grid = document.createElement('div'); grid.className = 'grid';
-    scalars.forEach(child => renderNode(child, target, grid, path));
+    const fields = new Map<string, any>();
+    scalars.forEach(child => {
+      renderNode(child, target, grid, path);
+      fields.set(child.key, grid.children[grid.children.length - 1]);
+    });
     container.appendChild(grid);
+    wireVisibility(scalars, target, fields);
   }
   complex.forEach(child => renderNode(child, target, container, path));
 }
+
+// A setting that only applies to one choice of another setting (schema visibleWhen) — the Prometheus URL,
+// when the history provider is Prometheus. Hidden the rest of the time rather than shown greyed out: an
+// EmonCMS page carrying a Prometheus URL reads as if that is what will be queried.
+//
+// Which fields these are comes from the schema, so the form holds no list of provider-specific settings.
+function wireVisibility(props: any[], target: any, fields: Map<string, any>) {
+  props.filter(p => p.visibleWhen).forEach(p => {
+    const field = fields.get(p.key);
+    if (!field) return;
+    // Unset means the deciding setting is at its default, not that it is blank — leaving History.Provider
+    // alone still means Prometheus, and the URL has to be reachable.
+    const decider = props.find((x: any) => x.key === p.visibleWhen.key);
+    const sync = () => {
+      const cur = target[p.visibleWhen.key] ?? decider?.default ?? '';
+      show(field, p.visibleWhen.values.includes(String(cur)));
+    };
+    sync();
+    visibilitySyncs.push(sync);
+  });
+}
+
+// Every conditional field's re-check, run together whenever the document is edited. Rebuilt with the form,
+// so a sync never outlives the element it hides.
+let visibilitySyncs: (() => void)[] = [];
+let visibilityOff: any = null;
+const runVisibilitySyncs = () => visibilitySyncs.forEach(s => s());
+
+// Leaving a page can change what belongs in the nav too: a page kept visible only because you were on it
+// (its feature switched off from inside it) drops out once you go somewhere else. Registered once — the
+// list it runs is rebuilt with the form, this listener is not.
+window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
+
+function show(elm: any, on: boolean) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
 export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
@@ -208,7 +259,7 @@ type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
   { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
   { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
@@ -249,6 +300,41 @@ function featurePointer(label: string) {
   return wrap;
 }
 
+// Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
+// names — so there is nothing to configure for it here. Point at the page that does configure it rather
+// than leave the page looking empty, or worse, duplicate the server and key into a second place to edit.
+function wireHistoryProvider(sec: any) {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  wrap.appendChild(el('span', { text: 'EmonCMS history reads the feeds the EmonCMS export writes. Its server, API key and feed names are configured on the EmonCMS page. ' }));
+  const go = btn('EmonCMS');
+  go.onclick = () => jumpToSection('EmonCMS');
+  wrap.appendChild(go);
+  sec.appendChild(wrap);
+
+  const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
+  sync();
+  visibilitySyncs.push(sync);
+}
+
+// A settings page for a capability that is switched off is a page of settings for something that is not
+// running. Its nav entry is hidden until the feature is turned on.
+//
+// Hidden, not removed: the page is still built, still reachable from the Features card's Settings button
+// and from the command palette, and its entry returns the instant the switch is flipped — no save, no
+// reload. The Features page is the one place that answers "what is this bridge doing?", and the nav now
+// agrees with it instead of listing ten pages for things that are off.
+function hideWhileOff(link: any, sectionKey: string, feature: any) {
+  const sync = () => {
+    const cur = (state.data[sectionKey] || {})[feature.key];
+    const on = cur == null ? !!feature.default : !!cur;
+    // Never hide the page being looked at: switching a feature off from its own settings page is exactly
+    // when its nav entry would vanish under you, which reads as the GUI breaking.
+    show(link, on || link.classList.contains('active'));
+  };
+  sync();
+  visibilitySyncs.push(sync);
+}
+
 // Render one schema-driven config section (nav link + panel); returns the nav link.
 function renderConfigSection(node: any, nav: any, sections: any) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
@@ -286,12 +372,14 @@ function renderConfigSection(node: any, nav: any, sections: any) {
       if (feature) {
         props = (props || []).filter((p: any) => p !== feature);
         sec.appendChild(featurePointer(label));
+        hideWhileOff(link, node.key, feature);
       }
       renderObjectBody(props, state.data[node.key], sec, [node.key]);
     }
     else renderNode(node, state.data, sec, []);
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
+    if (node.key === 'History') wireHistoryProvider(sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
     else if (node.key === 'EmonCMS') wireEmonCmsTransport(sec);
     else if (node.key === 'Api') wireApiDocs(sec);
@@ -306,6 +394,7 @@ export function build() {
   nav.innerHTML = ''; sections.innerHTML = '';
   // Everything registered against the old DOM is gone with it.
   clearFieldRegistry();
+  visibilitySyncs = [];
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
@@ -340,6 +429,11 @@ export function build() {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
+
+  // One subscription for every conditional field, so changing the setting they hang off takes effect as
+  // soon as it is picked rather than after a save and reload.
+  visibilityOff?.();
+  visibilityOff = onDirty(runVisibilitySyncs);
 
   wireNavBadges(nav);
 }
@@ -591,9 +685,35 @@ function cfgUrl(...path: string[]): string | null {
 // system being configured).
 function sectionActions(node: any) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const add = (label: string, fn: any, cls?: string) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
+
+  // What the last action did, on the page. A toast is gone in a few seconds and "did that work?" is the
+  // whole reason these buttons exist — a test whose answer you have to catch is a test that says nothing.
+  const result = el('div', { class: 'desc test-result' });
+
+  const add = (label: string, fn: any, cls?: string) => {
+    const b = btn(label, cls);
+    b.onclick = async () => {
+      const was = b.textContent;
+      b.disabled = true; b.textContent = 'Working…';
+      result.textContent = '';
+      result.className = 'desc test-result';
+      try {
+        const out: any = await fn();
+        if (out && typeof out.message === 'string') {
+          result.textContent = (out.ok ? '✓ ' : '✗ ') + out.message;
+          result.classList.add(out.ok ? 'test-ok' : 'test-bad');
+        }
+      } catch (e: any) {
+        // An action that throws must not leave the button stuck on "Working…" with nothing said.
+        result.textContent = '✗ ' + (e?.message || e);
+        result.classList.add('test-bad');
+      } finally { b.disabled = false; b.textContent = was; }
+    };
+    bar.appendChild(b);
+  };
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  else if (node.key === 'History') add('Test history backend', testHistory);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') {
@@ -631,5 +751,5 @@ function sectionActions(node: any) {
     if (!bar.children.length) return null;
   } else return null;
 
-  return bar;
+  return el('div', {}, bar, result);
 }

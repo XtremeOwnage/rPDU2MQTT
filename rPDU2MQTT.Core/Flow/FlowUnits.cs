@@ -39,6 +39,17 @@ public static class FlowUnits
             ["temperature"] = ("°C", new(StringComparer.OrdinalIgnoreCase) { ["°C"] = 1, ["C"] = 1, ["K"] = 1 }, false),
         };
 
+    /// <summary>
+    /// Every metric this build understands, in the order they are listed above.
+    ///
+    /// <para>
+    /// The table is the authority on what a metric name may be, so anything offering a choice of metric
+    /// reads it from here. Retyping the list — the GUI did, the config attributes did — is how a name gets
+    /// added in one place and silently missing in another.
+    /// </para>
+    /// </summary>
+    public static readonly string[] Metrics = Table.Keys.ToArray();
+
     /// <summary>The unit the flow/exports express <paramref name="metric"/> in (blank for the unitless power factor).</summary>
     public static string Canonical(string metric) => Table.TryGetValue(metric, out var t) ? t.Canonical : "";
 
