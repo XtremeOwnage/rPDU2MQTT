@@ -61,7 +61,7 @@ await new Promise(r => setTimeout(r, 50));
 const fail = (m) => { console.error('sankey check FAILED: ' + m); process.exit(1); };
 
 /// Render a second graph in a fresh sandbox and return its ribbons.
-async function render(graph) {
+async function render(graph, want = 'path') {
   const { sandbox: sb, getEl: ge } = makeDom({
     bodies: (url) =>
       url.includes('/api/schema') ? schema :
@@ -75,6 +75,7 @@ async function render(graph) {
   await new Promise(r => setTimeout(r, 40));
   query(ge('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
   await new Promise(r => setTimeout(r, 50));
+  if (want === 'rect') return query(ge('sections'), 'rect', true).filter(r => r.attrs['data-node']);
   return query(ge('sections'), 'path', true).filter(p => p.attrs['fill-opacity'] !== undefined);
 }
 
@@ -138,5 +139,35 @@ for (const r of flat) {
     fail(`a ribbon whose targets exactly fill its source drops ${dy.toFixed(1)}px — far more than the stacking gaps`);
 }
 
+// --- The unmetered remainder sits below every measured sibling (#366).
+//
+// It is what is left after the metered children are subtracted, and it changes size as they do, so ordering
+// it by magnitude moves it up and down the column between readings.
+const withRemainder = await render({
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'panel', label: 'Main Panel', value: 6722 },
+    { id: 'panel#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 5915 },
+    { id: 'pdu_1', label: 'Rack-PDU-1', value: 500 },
+    { id: 'fridge', label: 'fridge', value: 307 },
+  ],
+  links: [
+    { source: 'panel', target: 'panel#unmeasured', value: 5915 },
+    { source: 'panel', target: 'pdu_1', value: 500 },
+    { source: 'panel', target: 'fridge', value: 307 },
+  ],
+}, 'rect');
+
+const yOf = (id) => {
+  const r = withRemainder.find(x => x.attrs['data-node'] === id);
+  if (!r) fail(`no node drawn for ${id}`);
+  return Number(r.attrs.y);
+};
+const remainderY = yOf('panel#unmeasured');
+for (const id of ['pdu_1', 'fridge']) {
+  if (remainderY < yOf(id))
+    fail(`the unmetered remainder is drawn above ${id} — it is the last figure calculated and belongs below`);
+}
+
 console.log(`sankey: night-time chain holds together (MPPTs within ${Math.round(drift)}px of Solar), `
-  + `${ribbons.length} ribbons all visible`);
+  + `${ribbons.length} ribbons all visible; the unmetered remainder sits below its measured siblings`);
