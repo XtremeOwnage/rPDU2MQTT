@@ -19,6 +19,8 @@ public class EnergyFlowMqttExportService : baseMQTTService
     // Discovery config topics we've already retired (once per process) — the duplicate energyflow sensors
     // an earlier build published for outlets/PDU tiers (#177). Cleared by an empty retained message.
     private readonly HashSet<string> clearedDuplicates = new();
+    // Discovery configs retired because the tag filter now excludes their node. Cleared once per process.
+    private readonly HashSet<string> retiredByFilter = new();
     private readonly IFlowValueSource? live;
 
     public EnergyFlowMqttExportService(MQTTServiceDependencies deps, IFlowValueSource? live = null) : base(deps, deps.Cfg.Primary.PollInterval)
@@ -82,7 +84,20 @@ public class EnergyFlowMqttExportService : baseMQTTService
         {
             // Tag filter (#342): what this destination receives. It never changes a value — the node still
             // reports on the diagram and still goes to every other destination.
-            if (!tagFilter.Allows(node.Tags)) continue;
+            if (!tagFilter.Allows(node.Tags))
+            {
+                // Retire the discovery config with it. A node exported before the filter was set has a
+                // retained config on the broker; leaving it there keeps the device in Home Assistant with a
+                // state topic that no longer updates, which reads as a fault rather than as excluded.
+                // Once per process, and clearing a topic that was never published is a no-op.
+                if (publishDiscovery)
+                {
+                    var excludedTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
+                    if (retiredByFilter.Add(excludedTopic))
+                        await PublishString(excludedTopic, string.Empty, retain: true, cancellationToken);
+                }
+                continue;
+            }
 
             // Nothing determines this tier's power — no measurement, and no single path that conservation
             // pins down. Publishing it would put a fabricated 0 W into Home Assistant's history, which is
