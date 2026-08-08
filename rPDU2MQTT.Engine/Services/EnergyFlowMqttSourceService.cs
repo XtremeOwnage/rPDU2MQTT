@@ -36,25 +36,24 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private readonly ISnapshotSink<MeasurementSnapshot>? sink;
     private long version;
     private long received;
-    // Per (node, topic, direction): whether a source claiming to be a daily counter has actually behaved
-    // like one. Loaded from the store on first use and written back when a verdict changes, so a restart
-    // does not erase the previous period and leave every source unproven until the next rollover.
-    private readonly Dictionary<string, PeriodCounterAudit.State> periodAudit = new(StringComparer.Ordinal);
-    private readonly IPeriodAuditStore auditStore;
-    private bool auditLoaded;
+    // The audit's verdicts belong to one owner cluster-wide, so they live in IPeriodAuditGrain rather than
+    // here: two ingests each keeping their own map wrote back over one shared record and erased each other,
+    // and two replicas would have reached the verdict separately.
+    private readonly IPeriodAuditor? auditor;
 
     /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
-    public IReadOnlyCollection<WithheldSource> Withheld => PeriodCounterAudit.WithheldIn(periodAudit);
+    public IReadOnlyCollection<WithheldSource> Withheld => withheld;
+    private volatile WithheldSource[] withheld = [];
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null,
-                                       IPeriodAuditStore? auditStore = null)
+                                       IPeriodAuditor? auditor = null)
     {
         // OnMessageReceived lives on the concrete client, not the interface.
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for energy-flow MQTT sources.");
         cfg = deps.Cfg;
         this.sink = sink;
-        this.auditStore = auditStore ?? new MemoryPeriodAuditStore();
+        this.auditor = auditor;
     }
 
     public bool TryGetValue(string nodeId, string metric, out double value)
@@ -187,12 +186,31 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     }
 
     /// <summary>
-    /// A cheap comparison of the audit's contents, to decide whether it is worth persisting. The
-    /// high-water mark changes on most readings, so the store is written only when something did.
+    /// Ask the audit's owner whether this reading may be published as the day's total.
+    ///
+    /// <para>
+    /// Only reached for a source declared <c>period</c>, so the grain is not on a per-message path — an
+    /// install with none never calls it. The call is awaited: withholding is a correctness decision, and
+    /// publishing first and asking after would put the figure out before the answer came back.
+    /// </para>
     /// </summary>
-    private static string Snapshot(Dictionary<string, PeriodCounterAudit.State> audit)
-        => string.Join('\u0001', audit.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => $"{kv.Key}={kv.Value.PeriodKey}:{kv.Value.HighWater}:{kv.Value.Contradicted}"));
+    private bool Audit(string nodeId, string source, string? direction, string periodKey, double value)
+    {
+        if (auditor is null) return true;   // no owner wired (tests): nothing is withheld
+        try
+        {
+            var allowed = auditor.Allow(nodeId, source, direction, periodKey, value);
+            withheld = [.. auditor.Withheld];
+            return allowed;
+        }
+        catch (Exception ex)
+        {
+            // An unreachable owner must not stop the ingest. Publishing the reading is the pre-audit
+            // behaviour, and the next reading re-asks.
+            Log.Debug($"Energy-flow: could not consult the period audit ({ex.Message}).");
+            return true;
+        }
+    }
 
     /// <summary>The period a reading now belongs to, on the same boundary the daily accumulator uses.</summary>
     private string CurrentPeriodKey(DateTime nowUtc)
@@ -207,24 +225,12 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         // Collect the readings this message produced (only if a sink is wired) and push them to the flow grain
         // event-driven — the "subscription manager routes events to the recipient grain" (#v3).
         List<MeasurementReading>? readings = sink is null ? null : new();
-        // Loaded lazily: the store may be a cache that is not up yet when the service starts, and the first
-        // message is the first moment a verdict is needed.
-        if (!auditLoaded)
-        {
-            auditLoaded = true;
-            foreach (var (k, v) in auditStore.Load()) periodAudit[k] = v;
-        }
-
-        var auditBefore = Snapshot(periodAudit);
         Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, now,
             readings is null ? null : (node, metric, value, stale) =>
             {
                 if (Metrics.TryParse(metric, out var m)) readings.Add(new MeasurementReading(node, m, value, stale));
             },
-            periodAudit, CurrentPeriodKey(now), m => Log.Warning(m));
-        // Only on a change: the high-water mark moves on most readings, and writing the cache per message
-        // would put a round-trip on every publish the broker sends us.
-        if (auditBefore != Snapshot(periodAudit)) auditStore.Save(new Dictionary<string, PeriodCounterAudit.State>(periodAudit));
+            Audit, CurrentPeriodKey(now));
 
         if (sink is not null && readings is { Count: > 0 })
         {
@@ -266,9 +272,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         IReadOnlyDictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings,
         FlowValueCache cache, string? topic, string? payload, DateTime nowUtc,
         Action<string, string, double, int>? onReading = null,
-        IDictionary<string, PeriodCounterAudit.State>? periodAudit = null,
-        string? periodKey = null,
-        Action<string>? warn = null)
+        Func<string, string, string?, string, double, bool>? auditor = null,
+        string? periodKey = null)
     {
         if (topic is null || !bindings.TryGetValue(topic, out var list) || string.IsNullOrWhiteSpace(payload))
             return;
@@ -296,8 +301,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // today's — it is a cumulative total, or a value the device stopped updating before the rollover
             // — and it is dropped rather than stated. The node then reports "no data" for today, which is
             // the truth, instead of a confident wrong figure.
-            if (periodAudit is not null && periodKey is not null && PeriodCounterAudit.Applies(src)
-                && !PeriodCounterAudit.Allow(periodAudit, periodKey, nodeId, topic, src.Direction, value, warn))
+            if (auditor is not null && periodKey is not null && PeriodCounterAudit.Applies(src)
+                && !auditor(nodeId, topic, src.Direction, periodKey, value))
                 continue;
 
             foreach (var (key, v) in FlowMetricKey.Fan(FlowMetricKey.ForAccumulation(src.Metric, src.Accumulation), src.Direction, value))

@@ -346,6 +346,9 @@ public static class ServiceConfiguration
         // Registered whether or not the cache is enabled, so the Status board can say "not configured"
         // rather than the card simply being absent — an absent card looks like a feature that doesn't
         // exist, which is exactly the confusion this is meant to remove.
+        // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.
+        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp => new Hosting.GrainPeriodAuditor(sp.GetRequiredService<IGrainFactory>()));
+
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)
         {

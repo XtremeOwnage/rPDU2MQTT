@@ -291,25 +291,33 @@ public class EnergyFlowMqttSourceTests
         var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_energy", Metric = "energy", Accumulation = "period" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
-        var audit = new Dictionary<string, PeriodCounterAudit.State>();
-        var warnings = new List<string>();
+        var owner = new FakeAuditor();
         var now = DateTime.UtcNow;
 
         // Day one: no evidence yet, so it is trusted and published as the day's total.
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "129.9", now, null, audit, "2026-08-04", warnings.Add);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "129.9", now, null, owner.Allow, "2026-08-04");
         Assert.True(cache.TryGetValue("solar", EnergyPeriod.Metric, out var dayOne) && dayOne == 129.9);
 
         // The rollover, with the counter carrying straight on. That is not today's total, and it must not be
         // stated as one — the cache keeps no new value, so the node reports no data rather than 129.9 kWh.
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "130.4", now, null, audit, "2026-08-05", warnings.Add);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "130.4", now, null, owner.Allow, "2026-08-05");
         Assert.True(cache.TryGetValue("solar", EnergyPeriod.Metric, out var afterRoll) && afterRoll == 129.9,
             "the stale reading was overwritten with a value that is not today's total");
-        Assert.Single(warnings);
-        Assert.Contains("did not reset", warnings[0]);
+        Assert.Single(owner.Warnings);
+        Assert.Contains("did not reset", owner.Warnings[0]);
 
         // Still withheld on every later sample, and the operator is told once, not once per message.
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "131.0", now, null, audit, "2026-08-05", warnings.Add);
-        Assert.Single(warnings);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "131.0", now, null, owner.Allow, "2026-08-05");
+        Assert.Single(owner.Warnings);
+    }
+
+    /// <summary>Stands in for the audit's owner — the grain in production.</summary>
+    private sealed class FakeAuditor
+    {
+        private readonly Dictionary<string, PeriodCounterAudit.State> audit = new(StringComparer.Ordinal);
+        public readonly List<string> Warnings = new();
+        public bool Allow(string node, string source, string? direction, string periodKey, double value)
+            => PeriodCounterAudit.Allow(audit, periodKey, node, source, direction, value, Warnings.Add);
     }
 
     [Fact]
@@ -318,15 +326,14 @@ public class EnergyFlowMqttSourceTests
         var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_energy", Metric = "energy", Accumulation = "period" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
-        var audit = new Dictionary<string, PeriodCounterAudit.State>();
-        var warnings = new List<string>();
+        var owner = new FakeAuditor();
         var now = DateTime.UtcNow;
 
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "69.4", now, null, audit, "2026-08-04", warnings.Add);
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "0.2", now, null, audit, "2026-08-05", warnings.Add);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "69.4", now, null, owner.Allow, "2026-08-04");
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "0.2", now, null, owner.Allow, "2026-08-05");
 
         Assert.True(cache.TryGetValue("solar", EnergyPeriod.Metric, out var today) && today == 0.2);
-        Assert.Empty(warnings);
+        Assert.Empty(owner.Warnings);
     }
 
     [Fact]
@@ -338,16 +345,14 @@ public class EnergyFlowMqttSourceTests
         var nodes = new[] { NodeWith("grid", new EnergyFlowSource { Topic = "sa/grid_energy", Metric = "energy", Accumulation = "lifetime" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
-        var audit = new Dictionary<string, PeriodCounterAudit.State>();
-        var warnings = new List<string>();
+        var owner = new FakeAuditor();
         var now = DateTime.UtcNow;
 
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/grid_energy", "1306.3", now, null, audit, "2026-08-04", warnings.Add);
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/grid_energy", "1308.4", now, null, audit, "2026-08-05", warnings.Add);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/grid_energy", "1306.3", now, null, owner.Allow, "2026-08-04");
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/grid_energy", "1308.4", now, null, owner.Allow, "2026-08-05");
 
         Assert.True(cache.TryGetValue("grid", "energy", out var v) && v == 1308.4);
-        Assert.Empty(warnings);
-        Assert.Empty(audit);
+        Assert.Empty(owner.Warnings);
     }
 
     [Fact]
