@@ -392,9 +392,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var graph = Core.Flow.FlowGraphBuilder.Build(merged, config.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
         var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
-        var current = graph.Nodes
-            .Where(n => !n.Synthetic && !native.ContainsKey(n.Id))
-            .Select(n => Core.Flow.FlowExport.DeviceId(n.Id));
+        // The same rule the exporter applies, including its tag filter (#342): a node it no longer
+        // publishes is not "current", and reporting it as such leaves its retained config out of the sweep.
+        var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native);
 
         var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
 

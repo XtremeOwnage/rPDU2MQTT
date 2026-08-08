@@ -97,6 +97,24 @@ public static class FlowExport
     public const string DeviceIdPrefix = "energyflow_";
 
     /// <summary>
+    /// The discovery device ids the MQTT export publishes right now: every non-synthetic node the tag
+    /// filter allows, minus those already covered by native PDU discovery.
+    /// </summary>
+    /// <remarks>
+    /// Shared with the orphan sweep so the two agree. A node the exporter has stopped publishing must not
+    /// count as current, or its retained config is never swept and the device stays in Home Assistant with
+    /// a state topic that no longer updates.
+    /// </remarks>
+    public static IReadOnlyList<string> ExportedDeviceIds(
+        FlowGraph graph, Models.Config.NodeTagFilter? tagFilter, IReadOnlyDictionary<string, string>? nativeIds = null)
+        => [.. graph.Nodes
+            .Where(n => !n.Synthetic)
+            .Where(n => tagFilter is null || tagFilter.Allows(n.Tags))
+            .Where(n => nativeIds is null || !nativeIds.ContainsKey(n.Id))
+            .Select(n => DeviceId(n.Id))];
+
+
+    /// <summary>
     /// Retained Home Assistant discovery configs this exporter published and would no longer publish today —
     /// the ones to clear.
     ///
