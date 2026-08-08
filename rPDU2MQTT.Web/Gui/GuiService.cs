@@ -49,6 +49,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly Core.Flow.IFlowValueSource? live;
+    private readonly Core.Flow.IFlowHistory? history;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
     // Created on the first /api/events connection; the pump only runs while a tab is watching.
@@ -57,9 +58,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IFlowHistory? history = null)
     {
         this.live = live;
+        this.history = history;
         this.grains = grains;
         this.config = config;
         this.mqtt = mqtt;
@@ -496,7 +498,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     }
 
     /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
-    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct)
+    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(20));
@@ -504,8 +506,31 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             var (id, pdu, _) = ResolveInstance(instance);
             var data = await ResolveData(id, pdu, cts.Token);
-            var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric, live);
-            return new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units };
+            var m = string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric;
+
+            // A past moment is the same graph built from the values of that instant (#372): same builder,
+            // same roll-up, same rules about what is unknown. A node the backend has nothing for is absent
+            // rather than zero, so it reads as unmeasured exactly as a node with no source does now.
+            var values = live;
+            if (atUtc is { } at)
+            {
+                if (history is null)
+                    return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
+
+                var ids = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
+                    .Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+                var past = await history.ValuesAtAsync(ids, m, at, ct);
+                if (past.Count == 0)
+                    return new { ok = false, message = $"No history for {at:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+                values = new HistoricalFlowValueSource(past, m);
+            }
+
+            var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, m, values);
+            return new
+            {
+                ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units,
+                at = atUtc, historical = atUtc is not null, source = atUtc is null ? null : history?.Id,
+            };
         }
         catch (Exception ex)
         {
@@ -1740,7 +1765,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
         app.MapGet("/api/flow", async (HttpContext ctx) =>
         {
-            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json);
+            // ?at=<ISO-8601> renders the moment instead of now.
+            DateTime? at = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
+                ? parsed : null;
+            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be

@@ -54,6 +54,9 @@ public class Config
     [YamlMember(Alias = "Prometheus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Prometheus metrics exporter")]
     public PrometheusConfig Prometheus { get; set; } = new PrometheusConfig();
 
+    /// <summary>Where the Flow and Energy pages read past values from (#372).</summary>
+    public HistoryConfig History { get; set; } = new HistoryConfig();
+
     [YamlMember(Alias = "EmonCMS", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "EmonCMS exporter")]
     public EmonCMSConfig EmonCMS { get; set; } = new EmonCMSConfig();
 

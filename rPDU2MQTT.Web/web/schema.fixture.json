@@ -963,6 +963,53 @@
     ]
   },
   {
+    "key": "History",
+    "label": "History",
+    "type": "object",
+    "required": false,
+    "properties": [
+      {
+        "key": "Enabled",
+        "label": "Enabled",
+        "description": "Let the Flow and Energy pages show a past moment, read from Prometheus or EmonCMS.",
+        "type": "bool",
+        "required": false,
+        "default": false,
+        "isFeatureToggle": true
+      },
+      {
+        "key": "Provider",
+        "label": "Provider",
+        "description": "Which backend to read from: 'prometheus' or 'emoncms'.",
+        "type": "enum",
+        "required": false,
+        "default": "prometheus",
+        "enumValues": [
+          "",
+          "prometheus",
+          "emoncms"
+        ]
+      },
+      {
+        "key": "PrometheusUrl",
+        "label": "PrometheusUrl",
+        "description": "Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.",
+        "type": "string",
+        "required": false
+      },
+      {
+        "key": "ToleranceSeconds",
+        "label": "ToleranceSeconds",
+        "description": "How far either side of the requested moment to look for a sample, in seconds. A scrape or feed interval longer than this returns nothing rather than a value from a different time.",
+        "type": "int",
+        "required": false,
+        "default": 30,
+        "min": 1,
+        "max": 600
+      }
+    ]
+  },
+  {
     "key": "EmonCMS",
     "label": "EmonCMS",
     "description": "EmonCMS exporter",

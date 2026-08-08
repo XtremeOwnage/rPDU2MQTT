@@ -346,6 +346,16 @@ public static class ServiceConfiguration
         // Registered whether or not the cache is enabled, so the Status board can say "not configured"
         // rather than the card simply being absent — an absent card looks like a feature that doesn't
         // exist, which is exactly the confusion this is meant to remove.
+        // History reads whatever the readings were already exported to; the bridge stores none itself (#372).
+        if (cfg.History.Enabled)
+        {
+            // A dashboard read must not hang the page when the backend is down or slow.
+            var historyHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            services.AddSingleton<Core.Flow.IFlowHistory>(_ => string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase)
+                ? new Services.EmonCmsFlowHistory(historyHttp, cfg)
+                : new Services.PrometheusFlowHistory(historyHttp, cfg));
+        }
+
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)
         {

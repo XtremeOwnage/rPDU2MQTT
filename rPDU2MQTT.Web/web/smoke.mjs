@@ -256,7 +256,9 @@ if (!query(guiSwitch, '.switch', true).some(i => i.disabled)) fail('the GUI swit
 if (!guiSwitch.textContent.includes('lock you out')) fail('the locked GUI switch does not say why');
 
 // Toggling here edits the real document, so the change shows up as an unsaved edit against its section.
-const emon = query(featureSec, '.field', true).find(f => f.textContent.includes('EmonCMS'));
+// By config path, not by label text: another feature's description mentioning EmonCMS would otherwise
+// match first, and the assertion below would be about the wrong card.
+const emon = query(featureSec, '.field', true).find(f => f.dataset.path === 'EmonCMS.Enabled');
 if (!emon) fail('the Features page does not list the EmonCMS export');
 const emonSwitch = query(emon, '.switch', true)[0];
 emonSwitch.checked = !emonSwitch.checked;

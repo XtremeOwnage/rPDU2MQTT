@@ -2492,6 +2492,30 @@ function animateToggle(onToggle            )              {
   return lbl;
 }
 
+/// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
+///
+/// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
+/// the page renders whatever it gets back — a historical view is the same diagram built from the values of
+/// that instant, not a second rendering path.
+function historyControl(onChange            )                                                                       {
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  const input = el('input', { type: 'datetime-local', style: { width: 'auto' } })                    ;
+  const live = btn('Live', 'primary');
+  const note = el('span', { class: 'desc', style: { margin: '0' } });
+
+  const apply = () => onChange();
+  input.onchange = apply;
+  live.onclick = () => { input.value = ''; note.textContent = ''; apply(); };
+
+  row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), input, live, note);
+  return {
+    row,
+    // A datetime-local carries no zone; it is the browser's local time, so convert before sending.
+    at: () => input.value ? new Date(input.value).toISOString() : '',
+    setNote: (t        ) => { note.textContent = t; },
+  };
+}
+
 // The tag selected on the diagram, kept across redraws: the Sankey repaints on every live push, and a
 // highlight that cleared itself every few seconds would be unusable.
 let activeTag                = null;
@@ -2891,6 +2915,8 @@ function addFlowSection(nav     , sections     ) {
   };
   metricSel.onchange = () => { load(); showDayNote(); };
   bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
+  const hist = historyControl(() => load());
+  sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
   const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
   const ed      = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
@@ -3782,9 +3808,13 @@ function addFlowSection(nav     , sections     ) {
   const load = async () => {
     let path = withInstance('/api/flow', instSel);
     if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
+    const at = hist.at();
+    if (at) path += (path.includes('?') ? '&' : '?') + 'at=' + encodeURIComponent(at);
     const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
     withheldSources = (w.body && w.body.ok && w.body.sources) || [];
     if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
+    // Say plainly that this is not now. A past diagram that looks like the live one is the worst outcome.
+    hist.setNote(r.body.historical ? `showing ${new Date(r.body.at).toLocaleString()} from ${r.body.source}` : '');
     lastGraph = r.body;
     draw(r.body);
     renderEditor();
@@ -4398,6 +4428,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
   sec.appendChild(bar);
+  const hist = historyControl(() => load());
+  sec.appendChild(hist.row);
   showSel.onchange = () => load();
 
   // One column for the whole board, so the diagram and the tiles share an edge and read as a single
@@ -4598,7 +4630,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
     let r     ;
-    try { r = await api(withInstance('/api/flow' + (isEnergy ? '?metric=' + encodeURIComponent(metric) : ''), instSel)); }
+    const at = hist.at();
+    let path = withInstance('/api/flow' + (isEnergy ? '?metric=' + encodeURIComponent(metric) : ''), instSel);
+    if (at) path += (path.includes('?') ? '&' : '?') + 'at=' + encodeURIComponent(at);
+    try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
@@ -4616,6 +4651,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // report a battery doing both at once. These tiles compute the in-direction themselves, from the live
     // cache, a few lines below. '#' appears in no real id (PDU and outlet ids use ':'), so it is a safe
     // marker for "the builder made this".
+    hist.setNote(r.body.historical ? `showing ${new Date(r.body.at).toLocaleString()} from ${r.body.source}` : '');
     const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes, plus battery state of

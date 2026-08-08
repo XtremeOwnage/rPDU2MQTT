@@ -466,6 +466,28 @@ spec:
                         description: How often to push, in seconds. Falls back to the PDU poll interval when 0.
                     description: Push metrics to a Prometheus Pushgateway.
                 description: Prometheus metrics exporter
+              History:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Enabled:
+                    type: boolean
+                    description: Let the Flow and Energy pages show a past moment, read from Prometheus or EmonCMS.
+                  Provider:
+                    type: string
+                    enum:
+                    - ''
+                    - prometheus
+                    - emoncms
+                    description: "Which backend to read from: 'prometheus' or 'emoncms'."
+                  PrometheusUrl:
+                    type: string
+                    description: Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.
+                  ToleranceSeconds:
+                    type: integer
+                    description: How far either side of the requested moment to look for a sample, in seconds. A scrape or feed interval longer than this returns nothing rather than a value from a different time.
+                    minimum: 1
+                    maximum: 600
               EmonCMS:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
