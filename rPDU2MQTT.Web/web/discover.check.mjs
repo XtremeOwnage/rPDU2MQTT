@@ -37,9 +37,13 @@ const pattern = {
     { id: 'esphome_fridge_energy_d', label: 'fridge energy_d', device: 'fridge',
       topic: 'esphome/devices/fridge/sensor/energy_d/state', metric: 'energy', unit: null,
       units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '1365.109', unsupported: null },
-    { id: 'esphome_fridge_power', label: 'fridge power', device: 'fridge',
+      { id: 'esphome_fridge_power', label: 'fridge power', device: 'fridge',
       topic: 'esphome/devices/fridge/sensor/power/state', metric: 'realpower', unit: null,
       units: ['W', 'kW', 'MW'], canonicalUnit: 'W', jsonField: null, sample: '97.6', unsupported: null },
+    // Sanitises to 'main_panel', which is an unrelated node already in the config.
+    { id: 'esphome_main_panel_power', label: 'main panel power', device: 'main panel',
+      topic: 'esphome/devices/main_panel/sensor/power/state', metric: 'realpower', unit: null,
+      units: ['W', 'kW', 'MW'], canonicalUnit: 'W', jsonField: null, sample: '12.0', unsupported: null },
   ],
 };
 
@@ -214,6 +218,13 @@ if (JSON.stringify(metrics) !== JSON.stringify(['energy', 'realpower'])) fail(`w
 // Each source keeps its own unit: the energy one set in bulk, the power one its default.
 if (fridge.Sources.find(x => x.Metric === 'energy').Unit !== 'Wh') fail('the energy source lost its unit');
 if (fridge.Sources.find(x => x.Metric === 'realpower').Unit !== 'W') fail('the power source lost its unit');
+
+// A device whose id collides with an unrelated node is imported beside it, not merged into it. Appending
+// one device's topics to another node would bind the wrong readings to it.
+const panel = cfg.EnergyFlow.Nodes.find(n => n.Id === 'main_panel');
+if ((panel.Sources || []).length) fail('an unrelated node absorbed the imported device\'s sources');
+if (!cfg.EnergyFlow.Nodes.some(n => n.Id === 'main_panel_2')) fail(
+  `the colliding device was not imported under a free id: ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
 
 // Every imported node is wired to the chosen node, as a load drawn from it.
 //
