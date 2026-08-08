@@ -88,6 +88,10 @@
   a { color:var(--accent); }
   code, kbd, .mono { font-family:var(--mono); }
   .is-hidden { display:none !important; }
+  /* The verdict from a section's test button, kept on the page after the toast has gone. */
+  .test-result { margin:4px 2px 0; min-height:1em; }
+  .test-result.test-ok { color:var(--good, #46c46a); }
+  .test-result.test-bad { color:var(--bad, #d05a5a); }
 
   /* Scrollbars: match the surface instead of punching a bright hole in it. */
   * { scrollbar-color:var(--line) transparent; scrollbar-width:thin; }

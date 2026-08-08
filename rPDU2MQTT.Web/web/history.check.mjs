@@ -122,6 +122,27 @@ const withTime = instantOf(asked.filter(u => u.includes('at=')).at(-1));
 if (endOfDay - withTime !== 62999_000)
   fail(`a chosen time was not the moment asked for: ${new Date(withTime).toISOString()} vs end of day ${new Date(endOfDay).toISOString()}`);
 
+// Power at a chosen moment is a legitimate question, so the metric stays yours once you set it. Picking a
+// day defaults to energy, but the default was re-imposed on every load: choosing Power put the diagram back
+// on energy the moment anything refreshed.
+const metricSel = query(flowSection(), 'select', true)
+  .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energytoday'));
+if (!metricSel) fail('no metric selector on the Flow page');
+metricSel.value = 'realpower';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+const asPower = decodeURIComponent(asked.filter(u => u.includes('at=')).at(-1));
+if (asPower.includes('metric=energytoday')) fail(`choosing Power at a past moment was overridden: ${asPower}`);
+
+// ...and stepping to another day keeps it, rather than snapping back to energy on every press.
+stepBack.click();
+await new Promise(r => setTimeout(r, 300));
+if (metricSel.value !== 'realpower') fail('stepping a day discarded the chosen metric');
+
+metricSel.value = 'energytoday';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+
 // Live returns to now and drops the note.
 const liveBtn = query(flowSection(), 'button', true).find(b => b.textContent === 'Live');
 if (!liveBtn) fail('no Live control to return to now');
@@ -163,5 +184,19 @@ provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
 if (hidden(promField)) fail('switching back to Prometheus did not bring its URL back');
 
+// A test button has to end with a verdict. The action toasted `r.body.message`, so an answer carrying no
+// message toasted nothing and a fetch that threw never got there — leaving "Testing…" on screen, which
+// reads as a test still running rather than one that failed.
+const testBtn = query(historySection, 'button', true).find(b => b.textContent === 'Test history backend');
+if (!testBtn) fail('no Test button on the History page');
+testBtn.click();
+await new Promise(r => setTimeout(r, 100));
+const verdict = query(historySection, 'div', true).find(d => (d.className || '').includes('test-result'));
+if (!verdict || !verdict.textContent.trim())
+  fail('the test button said nothing about how the test ended');
+if (!/test-ok|test-bad/.test(verdict.className)) fail(`the verdict does not say whether it passed: "${verdict.textContent}"`);
+if (testBtn.disabled) fail('the test button was left disabled after the test finished');
+
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
-  + 'came from, and returns to live; the settings page shows only the chosen provider\'s settings');
+  + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
+  + 'provider\'s settings and says how the test ended');

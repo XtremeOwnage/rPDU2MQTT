@@ -15,10 +15,34 @@ export async function testModbus() {
   }
 }
 
-export async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
-export async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
-export async function testEmonCms() { toast('Testing EmonCMS…', true); const r = await api('/api/test/emoncms', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
-export async function testHistory() { toast('Testing the history backend…', true); const r = await api('/api/test/history', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
+/// Run a connection test and always end with a verdict.
+///
+/// Each of these used to end at `toast(r.body.message, r.body.ok)`. An answer carrying no message toasted
+/// an empty toast, and a fetch that threw — the bridge restarting, a proxy dropping the request — never
+/// reached the toast at all: the page kept the optimistic "Testing…" and nothing else, which reads as a
+/// test that is still running rather than one that failed.
+export type TestResult = { ok: boolean; message: string };
+
+async function runTest(what: string, path: string): Promise<TestResult> {
+  let out: TestResult;
+  try {
+    const r = await api(path, { method: 'POST' });
+    out = {
+      ok: !!(r.body && r.body.ok),
+      message: (r.body && r.body.message)
+        || (r.ok ? `${what}: the test answered without saying anything.` : `${what}: the bridge answered ${r.status}.`),
+    };
+  } catch (e: any) {
+    out = { ok: false, message: `${what}: could not reach the bridge (${e?.message || e}).` };
+  }
+  toast(out.message, out.ok);
+  return out;
+}
+
+export async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
+export async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
+export async function testEmonCms() { const r = await runTest('EmonCMS', '/api/test/emoncms'); refreshStatus(); return r; }
+export async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
 export async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 export async function deleteEmonCmsFeeds() {
   if (!confirm('⚠️ DELETE ALL EmonCMS feeds created by rPDU2MQTT?\n\n'

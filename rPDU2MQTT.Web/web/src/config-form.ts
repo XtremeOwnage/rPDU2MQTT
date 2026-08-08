@@ -673,7 +673,32 @@ function cfgUrl(...path: string[]): string | null {
 // system being configured).
 function sectionActions(node: any) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const add = (label: string, fn: any, cls?: string) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
+
+  // What the last action did, on the page. A toast is gone in a few seconds and "did that work?" is the
+  // whole reason these buttons exist — a test whose answer you have to catch is a test that says nothing.
+  const result = el('div', { class: 'desc test-result' });
+
+  const add = (label: string, fn: any, cls?: string) => {
+    const b = btn(label, cls);
+    b.onclick = async () => {
+      const was = b.textContent;
+      b.disabled = true; b.textContent = 'Working…';
+      result.textContent = '';
+      result.className = 'desc test-result';
+      try {
+        const out: any = await fn();
+        if (out && typeof out.message === 'string') {
+          result.textContent = (out.ok ? '✓ ' : '✗ ') + out.message;
+          result.classList.add(out.ok ? 'test-ok' : 'test-bad');
+        }
+      } catch (e: any) {
+        // An action that throws must not leave the button stuck on "Working…" with nothing said.
+        result.textContent = '✗ ' + (e?.message || e);
+        result.classList.add('test-bad');
+      } finally { b.disabled = false; b.textContent = was; }
+    };
+    bar.appendChild(b);
+  };
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'History') add('Test history backend', testHistory);
@@ -714,5 +739,5 @@ function sectionActions(node: any) {
     if (!bar.children.length) return null;
   } else return null;
 
-  return bar;
+  return el('div', {}, bar, result);
 }

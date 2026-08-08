@@ -32,6 +32,13 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
                 ? (true, baseUrl)
                 : (false, $"{baseUrl} answered {(int)response.StatusCode}");
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // HttpClient reports its own timeout as a cancellation. Passed on as-is it reaches the GUI as
+            // "The operation was canceled.", which reads as the request being abandoned rather than the
+            // server never answering.
+            return (false, $"{baseUrl}: no answer within {http.Timeout.TotalSeconds:0}s");
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return (false, $"{baseUrl}: {ex.Message}");
@@ -89,7 +96,13 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
     {
         var baseUrl = (cfg.EmonCMS.Url ?? "").TrimEnd('/');
         if (baseUrl.Length == 0) return (false, "no EmonCMS URL set");
-        var list = await FeedsAsync(baseUrl, cfg.EmonCMS.ApiKey ?? "", ct);
+        IReadOnlyDictionary<string, string> list;
+        try { list = await FeedsAsync(baseUrl, cfg.EmonCMS.ApiKey ?? "", ct); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (false, $"{baseUrl}: no answer within {http.Timeout.TotalSeconds:0}s");
+        }
+        catch (Exception ex) { return (false, $"{baseUrl}: {ex.Message}"); }
         // Reachable but with no feeds is still a working backend with nothing to show, and saying so is
         // more use than a bare "ok".
         return list.Count > 0 ? (true, $"{baseUrl} · {list.Count} feed(s)") : (false, $"{baseUrl}: no feeds readable");

@@ -2492,12 +2492,18 @@ function animateToggle(onToggle            )              {
   return lbl;
 }
 
+/// Which part of the moment was just changed. The caller needs it to tell "the whole of a day" (an energy
+/// question) from "this instant of it" (a power one) — the two want different metrics, and guessing from
+/// the value alone cannot distinguish a freshly-picked day from a re-render.
+
 /// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
 ///
 /// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
 /// the page renders whatever it gets back — a historical view is the same diagram built from the values of
 /// that instant, not a second rendering path.
-function historyControl(onChange            )                                                                                          {
+function historyControl(onChange                             )
+
+  {
   const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
   // Separate date and time inputs, not a datetime-local: that control reports '' until BOTH halves are
   // filled, so picking a day and leaving the time blank sent nothing and the page silently stayed live.
@@ -2520,19 +2526,35 @@ function historyControl(onChange            )                                   
     d.setDate(d.getDate() + days);
     const iso = d.toLocaleDateString('en-CA');
     input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
-    onChange();
+    onChange('day');
   };
 
-  input.onchange = () => onChange();
-  timeIn.onchange = () => onChange();
+  input.onchange = () => onChange('day');
+  timeIn.onchange = () => onChange('time');
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
-  live.onclick = () => { input.value = ''; timeIn.value = ''; note.textContent = ''; onChange(); };
+  live.onclick = () => { input.value = ''; timeIn.value = ''; note.textContent = ''; onChange('live'); };
+
+  // The picker exists only if there is a backend to read from. With History switched off, a date control
+  // whose every answer is "history is turned off" is worse than no control at all.
+  //
+  // Read live rather than at build time, and re-read on every tab switch, so turning the feature on under
+  // Features brings the picker out without a reload.
+  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
+  const syncEnabled = () => {
+    const on = historyOn();
+    row.classList[on ? 'remove' : 'add']('is-hidden');
+    // A day still selected when the feature is switched off has to stop being requested, or the page goes
+    // on asking for a moment that nothing can answer.
+    if (!on && input.value) { input.value = ''; timeIn.value = ''; note.textContent = ''; onChange('live'); }
+  };
 
   // One control rather than five: the arrows and inputs share a border and only the outer corners round,
   // so the group reads as a single thing instead of a row of loose buttons.
   const group = el('div', { class: 'input-group' }, prev, input, timeIn, next);
   row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group, live, note);
+  syncEnabled();
+  window.addEventListener?.('rpdu:activate', syncEnabled);
   return {
     row,
     /// The instant to ask for.
@@ -2541,12 +2563,13 @@ function historyControl(onChange            )                                   
     /// complete then, and midnight would return the total a moment after it re-based, which is zero. Either
     /// way an instant still ahead of now is clamped to now, because nothing is recorded past it.
     at: () => {
-      if (!input.value) return '';
+      if (!historyOn() || !input.value) return '';
       const when = new Date(`${input.value}T${timeIn.value || '23:59:59'}`);
       const now = new Date();
       return (when > now ? now : when).toISOString();
     },
-    day: () => input.value,
+    day: () => (historyOn() ? input.value : ''),
+    time: () => timeIn.value,
     setNote: (t        ) => { note.textContent = t; },
   };
 }
@@ -2950,7 +2973,23 @@ function addFlowSection(nav     , sections     ) {
   };
   metricSel.onchange = () => { load(); showDayNote(); };
   bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
-  const hist = historyControl(() => load());
+  // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
+  // so the metric moves with it. Picking a *time* is the opposite: an instant is exactly when power is the
+  // right question, so the metric is left alone. Either way this is a default at the moment of the pick,
+  // not a rule enforced on every load: choosing Power afterwards used to be undone by the next refresh.
+  let hadDay = false;
+  const hist = historyControl((what     ) => {
+    // Only on the way out of live. Stepping between days, or re-picking one, keeps whatever you are
+    // looking at — having the metric snap back every time the arrow is pressed is not a default, it is a
+    // refusal to let you choose.
+    const leftLive = what === 'day' && !hadDay && !!hist.day();
+    hadDay = !!hist.day();
+    if (leftLive && !hist.time() && metricSel.value === 'realpower') {
+      metricSel.value = 'energytoday';
+      showDayNote();
+    }
+    load();
+  });
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
@@ -3886,9 +3925,6 @@ function addFlowSection(nav     , sections     ) {
   };
 
   const load = async () => {
-    // A past day is an energy question. Power at one instant of a day gone by says almost nothing, and it
-    // is not what the day picker implies, so choosing a day moves the metric with it.
-    if (hist.day() && metricSel.value === 'realpower') { metricSel.value = 'energytoday'; showDayNote(); }
     let path = withInstance('/api/flow', instSel);
     if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
     const at = hist.at();
@@ -4531,7 +4567,15 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
   sec.appendChild(bar);
-  const hist = historyControl(() => load());
+  // As on the Flow page: a whole day is an energy question, a specific time is a power one, and the choice
+  // is a default at the moment of the pick rather than something re-imposed on every load.
+  let hadDay = false;
+  const hist = historyControl((what     ) => {
+    const leftLive = what === 'day' && !hadDay && !!hist.day();
+    hadDay = !!hist.day();
+    if (leftLive && !hist.time() && showSel.value === 'realpower') showSel.value = 'energytoday';
+    load();
+  });
   sec.appendChild(hist.row);
   showSel.onchange = () => load();
 
@@ -4730,8 +4774,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // The whole board reads one metric (#371). Power and energy-today are the same shape — a value per
     // node plus an in-direction for the bidirectional ones — so the tiles are built once and the metric
     // decides what they mean.
-    // A past day is an energy question, so choosing one moves the metric with it.
-    if (hist.day() && showSel.value === 'realpower') showSel.value = 'energytoday';
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
     let r     ;
@@ -4819,13 +4861,26 @@ function addEnergyOverviewSection(nav     , sections     ) {
       }
     }
 
-    // Self-sufficiency is a cumulative-ENERGY question, not an instantaneous-power one: over time, what share
-    // of the home's kWh came from solar + battery rather than the grid. Pull the same graph on the energy
-    // metric plus the in-direction (charge/export) energy, and compute the ratio from those totals — the
-    // power figures above only tell you this instant, which swings wildly and misreads a momentary grid draw
-    // as low self-sufficiency even on a house that's net-solar over the day.
+    // Self-sufficiency is an ENERGY question — over some window, what share of the home's kWh came from
+    // solar + battery rather than the grid — so it is answered over the window the board is showing.
+    //
+    // It used to fetch lifetime energy unconditionally. Under a chosen day that put a figure describing all
+    // time beneath tiles describing that day: the bar did not move when the day did, and the two contradicted
+    // each other on the same screen.
     let eHome                = null, eFromGrid                = null, eUnits = 'kWh';
-    try {
+    let eWindow = 'of lifetime energy';
+    if (isEnergy) {
+      // The board is already an energy view, so the bar is a share of the very tiles above it. No second
+      // read, and no second way of deriving the same numbers that could disagree with them.
+      eHome = home;
+      eUnits = units;
+      // Energy drawn from the grid is what it imported. Netting export off first would let a house that
+      // imported 10 kWh and exported 10 read as fully self-sufficient, which it was not.
+      eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
+      const day = hist.day();
+      eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
+        : metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+    } else try {
       const er = await api(withInstance('/api/flow?metric=energy', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
@@ -4848,7 +4903,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
           const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
           if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridNet || 0);
         }
-        if (eGridNet != null) eFromGrid = Math.max(0, eGridNet);   // export doesn't count against self-sufficiency
+        // What the house drew, not what it drew net of what it sent back: exported energy is not
+        // consumption avoided, and netting it off overstates the share solar covered.
+        if (eGrid.value != null) eFromGrid = Math.max(0, eGrid.value);
       }
     } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
 
@@ -4904,9 +4961,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
         dial(loadIds, home)));
 
-    // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
-    // figure, not this instant's power. Only when the home energy and grid import both resolve and the house
-    // has actually used energy; anything else would be dividing a guess.
+    // Self-sufficiency: the share of the home's energy (kWh) over the window above that was NOT drawn from
+    // the grid. Only when the home energy and grid import both resolve and the house has actually used
+    // energy; anything else would be dividing a guess.
     if (eHome != null && eHome > 0 && eFromGrid != null) {
       const covered = Math.max(0, eHome - eFromGrid);
       const pct = Math.max(0, Math.min(100, Math.round((covered / eHome) * 100)));
@@ -4914,7 +4971,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
         el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
-        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} of lifetime energy covered by solar + battery.` }),
+        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery.` }),
       );
       summary.appendChild(row);
     }
@@ -6184,7 +6241,32 @@ function cfgUrl(...path          )                {
 // system being configured).
 function sectionActions(node     ) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
-  const add = (label        , fn     , cls         ) => { const b = btn(label, cls); b.onclick = fn; bar.appendChild(b); };
+
+  // What the last action did, on the page. A toast is gone in a few seconds and "did that work?" is the
+  // whole reason these buttons exist — a test whose answer you have to catch is a test that says nothing.
+  const result = el('div', { class: 'desc test-result' });
+
+  const add = (label        , fn     , cls         ) => {
+    const b = btn(label, cls);
+    b.onclick = async () => {
+      const was = b.textContent;
+      b.disabled = true; b.textContent = 'Working…';
+      result.textContent = '';
+      result.className = 'desc test-result';
+      try {
+        const out      = await fn();
+        if (out && typeof out.message === 'string') {
+          result.textContent = (out.ok ? '✓ ' : '✗ ') + out.message;
+          result.classList.add(out.ok ? 'test-ok' : 'test-bad');
+        }
+      } catch (e     ) {
+        // An action that throws must not leave the button stuck on "Working…" with nothing said.
+        result.textContent = '✗ ' + (e?.message || e);
+        result.classList.add('test-bad');
+      } finally { b.disabled = false; b.textContent = was; }
+    };
+    bar.appendChild(b);
+  };
 
   if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
   else if (node.key === 'History') add('Test history backend', testHistory);
@@ -6225,7 +6307,7 @@ function sectionActions(node     ) {
     if (!bar.children.length) return null;
   } else return null;
 
-  return bar;
+  return el('div', {}, bar, result);
 }
 
 // ── actions.ts ──────────────────────────────────────────────────
@@ -6243,10 +6325,33 @@ async function testModbus() {
   }
 }
 
-async function testMqtt() { const r = await api('/api/test/mqtt', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
-async function testPdu() { toast('Testing PDU…', true); const r = await api('/api/test/pdu', { method: 'POST' }); toast(r.body.message, r.body.ok); }
-async function testEmonCms() { toast('Testing EmonCMS…', true); const r = await api('/api/test/emoncms', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
-async function testHistory() { toast('Testing the history backend…', true); const r = await api('/api/test/history', { method: 'POST' }); toast(r.body.message, r.body.ok); refreshStatus(); }
+/// Run a connection test and always end with a verdict.
+///
+/// Each of these used to end at `toast(r.body.message, r.body.ok)`. An answer carrying no message toasted
+/// an empty toast, and a fetch that threw — the bridge restarting, a proxy dropping the request — never
+/// reached the toast at all: the page kept the optimistic "Testing…" and nothing else, which reads as a
+/// test that is still running rather than one that failed.
+
+async function runTest(what        , path        )                      {
+  let out            ;
+  try {
+    const r = await api(path, { method: 'POST' });
+    out = {
+      ok: !!(r.body && r.body.ok),
+      message: (r.body && r.body.message)
+        || (r.ok ? `${what}: the test answered without saying anything.` : `${what}: the bridge answered ${r.status}.`),
+    };
+  } catch (e     ) {
+    out = { ok: false, message: `${what}: could not reach the bridge (${e?.message || e}).` };
+  }
+  toast(out.message, out.ok);
+  return out;
+}
+
+async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
+async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
+async function testEmonCms() { const r = await runTest('EmonCMS', '/api/test/emoncms'); refreshStatus(); return r; }
+async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
 async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function deleteEmonCmsFeeds() {
   if (!confirm('⚠️ DELETE ALL EmonCMS feeds created by rPDU2MQTT?\n\n'
