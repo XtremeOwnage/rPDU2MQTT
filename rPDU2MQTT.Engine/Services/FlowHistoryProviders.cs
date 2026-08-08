@@ -63,7 +63,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         var stride = steps.Count > 1 ? Math.Max(1, unix[1] - unix[0]) : 1;
 
         var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
-        var query = $"{name}{{node=~\"{HistoryParsing.NodeMatcher(nodeIds)}\"}}";
+        var query = HistoryParsing.NodeQuery(name, nodeIds);
         var url = $"{baseUrl}/api/v1/query_range?query={Uri.EscapeDataString(query)}"
                 + $"&start={unix[0]}&end={unix[^1]}&step={stride}s";
 
@@ -93,7 +93,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
 
         // The same name the exporter writes, so the query cannot drift from what is stored.
         var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
-        var query = $"{name}{{node=~\"{HistoryParsing.NodeMatcher(nodeIds)}\"}}";
+        var query = HistoryParsing.NodeQuery(name, nodeIds);
         var at = new DateTimeOffset(DateTime.SpecifyKind(atUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
         var url = $"{baseUrl}/api/v1/query?query={Uri.EscapeDataString(query)}&time={at}";
 

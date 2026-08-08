@@ -10,6 +10,25 @@ namespace rPDU2MQTT.Core.Flow;
 public static class HistoryParsing
 {
     /// <summary>
+    /// The query that reads one value per node, whatever produced it.
+    ///
+    /// <para>
+    /// The exporter's series carry an <c>instance</c> label, and every restart or reschedule of the bridge
+    /// gets a new address — so a node accumulates a fresh series per pod. A bare selector then returns
+    /// several series for one node and the reader took whichever the answer happened to list last, which is
+    /// not a decision anyone made. Collapsing to one value per node in the query makes the answer the same
+    /// every time and lets Prometheus do the work.
+    /// </para>
+    /// <para>
+    /// <c>max</c> rather than <c>last</c> or an average: within a period these are counters that only rise,
+    /// so where two processes overlap the higher reading is the one that has seen the whole period. An
+    /// average of a fresh process and one that started an hour ago would be a figure neither measured.
+    /// </para>
+    /// </summary>
+    public static string NodeQuery(string metricName, IReadOnlyCollection<string> nodeIds)
+        => $"max by (node) ({metricName}{{node=~\"{NodeMatcher(nodeIds)}\"}})";
+
+    /// <summary>
     /// A Prometheus range answer: one series per node, each a list of [timestamp, value] pairs, folded onto
     /// the step boundaries the caller asked for.
     ///

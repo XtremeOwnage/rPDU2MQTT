@@ -58,6 +58,33 @@ public class FlowHistoryTests
     }
 
     [Fact]
+    public void TheQueryCollapsesEveryProcessThatReportedANode()
+    {
+        // The exporter's series carry an `instance` label, so every restart or reschedule of the bridge
+        // starts a fresh series for the same node. A bare selector returns all of them and the reader took
+        // whichever the answer happened to list last — on the cluster this was found on, eighteen
+        // instances in a day.
+        var query = HistoryParsing.NodeQuery("rpdu2mqtt_flow_energytoday", ["solar", "grid"]);
+
+        Assert.StartsWith("max by (node) (", query);
+        Assert.Contains("rpdu2mqtt_flow_energytoday{node=~", query);
+        Assert.Contains("solar", query);
+    }
+
+    [Fact]
+    public void SeveralSeriesForOneNodeStillYieldOneValue()
+    {
+        // What the reader must make of an uncollapsed answer: one entry per node, never two.
+        var json = "{\"data\":{\"result\":["
+                 + "{\"metric\":{\"node\":\"solar\"},\"value\":[1786000000,\"62\"]},"
+                 + "{\"metric\":{\"node\":\"solar\"},\"value\":[1786000000,\"33\"]}]}}";
+
+        var values = HistoryParsing.PrometheusInstant(json);
+
+        Assert.Single(values);
+    }
+
+    [Fact]
     public void NodeMatcher_EscapesIdsSoOneNodeCannotMatchAnother()
     {
         // Outlet ids carry ':' and synthetic ones '#'; a '.' or '|' left unescaped widens the match.
