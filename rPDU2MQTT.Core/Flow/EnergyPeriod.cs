@@ -55,6 +55,28 @@ public static class EnergyPeriod
     }
 
     /// <summary>
+    /// When the period in progress began — where the counters last re-based.
+    ///
+    /// <para>
+    /// What "today so far" means. Not the last 24 hours and not the viewer's midnight: the daily totals are
+    /// cut on this boundary, so a chart of today anchored anywhere else covers a different day from the
+    /// totals beside it. Just after the boundary the window is minutes long, and that is the honest answer.
+    /// </para>
+    /// <para>
+    /// Computed in local time rather than by subtracting a day from the next rollover, so a clock change
+    /// does not put the start an hour inside the previous period.
+    /// </para>
+    /// </summary>
+    public static DateTime PeriodStart(DateTime utc, TimeZoneInfo zone, int startHour = 0)
+    {
+        var hour = Clamp(startHour);
+        var local = Local(utc, zone);
+        var start = local.Date.AddHours(hour);
+        if (start > local) start = start.AddDays(-1);
+        return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(start, DateTimeKind.Unspecified), zone);
+    }
+
+    /// <summary>
     /// One instant per day for the last <paramref name="days"/> periods, oldest first, with the day each
     /// belongs to.
     ///

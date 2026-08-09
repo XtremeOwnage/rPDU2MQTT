@@ -43,7 +43,10 @@ const power = {
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
-    if (url.includes('/api/flow/series')) { asked.push(url); return url.includes('minutes=') ? power : series; }
+    if (url.includes('/api/flow/series')) {
+      asked.push(url);
+      return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
+    }
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -190,6 +193,20 @@ await new Promise(r => setTimeout(r, 50));
 if (query(sec, 'rect', true).length >= before) fail('taking a node off the chart changed nothing');
 if (query(sec, 'tr', true).some(r => r.textContent.includes('Grid') && r.textContent.includes('of 7')))
   fail('a node taken off the chart is still in the totals');
+
+// "Today so far" starts where the counters last re-based — the configured boundary, not a fixed 24 hours
+// and not the browser's midnight. A chart of today anchored anywhere else covers a different day from the
+// totals beside it.
+const todayOpt = query(sec, 'select', true)
+  .find(x => (x.children || []).some(o => (o.value || '').includes('today=1')));
+if (!todayOpt) fail('no "today so far" range offered');
+todayOpt.value = 'today=1&step=300';
+todayOpt.onchange({});
+await new Promise(r => setTimeout(r, 300));
+if (!/today=1/.test(decodeURIComponent(asked.at(-1)))) fail(`"today" was not asked for as the period: ${asked.at(-1)}`);
+// It is a moment-in-the-day view, so it charts power like the other intra-day ranges.
+if (!query(sec, 'h3', true).map(h => h.textContent).includes('Power by node'))
+  fail('"today so far" is not charted as power');
 
 // --- Within a day: power, sampled, and no self-sufficiency ------------------------------------------
 const rangeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => (o.value || '').includes('minutes=')));

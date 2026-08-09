@@ -1925,6 +1925,23 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // Two shapes of question, and they are not the same question. ?days is the daily total, one
             // sample per day. ?minutes is what is happening within a day, sampled every ?step seconds —
             // power, because a cumulative daily counter charted through the day only ever climbs.
+            // "Today" is the period in progress, so it starts where the counters last re-based rather than a
+            // fixed number of hours ago. Anchored to the configured boundary, not the browser's midnight:
+            // it is the same instant the daily totals are cut on, and a chart of today that disagrees with
+            // the day the totals belong to is worse than no chart.
+            if (ctx.Request.Query["today"] == "1")
+            {
+                var dayZone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
+                var began = EnergyPeriod.PeriodStart(end, dayZone, config.EnergyFlow.Aggregation.PeriodStartHour);
+                var stepToday = int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? Math.Clamp(ts, 60, 3600) : 300;
+                var metricToday = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
+                var sinceStart = new List<DateTime>();
+                for (var t = began; t <= end; t = t.AddSeconds(stepToday)) sinceStart.Add(t);
+                if (sinceStart.Count == 0) sinceStart.Add(end);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricToday, sinceStart,
+                    null, null, ctx.RequestAborted), ConfigSchema.Json);
+            }
+
             if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
             {
                 var step = int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? Math.Clamp(st, 60, 3600) : 300;

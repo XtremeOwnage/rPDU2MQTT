@@ -199,6 +199,9 @@ export function addTrendsSection(nav: any, sections: any) {
   // question is power — a daily energy counter charted through the day only ever climbs, which says
   // nothing about when the load was. Across days it is the daily total, the one figure that adds up.
   const RANGES: [string, string, string][] = [
+    // Not "the last 24 hours": today starts where the counters last re-based, on the configured boundary,
+    // so the chart covers the same day the daily totals belong to.
+    ['today=1&step=300', 'today so far', 'power'],
     ['minutes=360&step=300', 'last 6 hours', 'power'],
     ['minutes=1440&step=900', 'last 24 hours', 'power'],
     ['days=7', 'last 7 days', 'energy'],
