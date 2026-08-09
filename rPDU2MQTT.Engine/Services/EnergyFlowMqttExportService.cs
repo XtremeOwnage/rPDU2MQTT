@@ -55,6 +55,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
         // an unavailable total simply publishes null, exactly as the in-direction one does.
         var todayGraph = FlowGraphBuilder.Build(merged, flow, EnergyPeriod.Metric, live);
 
+        // ...but not until the carried-over totals are back. On a fresh process the leaves have no period
+        // figure yet while an aggregate over them still resolves from links that are known and carry zero,
+        // so a tier would publish a confident 0 for a day nobody has added up. Home Assistant records that:
+        // a daily total dropping to zero reads as a meter reset, and HA corrects history that was right.
+        // Unavailable for those few seconds is the honest state. (Prometheus is held back the same way.)
+        var periodsReady = (live as Core.Flow.IPeriodTotalsReady)?.PeriodTotalsReady ?? true;
+
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
         // Outlets and PDU tiers already have native HA energy sensors from PDU discovery; publishing an
@@ -122,7 +129,7 @@ public class EnergyFlowMqttExportService : baseMQTTService
 
             // Today's total. Null — not 0 — when nothing determines it, so HA marks the sensor unavailable
             // rather than recording a zero that would read as "this tier used nothing today".
-            double? energyToday = FlowExport.TryNodeValue(todayGraph, node.Id, out var et) ? et : null;
+            double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
 
             // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export), so the
             // published power sensor swings ± the way HA's stat_rate wants. A one-way node keeps its plain power.

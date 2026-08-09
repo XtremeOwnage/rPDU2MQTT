@@ -82,6 +82,28 @@ public class WarmupTotalsTests
     }
 
     [Fact]
+    public void NoDailyTotalGoesOutWhileTheTotalsAreStillBeingRestored()
+    {
+        // Home Assistant records what MQTT publishes. A daily total dropping to zero reads there as a meter
+        // reset, and HA corrects history that was already right — so the seconds before the restore have to
+        // publish nothing rather than a zero.
+        var graph = new FlowGraph(
+            [new FlowNode("panel", "Panel", "panel", 12.5)], [], EnergyPeriod.Metric, "kWh");
+
+        Assert.Null(FlowExport.PeriodTotal(graph, "panel", periodTotalsReady: false));
+        Assert.Equal(12.5, FlowExport.PeriodTotal(graph, "panel", periodTotalsReady: true));
+    }
+
+    [Fact]
+    public void AnUnknownTierIsStillNullOnceReady()
+    {
+        var graph = new FlowGraph([new FlowNode("panel", "Panel", "panel")], [], EnergyPeriod.Metric, "kWh");
+
+        Assert.Null(FlowExport.PeriodTotal(graph, "panel", periodTotalsReady: true));
+        Assert.Null(FlowExport.PeriodTotal(graph, "missing", periodTotalsReady: true));
+    }
+
+    [Fact]
     public void TheLiveSourceTheExportersAreGivenCanBeAsked()
     {
         // Structural: the exporters hold a composite, so the gate only works if the composite offers it —

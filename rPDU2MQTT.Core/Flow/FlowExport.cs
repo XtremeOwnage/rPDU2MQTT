@@ -19,6 +19,25 @@ public static class FlowExport
     /// <see cref="TryNodeValue"/>.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// A node's daily total for a destination that records history, or <see langword="null"/> when there is
+    /// not one to give.
+    ///
+    /// <para>
+    /// <paramref name="periodTotalsReady"/> is false while a fresh process is still restoring the totals it
+    /// carried over. In that window the leaves have no period figure but an aggregate over them still
+    /// resolves — from links that are known and carry zero — so a tier would publish a confident 0 for a day
+    /// nobody has added up. Home Assistant records that: a daily total dropping to zero reads as a meter
+    /// reset, and HA then corrects history that was already right.
+    /// </para>
+    /// <para>
+    /// One function because two destinations need the same answer, and the last thing to be duplicated
+    /// across them — whether a node belongs in a history store — was got wrong in both.
+    /// </para>
+    /// </summary>
+    public static double? PeriodTotal(FlowGraph graph, string id, bool periodTotalsReady)
+        => periodTotalsReady && TryNodeValue(graph, id, out var v) ? v : null;
+
     public static double NodeValue(FlowGraph graph, string id)
         => TryNodeValue(graph, id, out var value) ? value : 0;
 
