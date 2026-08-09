@@ -139,9 +139,13 @@ public class PrometheusExportService : baseMQTTService
 
                 foreach (var node in graph.Nodes)
                 {
-                    // Synthetic nodes (…#in, …#unmeasured) describe an arithmetic result, not a device — the
-                    // same rule the MQTT export applies, and for the same reason.
-                    if (node.Synthetic) continue;
+                    // The unmetered remainder is arithmetic about a hierarchy, not a device, and does not
+                    // belong in a metrics store. A return lane is the opposite: battery charge and grid
+                    // export are bound sources, as measured as the supply direction beside them, and
+                    // leaving them out meant a history backend could show a battery discharging and never
+                    // charging. (MQTT still skips both: '#' is a topic wildcard, and that export already
+                    // carries the direction as the parent's own energy_in.)
+                    if (!Core.Flow.FlowExport.ToMetricsStore(node)) continue;
                     // Tag filter (#342): which nodes this scrape carries. Never changes a value.
                     if (!cfg.Prometheus.NodeTags.Allows(node.Tags)) continue;
                     // Unknown is not zero. A tier nothing determines must be absent from the scrape, so a

@@ -85,6 +85,25 @@ public sealed record FlowNode(
     /// </para>
     /// </summary>
     public bool Synthetic => Id.Contains('#');
+
+    /// <summary>
+    /// A bidirectional node's return lane: battery charge, grid export.
+    ///
+    /// <para>
+    /// Synthetic in that the builder invented the node, but the figure on it is not arithmetic — it is a
+    /// bound source read in the "in" direction, as measured as the supply direction beside it. Lumping the
+    /// two together because both ids contain '#' is what kept charge and export out of the history
+    /// backends entirely: a week of charts could show a battery discharging and never show it charging, and
+    /// a stack of "where the day's energy came from" counted solar once as production and again as the
+    /// discharge of what it had stored.
+    /// </para>
+    /// <para>
+    /// Still not publishable as MQTT — '#' is the multi-level wildcard, so the topic is illegal, and that
+    /// export already carries the direction as the parent's own <c>energy_in</c>. A label value has no such
+    /// problem.
+    /// </para>
+    /// </summary>
+    public bool ReturnLane => Id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal);
 }
 
 /// <summary>A weighted link between two <see cref="FlowNode"/>s (energy flows Source → Target).</summary>

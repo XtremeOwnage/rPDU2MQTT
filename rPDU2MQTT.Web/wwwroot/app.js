@@ -5367,10 +5367,21 @@ function barChart(opts
   const { days, lines, units, stacked } = opts;
   const has = (d        ) => lines.some(l => l.values[d] != null);
   const dayTotal = (d        ) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
+
+  // Charge and export are negative quantities — energy leaving in the other direction — so the axis has to
+  // hold both signs. Stacked, each sign builds away from zero on its own side; drawn on one axis they
+  // would cancel visually and a busy day would look like an idle one.
+  const posOf = (d        ) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
+  const negOf = (d        ) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
   const peak = opts.max ?? Math.max(
-    stacked ? Math.max(...days.map((_, d) => (has(d) ? dayTotal(d) : 0)), 0)
+    stacked ? Math.max(...days.map((_, d) => (has(d) ? posOf(d) : 0)), 0)
       : Math.max(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
     0);
+  const trough = Math.min(
+    stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
+      : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
+    0);
+  const span = (peak - trough) || 1;
 
   const W = Math.max(720, days.length * 26);
   const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
@@ -5378,13 +5389,14 @@ function barChart(opts
   const slot = plotW / days.length;
   const x = (d        ) => padL + slot * d;
   const barW = Math.max(3, slot * 0.72);
-  const y = (v        ) => padT + plotH - (peak > 0 ? (v / peak) * plotH : 0);
+  const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
+  const zeroY = y(0);
 
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
 
   const ticks = 4;
   for (let i = 0; i <= ticks; i++) {
-    const v = (peak / ticks) * i, yy = y(v);
+    const v = trough + (span / ticks) * i, yy = y(v);
     svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
     const t = svgTag('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
     t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0))) + (opts.pct ? '%' : '');
@@ -5417,19 +5429,28 @@ function barChart(opts
         svg.appendChild(r);
       };
       if (stacked) {
-        let base = 0;
+        // Each sign stacks away from zero on its own side.
+        let up = 0, down = 0;
         lines.forEach(l => {
           const v = l.values[d];
-          if (v == null || v <= 0) return;
-          paint({ x: x(d) + (slot - barW) / 2, y: y(base + v), width: barW, height: Math.max(1, (v / peak) * plotH), fill: l.color });
-          base += v;
+          if (v == null || v === 0) return;
+          const from = v > 0 ? up : down;
+          const to = from + v;
+          paint({
+            x: x(d) + (slot - barW) / 2, y: Math.min(y(from), y(to)), width: barW,
+            height: Math.max(1, Math.abs(y(to) - y(from))), fill: l.color,
+          });
+          if (v > 0) up = to; else down = to;
         });
       } else {
         const each = barW / lines.length;
         lines.forEach((l, i) => {
           const v = l.values[d];
-          if (v == null || v <= 0) return;
-          paint({ x: x(d) + (slot - barW) / 2 + each * i, y: y(v), width: Math.max(1, each - 1), height: Math.max(1, (v / peak) * plotH), fill: l.color });
+          if (v == null || v === 0) return;
+          paint({
+            x: x(d) + (slot - barW) / 2 + each * i, y: Math.min(zeroY, y(v)),
+            width: Math.max(1, each - 1), height: Math.max(1, Math.abs(y(v) - zeroY)), fill: l.color,
+          });
         });
       }
     }
@@ -5442,7 +5463,8 @@ function barChart(opts
     }
   });
 
-  svg.appendChild(svgTag('line', { x1: padL, y1: padT + plotH, x2: W - padR, y2: padT + plotH, stroke: 'var(--line)', 'stroke-width': 1 }));
+  // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
+  svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
 
   // A full-height hit area per day, over the bars. Hovering a thin bar is a game of skill, and a stacked
   // segment can be a pixel tall — the question is "what happened on this day", so the day is the target.
@@ -5615,13 +5637,23 @@ function addTrendsSection(nav     , sections     ) {
     picker.append(all, none, reset);
   };
 
+  /// The return lanes: battery charge, grid export. Negative, because that is the direction they are.
+  ///
+  /// The supply direction and the return direction of one device arrive as two series — `battery` and
+  /// `battery#in` — and adding them would state that a battery both supplied and stored the same energy.
+  /// Signing the return lane is what makes a stack net out: solar counted once as production, and the
+  /// portion that went into the battery subtracted rather than counted again as discharge.
+  const isReturn = (s     ) => String(s.node || '').endsWith('#in');
+  const signed = (s     )                    =>
+    isReturn(s) ? s.values.map((v     ) => (v == null ? null : -Math.abs(v))) : s.values;
+
   /// Sum one kind across the window, day by day. Null where no node of that kind reported that day —
   /// summing what happens to be present would quietly answer a different question each day.
   const byKind = (kind        )                           => {
     const members = (body.series || []).filter((s     ) => s.kind === kind);
     if (!members.length) return null;
     return (body.days || []).map((_        , d        ) => {
-      const vals = members.map((s     ) => s.values[d]).filter((v     ) => v != null);
+      const vals = members.map((s     ) => signed(s)[d]).filter((v     ) => v != null);
       return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
     });
   };
@@ -5665,7 +5697,7 @@ function addTrendsSection(nav     , sections     ) {
     let gaps = 0;
     if (series.length) {
       const lines         = series.map((s     , i        ) => ({
-        label: s.label || s.node, color: colorFor(s.kind, i), values: s.values,
+        label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s),
       }));
       gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node',
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it is not in the totals below.' : ''),
@@ -5681,14 +5713,22 @@ function addTrendsSection(nav     , sections     ) {
     // What the backend holds for the grid is the import direction. The export lane is a synthetic node and
     // the exporter does not publish those, so a "net" figure here would be import with a name that claims
     // export was subtracted. Say what it is instead.
+    // Import above the line, export below it, and the net is what the two leave.
+    const gridSupply = (body.series || []).filter((s     ) => s.kind === 'grid' && !isReturn(s));
+    const gridReturn = (body.series || []).filter((s     ) => s.kind === 'grid' && isReturn(s));
+    const sumOf = (list       ) => days.map((_, d) => {
+      const vals = list.map((s     ) => signed(s)[d]).filter((v     ) => v != null);
+      return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
+    });
     const gridIn = byKind('grid');
-    if (gridIn) {
-      const gridLines         = [{ label: 'Grid import', color: KIND_COLOR.grid, values: gridIn }];
-      section(intraDay() ? 'Grid power' : 'Grid import per day',
-        'Every grid node, whatever is selected above. Drawn from the grid — export is not charted: '
-        + 'the return lane is a derived node and the exporter does not publish those, so there is nothing '
-        + 'in history to subtract.',
-        barChart({ days, lines: gridLines, units, stacked: false, partial }), gridLines);
+    if (gridSupply.length) {
+      const imports = sumOf(gridSupply), exports_ = gridReturn.length ? sumOf(gridReturn) : null;
+      const gridLines         = [{ label: 'Import', color: KIND_COLOR.grid, values: imports }];
+      if (exports_) gridLines.push({ label: 'Export', color: '#6fb0e0', values: exports_ });
+      section(intraDay() ? 'Grid' : 'Grid per day',
+        'Every grid node, whatever is selected above. Import above the line, export below it'
+        + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
+        barChart({ days, lines: gridLines, units, stacked: true, partial }), gridLines);
     }
 
     // --- Self-sufficiency ---------------------------------------------------------------------------
@@ -5702,13 +5742,19 @@ function addTrendsSection(nav     , sections     ) {
       // Only the kinds that exist here. A system with no battery has no battery series, which is not the
       // same as a battery that failed to report — treating the two alike blanked the whole chart.
       const present = [solar, batt, gridIn].filter((k)                         => !!k);
+      // The balance uses each kind's NET: charge stores energy rather than consuming it, and export leaves
+      // the house. Both are already negative here, so the sum is what the home actually took.
       const home = days.map((_, d) => {
         if (load) return load[d];
         const parts = present.map(k => k[d]);
         return parts.some(p => p == null) ? null : parts.reduce((a     , b     ) => a + b, 0);
       });
+      // What the house drew from the grid is the import, not the net. Netting export off first lets a day
+      // that imported 9 and exported 4 read as though only 5 came from the grid, which is not what
+      // happened — the same reason the Energy Overview counts import here.
+      const drawn = sumOf(gridSupply);
       const pct = days.map((_, d) => {
-        const h = home[d], g = gridIn[d];
+        const h = home[d], g = drawn[d];
         if (h == null || g == null || h <= 0) return null;
         return Math.max(0, Math.min(100, ((h - Math.max(0, g)) / h) * 100));
       });
@@ -5724,13 +5770,26 @@ function addTrendsSection(nav     , sections     ) {
     }
 
     // --- Where the day's energy came from -------------------------------------------------------
-    const kinds                     = [['solar', 'Solar'], ['battery', 'Battery'], ['grid', 'Grid']];
-    const supply = kinds.map(([k, label]) => ({ k, label, values: byKind(k) }))
-      .filter(x => x.values)                                                             ;
-    if (supply.length > 1) {
-      const supplyLines         = supply.map(s => ({ label: s.label, color: KIND_COLOR[s.k], values: s.values }));
+    // Supply above the line, what went back below it. Stacking discharge on top of solar without
+    // subtracting the charge counts the same energy twice: once as produced, once as given back.
+    const supplyLines         = [];
+    ([['solar', 'Solar'], ['battery', 'Battery out'], ['grid', 'Grid import']]                      )
+      .forEach(([k, label]) => {
+        const v = sumOf((body.series || []).filter((s     ) => s.kind === k && !isReturn(s)));
+        if (v.some(x => x != null)) supplyLines.push({ label, color: KIND_COLOR[k], values: v });
+      });
+    ([['battery', 'Battery in', '#2f8f52'], ['grid', 'Grid export', '#6fb0e0']]                              )
+      .forEach(([k, label, colour]) => {
+        const list = (body.series || []).filter((s     ) => s.kind === k && isReturn(s));
+        if (!list.length) return;
+        const v = sumOf(list);
+        if (v.some(x => x != null)) supplyLines.push({ label, color: colour, values: v });
+      });
+    if (supplyLines.length > 1) {
       section(intraDay() ? 'Where the power is coming from' : 'Where the day’s energy came from',
-        'Each source summed across every node of that kind, whatever is selected above.',
+        'Each kind summed across its nodes, whatever is selected above. What went back — battery charge, '
+        + 'grid export — is below the line, so the same energy is not counted as produced and then again '
+        + 'as returned.',
         barChart({ days, lines: supplyLines, units, stacked: true, partial }), supplyLines);
     }
 

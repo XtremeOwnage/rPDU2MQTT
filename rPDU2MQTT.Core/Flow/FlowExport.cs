@@ -19,6 +19,24 @@ public static class FlowExport
     /// <see cref="TryNodeValue"/>.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Does this node belong in a metrics store (Prometheus, and anything else keeping a series per node)?
+    ///
+    /// <para>
+    /// The unmetered remainder does not: it is arithmetic about a hierarchy, and recording it as a device's
+    /// history invites reading it as one. A return lane does: battery charge and grid export are bound
+    /// sources read in the other direction, as measured as the supply beside them. Both ids contain '#',
+    /// which is why they were excluded together and why a history backend could show a battery discharging
+    /// every day and never charging.
+    /// </para>
+    /// <para>
+    /// Here rather than in the exporter so the rule is one thing that can be checked, instead of a
+    /// condition restated wherever it is needed — the mistake that lost the reading ages, and the tags on
+    /// the return lanes, each in their own place.
+    /// </para>
+    /// </summary>
+    public static bool ToMetricsStore(FlowNode node) => !node.Synthetic || node.ReturnLane;
+
     public static double NodeValue(FlowGraph graph, string id)
         => TryNodeValue(graph, id, out var value) ? value : 0;
 
