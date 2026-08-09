@@ -5,15 +5,25 @@ name: Docker
 # separate terms of service, privacy policy, and support
 # documentation.
 
+# Branch pushes only. A pull_request run built the whole image and then threw it away — `push:` below is
+# false for pull_request events, so it published nothing — while the push event for the same commit built
+# and published it. Two image builds per commit, one of them for nothing.
+#
+# Branches stay in: the image from a branch push is what gets deployed to test a change, so this is the run
+# that has to keep working.
 on:
-  workflow_dispatch:  
+  workflow_dispatch:
   push:
     branches:
         - '**'
     # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ "main" ]
+
+# A second push to the same branch makes the first image obsolete before it is finished. Releases and main
+# are never cancelled — those images are the ones people pull by tag.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   # Use docker.io for Docker Hub if empty

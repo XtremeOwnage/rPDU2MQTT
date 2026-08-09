@@ -54,6 +54,47 @@ public static class EnergyPeriod
         return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(next, DateTimeKind.Unspecified), zone);
     }
 
+    /// <summary>
+    /// One instant per day for the last <paramref name="days"/> periods, oldest first, with the day each
+    /// belongs to.
+    ///
+    /// <para>
+    /// A daily total is only a day's total at the end of that day. Sampling "now minus 24 hours" reads the
+    /// counter part-way through — at three in the afternoon, every bar on a month-long chart is that day up
+    /// to three o'clock, which is a real number of a thing nobody asked about and looks exactly like a
+    /// complete day. Each completed period is therefore read a second before its rollover.
+    /// </para>
+    /// <para>
+    /// The current period has not ended, so it is read at <paramref name="nowUtc"/> and labelled with its
+    /// own key: today so far is worth seeing, as long as it is not presented as a finished day.
+    /// </para>
+    /// <para>
+    /// Walked in local time rather than by subtracting 24 hours, so a clock change does not slide every
+    /// earlier boundary an hour off the day it belongs to.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<(DateTime AtUtc, string Day, bool Complete)> RecentPeriodEnds(
+        DateTime nowUtc, TimeZoneInfo zone, int startHour, int days)
+    {
+        var hour = Clamp(startHour);
+        var count = Math.Max(1, days);
+        var out_ = new List<(DateTime, string, bool)>(count);
+
+        // The boundary that ends the period now in progress, in local time.
+        var local = Local(nowUtc, zone);
+        var end = local.Date.AddHours(hour);
+        if (end <= local) end = end.AddDays(1);
+
+        for (var i = count - 1; i >= 1; i--)
+        {
+            var boundary = end.AddDays(-i);
+            var at = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(boundary, DateTimeKind.Unspecified), zone).AddSeconds(-1);
+            out_.Add((at, KeyFor(at, zone, hour), true));
+        }
+        out_.Add((nowUtc, KeyFor(nowUtc, zone, hour), false));
+        return out_;
+    }
+
     /// <summary>A start hour outside 0–23 is a typo, not an instruction; midnight is the honest reading.</summary>
     private static int Clamp(int startHour) => startHour is >= 0 and <= 23 ? startHour : 0;
 

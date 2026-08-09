@@ -43,16 +43,41 @@ public class ThroughputImbalanceTests
     };
 
     [Fact]
-    public void AMeasuredNodeCarryingMoreThanItReports_IsFlagged()
+    public void AMeasuredNodeCarryingMoreThanItReports_SaysWhatPassesThrough()
     {
-        // This used to return null on sight for anything measured — "its own reading settles it" — so an
-        // inverter drawing a bar a third the width of its own ribbons said nothing at all.
+        // 8,344 W in; 2,526 W to the panel and 5,652 W into the battery. Every watt is accounted for — the
+        // sensor is simply on one leg. Reporting the difference as an imbalance told the operator that "more
+        // than a quarter of what passes through is unaccounted for" about a node that balances.
         var graph = FlowGraphBuilder.Build(new PduData(), Topology(), "realpower", new Fixed(Live));
 
         var inverter = graph.Nodes.Single(n => n.Id == "inverter");
         Assert.Equal(2526, inverter.Value);              // the reading is still the reading
-        Assert.NotNull(inverter.Imbalance);              // but the discrepancy is no longer silent
-        Assert.True(inverter.Imbalance > 5000, $"expected the ~5.8 kW shortfall, got {inverter.Imbalance}");
+        Assert.Null(inverter.Imbalance);                 // and its flows do reconcile
+        Assert.Equal(8344, inverter.Throughput);         // while saying what actually passes through it
+    }
+
+    [Fact]
+    public void FlowsThatDoNotReconcile_AreStillFlagged()
+    {
+        // The signal has to survive: more leaving than arrives is not a state the hardware can be in.
+        var live = new Dictionary<string, double>(Live) { ["solar|realpower"] = 500 };
+
+        var graph = FlowGraphBuilder.Build(new PduData(), Topology(), "realpower", new Fixed(live));
+
+        var inverter = graph.Nodes.Single(n => n.Id == "inverter");
+        Assert.NotNull(inverter.Imbalance);
+        Assert.True(inverter.Imbalance > 5000, $"expected the shortfall against a 500 W supply, got {inverter.Imbalance}");
+    }
+
+    [Fact]
+    public void AReadingThatCoversItsThroughput_SaysNothingExtra()
+    {
+        var live = new Dictionary<string, double>(Live) { ["inverter|realpower"] = 8344 };
+        live.Remove("battery|realpower#in");
+
+        var graph = FlowGraphBuilder.Build(new PduData(), Topology(), "realpower", new Fixed(live));
+
+        Assert.Null(graph.Nodes.Single(n => n.Id == "inverter").Throughput);
     }
 
     [Fact]

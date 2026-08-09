@@ -49,6 +49,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly Core.Flow.IFlowValueSource? live;
+    private readonly Core.Flow.IFlowHistory? history;
+    // What the last save could not apply to this process. Reported on the status card and in the header.
+    private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
     // Created on the first /api/events connection; the pump only runs while a tab is watching.
@@ -57,9 +60,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IFlowHistory? history = null, Core.RestartPending? pending = null)
     {
         this.live = live;
+        this.history = history;
+        this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
         this.config = config;
         this.mqtt = mqtt;
@@ -357,6 +362,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         user,
         // Operator update state (#210) for the header indicator; null when no operator is reporting.
         update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),
+        // Settings that were saved but cannot reach this process until it restarts. On the status payload
+        // rather than only in the save's reply, so the header says so on every page and in every browser.
+        restart = new { required = pending.Required, settings = pending.Settings },
     };
 
     /// <summary>
@@ -495,8 +503,77 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// One value per node per day across a window — the daily totals, kept apart rather than summed.
+    ///
+    /// <para>
+    /// A day the backend has nothing for is <see langword="null"/> in the series and stays a gap all the way
+    /// to the chart. Drawing it as zero would put a bar of "nothing was used" next to bars of real days,
+    /// which is a claim about that day rather than an admission that nobody recorded it.
+    /// </para>
+    /// </summary>
+    private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
+                                                IReadOnlyList<string> labels, string? partialLabel, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
+        try
+        {
+            if (!config.History.Enabled || history is null)
+                return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
+
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+
+            // The shape of the graph comes from the live build — its nodes, labels and kinds. Only the
+            // values come from history, exactly as the single-moment view does it.
+            var shape = FlowGraphBuilder.Build(data, config.EnergyFlow, metric, live);
+            var ids = shape.Nodes.Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+            if (ids.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
+
+            // One request where the backend can answer a range, so a chart of 72 five-minute samples is not
+            // 72 round trips.
+            var perDay = await history.SeriesAsync(ids, metric, when, cts.Token);
+
+            var series = shape.Nodes
+                .Where(n => !n.Synthetic)
+                .Select(n => new
+                {
+                    node = n.Id,
+                    label = n.Label,
+                    kind = n.Kind,
+                    tags = n.Tags,
+                    values = perDay.Select(day => day.TryGetValue(n.Id, out var v) ? (double?)v : null).ToList(),
+                })
+                // A node with nothing across the whole window is not a line on a chart; it is a node the
+                // backend has no history for, and drawing an empty series for it says nothing.
+                .Where(s => s.values.Any(v => v is not null))
+                .ToList();
+
+            if (series.Count == 0)
+                return new { ok = false, message = $"No history between {when[0]:u} and {when[^1]:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+
+            return new
+            {
+                ok = true,
+                metric,
+                units = FlowUnits.Canonical(metric),
+                source = history.Id,
+                // Labelled by the caller: a day is the period key the counters re-base on, a moment within
+                // one is a clock time.
+                days = labels,
+                // The last bar is a period still in progress. Named so the chart can say so rather than
+                // showing a part-day beside finished ones as though they were the same thing.
+                partial = partialLabel,
+                stepSeconds = when.Count > 1 ? (int)(when[1] - when[0]).TotalSeconds : 0,
+                series,
+            };
+        }
+        catch (Exception ex) { return new { ok = false, message = $"Could not build the series: {ex.Message}" }; }
+    }
+
     /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
-    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct)
+    private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null, int spanDays = 1)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(20));
@@ -504,8 +581,60 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             var (id, pdu, _) = ResolveInstance(instance);
             var data = await ResolveData(id, pdu, cts.Token);
-            var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric, live);
-            return new { ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units };
+            var m = string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric;
+
+            // A past moment is the same graph built from the values of that instant (#372): same builder,
+            // same roll-up, same rules about what is unknown. A node the backend has nothing for is absent
+            // rather than zero, so it reads as unmeasured exactly as a node with no source does now.
+            var values = live;
+            if (atUtc is { } at)
+            {
+                // Read the live flag, not whether a provider was wired at startup: the toggle takes effect
+                // on the next request.
+                if (!config.History.Enabled || history is null)
+                    return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
+
+                var ids = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
+                    .Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+
+                if (spanDays > 1)
+                {
+                    // Only the daily total adds up across days. Summing lifetime counters or instantaneous
+                    // power would produce a number, and the number would mean nothing.
+                    if (m != FlowSpan.SpannableMetric)
+                        return new { ok = false, message = $"A span of days only means something for the daily total ({FlowSpan.SpannableMetric}); '{m}' cannot be added across days." };
+
+                    var perDay = new List<IReadOnlyDictionary<string, double>>();
+                    foreach (var day in FlowSpan.Days(at, spanDays))
+                        perDay.Add(await history.ValuesAtAsync(ids, m, day, cts.Token));
+
+                    var (totals, covered) = FlowSpan.Fold(perDay);
+                    if (totals.Count == 0)
+                        return new { ok = false, message = $"No history for the {spanDays} days to {at:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+
+                    var graphOverDays = FlowGraphBuilder.Build(data, config.EnergyFlow, m, new HistoricalFlowValueSource(totals, m));
+                    return new
+                    {
+                        ok = true, graphOverDays.Nodes, graphOverDays.Links, graphOverDays.Metric, graphOverDays.Units,
+                        at = atUtc, historical = true, source = history.Id, spanDays,
+                        // Days a node was missing are days missing from its total, so say which rather than
+                        // presenting a short window as a whole one.
+                        incomplete = FlowSpan.Incomplete(covered, spanDays).Select(x => new { node = x.Node, days = x.Days }).ToList(),
+                    };
+                }
+
+                var past = await history.ValuesAtAsync(ids, m, at, ct);
+                if (past.Count == 0)
+                    return new { ok = false, message = $"No history for {at:u} from {history.Id}. The backend may not reach that far back, or may not hold this metric." };
+                values = new HistoricalFlowValueSource(past, m);
+            }
+
+            var graph = FlowGraphBuilder.Build(data, config.EnergyFlow, m, values);
+            return new
+            {
+                ok = true, graph.Nodes, graph.Links, graph.Metric, graph.Units,
+                at = atUtc, historical = atUtc is not null, source = atUtc is null ? null : history?.Id,
+            };
         }
         catch (Exception ex)
         {
@@ -614,6 +743,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
             try
             {
+                // What this process is running, before any of it is replaced below. Everything that differs
+                // and is not in ConfigApply.AppliedLive is a setting the save cannot reach.
+                var stranded = ConfigApply.NeedingRestart(config, parsed);
+
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
 
@@ -628,6 +761,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // And the EmonCMS feed-provisioning settings, so AutoConfigure + the per-type feed config
                 // take effect on the next provisioning pass without a restart (#163).
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
+                // And the history backend: FlowHistoryRouter reads the provider and its settings per call,
+                // so turning history on or pointing it at another server needed no restart — except that
+                // nothing copied the saved values in, so it behaved as though it did.
+                config.History = reloaded.History;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config and
                 // reconcile the running pollers (a new PDU starts polling, a removed one stops) without a
@@ -644,10 +781,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     Log.Warning($"Could not reconcile PDU instances after save ({ex.Message}); a restart will apply them.");
                 }
 
+                pending.Set(stranded);
+
                 var message = (configSource.IsGitOpsManaged
                     ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Credentials are stored in the companion Secret. Press 'Republish discovery' to apply override/name/template changes; restart for primary connection/credential changes (incl. OIDC)."
                     : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for primary connection changes (host/port).") + instanceMessage;
-                return Results.Json(new { ok = true, message, gitops = configSource.IsGitOpsManaged });
+                return Results.Json(new
+                {
+                    ok = true,
+                    message,
+                    gitops = configSource.IsGitOpsManaged,
+                    // So the GUI can offer the restart then and there, and name what is waiting on it.
+                    restartRequired = stranded.Count > 0,
+                    restartSettings = stranded,
+                }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
@@ -1550,6 +1697,22 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
+        // Does the history backend actually answer? The Status card says so on a timer; this is the same
+        // probe on demand, next to the settings being edited.
+        app.MapPost("/api/test/history", async (HttpContext ctx) =>
+        {
+            if (!config.History.Enabled)
+                return Results.Json(new { ok = false, message = "History is turned off. Enable it under Features." }, ConfigSchema.Json);
+            if (history is null)
+                return Results.Json(new { ok = false, message = "No history backend is wired in this process." }, ConfigSchema.Json);
+            try
+            {
+                var (ok, detail) = await history.ProbeAsync(ctx.RequestAborted);
+                return Results.Json(new { ok, message = ok ? $"{history.Id}: reachable — {detail}" : $"{history.Id}: {detail}" }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Validate the EmonCMS configuration (HTTP: reach the server + check the API key; MQTT: broker up).
         app.MapPost("/api/test/emoncms", async (HttpContext ctx) =>
         {
@@ -1740,7 +1903,48 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
         app.MapGet("/api/flow", async (HttpContext ctx) =>
         {
-            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted), ConfigSchema.Json);
+            // ?at=<ISO-8601> renders the moment instead of now.
+            DateTime? at = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
+                ? parsed : null;
+            // ?span=<days> sums that many daily totals, ending at ?at.
+            var span = int.TryParse(ctx.Request.Query["span"].ToString(), out var d) ? Math.Clamp(d, 1, 366) : 1;
+            return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at, span), ConfigSchema.Json);
+        });
+
+        // One value per node per day over a window — what the Trends page charts. The same daily totals the
+        // span view sums, kept apart instead of added up.
+        app.MapGet("/api/flow/series", async (HttpContext ctx) =>
+        {
+            DateTime end = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
+                ? parsed : DateTime.UtcNow;
+
+            // Two shapes of question, and they are not the same question. ?days is the daily total, one
+            // sample per day. ?minutes is what is happening within a day, sampled every ?step seconds —
+            // power, because a cumulative daily counter charted through the day only ever climbs.
+            if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
+            {
+                var step = int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? Math.Clamp(st, 60, 3600) : 300;
+                var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, 60 * 48));
+                var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
+                var steps = new List<DateTime>();
+                for (var t = end - span; t <= end; t = t.AddSeconds(step)) steps.Add(t);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps,
+                    steps.Select(t => t.ToLocalTime().ToString("HH:mm")).ToList(), null, ctx.RequestAborted), ConfigSchema.Json);
+            }
+
+            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
+            var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
+
+            // Each day read at its own rollover, not at whatever time of day it happens to be now. The
+            // boundary is the server's — the same one the counters re-base on — so a bar is the day the
+            // bridge means by that date.
+            var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
+            var periods = EnergyPeriod.RecentPeriodEnds(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days);
+            return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
+                periods.Select(p => p.AtUtc).ToList(), periods.Select(p => p.Day).ToList(),
+                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // Readings the bridge is deliberately dropping, and why. Withholding a value that can be shown to be

@@ -165,6 +165,11 @@ public static class FlowGraphBuilder
 
                 label[outletId] = outlet.Entity_DisplayName; kind[outletId] = "outlet"; leaf[outletId] = value;
                 label[pduId] = device.Entity_DisplayName; kind[pduId] = "pdu";
+                // Derived nodes have no config entry to carry tags, so theirs come from the rules (#342).
+                var outletTags = AutoTags.For(flow.AutoTags, outletId);
+                if (outletTags.Count > 0) tags[outletId] = outletTags.ToList();
+                var pduTags = AutoTags.For(flow.AutoTags, pduId);
+                if (pduTags.Count > 0) tags[pduId] = pduTags.ToList();
                 // Skip the auto PDU link when the user has wired an explicit feeder for this outlet.
                 if (!explicitlyFed.Contains(outletId))
                     AddEdge(pduId, outletId);
@@ -556,22 +561,32 @@ public static class FlowGraphBuilder
             var (inflow, outflow, anyIn, anyOut) = Sides(id);
             if (!anyIn || !anyOut) return null;
 
-            // A measured node is NOT exempt, which is what this used to assume. Its reading settles what that
-            // sensor measures — not what passes through the node. An inverter bound to `load_power` reports
-            // the AC-load leg only, so a unit taking 8,344 W of PV and sending 5,652 W of it to charge a
-            // battery reported 2,526 W and drew a bar a third the width of its own ribbons. Nothing was
-            // wrong with the number; it was answering a different question from the one the diagram asked.
-            if (leaf.TryGetValue(id, out var reading))
-            {
-                var throughput = Math.Max(inflow, outflow);
-                var short_ = throughput - reading;
-                return short_ > 1 && short_ > reading * 0.02 ? short_ : null;
-            }
-
+            // A node whose own reading is smaller than what passes through it is NOT contradicted. An
+            // inverter bound to `load_power` reports its AC-load leg while also charging a battery: 8,725 W
+            // of PV in, 3,933 W to the panel and 4,589 W into the battery — every watt accounted for. This
+            // used to compare the reading against throughput and call the difference unaccounted, so the
+            // diagram announced that "more than a quarter of what passes through is unaccounted for" about a
+            // node that balanced to within its conversion loss. What is smaller than the throughput is the
+            // sensor's coverage, and that is reported separately (see ThroughputOf) rather than as a fault.
             var gap = outflow - inflow;
             // Rounding noise and honest conversion loss are not contradictions; 2% matches the floor the
             // unmeasured-load synthesis above already uses for the same reason.
             return gap > 1 && gap > inflow * 0.02 ? gap : null;
+        }
+
+        // What actually passes through a measured node, when its own reading covers less than that.
+        //
+        // The reading is not wrong and the flows are not contradicted — the sensor is on one leg. Carried so
+        // the diagram can say "3,933 W measured of 8,725 W passing through" instead of drawing a bar a third
+        // the width of its own ribbons with no explanation, which is what made this look like a fault.
+        double? ThroughputOf(string id)
+        {
+            if (!leaf.TryGetValue(id, out var reading)) return null;
+            var (inflow, outflow, anyIn, anyOut) = Sides(id);
+            if (!anyIn || !anyOut) return null;
+            var throughput = Math.Max(inflow, outflow);
+            var over = throughput - reading;
+            return over > 1 && over > reading * 0.02 ? throughput : null;
         }
 
         // Where a node's number came from. Provenance travels with the value so no consumer has to guess,
@@ -592,7 +607,7 @@ public static class FlowGraphBuilder
             .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
                                        ValueOf(id), ImbalanceOf(id), DerivationOf(id),
-                                       tags.TryGetValue(id, out var t) ? t : null))
+                                       tags.TryGetValue(id, out var t) ? t : null, ThroughputOf(id)))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

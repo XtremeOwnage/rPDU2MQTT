@@ -27,6 +27,14 @@ const today = {
   links: [],
 };
 
+// Lifetime energy: what self-sufficiency used to be computed from on the power view. Distinct figures, so
+// a chart built from the wrong one is visible rather than plausible.
+const lifetime = {
+  ok: true, metric: 'energy', units: 'kWh',
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 9000 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 }],
+  links: [],
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
     url.includes('/api/schema') ? schema :
@@ -34,6 +42,7 @@ const { sandbox, getEl } = makeDom({
     url.includes('/api/config') ? cfg :
     url.includes('/api/flow/live') ? { ok: true, values: [{ node: 'grid', metric: 'energytoday#in', value: 7.5 }] } :
     url.includes('metric=energytoday') ? today :
+    url.includes('metric=energy') ? lifetime :
     url.includes('/api/flow') ? power :
     { ok: true },
 });
@@ -49,6 +58,21 @@ const tileText = (label) => {
   if (!t) fail(`no ${label} tile`);
   return t;
 };
+
+// History is off in this config, so there is no moment to pick — a date control whose every answer would
+// be "history is turned off" is worse than no control.
+const histBar = query(getEl('sections'), 'div', true).filter(d => cn(d).includes('history-bar'));
+if (!histBar.length) fail('the board never built a history control');
+if (!histBar.every(b => cn(b).includes('is-hidden')))
+  fail('the date picker is offered while the History feature is off');
+
+// On the power view, self-sufficiency covers TODAY. It used to fetch lifetime energy, so a board of live
+// watts carried a figure describing every kWh since each counter was first bound — one that barely moves
+// and answers a question nobody was asking.
+const ssLive = query(getEl('sections'), 'div', true).find(d => cn(d).includes('energy-selfsuff'));
+if (!ssLive) fail('no self-sufficiency figure on the power view');
+if (/lifetime/.test(ssLive.textContent)) fail(`self-sufficiency on the power view still covers all time: ${ssLive.textContent}`);
+if (!/today/.test(ssLive.textContent)) fail(`self-sufficiency does not say it covers today: ${ssLive.textContent}`);
 
 // Power: dials are drawn against the stated Max.
 if (!query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge'))) fail('no gauge on the power view');
@@ -72,5 +96,17 @@ if (query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge')))
 const gridTile = tileText('Grid');
 if (!/-5\.5/.test(gridTile.textContent)) fail(`the grid tile does not show the day's net: ${gridTile.textContent}`);
 
+// Self-sufficiency covers the window the board is showing, and is a share of the very tiles above it.
+// It used to be fetched separately as lifetime energy, so the bar described all time while the tiles
+// described the day, and the two contradicted each other on one screen.
+//
+// Home = 41.2 solar + (2.0 imported - 7.5 exported) = 35.7 kWh, of which 2.0 came from the grid: 94%.
+// (Grid import, not the net: a house that imports 10 and exports 10 has not covered its own load.)
+const ss = query(getEl('sections'), 'div', true).find(d => cn(d).includes('energy-selfsuff'));
+if (!ss) fail('no self-sufficiency figure on the energy view');
+if (!ss.textContent.includes('94%')) fail(`self-sufficiency is not the day's: ${ss.textContent}`);
+if (!/today/.test(ss.textContent) || /lifetime/.test(ss.textContent))
+  fail(`self-sufficiency does not say it covers the day being shown: ${ss.textContent}`);
+
 console.log('energy-show: the board switches between power and energy today; no dial against a power '
-  + 'ceiling on kWh; the grid shows the signed net for the day');
+  + 'ceiling on kWh; the grid shows the signed net for the day; self-sufficiency covers that same day');

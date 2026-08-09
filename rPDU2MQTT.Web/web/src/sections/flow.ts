@@ -92,7 +92,10 @@ let pickerSeq = 0;
 /// there would loop when the callback re-renders the surface that owns the panel.
 function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
-  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(860px, 92vw)', maxHeight: '80vh', overflow: 'auto' } });
+  // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings — type,
+  // metric, counter, unit and a full MQTT topic — and at 860px the topic column was cut off mid-string on
+  // the machines this is actually used from. The floor keeps it usable on a narrow screen.
+  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'max(min(75vw, 1600px), min(860px, 92vw))', maxHeight: '80vh', overflow: 'auto' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -1064,6 +1067,157 @@ function animateToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
+/// The `at`/`span` part of a flow query, and the sentence that says what came back.
+///
+/// Both pages ask the same question and must describe the answer the same way — a diagram or a board that
+/// looks live while showing last Tuesday is the worst thing either page can do.
+function historyQuery(hist: { at: () => string, span: () => number }): string {
+  const at = hist.at();
+  if (!at) return '';
+  const span = hist.span();
+  return '&at=' + encodeURIComponent(at) + (span > 1 ? '&span=' + span : '');
+}
+
+function historyNote(body: any): string {
+  if (!body || !body.historical) return '';
+  const when = new Date(body.at).toLocaleString();
+  const days = Number(body.spanDays) || 1;
+  const what = days > 1 ? `${days} days to ${new Date(body.at).toLocaleDateString()}` : when;
+  // A window with days missing from it is not that window. Name the nodes rather than quietly showing a
+  // short total as a whole one.
+  const short = (body.incomplete || []) as { node: string, days: number }[];
+  const gap = short.length
+    ? ` · incomplete: ${short.slice(0, 4).map(x => `${x.node} ${x.days}/${days}d`).join(', ')}${short.length > 4 ? `, +${short.length - 4} more` : ''}`
+    : '';
+  return `showing ${what} from ${body.source}${gap}`;
+}
+
+/// Which part of the moment was just changed. The caller needs it to tell "the whole of a day" (an energy
+/// question) from "this instant of it" (a power one) — the two want different metrics, and guessing from
+/// the value alone cannot distinguish a freshly-picked day from a re-render.
+type HistoryPick = 'day' | 'time' | 'span' | 'live';
+
+/// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
+///
+/// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
+/// the page renders whatever it gets back — a historical view is the same diagram built from the values of
+/// that instant, not a second rendering path.
+function historyControl(onChange: (what: HistoryPick) => void): {
+  row: HTMLElement, at: () => string, day: () => string, time: () => string, span: () => number,
+  setNote: (t: string) => void
+} {
+  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
+  // Separate date and time inputs, not a datetime-local: that control reports '' until BOTH halves are
+  // filled, so picking a day and leaving the time blank sent nothing and the page silently stayed live.
+  // Split, the time is genuinely optional — blank means the end of the chosen day.
+  const input = el('input', { type: 'date' }) as HTMLInputElement;
+  const timeIn = el('input', { type: 'time', step: '1' }) as HTMLInputElement;
+  const prev = btn('◀');
+  const next = btn('▶');
+  const live = btn('Live', 'primary');
+  // Which of the two things you are looking at, said plainly and in the same place every time. The date
+  // control alone does not answer it at a glance — an empty date reads as "not set yet" as easily as "now",
+  // and a diagram of last Tuesday looks exactly like a diagram of this second.
+  const badge = el('span', { class: 'pill good', text: 'LIVE' });
+  const note = el('span', { class: 'desc', style: { margin: '0' } });
+
+
+  live.title = 'Back to the current reading';
+
+  const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
+  const spanDays = () => Math.max(1, Number(spanSel.value) || 1);
+
+  // The arrows move by whatever is being shown: a day at a time on a single day, a week at a time on a
+  // week, a month on a month. Stepping one day through a 30-day window means 30 presses to see the window
+  // before it, and every one of those presses is a fresh set of history queries.
+  const step = (dir: number) => {
+    const from = input.value || today();
+    const d = new Date(from + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
+    d.setDate(d.getDate() + dir * spanDays());
+    const iso = d.toLocaleDateString('en-CA');
+    input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
+    onChange('day');
+  };
+
+  input.onchange = () => onChange('day');
+  timeIn.onchange = () => onChange('time');
+  prev.onclick = () => step(-1);
+  next.onclick = () => step(1);
+  const stepLabel = () => { const n = spanDays(); return n === 1 ? 'day' : n === 7 ? 'week' : `${n} days`; };
+  live.onclick = () => { input.value = ''; timeIn.value = ''; spanSel.value = '1'; syncSpan(); note.textContent = ''; onChange('live'); };
+
+  // The picker exists only if there is a backend to read from. With History switched off, a date control
+  // whose every answer is "history is turned off" is worse than no control at all.
+  //
+  // Read live rather than at build time, and re-read on every tab switch, so turning the feature on under
+  // Features brings the picker out without a reload.
+  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
+  const syncEnabled = () => {
+    const on = historyOn();
+    row.classList[on ? 'remove' : 'add']('is-hidden');
+    // A day still selected when the feature is switched off has to stop being requested, or the page goes
+    // on asking for a moment that nothing can answer.
+    if (!on && input.value) { input.value = ''; timeIn.value = ''; spanSel.value = '1'; note.textContent = ''; onChange('live'); }
+  };
+
+  // One control rather than five: the arrows and inputs share a border and only the outer corners round,
+  // so the group reads as a single thing instead of a row of loose buttons.
+  const group = el('div', { class: 'input-group' }, prev, input, timeIn, next);
+
+  // How much of the past to add up. A week is the sum of seven daily totals — they all re-base at the same
+  // moment, so they add; a lifetime counter and an instantaneous power reading do not, which is why the
+  // server refuses a span for anything but the daily total and this offers one only alongside a date.
+  const spanSel = el('select', { title: 'Add up the daily totals over this many days, ending on the chosen day.' }) as HTMLSelectElement;
+  [['1', 'that day'], ['7', '7 days to it'], ['30', '30 days to it']]
+    .forEach(([v, t]) => spanSel.appendChild(el('option', { value: v, text: t })));
+  spanSel.onchange = () => { syncSpan(); onChange('span'); };
+
+  // A time within the day says nothing about a week of them, so the two cannot both be set.
+  const syncSpan = () => {
+    prev.title = 'Previous ' + stepLabel();
+    next.title = 'Next ' + stepLabel();
+    const many = spanDays() > 1;
+    timeIn.disabled = many;
+    if (many) timeIn.value = '';
+    timeIn.title = many
+      ? 'Not used over a span of days — each day is counted whole.'
+      : 'Optional. Leave blank for the end of the day — the day’s complete totals.';
+  };
+
+  row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'covering' }), spanSel, live, note);
+  syncSpan();
+  syncEnabled();
+  window.addEventListener?.('rpdu:activate', syncEnabled);
+  return {
+    row,
+    /// The instant to ask for.
+    ///
+    /// With a time, that time on the chosen day. Without one, the end of the day: a daily total is only
+    /// complete then, and midnight would return the total a moment after it re-based, which is zero. Either
+    /// way an instant still ahead of now is clamped to now, because nothing is recorded past it.
+    at: () => {
+      if (!historyOn() || !input.value) return '';
+      const when = new Date(`${input.value}T${timeIn.value || '23:59:59'}`);
+      const now = new Date();
+      return (when > now ? now : when).toISOString();
+    },
+    day: () => (historyOn() ? input.value : ''),
+    time: () => timeIn.value,
+    /// Days to add up, ending on the chosen day. 1 is the plain "that moment" view.
+    span: () => (historyOn() && input.value ? spanDays() : 1),
+    setNote: (t: string) => {
+      note.textContent = t;
+      // The badge follows what was actually rendered, not what the picker says: a date that produced no
+      // answer leaves the live view on screen, and calling that historical would be a lie about the figures.
+      const past = !!t;
+      badge.className = 'pill ' + (past ? 'warn' : 'good');
+      badge.textContent = past ? 'HISTORICAL' : 'LIVE';
+      badge.title = past ? t : 'These are the latest readings.';
+    },
+  };
+}
+
 // The tag selected on the diagram, kept across redraws: the Sankey repaints on every live push, and a
 // highlight that cleared itself every few seconds would be unusable.
 let activeTag: string | null = null;
@@ -1097,18 +1251,21 @@ function tagToggles(nodes: any[], svg: any, apply: (tag: string | null) => void)
   return row;
 }
 
-function groupToggles(onToggle: () => void): HTMLElement | null {
+/// The strip above a view: the switches that change how it is drawn, then the group chips.
+///
+/// `drawn` says whether this view is a drawing. The roll-up is a table — nothing on it is drawn and nothing
+/// animates — so offering "Unmeasured load" and "Animate flow" there described a diagram that was not on
+/// the page. The group chips still belong: collapsing a group changes the table's rows.
+function groupToggles(onToggle: () => void, drawn = true): HTMLElement | null {
   const groups = flowGroups();
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
   // The view switches are not about groups and must not disappear with them — this used to return null
   // when nothing was grouped, which hid the "Unmeasured load" toggle from anyone who had no groups.
-  if (!groups.length) {
+  if (drawn) {
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
-    return row;
   }
-  row.appendChild(unmeasuredToggle(onToggle));
-  row.appendChild(animateToggle(onToggle));
+  if (!groups.length) return drawn ? row : null;
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
   groups.forEach((g: any) => {
     const on = collapsedGroups.has(g.Id);
@@ -1150,6 +1307,68 @@ function flowCandidates(lastGraph: any, customNodes: any[]) {
     .forEach((n: any) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
   customNodes.forEach((n: any) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
   return cand;
+}
+
+// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
+// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
+// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
+function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: () => void) {
+  const rules = ensure(flow, 'AutoTags', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Tags for PDUs and outlets', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes the bridge derives from what it polls have no row of their own to tag. Match them by id, with * for any run of characters: “outlet:rack_pdu_1:*” tags every outlet on that PDU, “pdu:*” every PDU, and a full id one outlet. A tag never changes a reading — only what a view shows and what the exports may carry.' }));
+
+  const ids = [...cand.keys()].filter(id => id.startsWith('pdu:') || id.startsWith('outlet:'));
+
+  const t = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Match', 'Tags', 'Matches now', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  t.appendChild(el('thead', {}, head));
+  const tb = el('tbody');
+
+  rules.forEach((r: any, i: number) => {
+    const tr = el('tr');
+    const matchIn = el('input', { type: 'text', value: r.Match || '', placeholder: 'outlet:rack_pdu_1:*' }) as HTMLInputElement;
+    matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, matchIn));
+
+    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' }) as HTMLInputElement;
+    tagsIn.onchange = () => {
+      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
+      refreshDirty(); rerender();
+    };
+    tr.appendChild(el('td', {}, tagsIn));
+
+    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
+    // is the whole failure mode here — it looks configured and does nothing.
+    const hits = ids.filter(id => globMatches(r.Match || '', id));
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
+      text: hits.length ? `${hits.length} node(s)` : 'nothing',
+      title: hits.length ? hits.slice(0, 20).join('\n') + (hits.length > 20 ? `\n…and ${hits.length - 20} more` : '')
+        : 'No PDU or outlet on the current graph has an id this matches.',
+    })));
+
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { rules.splice(i, 1); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, del));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  if (rules.length) box.appendChild(t);
+
+  const add = btn('+ Add tag rule');
+  add.onclick = () => { rules.push({ Match: '', Tags: [] }); refreshDirty(); rerender(); };
+  box.appendChild(add);
+  return box;
+}
+
+/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
+/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
+function globMatches(pattern: string, id: string): boolean {
+  if (!pattern) return false;
+  const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+  return new RegExp(rx, 'i').test(id);
 }
 
 // Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
@@ -1292,10 +1511,10 @@ function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Ma
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Feeds', 'Bindings', ''].forEach(h => {
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''].forEach(h => {
     const th = el('th', { text: h });
     if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
-    if (h === 'Feeds') th.title = 'What this node feeds. The same wiring as dragging on the Flow tab, without the dragging.';
+    if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
     if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
@@ -1313,12 +1532,18 @@ function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Ma
     tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
-    // Wiring without dragging. The Flow tab's canvas needs the target dragged onto, which means scrolling a
-    // tall column to reach it; a node with several targets keeps them and is edited in its own editor.
-    const outgoing = links.filter((l: any) => l.From === n.Id).map((l: any) => l.To);
-    const feedsCell = el('td');
-    if (outgoing.length > 1) {
-      feedsCell.appendChild(el('span', { text: outgoing.map((t: string) => (cand.get(t) || {}).label || t).join(', ') }));
+    // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
+    //
+    // The column used to be the other way round, "what this node feeds". Every row of imported appliances
+    // then read "— none —" while being fed by the main panel, and setting a node's place in the hierarchy
+    // meant finding its parent's row and editing a list. You put a thing under its feeder, so the control
+    // is on the thing.
+    const incoming = links.filter((l: any) => l.To === n.Id).map((l: any) => l.From);
+    const fedByCell = el('td');
+    if (incoming.length > 1) {
+      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter — and one
+      // dropdown cannot express it. Shown, and edited in the node's own editor.
+      fedByCell.appendChild(el('span', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') }));
     } else {
       const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
       sel.appendChild(el('option', { value: '', text: '— none —' }));
@@ -1326,22 +1551,23 @@ function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Ma
         .filter(id => id !== n.Id && !String(id).includes('#'))
         .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
         .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
-      sel.value = outgoing[0] || '';
+      sel.value = incoming[0] || '';
       sel.onchange = () => {
-        const target = sel.value;
-        if (target && wouldLoop(links.filter((l: any) => l.From !== n.Id), n.Id, target)) {
+        const feeder = sel.value;
+        // Energy would have to arrive from something this node already supplies.
+        if (feeder && wouldLoop(links.filter((l: any) => l.To !== n.Id), feeder, n.Id)) {
           toast('That would create a feeder loop.', false);
-          sel.value = outgoing[0] || '';
+          sel.value = incoming[0] || '';
           return;
         }
-        // One outgoing link is what this control manages: drop the old one, add the new.
-        for (let i = links.length - 1; i >= 0; i--) if (links[i].From === n.Id) links.splice(i, 1);
-        if (target) links.push({ From: n.Id, To: target });
+        // One incoming link is what this control manages: drop the old one, add the new.
+        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
+        if (feeder) links.push({ From: feeder, To: n.Id });
         rerender();
       };
-      feedsCell.appendChild(sel);
+      fedByCell.appendChild(sel);
     }
-    tr.appendChild(feedsCell);
+    tr.appendChild(fedByCell);
     // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
@@ -1463,9 +1689,51 @@ export function addFlowSection(nav: any, sections: any) {
   };
   metricSel.onchange = () => { load(); showDayNote(); };
   bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
+  // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
+  // so the metric moves with it. Picking a *time* is the opposite: an instant is exactly when power is the
+  // right question, so the metric is left alone. Either way this is a default at the moment of the pick,
+  // not a rule enforced on every load: choosing Power afterwards used to be undone by the next refresh.
+  let hadDay = false;
+  const hist = historyControl((what: any) => {
+    // Only on the way out of live. Stepping between days, or re-picking one, keeps whatever you are
+    // looking at — having the metric snap back every time the arrow is pressed is not a default, it is a
+    // refusal to let you choose.
+    const leftLive = what === 'day' && !hadDay && !!hist.day();
+    hadDay = !!hist.day();
+    // Only the daily total can be added across days, so asking for a span asks for that metric — the
+    // server refuses any other, and a refusal where an answer was expected is not a useful default.
+    if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
+      if (metricSel.value !== 'energytoday') metricSel.value = 'energytoday';
+      showDayNote();
+    }
+    load();
+  });
+  sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
-  const treePanel = document.createElement('div'); treePanel.style.margin = '16px 0 4px'; sec.appendChild(treePanel);
-  const ed: any = document.createElement('div'); ed.style.marginTop = '18px'; sec.appendChild(ed);
+
+  // Three separate jobs used to be stacked below the diagram on this one page: a table of what each node
+  // grain rolled up, the editor that wires the hierarchy, and the settings that govern the roll-up. Each
+  // gets its own page under Energy Flow, so the Flow page is the diagram.
+  const subPage = (label: string, icon: string, desc: string) => {
+    const l = navLink(nav, label, icon);
+    l.classList.add('nav-child');
+    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
+    l.dataset.section = 'EnergyFlow';
+    const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
+    s.appendChild(el('h2', { text: label }));
+    s.appendChild(el('div', { class: 'desc', text: desc }));
+    const body = document.createElement('div'); s.appendChild(body);
+    return { link: l, sec: s, body };
+  };
+
+  const treePage = subPage('Roll-up', '∑',
+    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+  const treePanel = treePage.body;
+  const edPage = subPage('Hierarchy', '⑃',
+    'How the nodes are wired together. Energy flows left → right.');
+  const ed: any = edPage.body;
+  const settingsPage = subPage('Settings', '⚙',
+    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose. Fetched beside the graph rather than folded into it: it
   // describes the ingest, not the drawing, and it must still be reported when the graph itself is empty.
@@ -1478,8 +1746,6 @@ export function addFlowSection(nav: any, sections: any) {
   // (measured leaves report their source, aggregates sum their children, residuals the remainder).
   const renderTree = async () => {
     treePanel.innerHTML = '';
-    const head = document.createElement('div'); head.textContent = 'Node-grain roll-up (distributed)';
-    head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; treePanel.appendChild(head);
     let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
     if (!r.body || !r.body.ok) {
       const dd = document.createElement('div'); dd.className = 'desc';
@@ -1494,7 +1760,7 @@ export function addFlowSection(nav: any, sections: any) {
     }
 
     ensureGroupState();
-    const toggles = groupToggles(redrawBoth);
+    const toggles = groupToggles(redrawBoth, false);
     if (toggles) treePanel.appendChild(toggles);
 
     const t = document.createElement('table'); t.className = 'ld';
@@ -1980,6 +2246,11 @@ export function addFlowSection(nav: any, sections: any) {
               : 'summed from what it feeds'));
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
+        // A sensor on one leg of a bidirectional device — an inverter measuring its AC load while also
+        // charging a battery. Its flows reconcile, so this is a note about coverage, not a warning.
+        if (n.throughput != null)
+          rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
+            text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;
@@ -2066,47 +2337,39 @@ export function addFlowSection(nav: any, sections: any) {
     attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
   };
 
-  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
-  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
-  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
-  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
-  const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
-  const NW = 190, NH = 46;
-
-  const renderEditor = () => {
-    if (ed._cleanup) ed._cleanup();
+  // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.
+  //
+  // The generic config form deliberately hides EnergyFlow (these visual editors replace it), so each of
+  // these had been dropped onto whichever page it affected — the MQTT export and the day boundary under
+  // the hierarchy editor, the rest further down the same page. Answering "how is this rolled up?" meant
+  // scrolling a diagram editor. They are the same controls, bound to the same document, in one place.
+  const renderSettings = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
     migrateEnergyFlow(flow);
-    const customNodes = ensure(flow, 'Nodes', []);
-    const links = ensure(flow, 'Links', []);
-    ed.innerHTML = '';
+    const agg = ensure(flow, 'Aggregation', {});
+    const body = settingsPage.body;
+    body.innerHTML = '';
 
-    ed.appendChild(el('h3', { text: 'Hierarchy', style: { margin: '4px 0' } }));
-    ed.appendChild(el('div', { class: 'desc', text: 'Energy flows left → right. Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
-
-    const bar2 = el('div', { class: 'ld-toolbar' });
+    const bar3 = el('div', { class: 'ld-toolbar' });
     const save = btn('Save', 'primary');
     save.onclick = () => saveConfig(load);
-    bar2.append(save); ed.appendChild(bar2);
+    bar3.append(save); body.appendChild(bar3);
 
-    // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll. Saved with
-    // the hierarchy (the Save button posts the whole config).
+    // MQTT export of the hierarchy (#164): each tier's rolled-up value is published per poll.
+    body.appendChild(el('h3', { text: 'MQTT export', style: { margin: '14px 0 4px' } }));
     const exportRow = el('div', { class: 'ld-toolbar' });
     const topicIn = el('input', { type: 'text', placeholder: '{parent}/energyflow/{id}', style: { width: '280px' } });
     topicIn.value = flow.MqttTopicTemplate || '';
     topicIn.disabled = !flow.MqttExport;
-    topicIn.onchange = () => { flow.MqttTopicTemplate = topicIn.value.trim() || undefined; };
+    topicIn.onchange = () => { flow.MqttTopicTemplate = topicIn.value.trim() || undefined; refreshDirty(); };
     const expChk = el('input', { type: 'checkbox' }); expChk.checked = !!flow.MqttExport;
-    expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; };
+    expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; refreshDirty(); };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
-    ed.appendChild(exportRow);
+    body.appendChild(exportRow);
 
-    // How the energy roll-up is accumulated, and when the day ends. These live under EnergyFlow, which the
-    // generic config form deliberately hides (this visual editor replaces it) — so without a panel here they
-    // had no UI at all and could only be set by hand-editing the config.
-    const agg = ensure(flow, 'Aggregation', {});
-    ed.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
-    ed.appendChild(el('div', { class: 'desc' },
+    // How the energy roll-up is accumulated, and when the day ends.
+    body.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
+    body.appendChild(el('div', { class: 'desc' },
       'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
       + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
       + 'Draw the diagram with Show → “Energy today”.'));
@@ -2143,13 +2406,13 @@ export function addFlowSection(nav: any, sections: any) {
     aggRow.append(
       el('label', {}, trackChk, ' Track daily totals'),
       el('span', { class: 'desc', style: { margin: '0' }, text: 'Day ends at:' }), hourSel, zoneSel);
-    ed.appendChild(aggRow);
+    body.appendChild(aggRow);
 
     // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
     // container it is UTC unless someone set TZ. Not knowing that is how "Energy today" appears to reset at
     // 7pm for no reason.
     const clock = el('div', { class: 'desc' }) as HTMLElement;
-    ed.appendChild(clock);
+    body.appendChild(clock);
     api('/api/time').then((r: any) => {
       const t = r.body; if (!t || !t.ok || !t.host || !t.period) return;
       const p = t.period;
@@ -2166,6 +2429,8 @@ export function addFlowSection(nav: any, sections: any) {
       }
     }).catch(() => { });
 
+    body.appendChild(el('h3', { text: 'What the diagram may state', style: { margin: '14px 0 4px' } }));
+
     // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
     // nothing measured — sound arithmetic about the hierarchy you drew, and only as true as that hierarchy.
     const inferRow = el('div', { class: 'desc' }) as HTMLElement;
@@ -2174,16 +2439,45 @@ export function addFlowSection(nav: any, sections: any) {
     inferChk.onchange = () => { flow.InferFromConservation = inferChk.checked ? undefined : false; refreshDirty(); };
     inferRow.append(el('label', {}, inferChk,
       ' Infer from a single supply path — fill in an unmeasured node from what it feeds, when only one path could have supplied it. Results are labelled “inferred”; off shows “no data”.'));
-    ed.appendChild(inferRow);
+    body.appendChild(inferRow);
 
-    // The aggregation settings are saved by the same Save button as the hierarchy (it posts the whole config).
     const aggIntegrate = el('div', { class: 'desc' }) as HTMLElement;
     const intChk = el('input', { type: 'checkbox' }) as HTMLInputElement;
     intChk.checked = !!agg.Enabled;
     intChk.onchange = () => { agg.Enabled = intChk.checked; refreshDirty(); };
     aggIntegrate.append(el('label', {}, intChk,
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
-    ed.appendChild(aggIntegrate);
+    body.appendChild(aggIntegrate);
+
+    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram
+    // itself. They change what you are looking at rather than what is configured, they are per-viewer
+    // (browser-local, never saved), and a view switch on another page is one you cannot see the effect of.
+    body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
+      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
+      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+  };
+
+  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
+  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
+  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
+  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
+  const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
+  const NW = 190, NH = 46;
+
+  const renderEditor = () => {
+    if (ed._cleanup) ed._cleanup();
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const customNodes = ensure(flow, 'Nodes', []);
+    const links = ensure(flow, 'Links', []);
+    ed.innerHTML = '';
+
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
+
+    const bar2 = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(load);
+    bar2.append(save); ed.appendChild(bar2);
 
     // Candidate nodes (from the built graph + custom defs).
     const cand = flowCandidates(lastGraph, customNodes);
@@ -2355,21 +2649,45 @@ export function addFlowSection(nav: any, sections: any) {
   const load = async () => {
     let path = withInstance('/api/flow', instSel);
     if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
+    const past = historyQuery(hist);
+    if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
     const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
     withheldSources = (w.body && w.body.ok && w.body.sources) || [];
-    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; renderEditor(); return; }
+    if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; redrawSubPages(); return; }
+    // Say plainly that this is not now. A past diagram that looks like the live one is the worst outcome.
+    hist.setNote(historyNote(r.body));
     lastGraph = r.body;
     draw(r.body);
-    renderEditor();
-    renderTree();
+    redrawSubPages();
   };
   refresh.onclick = load;
 
+  // A sub-page repaints with the data only while it is the page you are on — saving from the hierarchy
+  // editor reloads the graph, and rebuilding a page nobody is looking at would drop a drag in progress.
+  const redrawSubPages = () => {
+    if (edPage.sec.classList.contains('active')) renderEditor();
+    if (treePage.sec.classList.contains('active')) renderTree();
+  };
+
+  // The editor draws every node the diagram knows about, not just the configured ones, so it needs the
+  // graph — reachable now without going via the Flow page first.
+  const openSubPage = async (page: any, render: () => void) => {
+    activate(page.link, page.sec);
+    if (!lastGraph) await load();
+    render();
+  };
+  treePage.link.onclick = () => openSubPage(treePage, renderTree);
+  edPage.link.onclick = () => openSubPage(edPage, renderEditor);
+  settingsPage.link.onclick = () => { activate(settingsPage.link, settingsPage.sec); renderSettings(); };
+
   // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
   // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
+  //
+  // Updates are ignored while a past moment is on screen. A push carries the current readings, and painting
+  // them under a chosen date shows live figures labelled as that date — the plainest way to mislead.
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body: any) => { if (!body || !body.ok) return; lastGraph = body; draw(body); });
+    (body: any) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
@@ -2933,6 +3251,7 @@ export function addNodesSection(nav: any, sections: any) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
+    ed.appendChild(renderAutoTagRules(flow, cand, render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 
@@ -2971,6 +3290,17 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
   sec.appendChild(bar);
+  // As on the Flow page: a whole day is an energy question, a specific time is a power one, and the choice
+  // is a default at the moment of the pick rather than something re-imposed on every load.
+  let hadDay = false;
+  const hist = historyControl((what: any) => {
+    const leftLive = what === 'day' && !hadDay && !!hist.day();
+    hadDay = !!hist.day();
+    if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
+      showSel.value = 'energytoday';
+    load();
+  });
+  sec.appendChild(hist.row);
   showSel.onchange = () => load();
 
   // One column for the whole board, so the diagram and the tiles share an edge and read as a single
@@ -3171,7 +3501,11 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
     let r: any;
-    try { r = await api(withInstance('/api/flow' + (isEnergy ? '?metric=' + encodeURIComponent(metric) : ''), instSel)); }
+    const at = hist.at();
+    let path = withInstance('/api/flow' + (isEnergy ? '?metric=' + encodeURIComponent(metric) : ''), instSel);
+    const past = historyQuery(hist);
+    if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
+    try { r = await api(path); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
@@ -3189,6 +3523,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // report a battery doing both at once. These tiles compute the in-direction themselves, from the live
     // cache, a few lines below. '#' appears in no real id (PDU and outlet ids use ':'), so it is a safe
     // marker for "the builder made this".
+    hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n: any) => !String(n.id || '').includes('#'));
 
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes, plus battery state of
@@ -3251,28 +3586,47 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       }
     }
 
-    // Self-sufficiency is a cumulative-ENERGY question, not an instantaneous-power one: over time, what share
-    // of the home's kWh came from solar + battery rather than the grid. Pull the same graph on the energy
-    // metric plus the in-direction (charge/export) energy, and compute the ratio from those totals — the
-    // power figures above only tell you this instant, which swings wildly and misreads a momentary grid draw
-    // as low self-sufficiency even on a house that's net-solar over the day.
+    // Self-sufficiency is an ENERGY question — over some window, what share of the home's kWh came from
+    // solar + battery rather than the grid — so it is answered over the window the board is showing.
+    //
+    // It used to fetch lifetime energy unconditionally. Under a chosen day that put a figure describing all
+    // time beneath tiles describing that day: the bar did not move when the day did, and the two contradicted
+    // each other on the same screen.
     let eHome: number | null = null, eFromGrid: number | null = null, eUnits = 'kWh';
-    try {
-      const er = await api(withInstance('/api/flow?metric=energy', instSel));
+    let eWindow = 'of lifetime energy';
+    if (isEnergy) {
+      // The board is already an energy view, so the bar is a share of the very tiles above it. No second
+      // read, and no second way of deriving the same numbers that could disagree with them.
+      eHome = home;
+      eUnits = units;
+      // Energy drawn from the grid is what it imported. Netting export off first would let a house that
+      // imported 10 kWh and exported 10 read as fully self-sufficient, which it was not.
+      eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
+      const day = hist.day();
+      eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
+        : metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+    } else try {
+      // Today, not all time. On the power view this asked for lifetime energy, so the bar under a board of
+      // live watts described every kWh since each counter was first bound — a figure that barely moves and
+      // answers a question nobody was asking. Today is the window the rest of the board is about.
+      const er = await api(withInstance('/api/flow?metric=energytoday', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
         eUnits = er.body.units || 'kWh';
+        // From the answer, not from what was asked for. Hardcoding "today" here meant the label kept
+        // saying today no matter which metric came back, so it could not be wrong and could not be caught.
+        eWindow = er.body.metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
         const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
-        // In-direction (charge/export) energy from the same live cache, keyed energy#in.
+        // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy: Record<string, number> = {};
-        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy#in' }));
+        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energytoday#in' }));
         if (eq.length) {
           try {
             const elr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(eq) });
             (elr.body?.values || []).forEach((v: any) => { if (typeof v.value === 'number') eInBy[`${v.node}|${v.metric}`] = v.value; });
           } catch { /* no live cache — energy#in just stays absent */ }
         }
-        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
+        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energytoday#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
         const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;
@@ -3280,7 +3634,9 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
           const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
           if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridNet || 0);
         }
-        if (eGridNet != null) eFromGrid = Math.max(0, eGridNet);   // export doesn't count against self-sufficiency
+        // What the house drew, not what it drew net of what it sent back: exported energy is not
+        // consumption avoided, and netting it off overstates the share solar covered.
+        if (eGrid.value != null) eFromGrid = Math.max(0, eGrid.value);
       }
     } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
 
@@ -3336,9 +3692,9 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
         dial(loadIds, home)));
 
-    // Self-sufficiency: the share of the home's cumulative ENERGY (kWh) NOT drawn from the grid — a lifetime
-    // figure, not this instant's power. Only when the home energy and grid import both resolve and the house
-    // has actually used energy; anything else would be dividing a guess.
+    // Self-sufficiency: the share of the home's energy (kWh) over the window above that was NOT drawn from
+    // the grid. Only when the home energy and grid import both resolve and the house has actually used
+    // energy; anything else would be dividing a guess.
     if (eHome != null && eHome > 0 && eFromGrid != null) {
       const covered = Math.max(0, eHome - eFromGrid);
       const pct = Math.max(0, Math.min(100, Math.round((covered / eHome) * 100)));
@@ -3346,7 +3702,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
         el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
-        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} of lifetime energy covered by solar + battery.` }),
+        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery.` }),
       );
       summary.appendChild(row);
     }
@@ -3361,8 +3717,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   // The board is assembled from several reads (the graph, the in-direction live values, the energy graph),
   // so the push is used as a *trigger*: when the server says the flow moved, rebuild the board. That keeps
   // one source of truth for how the figures are derived while making the page react in ~2s instead of 8.
-  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''), () => load());
+  // Both the push and the fallback timer are held while a past moment is on screen: a reload would fetch
+  // the chosen instant again, but it would also overwrite a view the operator is reading with a fresh one
+  // every couple of seconds.
+  const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''),
+    () => { if (!hist.day()) load(); });
   // Fallback for when the stream isn't up; it does nothing while it is.
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 8000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }

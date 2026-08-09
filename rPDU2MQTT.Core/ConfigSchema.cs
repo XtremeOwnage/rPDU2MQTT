@@ -53,10 +53,23 @@ public sealed class SchemaNode
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsFeatureToggle { get; set; }
+
+    /// <summary>
+    /// This setting only applies when a sibling setting has one of these values — see
+    /// <c>VisibleWhenAttribute</c>. The GUI hides it the rest of the time. Null when it always applies.
+    /// </summary>
+    public VisibleWhenRule? VisibleWhen { get; set; }
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
     public string? KeyType { get; set; }
+}
+
+/// <summary>When a setting applies: the sibling property that decides, and the values it applies to.</summary>
+public class VisibleWhenRule
+{
+    public string Key { get; set; } = "";
+    public string[] Values { get; set; } = [];
 }
 
 /// <summary>
@@ -74,12 +87,31 @@ public static class ConfigSchema
 
     // Used for the config payload itself. Keys are the model's real (PascalCase) property names so
     // they line up exactly with the schema's Key values the form binds against.
+    /// <summary>The options the config payload itself round-trips through. Exposed so anything comparing two
+    /// configuration documents (see <see cref="ConfigApply"/>) uses the same field names the GUI binds to.</summary>
+    public static JsonSerializerOptions ConfigJsonOptions => ConfigJson;
+
     private static readonly JsonSerializerOptions ConfigJson = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },
     };
+
+    /// <summary>
+    /// The metrics a live source may be bound to — read from <c>EnergyFlowSource.Metric</c>, which is what
+    /// actually validates a binding.
+    ///
+    /// <para>
+    /// Not every metric in the unit table: <c>energytoday</c> is derived by the aggregation service from a
+    /// counter's rise, so offering it as something to bind would produce a binding the source validation
+    /// then rejects. Taken from the property rather than retyped so the offer and the rule cannot drift.
+    /// </para>
+    /// </summary>
+    private static readonly string[] BindableMetrics =
+        typeof(EnergyFlowSource).GetProperty(nameof(EnergyFlowSource.Metric))!
+            .GetCustomAttribute<AllowedValuesAttribute>()!.Values
+            .Select(v => v?.ToString() ?? "").ToArray();
 
     /// <summary>Build the schema for the whole configuration model.</summary>
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
@@ -141,6 +173,11 @@ public static class ConfigSchema
         if (prop.GetCustomAttribute<FeatureToggleAttribute>() is not null)
             node.IsFeatureToggle = true;
 
+        // A setting that belongs to one choice of another setting — the Prometheus URL when the history
+        // provider is Prometheus. The form hides it otherwise.
+        if (prop.GetCustomAttribute<VisibleWhenAttribute>() is { } vis)
+            node.VisibleWhen = new VisibleWhenRule { Key = vis.Key, Values = vis.Values };
+
         // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
         // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).
         if (type == typeof(string) && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } allowed)
@@ -163,6 +200,22 @@ public static class ConfigSchema
         }
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
+
+        // A closed set of answers for a collection's items. The element of a list and the value of a
+        // dictionary have no property to annotate, so this is where their choices arrive.
+        if (node.ValueSchema is { } vs)
+        {
+            if (prop.GetCustomAttribute<ItemAllowedValuesAttribute>() is { } items)
+            {
+                vs.EnumValues = items.Values;
+                vs.Type = "enum";
+            }
+            else if (prop.GetCustomAttribute<MetricItemChoicesAttribute>() is not null)
+            {
+                vs.EnumValues = BindableMetrics;
+                vs.Type = "enum";
+            }
+        }
         return node;
     }
 

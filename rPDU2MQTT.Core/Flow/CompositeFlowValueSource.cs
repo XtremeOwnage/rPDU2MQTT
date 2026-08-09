@@ -5,7 +5,7 @@ namespace rPDU2MQTT.Core.Flow;
 /// (node, metric) wins. Lets the graph draw live values from more than one ingest at once — MQTT and Modbus
 /// TCP today — without <see cref="FlowGraphBuilder"/> or any exporter knowing there's more than one source.
 /// </summary>
-public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSources
+public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics
 {
     private readonly IReadOnlyList<IFlowValueSource> sources;
 
@@ -19,6 +19,30 @@ public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSource
         value = 0;
         return false;
     }
+
+    /// <summary>
+    /// When each reading arrived, from whichever ingest holds it.
+    ///
+    /// <para>
+    /// Merging this was missed when the composite was introduced, and the consequence was silent: the Node
+    /// Data page asks the API for readings and their ages, the API asks for these diagnostics, and a
+    /// composite that did not offer them answered "no reading" for every row. Every source on the page read
+    /// "— / never" while the diagram beside it drew their values perfectly, because the diagram only needs
+    /// <see cref="TryGetValue"/>. A capability that quietly disappears when two ingests are combined is
+    /// worse than one that was never there.
+    /// </para>
+    /// </summary>
+    public bool TryDescribe(string nodeId, string metric, out FlowReading reading)
+    {
+        foreach (var s in sources.OfType<IFlowValueDiagnostics>())
+            if (s.TryDescribe(nodeId, metric, out reading))
+                return true;
+        reading = default;
+        return false;
+    }
+
+    public IReadOnlyCollection<(string Node, string Metric)> ReportedKeys =>
+        sources.OfType<IFlowValueDiagnostics>().SelectMany(s => s.ReportedKeys).Distinct().ToList();
 
     /// <summary>
     /// What every ingest behind this one is refusing to publish. Merged here so the GUI asks once and no

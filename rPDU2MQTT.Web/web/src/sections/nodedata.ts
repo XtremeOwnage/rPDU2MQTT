@@ -71,7 +71,11 @@ export function addNodeDataSection(nav: any, sections: any) {
     const f = (filter.value || '').trim().toLowerCase();
     let list = rows();
     list = list.filter(r => !f || `${r.node.Label || ''} ${r.node.Id} ${metricName(r.metric)} ${describe(r.src)}`.toLowerCase().includes(f));
-    if (onlyProblems.checked) list = list.filter(r => { const v = live[keyOf(r)]; return r.fixed == null && (!v || v.reported == null || v.fresh === false); });
+    if (onlyProblems.checked) list = list.filter(r => {
+      const v = live[keyOf(r)];
+      // A reading with no timestamp is not a problem — it is in use. Only nothing at all, or something stale.
+      return r.fixed == null && (!v || (v.reported == null && v.value == null) || v.fresh === false);
+    });
 
     wrap.innerHTML = '';
     if (!list.length) {
@@ -93,14 +97,22 @@ export function addNodeDataSection(nav: any, sections: any) {
         el('div', { class: 'desc', style: { fontSize: '11px', margin: '0' }, text: r.node.Id })));
       tr.appendChild(el('td', { text: metricName(r.metric) }));
 
+      // `reported` is the reading including one that has expired, and it only exists where the ingest can
+      // date its readings. `value` is the live figure the roll-up is using. Reading the first alone meant a
+      // source that cannot report ages showed "—" here while the diagram beside it drew that very number.
+      const shown = v ? (v.reported != null ? v.reported : v.value) : null;
       const val = el('td', { class: 'num' });
       if (r.fixed != null) val.append(el('span', { text: `${formatNum(r.fixed)} ${metricUnit(r.metric)}`.trim() }));
-      else if (v && v.reported != null) val.append(el('span', { text: `${formatNum(v.reported)} ${metricUnit(r.metric)}`.trim() }));
+      else if (shown != null) val.append(el('span', { text: `${formatNum(shown)} ${metricUnit(r.metric)}`.trim() }));
       else { val.append(el('span', { style: { color: 'var(--muted)' }, text: '—' })); missing++; }
       tr.appendChild(val);
 
       const upd = el('td');
       if (r.fixed != null) upd.append(el('span', { class: 'desc', text: 'fixed' }));
+      // A value with no timestamp is not a source that never reported — it is one whose ingest does not
+      // date its readings. Calling it "never" while showing its number contradicts the row itself.
+      else if (v && v.atUtc == null && shown != null)
+        upd.append(el('span', { class: 'desc', title: 'This value is in use, but the source it came from does not record when it arrived, so it cannot be aged.', text: 'no timestamp' }));
       else if (!v || v.atUtc == null) upd.append(el('span', { style: { color: 'var(--muted)' }, text: 'never' }));
       else {
         const fresh = v.fresh !== false;

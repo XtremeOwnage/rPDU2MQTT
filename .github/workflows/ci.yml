@@ -1,11 +1,20 @@
 name: CI
 
+# A branch with an open PR used to run this twice for one `git push` — once for the push, once for the
+# synchronize — and both runs tested the same commit. `push` is now main only (the merge commit, which no
+# pull_request event covers); everything on a branch is covered by its PR.
 on:
   workflow_dispatch:
   push:
-    branches: [ '**' ]
+    branches: [ main ]
   pull_request:
     branches: [ "main" ]
+
+# Pushing twice in a row supersedes the first run. Nothing is published here, so there is nothing to leave
+# half-done by cancelling it — main is excluded anyway, since its history is what the badge reports on.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:

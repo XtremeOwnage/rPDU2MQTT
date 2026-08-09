@@ -103,6 +103,36 @@ function renderUpdate(u: any) {
   }
 }
 
+/// Settings that were saved but that this process is not running.
+///
+/// Most of the configuration is read once at startup, so saving it writes the file and changes nothing
+/// else — the GUI then showed the saved value while the bridge went on behaving the old way, with a single
+/// toast as the only warning. The badge stays until a restart closes the gap, on every page and in every
+/// browser, and clicking it does the restart.
+function renderRestartPending(r: any) {
+  const pill: any = document.getElementById('st-restart');
+  if (!pill) return;
+  const settings: string[] = (r && r.settings) || [];
+  if (!r || !r.required || !settings.length) { pill.classList.add('is-hidden'); return; }
+  pill.classList.remove('is-hidden');
+  pill.textContent = 'Restart required';
+  pill.title = `${settings.length} saved setting(s) are not what this process is running:\n`
+    + settings.slice(0, 12).map(s => '· ' + s).join('\n')
+    + (settings.length > 12 ? `\n· …and ${settings.length - 12} more` : '')
+    + '\nClick to restart the bridge and apply them.';
+  pill.onclick = () => restartNow(settings);
+}
+
+/// Restart the bridge, having said exactly what it is for. The stream drops on the way, which the live
+/// pill already knows how to explain.
+async function restartNow(settings: string[]) {
+  const what = settings.length === 1 ? settings[0] : `${settings.length} settings`;
+  if (!confirm(`Restart the bridge now to apply ${what}?\n\nPolling and MQTT publishing stop for a few seconds. This page reconnects on its own.`)) return;
+  expectRestart('Applying saved settings');
+  const r = await api('/api/restart', { method: 'POST' });
+  toast(r.body?.message || (r.ok ? 'Restarting…' : 'Could not restart.'), !!(r.body?.ok ?? r.ok));
+}
+
 // Paint the app bar from a /api/status body — from the initial fetch, or pushed on the `status` feed.
 function renderStatus(body: any) {
   if (!body) return;
@@ -115,6 +145,8 @@ function renderStatus(body: any) {
   });
   set('st-mqtt-dot', e => e.className = 'dot ' + (body.mqttConnected ? 'good' : 'bad'));
   renderUpdate(body.update);
+
+  renderRestartPending(body.restart);
 
   // A ConfigMap / read-only mount can't be saved: say so up front, not after the save fails.
   configWritable = body.configWritable !== false;
@@ -231,6 +263,14 @@ async function saveConfigChanges() {
   if (ok) setBaseline(payload);
   else renderSaveBar();
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
+
+  // Offer the restart at the moment it is needed, rather than leaving the operator to notice later that
+  // the bridge is still running the old settings.
+  if (ok && r.body.restartRequired) {
+    const settings: string[] = r.body.restartSettings || [];
+    renderRestartPending({ required: true, settings });
+    restartNow(settings);
+  }
 }
 
 // The reviewable list of what a save would write: one row per setting, old value -> new value.

@@ -40,6 +40,15 @@ function* descendants(node) {
   for (const c of node.children) { yield c; yield* descendants(c); }
 }
 
+// A text node with its text. The browser's append()/appendChild() accept a bare string; the stub used to
+// drop it, so a label built as el('label', {}, checkbox, ' Track daily totals') rendered as a checkbox with
+// no words next to it here while reading correctly in a browser — and any assertion on that text was
+// vacuous rather than failing.
+export function textNode(t) { return Object.assign(makeEl('#text'), { _text: String(t ?? '') }); }
+
+// What append()/appendChild() were handed: an element, or text to wrap in a node.
+function asNode(c) { return typeof c === 'string' || typeof c === 'number' ? textNode(c) : c; }
+
 export function makeEl(tag = 'div') {
   const node = {
     tag, children: [], attrs: {}, style: {}, dataset: {}, _text: '',
@@ -64,6 +73,7 @@ export function makeEl(tag = 'div') {
     // to leave the tree, or a test can't tell an open modal from a closed one.
     parent: null,
     appendChild(c) {
+      c = asNode(c);
       if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); }
       return c;
     },
@@ -74,7 +84,7 @@ export function makeEl(tag = 'div') {
       this._adopted = true;
       this.value = c.value || (c.attrs && c.attrs.value) || '';
     },
-    append(...cs) { cs.forEach(c => { if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
+    append(...cs) { cs.forEach(c => { c = asNode(c); if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
     remove() { if (this.parent) this.parent.removeChild(this); },
     // Swap this node for another in the parent's child list, keeping its position — used where a toolbar
@@ -130,7 +140,7 @@ export function makeDom({ bodies }) {
       documentElement: makeEl('html'),
       getElementById: (id) => getEl(id),
       createElement: (t) => makeEl(t), createElementNS: (_ns, t) => makeEl(t),
-      createTextNode: () => makeEl('#text'),
+      createTextNode: (t) => textNode(t),
       querySelector: (s) => query(root, s, false),
       querySelectorAll: (s) => query(root, s, true),
       elementFromPoint: () => null,
