@@ -308,3 +308,35 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
 
 /// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
 /// is used once when wiring something up, so it does not belong on the node editor's toolbar.
+
+export function addMqttImportSection(nav: any, sections: any) {
+  const link = navLink(nav, 'MQTT Import', '⇤');
+  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
+  link.dataset.section = 'EnergyFlow';
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'MQTT Import' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'Add energy-flow nodes from readings other integrations already publish to this broker — by their '
+        + 'Home Assistant discovery where they announce it, or by topic shape where they do not.',
+  }));
+
+  const host = el('div');
+  sec.appendChild(host);
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const nodes = ensure(flow, 'Nodes', []);
+    host.innerHTML = '';
+    host.appendChild(renderDiscoverPanel(flow, render));
+    const bar = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(() => render());
+    bar.appendChild(save);
+    host.appendChild(bar);
+  };
+
+  link.onclick = () => { render(); activate(link, sec); };
+  return { link, sec };
+}

@@ -27,6 +27,9 @@ const MODULES = [
   'energy.ts',
   'history-control.ts',
   'charts.ts',
+  'flow-banners.ts',
+  'flow-focus.ts',
+  'flow-view.ts',
   'node-templates.ts',
   'palette.ts',
   'overrides.ts',
@@ -36,6 +39,7 @@ const MODULES = [
   'sections/livedata.ts',
   'sections/flow.ts',
   'sections/node-editor.ts',
+  'sections/nodes.ts',
   'sections/energy-board.ts',
   'sections/mqtt-import.ts',
   'sections/nodedata.ts',
@@ -57,6 +61,15 @@ const MODULES = [
 // which is how a module with a dozen named imports is written — left its closing brace behind and the
 // whole bundle failed to parse. The error pointed at the brace rather than the import, which is a long way
 // from the cause.
+// A module listed twice is concatenated twice, and every top-level name in it collides with itself. The
+// error that produces — "Identifier 'x' has already been declared", pointing at the second copy — says
+// nothing about the list it came from.
+{
+  const seen = new Set();
+  const twice = MODULES.filter(m => seen.size === seen.add(m).size);
+  if (twice.length) throw new Error("MODULES lists " + twice.join(", ") + " more than once; each module is concatenated once.");
+}
+
 function debundle(js) {
   const out = [];
   let inImport = false;

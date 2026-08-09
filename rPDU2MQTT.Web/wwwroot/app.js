@@ -1082,6 +1082,459 @@ function barChart(opts
   return { svg, gaps };
 }
 
+// ── flow-banners.ts ─────────────────────────────────────────────
+// What the diagram says about readings it does not trust.
+//
+// Two banners above the chart, because the alternative is a small mark on a label printed in the same
+// weight as every honest number — which is how a node carrying a 129.9 kWh gap went unnoticed for a day.
+// Their own module: the rules for when to speak up are the point, and they are easier to find here than
+// three hundred lines into a drawing routine.
+
+/// The banner naming every binding the bridge is dropping, and why. Separate from the contradiction banner
+/// because it is a different statement: that one says a number on the chart disagrees with the chart, this
+/// one says a number is absent on purpose. A node reading "no data" is otherwise indistinguishable from one
+/// nobody ever bound a source to, and the two need completely different fixes.
+function withheldBanner(sources       )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  box.appendChild(el('strong', {
+    text: sources.length === 1
+      ? '1 source is being withheld'
+      : `${sources.length} sources are being withheld`,
+  }));
+  box.appendChild(el('div', {
+    class: 'desc',
+    style: { margin: '2px 0 6px' },
+    text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
+        + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
+  }));
+  sources.forEach((w     ) => {
+    const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
+    row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
+    row.appendChild(el('span', { text: w.reason || '' }));
+    box.appendChild(row);
+  });
+  return box;
+}
+
+/// The banner naming every node whose figure its own flows contradict. Above the chart, not inside it: the
+/// point is to be read before the numbers are, by someone who came to the page to read the numbers.
+function contradictionBanner(items                                                , onFocus                      )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  const n = items.length;
+  box.appendChild(el('strong', {
+    text: n === 1
+      ? '1 node’s figure is contradicted by its own flows'
+      : `${n} nodes’ figures are contradicted by their own flows`,
+  }));
+  box.appendChild(el('div', {
+    class: 'desc',
+    style: { margin: '2px 0 6px' },
+    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
+        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
+        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
+        + 'suspect until the gap is explained.',
+  }));
+  const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
+  items.forEach(it => {
+    const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
+    b.onclick = () => onFocus(it.id);
+    row.appendChild(b);
+  });
+  box.appendChild(row);
+  return box;
+}
+
+/// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
+function contradictionShare(n     , reading               )                {
+  if (n.imbalance == null || reading == null || !isFinite(reading)) return null;
+  // The denominator is what the node is handling — the larger of its two sides.
+  //
+  // This used to reconstruct it as `reading + imbalance`, which was true while a measured node's imbalance
+  // meant "throughput − reading". It stopped being true when an imbalance became outflow − inflow for every
+  // node, and the arithmetic went on producing a plausible number from a premise that no longer held. The
+  // server states the throughput now, so there is nothing to reconstruct; a node without one is reporting
+  // the larger side as its own value already.
+  const throughput = typeof n.throughput === 'number' ? n.throughput : reading;
+  if (!(throughput > 0)) return null;
+  return Math.min(1, Math.abs(n.imbalance) / throughput);
+}
+
+// Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
+// figures already measured and is never exported (see FlowNode.Synthetic), so hiding it changes what you
+// are looking at and nothing else. On by default — a panel passing 8 kW to 560 W of metered outlets is
+// worth seeing — but it can dominate a chart when most of the load is unmetered, which is exactly when
+// someone wants the metered detail back.
+
+// ── flow-focus.ts ───────────────────────────────────────────────
+// Reading the diagram: what lights up when you point at something.
+//
+// Clicking a node lights everything upstream of it; a tag chip dims everything not carrying it; hovering
+// shows the node's own figures. All three highlight and none of them filter — removing nodes from a Sankey
+// removes the ribbons into them too, so a node whose feeders were hidden reads as unsourced and the totals
+// along the remaining chain stop adding up.
+
+let activeTag                = null;
+
+/// Chips for every tag in use, highlighting the nodes carrying it (#342).
+function tagToggles(nodes       , svg     , apply                              )                     {
+  const all = new Map                ();   // lower-case key -> first spelling seen
+  nodes.forEach(n => (n.tags || []).forEach((t        ) => {
+    const k = t.toLowerCase();
+    if (!all.has(k)) all.set(k, t);
+  }));
+  if (!all.size) return null;   // nothing tagged: an empty row of controls is just clutter
+
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Tags:' }));
+  [...all.values()].sort((a, b) => a.localeCompare(b)).forEach(tag => {
+    const on = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
+    const chip = btn(tag, on ? 'primary' : undefined);
+    chip.title = on
+      ? 'Showing every node with this tag; click to clear.'
+      : `Highlight the nodes tagged “${tag}”. Nothing is hidden and no figure changes — the rest are dimmed.`;
+    // Read the state at click time, not the value captured when the chip was built: the row is rebuilt on
+    // every toggle, but a chip that outlives its rebuild would keep re-selecting the tag it already has.
+    chip.onclick = () => {
+      const selected = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
+      activeTag = selected ? null : tag;
+      apply(activeTag);
+    };
+    row.appendChild(chip);
+  });
+  return row;
+}
+
+/// The strip above a view: the switches that change how it is drawn, then the group chips.
+///
+/// `drawn` says whether this view is a drawing. The roll-up is a table — nothing on it is drawn and nothing
+/// animates — so offering "Unmeasured load" and "Animate flow" there described a diagram that was not on
+/// the page. The group chips still belong: collapsing a group changes the table's rows.
+
+// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
+// bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
+// --- Focus a supply path --------------------------------------------------------------------------
+// "Where does this node's power come from?" is the question the diagram is worst at once there are more
+// than a handful of ribbons. Clicking a node lights everything upstream of it and dims the rest.
+//
+// Done by classing the <svg> and the elements on the path, never by rewriting their fill-opacity: that
+// attribute already carries meaning (a hairline says the quantity is unknown), and overwriting it to dim
+// would destroy the very thing the diagram is being read for.
+let focusedNode                = null;
+
+function focusPath(svg     , incoming     , id        ) {
+  if (focusedNode === id) { clearFocus(svg); return; }
+  focusedNode = id;
+
+  // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
+  // graph acyclic — this walks whatever it is handed.
+  const onPath = new Set        ([id]);
+  const links = new Set        ();
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop() ;
+    (incoming[cur] || []).forEach((l     ) => {
+      links.add(l.source + '' + l.target);
+      if (!onPath.has(l.source)) { onPath.add(l.source); stack.push(l.source); }
+    });
+  }
+
+  svg.querySelectorAll('[data-node]').forEach((e     ) =>
+    e.classList[onPath.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
+  svg.querySelectorAll('[data-src]').forEach((e     ) =>
+    e.classList[links.has(e.getAttribute('data-src') + '' + e.getAttribute('data-dst')) ? 'add' : 'remove']('on-path'));
+  svg.classList.add('flow-focus');
+}
+
+/// Highlight every node carrying `tag`, dimming the rest (#342).
+///
+/// A highlight and not a filter: removing nodes from a Sankey removes the ribbons into them too, so a
+/// node whose feeders were hidden would read as unsourced and the totals along the remaining chain would
+/// no longer add up. Dimming answers "which of these are tagged X" without changing a single figure.
+function focusTag(svg     , nodesById                  , tag        ) {
+  const tagged = new Set        ();
+  nodesById.forEach((n, id) => {
+    if ((n.tags || []).some((t        ) => t.toLowerCase() === tag.toLowerCase())) tagged.add(id);
+  });
+
+  focusedNode = null;
+  svg.querySelectorAll('[data-node]').forEach((e     ) =>
+    e.classList[tagged.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
+  // Ribbons stay dim throughout: a link is not tagged, and lighting one because an end happens to be
+  // would say the flow itself is part of the selection.
+  svg.querySelectorAll('[data-src]').forEach((e     ) => e.classList.remove('on-path'));
+  svg.classList.add('flow-focus');
+}
+
+function clearFocus(svg     ) {
+  focusedNode = null;
+  if (!svg) return;
+  svg.classList.remove('flow-focus');
+  svg.querySelectorAll('.on-path').forEach((e     ) => e.classList.remove('on-path'));
+}
+
+// --- Node hover card ------------------------------------------------------------------------------
+// One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
+let nodeCardEl      = null;
+
+function showNodeCard(host     , ev     , rows       ) {
+  if (!nodeCardEl) {
+    nodeCardEl = el('div', { class: 'node-card' });
+    document.body.appendChild(nodeCardEl);
+  }
+  nodeCardEl.innerHTML = '';
+  rows.forEach(r => nodeCardEl.appendChild(r));
+  nodeCardEl.classList.add('show');
+  moveNodeCard(ev);
+}
+
+// Follow the pointer, but flip to the other side rather than hanging off the edge of the window.
+function moveNodeCard(ev     ) {
+  if (!nodeCardEl || !nodeCardEl.classList.contains('show')) return;
+  const pad = 14;
+  const w = nodeCardEl.offsetWidth || 260, h = nodeCardEl.offsetHeight || 120;
+  const vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
+  const x = ev.clientX + pad + w > vw ? ev.clientX - pad - w : ev.clientX + pad;
+  const y = Math.min(Math.max(pad, ev.clientY - h / 2), vh - h - pad);
+  nodeCardEl.style.left = Math.max(pad, x) + 'px';
+  nodeCardEl.style.top = y + 'px';
+}
+
+function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
+
+// Device templates and the panels that import them live in node-templates.ts — the MQTT Import page
+// and the Nodes page both instantiate them, and two ways of writing the same device is one too many.
+
+// ── flow-view.ts ────────────────────────────────────────────────
+// What the diagram shows, as opposed to what it measures.
+//
+// Two per-viewer switches (the unmetered remainder, the moving ribbons) and the group collapse, which folds
+// several nodes into one. None of it changes a figure: a hidden remainder is still in every total, and a
+// collapsed group reports the sum of the members it hides. They live together because they are the same
+// kind of decision — how much detail to draw — and because the strip above each graph offers all of them.
+//
+// The switches are browser-local rather than configuration: they are a property of the person looking, not
+// of the system.
+
+// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
+//     state is per-viewer (this session), defaulting to collapsed so a group de-clutters until you open it.
+const collapsedGroups = new Set        ();
+const seenGroups = new Set        ();   // groups we've applied the default (collapsed) to at least once
+
+function flowGroups()        {
+  return (state.data?.EnergyFlow?.Groups || []).filter((g     ) => g && g.Id);
+}
+
+// Collapse each group the FIRST time we see it (a group exists to tidy the diagram; opening it is the
+// deliberate act). After that, respect the viewer's choice — the old version re-collapsed any group that
+// wasn't currently collapsed on every redraw, which silently undid an expand the instant it happened.
+function ensureGroupState() {
+  flowGroups().forEach((g     ) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
+}
+
+// A member's owning group id, only when that group is currently collapsed.
+function collapsedMemberMap()                      {
+  const map                      = {};
+  flowGroups().forEach((g     ) => { if (collapsedGroups.has(g.Id)) (g.Members || []).forEach((m        ) => { map[m] = g; }); });
+  return map;
+}
+
+// Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
+// members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
+// group is only as known as its members (the same never-fabricate rule the server uses).
+/**
+ * An expanded group shows its members *instead of* its anchor, not as well as it.
+ *
+ * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
+ * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
+ * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
+ * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
+ *
+ * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
+ * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
+ * the toggle changes only how finely it is broken down.
+ *
+ * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
+ * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
+ * at least not a fabricated number, so that case keeps the hop.
+ */
+function explodeExpandedGroups(nodes       , links       )                                 {
+  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id));
+  if (!groups.length) return { nodes, links };
+
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g     ) => {
+    const byId      = {}; outNodes.forEach((n     ) => { byId[n.id] = n; });
+    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    const members = (g.Members || []).filter((m        ) => byId[m]);
+    if (!members.length) return;
+
+    const feedsAnchor = outLinks.filter((l     ) => l.target === g.Id && members.includes(l.source));
+    const anchorFeeds = outLinks.filter((l     ) => l.source === g.Id);
+    if (!feedsAnchor.length || anchorFeeds.length !== 1) return;
+
+    const target = anchorFeeds[0];
+    const kept = outLinks.filter((l     ) => l.source !== g.Id && !(l.target === g.Id && members.includes(l.source)));
+    outLinks = kept.concat(feedsAnchor.map((ml     ) => ({
+      source: ml.source, target: target.target, value: ml.value,
+      known: ml.known !== false && target.known !== false,
+    })));
+    outNodes = outNodes.filter((n     ) => n.id !== g.Id);
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
+function collapseGraph(nodes       , links       )                                 {
+  const memberOf = collapsedMemberMap();
+  if (!Object.keys(memberOf).length) return { nodes, links };
+
+  const byId      = {}; nodes.forEach(n => { byId[n.id] = n; });
+  const groupNode                      = {};
+  flowGroups().forEach((g     ) => {
+    if (!collapsedGroups.has(g.Id)) return;
+    const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
+    let sum = 0, known = false;
+    (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
+    groupNode[g.Id] = anchor
+      // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
+      ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
+      : { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
+  });
+
+  const remap = (id        ) => (memberOf[id] ? memberOf[id].Id : id);
+  // Drop the collapsed members, keep everyone else, add the group nodes (only groups that actually have a
+  // member present in this graph).
+  const present = new Set        ();
+  // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
+  const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
+  const merged                      = {};
+  links.forEach(l => {
+    const s = remap(l.source), t = remap(l.target);
+    if (s === t) return;                       // a link fully inside one collapsed group
+    present.add(s); present.add(t);
+    const k = s + '\u0000' + t;
+    if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
+    merged[k].value += (l.value || 0);
+    if (l.known === false) merged[k].known = false;
+  });
+  // An anchor group always appears (its node was already in the graph); a synthetic group only if a member was.
+  Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id) || byId[gn.id]) outNodes.push(gn); });
+  return { nodes: outNodes, links: Object.values(merged) };
+}
+
+// The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
+// How much of what passes through a node may go unaccounted for before the node's own figure stops being
+// believable.
+//
+// The server already suppresses noise — it only reports a gap at all above 1 unit AND 2% of the reading —
+// so anything that reaches here is a real discrepancy worth a marker. But a marker was ALL it got: a small
+// "⚠" appended to the label while the number itself was printed in the same weight as every honest figure
+// on the chart. A node carrying a 129.9 kWh gap and a node 3% out looked identical.
+//
+// A quarter is the line because it is past arguing about. Rounding, sampling skew and counters read a few
+// seconds apart do not lose a quarter of the energy; a mis-scaled source, a sensor measuring one leg of a
+// node, or a counter that is not what it was declared to be all do. Above it, the figure is not "slightly
+// off" — it is contradicted by the diagram it sits on, and saying so quietly is how a wrong number gets
+// believed for a week.
+
+let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
+
+function setShowUnmeasured(on         ) {
+  showUnmeasured = on;
+  try { localStorage.setItem('rpdu-flow-unmeasured', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop the unmetered-remainder nodes and their links when the view is switched off. Return lanes (#in)
+/// are real measured flows and are never hidden by this.
+function applyUnmeasuredPref(nodes       , links       )                                 {
+  if (showUnmeasured) return { nodes, links };
+  const hidden = new Set(nodes.filter((n     ) => String(n.id || '').endsWith('#unmeasured')).map((n     ) => n.id));
+  if (!hidden.size) return { nodes, links };
+  return {
+    nodes: nodes.filter((n     ) => !hidden.has(n.id)),
+    links: links.filter((l     ) => !hidden.has(l.target) && !hidden.has(l.source)),
+  };
+}
+
+/// The "Unmeasured load" view switch, shown wherever the group chips are.
+function unmeasuredToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Show the gap between what a node passes and what its metered children draw, as its own node. '
+      + 'A view setting only — the figure is never published, and turning it off does not change any total.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = showUnmeasured;
+  cb.onchange = () => { setShowUnmeasured(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Unmeasured load'));
+  return lbl;
+}
+
+/// The "Animate flow" view switch. Purely local: a per-viewer preference, not a property of the system, and
+/// off by default because motion on a dashboard left up on a wall is a nuisance rather than information.
+function animateToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Draw a moving stream along each ribbon. Speed follows how dense the flow is — flow per unit of '
+      + 'ribbon width — so it says how hard something is moving, which width alone cannot. Links with no '
+      + 'data, and measured zeroes, never animate: nothing should look busier than its reading.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = localStorage.getItem('rpdu2mqtt.flow.animate') === '1';
+  cb.onchange = () => { localStorage.setItem('rpdu2mqtt.flow.animate', cb.checked ? '1' : '0'); onToggle(); };
+  lbl.append(cb, document.createTextNode('Animate flow'));
+  return lbl;
+}
+
+// The "show a past moment" control, and the wording for what comes back, live in history-control.ts:
+// the Energy board builds the same control, and two of them would drift.
+
+function groupToggles(onToggle            , drawn = true)                     {
+  const groups = flowGroups();
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  // The view switches are not about groups and must not disappear with them — this used to return null
+  // when nothing was grouped, which hid the "Unmeasured load" toggle from anyone who had no groups.
+  if (drawn) {
+    row.appendChild(unmeasuredToggle(onToggle));
+    row.appendChild(animateToggle(onToggle));
+  }
+  if (!groups.length) return drawn ? row : null;
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
+  groups.forEach((g     ) => {
+    const on = collapsedGroups.has(g.Id);
+    const count = (g.Members || []).length;
+    const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
+    // A group with no members has nothing to fold — collapsing/expanding it is a no-op, so say so instead of
+    // leaving the click feeling broken.
+    chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
+      : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
+    chip.onclick = () => {
+      if (count === 0) { toast(`“${g.Label || g.Id}” has no members yet — add some in the Groups section on the Nodes tab.`, false); return; }
+      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
+    };
+    row.appendChild(chip);
+  });
+  // Where membership is edited — the toggles only collapse/expand; you add or remove a group's nodes on the
+  // Nodes tab (this is the “how do I add a node to a group?” signpost).
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
+  return row;
+}
+
+// The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+//
+// Not the nodes the builder synthesises to make the diagram balance — a bidirectional node's return lane
+// (`…#in`) and a pass-through's unmetered remainder (`…#unmeasured`). They describe an arithmetic result,
+// not a thing you can wire: they exist only in the built graph, are recomputed on every build, and have no
+// entry in the config at all.
+//
+// Leaving them in put "Unmeasured load" into the hierarchy editor as a node with no links — orphaned and
+// unexplained, because the editor draws links from the config while that node's link exists only in the
+// graph. It also offered them in the "wire to" picker and as group members, where selecting one would
+// write a config link to an id that is regenerated from scratch on the next build.
+//
+// '#' appears in no real id (PDU and outlet ids use ':'), so it marks exactly the builder's own inventions.
+
 // ── node-templates.ts ───────────────────────────────────────────
 // Ready-made device templates: an EG4 inverter, a meter, and whatever else the server ships.
 //
@@ -2018,6 +2471,12 @@ function addLiveDataSection(nav     , sections     ) {
 }
 
 // ── sections/flow.ts ────────────────────────────────────────────
+// The Sankey: the energy hierarchy drawn as ribbons, at a moment in time.
+//
+// What is left of what used to be this whole GUI's flow code. The vocabulary it speaks, the switches that
+// decide how much of it to draw, the banners over it, the highlighting on it, the page that edits its
+// nodes and the one that imports them are all their own modules now — this file is the drawing.
+
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 // Every page speaks it, so it is not this file’s to own.
 
@@ -2051,664 +2510,7 @@ async function saveConfig(onSaved            ) {
   if (ok) { setBaseline(payload); onSaved(); }
 }
 
-// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
-//     state is per-viewer (this session), defaulting to collapsed so a group de-clutters until you open it.
-const collapsedGroups = new Set        ();
-const seenGroups = new Set        ();   // groups we've applied the default (collapsed) to at least once
-
-function flowGroups()        {
-  return (state.data?.EnergyFlow?.Groups || []).filter((g     ) => g && g.Id);
-}
-
-// Collapse each group the FIRST time we see it (a group exists to tidy the diagram; opening it is the
-// deliberate act). After that, respect the viewer's choice — the old version re-collapsed any group that
-// wasn't currently collapsed on every redraw, which silently undid an expand the instant it happened.
-function ensureGroupState() {
-  flowGroups().forEach((g     ) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
-}
-
-// A member's owning group id, only when that group is currently collapsed.
-function collapsedMemberMap()                      {
-  const map                      = {};
-  flowGroups().forEach((g     ) => { if (collapsedGroups.has(g.Id)) (g.Members || []).forEach((m        ) => { map[m] = g; }); });
-  return map;
-}
-
-// Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
-// members' links re-pointed at the group and duplicates merged. A node/link value of null stays null — a
-// group is only as known as its members (the same never-fabricate rule the server uses).
-/**
- * An expanded group shows its members *instead of* its anchor, not as well as it.
- *
- * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
- * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
- * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
- * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
- *
- * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
- * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
- * the toggle changes only how finely it is broken down.
- *
- * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
- * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
- * at least not a fabricated number, so that case keeps the hop.
- */
-function explodeExpandedGroups(nodes       , links       )                                 {
-  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id));
-  if (!groups.length) return { nodes, links };
-
-  let outNodes = nodes, outLinks = links;
-  groups.forEach((g     ) => {
-    const byId      = {}; outNodes.forEach((n     ) => { byId[n.id] = n; });
-    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
-    const members = (g.Members || []).filter((m        ) => byId[m]);
-    if (!members.length) return;
-
-    const feedsAnchor = outLinks.filter((l     ) => l.target === g.Id && members.includes(l.source));
-    const anchorFeeds = outLinks.filter((l     ) => l.source === g.Id);
-    if (!feedsAnchor.length || anchorFeeds.length !== 1) return;
-
-    const target = anchorFeeds[0];
-    const kept = outLinks.filter((l     ) => l.source !== g.Id && !(l.target === g.Id && members.includes(l.source)));
-    outLinks = kept.concat(feedsAnchor.map((ml     ) => ({
-      source: ml.source, target: target.target, value: ml.value,
-      known: ml.known !== false && target.known !== false,
-    })));
-    outNodes = outNodes.filter((n     ) => n.id !== g.Id);
-  });
-  return { nodes: outNodes, links: outLinks };
-}
-
-function collapseGraph(nodes       , links       )                                 {
-  const memberOf = collapsedMemberMap();
-  if (!Object.keys(memberOf).length) return { nodes, links };
-
-  const byId      = {}; nodes.forEach(n => { byId[n.id] = n; });
-  const groupNode                      = {};
-  flowGroups().forEach((g     ) => {
-    if (!collapsedGroups.has(g.Id)) return;
-    const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
-    let sum = 0, known = false;
-    (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
-    groupNode[g.Id] = anchor
-      // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
-      ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
-      : { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
-  });
-
-  const remap = (id        ) => (memberOf[id] ? memberOf[id].Id : id);
-  // Drop the collapsed members, keep everyone else, add the group nodes (only groups that actually have a
-  // member present in this graph).
-  const present = new Set        ();
-  // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
-  const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
-  const merged                      = {};
-  links.forEach(l => {
-    const s = remap(l.source), t = remap(l.target);
-    if (s === t) return;                       // a link fully inside one collapsed group
-    present.add(s); present.add(t);
-    const k = s + '\u0000' + t;
-    if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
-    merged[k].value += (l.value || 0);
-    if (l.known === false) merged[k].known = false;
-  });
-  // An anchor group always appears (its node was already in the graph); a synthetic group only if a member was.
-  Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id) || byId[gn.id]) outNodes.push(gn); });
-  return { nodes: outNodes, links: Object.values(merged) };
-}
-
-// The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
-// How much of what passes through a node may go unaccounted for before the node's own figure stops being
-// believable.
-//
-// The server already suppresses noise — it only reports a gap at all above 1 unit AND 2% of the reading —
-// so anything that reaches here is a real discrepancy worth a marker. But a marker was ALL it got: a small
-// "⚠" appended to the label while the number itself was printed in the same weight as every honest figure
-// on the chart. A node carrying a 129.9 kWh gap and a node 3% out looked identical.
-//
-// A quarter is the line because it is past arguing about. Rounding, sampling skew and counters read a few
-// seconds apart do not lose a quarter of the energy; a mis-scaled source, a sensor measuring one leg of a
-// node, or a counter that is not what it was declared to be all do. Above it, the figure is not "slightly
-// off" — it is contradicted by the diagram it sits on, and saying so quietly is how a wrong number gets
-// believed for a week.
 const CONTRADICTION_SHARE = 0.25;
-
-/// The banner naming every binding the bridge is dropping, and why. Separate from the contradiction banner
-/// because it is a different statement: that one says a number on the chart disagrees with the chart, this
-/// one says a number is absent on purpose. A node reading "no data" is otherwise indistinguishable from one
-/// nobody ever bound a source to, and the two need completely different fixes.
-function withheldBanner(sources       )              {
-  const box = el('div', { class: 'flow-contradiction' });
-  box.appendChild(el('strong', {
-    text: sources.length === 1
-      ? '1 source is being withheld'
-      : `${sources.length} sources are being withheld`,
-  }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    style: { margin: '2px 0 6px' },
-    text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
-        + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
-  }));
-  sources.forEach((w     ) => {
-    const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
-    row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
-    row.appendChild(el('span', { text: w.reason || '' }));
-    box.appendChild(row);
-  });
-  return box;
-}
-
-/// The banner naming every node whose figure its own flows contradict. Above the chart, not inside it: the
-/// point is to be read before the numbers are, by someone who came to the page to read the numbers.
-function contradictionBanner(items                                                , onFocus                      )              {
-  const box = el('div', { class: 'flow-contradiction' });
-  const n = items.length;
-  box.appendChild(el('strong', {
-    text: n === 1
-      ? '1 node’s figure is contradicted by its own flows'
-      : `${n} nodes’ figures are contradicted by their own flows`,
-  }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    style: { margin: '2px 0 6px' },
-    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
-        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
-        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
-        + 'suspect until the gap is explained.',
-  }));
-  const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
-  items.forEach(it => {
-    const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
-    b.onclick = () => onFocus(it.id);
-    row.appendChild(b);
-  });
-  box.appendChild(row);
-  return box;
-}
-
-/// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
-function contradictionShare(n     , reading               )                {
-  if (n.imbalance == null || reading == null || !isFinite(reading)) return null;
-  // The denominator is what the node is handling — the larger of its two sides.
-  //
-  // This used to reconstruct it as `reading + imbalance`, which was true while a measured node's imbalance
-  // meant "throughput − reading". It stopped being true when an imbalance became outflow − inflow for every
-  // node, and the arithmetic went on producing a plausible number from a premise that no longer held. The
-  // server states the throughput now, so there is nothing to reconstruct; a node without one is reporting
-  // the larger side as its own value already.
-  const throughput = typeof n.throughput === 'number' ? n.throughput : reading;
-  if (!(throughput > 0)) return null;
-  return Math.min(1, Math.abs(n.imbalance) / throughput);
-}
-
-// Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
-// figures already measured and is never exported (see FlowNode.Synthetic), so hiding it changes what you
-// are looking at and nothing else. On by default — a panel passing 8 kW to 560 W of metered outlets is
-// worth seeing — but it can dominate a chart when most of the load is unmetered, which is exactly when
-// someone wants the metered detail back.
-let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
-
-function setShowUnmeasured(on         ) {
-  showUnmeasured = on;
-  try { localStorage.setItem('rpdu-flow-unmeasured', on ? '1' : '0'); } catch { /* private mode: this session only */ }
-}
-
-/// Drop the unmetered-remainder nodes and their links when the view is switched off. Return lanes (#in)
-/// are real measured flows and are never hidden by this.
-function applyUnmeasuredPref(nodes       , links       )                                 {
-  if (showUnmeasured) return { nodes, links };
-  const hidden = new Set(nodes.filter((n     ) => String(n.id || '').endsWith('#unmeasured')).map((n     ) => n.id));
-  if (!hidden.size) return { nodes, links };
-  return {
-    nodes: nodes.filter((n     ) => !hidden.has(n.id)),
-    links: links.filter((l     ) => !hidden.has(l.target) && !hidden.has(l.source)),
-  };
-}
-
-/// The "Unmeasured load" view switch, shown wherever the group chips are.
-function unmeasuredToggle(onToggle            )              {
-  const lbl = el('label', {
-    class: 'desc',
-    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
-    title: 'Show the gap between what a node passes and what its metered children draw, as its own node. '
-      + 'A view setting only — the figure is never published, and turning it off does not change any total.',
-  });
-  const cb      = el('input', { type: 'checkbox' });
-  cb.checked = showUnmeasured;
-  cb.onchange = () => { setShowUnmeasured(cb.checked); onToggle(); };
-  lbl.append(cb, document.createTextNode('Unmeasured load'));
-  return lbl;
-}
-
-/// The "Animate flow" view switch. Purely local: a per-viewer preference, not a property of the system, and
-/// off by default because motion on a dashboard left up on a wall is a nuisance rather than information.
-function animateToggle(onToggle            )              {
-  const lbl = el('label', {
-    class: 'desc',
-    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
-    title: 'Draw a moving stream along each ribbon. Speed follows how dense the flow is — flow per unit of '
-      + 'ribbon width — so it says how hard something is moving, which width alone cannot. Links with no '
-      + 'data, and measured zeroes, never animate: nothing should look busier than its reading.',
-  });
-  const cb      = el('input', { type: 'checkbox' });
-  cb.checked = localStorage.getItem('rpdu2mqtt.flow.animate') === '1';
-  cb.onchange = () => { localStorage.setItem('rpdu2mqtt.flow.animate', cb.checked ? '1' : '0'); onToggle(); };
-  lbl.append(cb, document.createTextNode('Animate flow'));
-  return lbl;
-}
-
-// The "show a past moment" control, and the wording for what comes back, live in history-control.ts:
-// the Energy board builds the same control, and two of them would drift.
-
-let activeTag                = null;
-
-/// Chips for every tag in use, highlighting the nodes carrying it (#342).
-function tagToggles(nodes       , svg     , apply                              )                     {
-  const all = new Map                ();   // lower-case key -> first spelling seen
-  nodes.forEach(n => (n.tags || []).forEach((t        ) => {
-    const k = t.toLowerCase();
-    if (!all.has(k)) all.set(k, t);
-  }));
-  if (!all.size) return null;   // nothing tagged: an empty row of controls is just clutter
-
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Tags:' }));
-  [...all.values()].sort((a, b) => a.localeCompare(b)).forEach(tag => {
-    const on = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
-    const chip = btn(tag, on ? 'primary' : undefined);
-    chip.title = on
-      ? 'Showing every node with this tag; click to clear.'
-      : `Highlight the nodes tagged “${tag}”. Nothing is hidden and no figure changes — the rest are dimmed.`;
-    // Read the state at click time, not the value captured when the chip was built: the row is rebuilt on
-    // every toggle, but a chip that outlives its rebuild would keep re-selecting the tag it already has.
-    chip.onclick = () => {
-      const selected = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
-      activeTag = selected ? null : tag;
-      apply(activeTag);
-    };
-    row.appendChild(chip);
-  });
-  return row;
-}
-
-/// The strip above a view: the switches that change how it is drawn, then the group chips.
-///
-/// `drawn` says whether this view is a drawing. The roll-up is a table — nothing on it is drawn and nothing
-/// animates — so offering "Unmeasured load" and "Animate flow" there described a diagram that was not on
-/// the page. The group chips still belong: collapsing a group changes the table's rows.
-function groupToggles(onToggle            , drawn = true)                     {
-  const groups = flowGroups();
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  // The view switches are not about groups and must not disappear with them — this used to return null
-  // when nothing was grouped, which hid the "Unmeasured load" toggle from anyone who had no groups.
-  if (drawn) {
-    row.appendChild(unmeasuredToggle(onToggle));
-    row.appendChild(animateToggle(onToggle));
-  }
-  if (!groups.length) return drawn ? row : null;
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
-  groups.forEach((g     ) => {
-    const on = collapsedGroups.has(g.Id);
-    const count = (g.Members || []).length;
-    const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
-    // A group with no members has nothing to fold — collapsing/expanding it is a no-op, so say so instead of
-    // leaving the click feeling broken.
-    chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
-      : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
-    chip.onclick = () => {
-      if (count === 0) { toast(`“${g.Label || g.Id}” has no members yet — add some in the Groups section on the Nodes tab.`, false); return; }
-      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
-    };
-    row.appendChild(chip);
-  });
-  // Where membership is edited — the toggles only collapse/expand; you add or remove a group's nodes on the
-  // Nodes tab (this is the “how do I add a node to a group?” signpost).
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
-  return row;
-}
-
-// The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
-//
-// Not the nodes the builder synthesises to make the diagram balance — a bidirectional node's return lane
-// (`…#in`) and a pass-through's unmetered remainder (`…#unmeasured`). They describe an arithmetic result,
-// not a thing you can wire: they exist only in the built graph, are recomputed on every build, and have no
-// entry in the config at all.
-//
-// Leaving them in put "Unmeasured load" into the hierarchy editor as a node with no links — orphaned and
-// unexplained, because the editor draws links from the config while that node's link exists only in the
-// graph. It also offered them in the "wire to" picker and as group members, where selecting one would
-// write a config link to an id that is regenerated from scratch on the next build.
-//
-// '#' appears in no real id (PDU and outlet ids use ':'), so it marks exactly the builder's own inventions.
-function flowCandidates(lastGraph     , customNodes       ) {
-  const cand = new Map             ();
-  (lastGraph?.nodes || [])
-    .filter((n     ) => !String(n.id || '').includes('#'))
-    .forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
-  customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
-  return cand;
-}
-
-// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
-// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
-// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
-function renderAutoTagRules(flow     , cand                  , rerender            ) {
-  const rules = ensure(flow, 'AutoTags', []);
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Tags for PDUs and outlets', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Nodes the bridge derives from what it polls have no row of their own to tag. Match them by id, with * for any run of characters: “outlet:rack_pdu_1:*” tags every outlet on that PDU, “pdu:*” every PDU, and a full id one outlet. A tag never changes a reading — only what a view shows and what the exports may carry.' }));
-
-  const ids = [...cand.keys()].filter(id => id.startsWith('pdu:') || id.startsWith('outlet:'));
-
-  const t = el('table', { class: 'ld' });
-  const head = el('tr');
-  ['Match', 'Tags', 'Matches now', ''].forEach(h => head.appendChild(el('th', { text: h })));
-  t.appendChild(el('thead', {}, head));
-  const tb = el('tbody');
-
-  rules.forEach((r     , i        ) => {
-    const tr = el('tr');
-    const matchIn = el('input', { type: 'text', value: r.Match || '', placeholder: 'outlet:rack_pdu_1:*' })                    ;
-    matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
-    tr.appendChild(el('td', {}, matchIn));
-
-    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' })                    ;
-    tagsIn.onchange = () => {
-      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
-      refreshDirty(); rerender();
-    };
-    tr.appendChild(el('td', {}, tagsIn));
-
-    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
-    // is the whole failure mode here — it looks configured and does nothing.
-    const hits = ids.filter(id => globMatches(r.Match || '', id));
-    tr.appendChild(el('td', {}, el('span', {
-      class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
-      text: hits.length ? `${hits.length} node(s)` : 'nothing',
-      title: hits.length ? hits.slice(0, 20).join('\n') + (hits.length > 20 ? `\n…and ${hits.length - 20} more` : '')
-        : 'No PDU or outlet on the current graph has an id this matches.',
-    })));
-
-    const del = btn('Remove', 'danger');
-    del.onclick = () => { rules.splice(i, 1); refreshDirty(); rerender(); };
-    tr.appendChild(el('td', {}, del));
-    tb.appendChild(tr);
-  });
-  t.appendChild(tb);
-  if (rules.length) box.appendChild(t);
-
-  const add = btn('+ Add tag rule');
-  add.onclick = () => { rules.push({ Match: '', Tags: [] }); refreshDirty(); rerender(); };
-  box.appendChild(add);
-  return box;
-}
-
-/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
-/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
-function globMatches(pattern        , id        )          {
-  if (!pattern) return false;
-  const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
-  return new RegExp(rx, 'i').test(id);
-}
-
-// Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
-// export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
-function renderGroupManager(flow     , cand                  , rerender            ) {
-  const groups = ensure(flow, 'Groups', []);
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs. Either make a new group (its value is the members’ sum), or turn an existing node into a group — e.g. make “Solar PV” a group over its three MPPTs: collapsed, the flow chart shows only Solar PV reporting its own value; click it to expand the strings. Collapse/expand from the toggles above either graph, or by clicking the node.' }));
-
-  const nm = (id        ) => (cand.get(id) || {}).label || id;
-
-  const addBar = el('div', { class: 'ld-toolbar' });
-  const idIn = el('input', { type: 'text', placeholder: 'group id (e.g. incoming_pv)' })                    ;
-  const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Incoming PV)' })                    ;
-  const kindSel = el('select', { style: { width: 'auto' } });
-  NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
-  const addBtn = btn('Add group', 'primary');
-  addBtn.onclick = () => {
-    const id = (idIn.value || '').trim();
-    if (!id) { toast('A group id is required.', false); return; }
-    if (groups.some((g     ) => g.Id === id) || cand.has(id)) { toast('That id already exists.', false); return; }
-    const g      = { Id: id, Label: (labIn.value || '').trim() || id, Members: [] };
-    if (kindSel.value !== 'node') g.Kind = kindSel.value;
-    groups.push(g);
-    rerender();
-  };
-  addBar.append(idIn, labIn, kindSel, addBtn);
-  box.appendChild(addBar);
-
-  // Anchor a group on an existing node: that node becomes the group (keeping its own value), and its members
-  // fold into it. This is the "make Solar PV a group over its MPPTs" path.
-  const anchorRow = el('div', { class: 'ld-toolbar' });
-  anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
-  const anchorSel = el('select', { style: { width: 'auto' } })                     ;
-  anchorSel.appendChild(el('option', { value: '', text: '— pick a node —' }));
-  [...cand.keys()].filter(id => !groups.some((g     ) => g.Id === id)).sort((a, b) => nm(a).localeCompare(nm(b)))
-    .forEach(id => anchorSel.appendChild(el('option', { value: id, text: nm(id) })));
-  anchorSel.onchange = () => {
-    const id = anchorSel.value; if (!id) return;
-    groups.push({ Id: id, Label: nm(id), Members: [] });
-    toast(`“${nm(id)}” is now a group — add its members below.`, true);
-    rerender();
-  };
-  anchorRow.appendChild(anchorSel);
-  box.appendChild(anchorRow);
-
-  if (!groups.length) { box.appendChild(el('div', { class: 'desc', text: 'No groups yet — add one above, then pick its members.' })); return box; }
-
-  groups.forEach((g     ) => {
-    const card = el('div', { style: { border: '1px solid var(--line)', borderRadius: '6px', padding: '10px', margin: '8px 0', background: 'var(--panel2)' } });
-    const head = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } });
-    const labEdit = el('input', { type: 'text', value: g.Label || g.Id, style: { width: '200px' } })                    ;
-    labEdit.onchange = () => { g.Label = labEdit.value.trim() || g.Id; };
-    const kindEdit = el('select', { style: { width: 'auto' } });
-    NODE_KINDS.forEach(([v, label]) => kindEdit.appendChild(el('option', { value: v, text: label })));
-    kindEdit.value = g.Kind || 'node';
-    kindEdit.onchange = () => { g.Kind = kindEdit.value === 'node' ? undefined : kindEdit.value; };
-    const del = btn('Delete', 'danger');
-    del.onclick = () => { groups.splice(groups.indexOf(g), 1); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
-    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, del);
-    card.appendChild(head);
-
-    // Members as removable chips, plus a picker of candidates not already in the group.
-    const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
-    memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
-    (g.Members || []).forEach((m        ) => {
-      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
-      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
-      x.onclick = () => { g.Members.splice(g.Members.indexOf(m), 1); rerender(); };
-      chip.append(nm(m), x); memRow.appendChild(chip);
-    });
-    const sel = el('select', { style: { width: 'auto' } })                     ;
-    sel.appendChild(el('option', { value: '', text: '+ add member…' }));
-    [...cand.keys()].filter(id => id !== g.Id && !(g.Members || []).includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
-      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
-    sel.onchange = () => { if (sel.value) { ensure(g, 'Members', []).push(sel.value); rerender(); } };
-    memRow.appendChild(sel);
-    card.appendChild(memRow);
-    box.appendChild(card);
-  });
-
-  return box;
-}
-
-// The open node editor, as a modal over the table (#292).
-//
-// It used to render beneath the table, which put the form at the bottom of a long page — nowhere near the
-// row you clicked — and forced the table itself to stay wide enough to host it, which small screens can't
-// give. The panel lives on <body>, so it outlives the re-render of the surface underneath it and is rebuilt
-// in place instead: the node object's identity is what the editor holds, and that survives a re-render.
-let nodeModal                                                      = null;
-
-function closeNodeModal() {
-  const m = nodeModal;
-  nodeModal = null;
-  if (m) m.close();
-}
-
-function syncNodeModal(node     , links       , cand                  , editing                       , rerender            ) {
-  if (!node) { closeNodeModal(); return; }
-  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
-  if (!nodeModal) {
-    const o = overlay(`Edit node — ${node.Label || node.Id}`, () => { nodeModal = null; editing.id = null; rerender(); });
-    nodeModal = { id: node.Id, body: o.body, close: o.close };
-  }
-  nodeModal.body.innerHTML = '';
-  nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
-}
-
-/// Would adding from -> to close a cycle? The builder walks whatever it is handed, so a loop expressed in
-/// config would recurse rather than fail.
-function wouldLoop(links       , from        , to        ) {
-  const adj      = {};
-  links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
-  const stack = [to]; const seen = new Set        ();
-  while (stack.length) {
-    const x = stack.pop() ;
-    if (x === from) return true;
-    if (seen.has(x)) continue;
-    seen.add(x);
-    (adj[x] || []).forEach((t        ) => stack.push(t));
-  }
-  return false;
-}
-
-// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
-// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) in a modal.
-// Deleting a node takes its bound sources with it (they live on the node).
-function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
-
-  if (!customNodes.length) {
-    closeNodeModal();
-    box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
-    return box;
-  }
-
-  const tbl = el('table', { class: 'ld' });
-  const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''].forEach(h => {
-    const th = el('th', { text: h });
-    if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
-    if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
-    if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
-    if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
-    head.appendChild(th);
-  });
-  tbl.appendChild(el('thead', {}, head));
-  const body = el('tbody');
-  customNodes.forEach((n     ) => {
-    const tr = el('tr');
-    if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
-    tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
-    tr.appendChild(el('td', { text: n.Label || n.Id }));
-    tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
-    tr.appendChild(el('td', { text: n.Mode || 'auto' }));
-    tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
-    tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
-    tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
-
-    // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
-    //
-    // The column used to be the other way round, "what this node feeds". Every row of imported appliances
-    // then read "— none —" while being fed by the main panel, and setting a node's place in the hierarchy
-    // meant finding its parent's row and editing a list. You put a thing under its feeder, so the control
-    // is on the thing.
-    const incoming = links.filter((l     ) => l.To === n.Id).map((l     ) => l.From);
-    const fedByCell = el('td');
-    if (incoming.length > 1) {
-      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter — and one
-      // dropdown cannot express it. Shown, and edited in the node's own editor.
-      fedByCell.appendChild(el('span', { text: incoming.map((f        ) => (cand.get(f) || {}).label || f).join(', ') }));
-    } else {
-      const sel = el('select', { style: { width: 'auto' } })                     ;
-      sel.appendChild(el('option', { value: '', text: '— none —' }));
-      [...cand.keys()]
-        .filter(id => id !== n.Id && !String(id).includes('#'))
-        .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
-        .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
-      sel.value = incoming[0] || '';
-      sel.onchange = () => {
-        const feeder = sel.value;
-        // Energy would have to arrive from something this node already supplies.
-        if (feeder && wouldLoop(links.filter((l     ) => l.To !== n.Id), feeder, n.Id)) {
-          toast('That would create a feeder loop.', false);
-          sel.value = incoming[0] || '';
-          return;
-        }
-        // One incoming link is what this control manages: drop the old one, add the new.
-        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
-        if (feeder) links.push({ From: feeder, To: n.Id });
-        rerender();
-      };
-      fedByCell.appendChild(sel);
-    }
-    tr.appendChild(fedByCell);
-    // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
-    const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
-    const nb = srcs.length;
-    const hasEnergy = srcs.some((s     ) => String(s.Metric || 'realpower').toLowerCase() === 'energy');
-    const bindCell = el('td', { class: nb ? '' : 'num' });
-    bindCell.appendChild(el('span', { text: nb ? String(nb) : '—' }));
-    if (nb && !hasEnergy)
-      bindCell.appendChild(el('span', {
-        text: ' ⚠', style: { color: 'var(--warn)', fontWeight: '700', cursor: 'help' },
-        title: 'No energy (kWh) source bound — this node won’t appear on Home Assistant’s Energy Dashboard. Edit it and add a source with the “Energy” metric to include it.',
-      }));
-    tr.appendChild(bindCell);
-
-    const actions = el('td', { style: { whiteSpace: 'nowrap' } });
-    const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
-    edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
-    const rename = btn('Rename');
-    rename.title = 'Change this node’s id, moving its wiring with it.';
-    rename.onclick = () => {
-      const taken = new Set        ([...cand.keys(), ...customNodes.map((x     ) => x.Id)]);
-      taken.delete(n.Id);
-      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
-    };
-
-    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
-    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
-    // since the copy usually feeds somewhere else.
-    const copy = btn('Copy');
-    copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
-    copy.onclick = () => {
-      const taken = (id        ) => customNodes.some((x     ) => x.Id === id);
-      let id = `${n.Id}-copy`;
-      for (let i = 2; taken(id); i++) id = `${n.Id}-copy-${i}`;
-      const clone = JSON.parse(JSON.stringify(n));
-      clone.Id = id;
-      clone.Label = `${n.Label || n.Id} (copy)`;
-      customNodes.splice(customNodes.indexOf(n) + 1, 0, clone);
-      editing.id = id;
-      toast(`Copied to '${id}' — rename it and set its feeders.`, true);
-      rerender();
-    };
-    const rm = btn('Delete', 'danger');
-    rm.onclick = () => {
-      customNodes.splice(customNodes.indexOf(n), 1);
-      for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
-      if (editing.id === n.Id) editing.id = null;
-      toast(`${n.Label || n.Id} deleted.`, true);
-      rerender();
-    };
-    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
-    tr.appendChild(actions);
-    body.appendChild(tr);
-  });
-  tbl.appendChild(body);
-  box.appendChild(tbl);
-
-  // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
-  syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
-  return box;
-}
 
 function addFlowSection(nav     , sections     ) {
   const link = navLink(nav, "Flow", "⇄");
@@ -3773,205 +3575,6 @@ function addFlowSection(nav     , sections     ) {
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
 }
 
-// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
-// bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
-// --- Focus a supply path --------------------------------------------------------------------------
-// "Where does this node's power come from?" is the question the diagram is worst at once there are more
-// than a handful of ribbons. Clicking a node lights everything upstream of it and dims the rest.
-//
-// Done by classing the <svg> and the elements on the path, never by rewriting their fill-opacity: that
-// attribute already carries meaning (a hairline says the quantity is unknown), and overwriting it to dim
-// would destroy the very thing the diagram is being read for.
-let focusedNode                = null;
-
-function focusPath(svg     , incoming     , id        ) {
-  if (focusedNode === id) { clearFocus(svg); return; }
-  focusedNode = id;
-
-  // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
-  // graph acyclic — this walks whatever it is handed.
-  const onPath = new Set        ([id]);
-  const links = new Set        ();
-  const stack = [id];
-  while (stack.length) {
-    const cur = stack.pop() ;
-    (incoming[cur] || []).forEach((l     ) => {
-      links.add(l.source + '' + l.target);
-      if (!onPath.has(l.source)) { onPath.add(l.source); stack.push(l.source); }
-    });
-  }
-
-  svg.querySelectorAll('[data-node]').forEach((e     ) =>
-    e.classList[onPath.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
-  svg.querySelectorAll('[data-src]').forEach((e     ) =>
-    e.classList[links.has(e.getAttribute('data-src') + '' + e.getAttribute('data-dst')) ? 'add' : 'remove']('on-path'));
-  svg.classList.add('flow-focus');
-}
-
-/// Highlight every node carrying `tag`, dimming the rest (#342).
-///
-/// A highlight and not a filter: removing nodes from a Sankey removes the ribbons into them too, so a
-/// node whose feeders were hidden would read as unsourced and the totals along the remaining chain would
-/// no longer add up. Dimming answers "which of these are tagged X" without changing a single figure.
-function focusTag(svg     , nodesById                  , tag        ) {
-  const tagged = new Set        ();
-  nodesById.forEach((n, id) => {
-    if ((n.tags || []).some((t        ) => t.toLowerCase() === tag.toLowerCase())) tagged.add(id);
-  });
-
-  focusedNode = null;
-  svg.querySelectorAll('[data-node]').forEach((e     ) =>
-    e.classList[tagged.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
-  // Ribbons stay dim throughout: a link is not tagged, and lighting one because an end happens to be
-  // would say the flow itself is part of the selection.
-  svg.querySelectorAll('[data-src]').forEach((e     ) => e.classList.remove('on-path'));
-  svg.classList.add('flow-focus');
-}
-
-function clearFocus(svg     ) {
-  focusedNode = null;
-  if (!svg) return;
-  svg.classList.remove('flow-focus');
-  svg.querySelectorAll('.on-path').forEach((e     ) => e.classList.remove('on-path'));
-}
-
-// --- Node hover card ------------------------------------------------------------------------------
-// One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
-let nodeCardEl      = null;
-
-function showNodeCard(host     , ev     , rows       ) {
-  if (!nodeCardEl) {
-    nodeCardEl = el('div', { class: 'node-card' });
-    document.body.appendChild(nodeCardEl);
-  }
-  nodeCardEl.innerHTML = '';
-  rows.forEach(r => nodeCardEl.appendChild(r));
-  nodeCardEl.classList.add('show');
-  moveNodeCard(ev);
-}
-
-// Follow the pointer, but flip to the other side rather than hanging off the edge of the window.
-function moveNodeCard(ev     ) {
-  if (!nodeCardEl || !nodeCardEl.classList.contains('show')) return;
-  const pad = 14;
-  const w = nodeCardEl.offsetWidth || 260, h = nodeCardEl.offsetHeight || 120;
-  const vw = window.innerWidth || 1200, vh = window.innerHeight || 800;
-  const x = ev.clientX + pad + w > vw ? ev.clientX - pad - w : ev.clientX + pad;
-  const y = Math.min(Math.max(pad, ev.clientY - h / 2), vh - h - pad);
-  nodeCardEl.style.left = Math.max(pad, x) + 'px';
-  nodeCardEl.style.top = y + 'px';
-}
-
-function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
-
-// Device templates and the panels that import them live in node-templates.ts — the MQTT Import page
-// and the Nodes page both instantiate them, and two ways of writing the same device is one too many.
-
-function addMqttImportSection(nav     , sections     ) {
-  const link = navLink(nav, 'MQTT Import', '⇤');
-  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
-  link.dataset.section = 'EnergyFlow';
-  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'MQTT Import' }));
-  sec.appendChild(el('div', {
-    class: 'desc',
-    text: 'Add energy-flow nodes from readings other integrations already publish to this broker — by their '
-        + 'Home Assistant discovery where they announce it, or by topic shape where they do not.',
-  }));
-
-  const host = el('div');
-  sec.appendChild(host);
-
-  const render = () => {
-    const flow = ensure(state.data, 'EnergyFlow', {});
-    migrateEnergyFlow(flow);
-    const nodes = ensure(flow, 'Nodes', []);
-    host.innerHTML = '';
-    host.appendChild(renderDiscoverPanel(flow, render));
-    const bar = el('div', { class: 'ld-toolbar' });
-    const save = btn('Save', 'primary');
-    save.onclick = () => saveConfig(() => render());
-    bar.appendChild(save);
-    host.appendChild(bar);
-  };
-
-  link.onclick = () => { render(); activate(link, sec); };
-  return { link, sec };
-}
-
-function addNodesSection(nav     , sections     ) {
-  const link = navLink(nav, "Nodes", "⬡");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
-  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
-  const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
-  sec.appendChild(d);
-
-  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
-  const instSel = instanceSelector(() => load());
-  const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
-  const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
-  let lastGraph      = null;
-  const editing                        = { id: null };
-
-  const render = () => {
-    const flow = ensure(state.data, 'EnergyFlow', {});
-    migrateEnergyFlow(flow);
-    const customNodes = ensure(flow, 'Nodes', []);
-    const links = ensure(flow, 'Links', []);
-    count.textContent = `${customNodes.length} node(s)`;
-    ed.innerHTML = '';
-
-    const addBar = el('div', { class: 'ld-toolbar' });
-    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
-    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
-    const kindSel = el('select', { style: { width: 'auto' } });
-    NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
-    const addBtn = btn('Add node', 'primary');
-    const importBtn = btn('Import device template');
-    const save = btn('Save', 'primary');
-    addBtn.onclick = () => {
-      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
-      if (customNodes.some((n     ) => n.Id === id) || (lastGraph?.nodes || []).some((n     ) => n.id === id)) { toast('That id already exists.', false); return; }
-      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
-      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
-      const node      = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
-      if (kindSel.value !== 'node') node.Kind = kindSel.value;
-      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
-    };
-    save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
-
-    // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
-    const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
-    const impWrap = el('div'); ed.appendChild(impWrap);
-    importBtn.onclick = () => {
-      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
-      impWrap.appendChild(renderImportPanel(flow, existingIds, render));
-    };
-
-    const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderGroupManager(flow, cand, render));
-    ed.appendChild(renderAutoTagRules(flow, cand, render));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
-  };
-
-  const load = async () => {
-    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
-    // is global, so a failed/empty graph just means fewer wiring candidates, not an error.
-    const r = await api(withInstance('/api/flow', instSel));
-    lastGraph = r.body?.ok ? r.body : null;
-    render();
-  };
-  link.onclick = () => { activate(link, sec); load(); };
-  // The editor panel is mounted on <body>, so switching pages would otherwise leave it floating over
-  // whatever you switched to.
-  nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
-}
-
 // ── sections/node-editor.ts ─────────────────────────────────────
 // Editing one node: its name, kind, how it is valued, and the live sources bound to it — plus the dialogs
 // that go with it (the topic picker, the Modbus register explorer, the rename).
@@ -4696,6 +4299,417 @@ function renderNodeEditor(node     , links       , cand                  , reren
   box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
 
   return box;
+}
+
+// ── sections/nodes.ts ───────────────────────────────────────────
+// The Nodes page: the table of virtual nodes, the groups, and the tag rules for the ones nobody typed out.
+//
+// Configuration, not visualisation. The Flow page draws the hierarchy; this one is where it is written
+// down — which node exists, what feeds it, which group it belongs to, what it is tagged.
+//
+// flowCandidates and wouldLoop stay here with it: both answer questions about the hierarchy as configured
+// (what can be wired to what, and whether wiring it would close a cycle) rather than about what is drawn.
+
+function flowCandidates(lastGraph     , customNodes       ) {
+  const cand = new Map             ();
+  (lastGraph?.nodes || [])
+    .filter((n     ) => !String(n.id || '').includes('#'))
+    .forEach((n     ) => cand.set(n.id, { id: n.id, label: n.label, kind: n.kind }));
+  customNodes.forEach((n     ) => cand.set(n.Id, { id: n.Id, label: n.Label || n.Id, kind: n.Kind || 'node', custom: true }));
+  return cand;
+}
+
+// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
+// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
+// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
+function renderAutoTagRules(flow     , cand                  , rerender            ) {
+  const rules = ensure(flow, 'AutoTags', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Tags for PDUs and outlets', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes the bridge derives from what it polls have no row of their own to tag. Match them by id, with * for any run of characters: “outlet:rack_pdu_1:*” tags every outlet on that PDU, “pdu:*” every PDU, and a full id one outlet. A tag never changes a reading — only what a view shows and what the exports may carry.' }));
+
+  const ids = [...cand.keys()].filter(id => id.startsWith('pdu:') || id.startsWith('outlet:'));
+
+  const t = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Match', 'Tags', 'Matches now', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  t.appendChild(el('thead', {}, head));
+  const tb = el('tbody');
+
+  rules.forEach((r     , i        ) => {
+    const tr = el('tr');
+    const matchIn = el('input', { type: 'text', value: r.Match || '', placeholder: 'outlet:rack_pdu_1:*' })                    ;
+    matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, matchIn));
+
+    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' })                    ;
+    tagsIn.onchange = () => {
+      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
+      refreshDirty(); rerender();
+    };
+    tr.appendChild(el('td', {}, tagsIn));
+
+    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
+    // is the whole failure mode here — it looks configured and does nothing.
+    const hits = ids.filter(id => globMatches(r.Match || '', id));
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
+      text: hits.length ? `${hits.length} node(s)` : 'nothing',
+      title: hits.length ? hits.slice(0, 20).join('\n') + (hits.length > 20 ? `\n…and ${hits.length - 20} more` : '')
+        : 'No PDU or outlet on the current graph has an id this matches.',
+    })));
+
+    const del = btn('Remove', 'danger');
+    del.onclick = () => { rules.splice(i, 1); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, del));
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  if (rules.length) box.appendChild(t);
+
+  const add = btn('+ Add tag rule');
+  add.onclick = () => { rules.push({ Match: '', Tags: [] }); refreshDirty(); rerender(); };
+  box.appendChild(add);
+  return box;
+}
+
+/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
+/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
+function globMatches(pattern        , id        )          {
+  if (!pattern) return false;
+  const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
+  return new RegExp(rx, 'i').test(id);
+}
+
+// Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
+// export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
+function renderGroupManager(flow     , cand                  , rerender            ) {
+  const groups = ensure(flow, 'Groups', []);
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs. Either make a new group (its value is the members’ sum), or turn an existing node into a group — e.g. make “Solar PV” a group over its three MPPTs: collapsed, the flow chart shows only Solar PV reporting its own value; click it to expand the strings. Collapse/expand from the toggles above either graph, or by clicking the node.' }));
+
+  const nm = (id        ) => (cand.get(id) || {}).label || id;
+
+  const addBar = el('div', { class: 'ld-toolbar' });
+  const idIn = el('input', { type: 'text', placeholder: 'group id (e.g. incoming_pv)' })                    ;
+  const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Incoming PV)' })                    ;
+  const kindSel = el('select', { style: { width: 'auto' } });
+  NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+  const addBtn = btn('Add group', 'primary');
+  addBtn.onclick = () => {
+    const id = (idIn.value || '').trim();
+    if (!id) { toast('A group id is required.', false); return; }
+    if (groups.some((g     ) => g.Id === id) || cand.has(id)) { toast('That id already exists.', false); return; }
+    const g      = { Id: id, Label: (labIn.value || '').trim() || id, Members: [] };
+    if (kindSel.value !== 'node') g.Kind = kindSel.value;
+    groups.push(g);
+    rerender();
+  };
+  addBar.append(idIn, labIn, kindSel, addBtn);
+  box.appendChild(addBar);
+
+  // Anchor a group on an existing node: that node becomes the group (keeping its own value), and its members
+  // fold into it. This is the "make Solar PV a group over its MPPTs" path.
+  const anchorRow = el('div', { class: 'ld-toolbar' });
+  anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
+  const anchorSel = el('select', { style: { width: 'auto' } })                     ;
+  anchorSel.appendChild(el('option', { value: '', text: '— pick a node —' }));
+  [...cand.keys()].filter(id => !groups.some((g     ) => g.Id === id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+    .forEach(id => anchorSel.appendChild(el('option', { value: id, text: nm(id) })));
+  anchorSel.onchange = () => {
+    const id = anchorSel.value; if (!id) return;
+    groups.push({ Id: id, Label: nm(id), Members: [] });
+    toast(`“${nm(id)}” is now a group — add its members below.`, true);
+    rerender();
+  };
+  anchorRow.appendChild(anchorSel);
+  box.appendChild(anchorRow);
+
+  if (!groups.length) { box.appendChild(el('div', { class: 'desc', text: 'No groups yet — add one above, then pick its members.' })); return box; }
+
+  groups.forEach((g     ) => {
+    const card = el('div', { style: { border: '1px solid var(--line)', borderRadius: '6px', padding: '10px', margin: '8px 0', background: 'var(--panel2)' } });
+    const head = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } });
+    const labEdit = el('input', { type: 'text', value: g.Label || g.Id, style: { width: '200px' } })                    ;
+    labEdit.onchange = () => { g.Label = labEdit.value.trim() || g.Id; };
+    const kindEdit = el('select', { style: { width: 'auto' } });
+    NODE_KINDS.forEach(([v, label]) => kindEdit.appendChild(el('option', { value: v, text: label })));
+    kindEdit.value = g.Kind || 'node';
+    kindEdit.onchange = () => { g.Kind = kindEdit.value === 'node' ? undefined : kindEdit.value; };
+    const del = btn('Delete', 'danger');
+    del.onclick = () => { groups.splice(groups.indexOf(g), 1); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
+    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, del);
+    card.appendChild(head);
+
+    // Members as removable chips, plus a picker of candidates not already in the group.
+    const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
+    memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
+    (g.Members || []).forEach((m        ) => {
+      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
+      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
+      x.onclick = () => { g.Members.splice(g.Members.indexOf(m), 1); rerender(); };
+      chip.append(nm(m), x); memRow.appendChild(chip);
+    });
+    const sel = el('select', { style: { width: 'auto' } })                     ;
+    sel.appendChild(el('option', { value: '', text: '+ add member…' }));
+    [...cand.keys()].filter(id => id !== g.Id && !(g.Members || []).includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)))
+      .forEach(id => sel.appendChild(el('option', { value: id, text: nm(id) })));
+    sel.onchange = () => { if (sel.value) { ensure(g, 'Members', []).push(sel.value); rerender(); } };
+    memRow.appendChild(sel);
+    card.appendChild(memRow);
+    box.appendChild(card);
+  });
+
+  return box;
+}
+
+// The open node editor, as a modal over the table (#292).
+//
+// It used to render beneath the table, which put the form at the bottom of a long page — nowhere near the
+// row you clicked — and forced the table itself to stay wide enough to host it, which small screens can't
+// give. The panel lives on <body>, so it outlives the re-render of the surface underneath it and is rebuilt
+// in place instead: the node object's identity is what the editor holds, and that survives a re-render.
+let nodeModal                                                      = null;
+
+function closeNodeModal() {
+  const m = nodeModal;
+  nodeModal = null;
+  if (m) m.close();
+}
+
+function syncNodeModal(node     , links       , cand                  , editing                       , rerender            ) {
+  if (!node) { closeNodeModal(); return; }
+  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
+  if (!nodeModal) {
+    const o = overlay(`Edit node — ${node.Label || node.Id}`, () => { nodeModal = null; editing.id = null; rerender(); });
+    nodeModal = { id: node.Id, body: o.body, close: o.close };
+  }
+  nodeModal.body.innerHTML = '';
+  nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
+}
+
+/// Would adding from -> to close a cycle? The builder walks whatever it is handed, so a loop expressed in
+/// config would recurse rather than fail.
+function wouldLoop(links       , from        , to        ) {
+  const adj      = {};
+  links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
+  const stack = [to]; const seen = new Set        ();
+  while (stack.length) {
+    const x = stack.pop() ;
+    if (x === from) return true;
+    if (seen.has(x)) continue;
+    seen.add(x);
+    (adj[x] || []).forEach((t        ) => stack.push(t));
+  }
+  return false;
+}
+
+// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
+// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) in a modal.
+// Deleting a node takes its bound sources with it (they live on the node).
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
+
+  if (!customNodes.length) {
+    closeNodeModal();
+    box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
+    return box;
+  }
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''].forEach(h => {
+    const th = el('th', { text: h });
+    if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
+    if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
+    if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
+    if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
+    head.appendChild(th);
+  });
+  tbl.appendChild(el('thead', {}, head));
+  const body = el('tbody');
+  customNodes.forEach((n     ) => {
+    const tr = el('tr');
+    if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
+    tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
+    tr.appendChild(el('td', { text: n.Label || n.Id }));
+    tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
+    tr.appendChild(el('td', { text: n.Mode || 'auto' }));
+    tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));
+    tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
+    tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
+
+    // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
+    //
+    // The column used to be the other way round, "what this node feeds". Every row of imported appliances
+    // then read "— none —" while being fed by the main panel, and setting a node's place in the hierarchy
+    // meant finding its parent's row and editing a list. You put a thing under its feeder, so the control
+    // is on the thing.
+    const incoming = links.filter((l     ) => l.To === n.Id).map((l     ) => l.From);
+    const fedByCell = el('td');
+    if (incoming.length > 1) {
+      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter — and one
+      // dropdown cannot express it. Shown, and edited in the node's own editor.
+      fedByCell.appendChild(el('span', { text: incoming.map((f        ) => (cand.get(f) || {}).label || f).join(', ') }));
+    } else {
+      const sel = el('select', { style: { width: 'auto' } })                     ;
+      sel.appendChild(el('option', { value: '', text: '— none —' }));
+      [...cand.keys()]
+        .filter(id => id !== n.Id && !String(id).includes('#'))
+        .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
+        .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
+      sel.value = incoming[0] || '';
+      sel.onchange = () => {
+        const feeder = sel.value;
+        // Energy would have to arrive from something this node already supplies.
+        if (feeder && wouldLoop(links.filter((l     ) => l.To !== n.Id), feeder, n.Id)) {
+          toast('That would create a feeder loop.', false);
+          sel.value = incoming[0] || '';
+          return;
+        }
+        // One incoming link is what this control manages: drop the old one, add the new.
+        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
+        if (feeder) links.push({ From: feeder, To: n.Id });
+        rerender();
+      };
+      fedByCell.appendChild(sel);
+    }
+    tr.appendChild(fedByCell);
+    // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
+    const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
+    const nb = srcs.length;
+    const hasEnergy = srcs.some((s     ) => String(s.Metric || 'realpower').toLowerCase() === 'energy');
+    const bindCell = el('td', { class: nb ? '' : 'num' });
+    bindCell.appendChild(el('span', { text: nb ? String(nb) : '—' }));
+    if (nb && !hasEnergy)
+      bindCell.appendChild(el('span', {
+        text: ' ⚠', style: { color: 'var(--warn)', fontWeight: '700', cursor: 'help' },
+        title: 'No energy (kWh) source bound — this node won’t appear on Home Assistant’s Energy Dashboard. Edit it and add a source with the “Energy” metric to include it.',
+      }));
+    tr.appendChild(bindCell);
+
+    const actions = el('td', { style: { whiteSpace: 'nowrap' } });
+    const edit = btn(editing.id === n.Id ? 'Editing…' : 'Edit');
+    edit.onclick = () => { editing.id = editing.id === n.Id ? null : n.Id; rerender(); };
+    const rename = btn('Rename');
+    rename.title = 'Change this node’s id, moving its wiring with it.';
+    rename.onclick = () => {
+      const taken = new Set        ([...cand.keys(), ...customNodes.map((x     ) => x.Id)]);
+      taken.delete(n.Id);
+      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+    };
+
+    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
+    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
+    // since the copy usually feeds somewhere else.
+    const copy = btn('Copy');
+    copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
+    copy.onclick = () => {
+      const taken = (id        ) => customNodes.some((x     ) => x.Id === id);
+      let id = `${n.Id}-copy`;
+      for (let i = 2; taken(id); i++) id = `${n.Id}-copy-${i}`;
+      const clone = JSON.parse(JSON.stringify(n));
+      clone.Id = id;
+      clone.Label = `${n.Label || n.Id} (copy)`;
+      customNodes.splice(customNodes.indexOf(n) + 1, 0, clone);
+      editing.id = id;
+      toast(`Copied to '${id}' — rename it and set its feeders.`, true);
+      rerender();
+    };
+    const rm = btn('Delete', 'danger');
+    rm.onclick = () => {
+      customNodes.splice(customNodes.indexOf(n), 1);
+      for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      if (editing.id === n.Id) editing.id = null;
+      toast(`${n.Label || n.Id} deleted.`, true);
+      rerender();
+    };
+    actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
+    tr.appendChild(actions);
+    body.appendChild(tr);
+  });
+  tbl.appendChild(body);
+  box.appendChild(tbl);
+
+  // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
+  syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
+  return box;
+}
+
+function addNodesSection(nav     , sections     ) {
+  const link = navLink(nav, "Nodes", "⬡");
+  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
+  link.dataset.section = "EnergyFlow";
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
+  const d = document.createElement('div'); d.className = 'desc';
+  d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
+  sec.appendChild(d);
+
+  const bar = document.createElement('div'); bar.className = 'ld-toolbar';
+  const instSel = instanceSelector(() => load());
+  const count = document.createElement('span'); count.className = 'ld-count';
+  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
+  let lastGraph      = null;
+  const editing                        = { id: null };
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const customNodes = ensure(flow, 'Nodes', []);
+    const links = ensure(flow, 'Links', []);
+    count.textContent = `${customNodes.length} node(s)`;
+    ed.innerHTML = '';
+
+    const addBar = el('div', { class: 'ld-toolbar' });
+    const idIn = el('input', { type: 'text', placeholder: 'id (e.g. gridboss)' });
+    const labIn = el('input', { type: 'text', placeholder: 'label (e.g. Grid Boss)' });
+    const kindSel = el('select', { style: { width: 'auto' } });
+    NODE_KINDS.forEach(([v, label]) => kindSel.appendChild(el('option', { value: v, text: label })));
+    const addBtn = btn('Add node', 'primary');
+    const importBtn = btn('Import device template');
+    const save = btn('Save', 'primary');
+    addBtn.onclick = () => {
+      const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
+      if (customNodes.some((n     ) => n.Id === id) || (lastGraph?.nodes || []).some((n     ) => n.id === id)) { toast('That id already exists.', false); return; }
+      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
+      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
+      const node      = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
+      if (kindSel.value !== 'node') node.Kind = kindSel.value;
+      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
+    };
+    save.onclick = () => saveConfig(load);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
+
+    // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
+    const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
+    const impWrap = el('div'); ed.appendChild(impWrap);
+    importBtn.onclick = () => {
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
+      impWrap.appendChild(renderImportPanel(flow, existingIds, render));
+    };
+
+    const cand = flowCandidates(lastGraph, customNodes);
+    ed.appendChild(renderGroupManager(flow, cand, render));
+    ed.appendChild(renderAutoTagRules(flow, cand, render));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+  };
+
+  const load = async () => {
+    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
+    // is global, so a failed/empty graph just means fewer wiring candidates, not an error.
+    const r = await api(withInstance('/api/flow', instSel));
+    lastGraph = r.body?.ok ? r.body : null;
+    render();
+  };
+  link.onclick = () => { activate(link, sec); load(); };
+  // The editor panel is mounted on <body>, so switching pages would otherwise leave it floating over
+  // whatever you switched to.
+  nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }
 
 // ── sections/energy-board.ts ────────────────────────────────────
@@ -5493,6 +5507,38 @@ function renderDiscoverPanel(flow     , rerender            )              {
 
 /// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
 /// is used once when wiring something up, so it does not belong on the node editor's toolbar.
+
+function addMqttImportSection(nav     , sections     ) {
+  const link = navLink(nav, 'MQTT Import', '⇤');
+  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
+  link.dataset.section = 'EnergyFlow';
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'MQTT Import' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'Add energy-flow nodes from readings other integrations already publish to this broker — by their '
+        + 'Home Assistant discovery where they announce it, or by topic shape where they do not.',
+  }));
+
+  const host = el('div');
+  sec.appendChild(host);
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    migrateEnergyFlow(flow);
+    const nodes = ensure(flow, 'Nodes', []);
+    host.innerHTML = '';
+    host.appendChild(renderDiscoverPanel(flow, render));
+    const bar = el('div', { class: 'ld-toolbar' });
+    const save = btn('Save', 'primary');
+    save.onclick = () => saveConfig(() => render());
+    bar.appendChild(save);
+    host.appendChild(bar);
+  };
+
+  link.onclick = () => { render(); activate(link, sec); };
+  return { link, sec };
+}
 
 // ── sections/nodedata.ts ────────────────────────────────────────
 // Node Data: every reading the energy flow is collecting, in one table.
