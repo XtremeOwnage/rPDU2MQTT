@@ -342,7 +342,10 @@ export function addTrendsSection(nav: any, sections: any) {
     hideCard();
     if (!body?.ok) return;
 
-    const days: string[] = body.days || [];
+    // A day carries the server's period key; a moment within one is named here, in the viewer's clock.
+    // The server used to format these too, stamping every intra-day tick with the container's timezone.
+    const days: string[] = body.days
+      || (body.at || []).map((iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     const series = shown();
     const units = body.units || 'kWh';
     // The last period has not ended. Every chart fades it, and the totals leave it out — averaging a

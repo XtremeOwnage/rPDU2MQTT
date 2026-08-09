@@ -513,7 +513,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// </para>
     /// </summary>
     private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
-                                                IReadOnlyList<string> labels, string? partialLabel, CancellationToken ct)
+                                                IReadOnlyList<string>? labels, string? partialLabel, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -559,9 +559,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 metric,
                 units = FlowUnits.Canonical(metric),
                 source = history.Id,
-                // Labelled by the caller: a day is the period key the counters re-base on, a moment within
-                // one is a clock time.
+                // A day is named by the period key the counters re-base on — a server concept, so the server
+                // names it. A moment within a day is named by the viewer's clock, so only the instant is
+                // sent and the browser formats it.
                 days = labels,
+                at = when.Select(w => DateTime.SpecifyKind(w, DateTimeKind.Utc)).ToList(),
                 // The last bar is a period still in progress. Named so the chart can say so rather than
                 // showing a part-day beside finished ones as though they were the same thing.
                 partial = partialLabel,
@@ -1930,8 +1932,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 var steps = new List<DateTime>();
                 for (var t = end - span; t <= end; t = t.AddSeconds(step)) steps.Add(t);
+                // No labels: a moment within a day is named in the viewer's zone, and the server does not
+                // know it. Formatting here stamped every intra-day tick with the container's clock — UTC
+                // unless someone set TZ — so a chart ending at this minute read as ending hours ago.
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps,
-                    steps.Select(t => t.ToLocalTime().ToString("HH:mm")).ToList(), null, ctx.RequestAborted), ConfigSchema.Json);
+                    null, null, ctx.RequestAborted), ConfigSchema.Json);
             }
 
             var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
