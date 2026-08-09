@@ -5,7 +5,7 @@ namespace rPDU2MQTT.Core.Flow;
 /// (node, metric) wins. Lets the graph draw live values from more than one ingest at once — MQTT and Modbus
 /// TCP today — without <see cref="FlowGraphBuilder"/> or any exporter knowing there's more than one source.
 /// </summary>
-public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics
+public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics, IPeriodTotalsReady
 {
     private readonly IReadOnlyList<IFlowValueSource> sources;
 
@@ -43,6 +43,9 @@ public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSource
 
     public IReadOnlyCollection<(string Node, string Metric)> ReportedKeys =>
         sources.OfType<IFlowValueDiagnostics>().SelectMany(s => s.ReportedKeys).Distinct().ToList();
+
+    /// <summary>Ready only when every source behind it is: one that is still restoring holds the rest back.</summary>
+    public bool PeriodTotalsReady => sources.OfType<IPeriodTotalsReady>().All(s => s.PeriodTotalsReady);
 
     /// <summary>
     /// What every ingest behind this one is refusing to publish. Merged here so the GUI asks once and no

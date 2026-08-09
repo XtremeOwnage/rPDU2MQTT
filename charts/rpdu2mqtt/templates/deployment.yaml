@@ -113,6 +113,17 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- end }}
+            {{- /* The container's own clock. Unset, a container runs in UTC: log lines, and anything the
+                   bridge formats in local time, are then hours from the operator's clock. The energy day
+                   boundary is NOT this — that is EnergyFlow.Aggregation.PeriodTimeZone, deliberately
+                   configuration rather than an accident of the container's environment. */}}
+            {{- with $.Values.timeZone }}
+            - name: TZ
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $.Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             {{- if dig "Gui" "Enabled" false $.Values.config }}
             - name: gui

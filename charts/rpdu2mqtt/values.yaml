@@ -283,6 +283,17 @@ healthProbes:
 resources: {}
 podAnnotations: {}
 
+# The container's clock (tzdata name, e.g. "America/Chicago"). Unset, a container runs in UTC and every
+# log line is hours from yours. Use the region name rather than an abbreviation: "America/Chicago" follows
+# CST and CDT on its own, where "CST" pins standard time and is an hour out for most of the year.
+#
+# This is not the energy day boundary — that is EnergyFlow.Aggregation.PeriodTimeZone, which is
+# configuration precisely so the daily totals do not depend on the container's environment.
+timeZone: ""
+
+# Anything else to put in the container's environment, as a list of name/value (or valueFrom) entries.
+extraEnv: []
+
 # Defaults that satisfy the Pod Security Standards "restricted" profile, so the chart installs without
 # warnings into a namespace that enforces it. The image runs as uid 1654 (non-root), so these describe what
 # the container does rather than constraining it further.
