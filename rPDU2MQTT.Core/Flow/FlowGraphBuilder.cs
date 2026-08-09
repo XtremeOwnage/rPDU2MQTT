@@ -480,6 +480,9 @@ public static class FlowGraphBuilder
                     + (k == "battery" ? " (charging)" : k == "grid" ? " (export)" : " (in)");
                 kind[sinkId] = k;
                 leaf[sinkId] = drawn;
+                // The same tags as the node it belongs to: a filter that keeps the battery must keep its
+                // charge lane, or an export carries the discharge and silently drops the other half.
+                if (tags.TryGetValue(n.Id, out var nt)) tags[sinkId] = nt;
                 links.Add(new FlowLink(hub, sinkId, drawn, true));
                 wired.Add(hub); wired.Add(sinkId);
             }
