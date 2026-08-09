@@ -27,9 +27,13 @@ const series = {
 
 // The same window asked about within a day: power every 5 minutes, not a daily total. A cumulative daily
 // counter charted through the day only ever climbs, so this is a different metric, not a finer one.
+// Instants, not labels: a moment within a day is named in the viewer's clock, and the server does not know
+// it. Formatting them server-side stamped every intra-day tick with the container's timezone — UTC unless
+// someone set TZ — so a chart ending at this minute read as ending hours ago.
+const at = ['2026-08-08T18:00:00Z', '2026-08-08T18:05:00Z', '2026-08-08T18:10:00Z', '2026-08-08T18:15:00Z'];
 const power = {
   ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
-  days: ['13:00', '13:05', '13:10', '13:15'],
+  at,
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [4200, 4400, null, 3900] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [0, 0, null, 120] },
@@ -216,11 +220,15 @@ if (!intraRows.some(h => /Energy \(kWh/.test(h))) fail(`no energy column on the 
 const solarIntra = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
 if (!solarIntra.textContent.includes('1.042')) fail(`the energy estimate is wrong: ${solarIntra.textContent}`);
 
-// The clock is the axis, and a missing sample is still a gap.
+// The axis is the clock — this browser's clock, whatever the server's is.
+const local = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const intraCard = query(sec, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
-intraCard.find(h => h.attrs['data-day'] === '13:05').dispatch('mouseenter', { clientX: 5, clientY: 5 });
+const want = local(at[1]);
+const hit = intraCard.find(h => h.attrs['data-day'] === want);
+if (!hit) fail(`the axis is not in this browser's clock: expected "${want}", got ${intraCard.map(h => h.attrs['data-day']).join(', ')}`);
+hit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
 const intraText = query(sandbox.document.body, '.trend-card').textContent;
-if (!intraText.includes('13:05') || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
+if (!intraText.includes(want) || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
 
 // Columns sort. Twelve nodes over ninety days is a table you read by scanning for the biggest number.
 // Every node back on first: a one-row table is sorted whatever the code does, which is no test at all.
