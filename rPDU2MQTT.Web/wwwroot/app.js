@@ -1001,6 +1001,94 @@ function barChart(opts
   return { svg, gaps };
 }
 
+// ── node-templates.ts ───────────────────────────────────────────
+// Ready-made device templates: an EG4 inverter, a meter, and whatever else the server ships.
+//
+// Two callers — the MQTT Import page and the Nodes page's "Import device" panel — which is why this is a
+// module and not a private helper of either. Instantiating a template writes real config (a Modbus
+// connection, pre-wired nodes and links), so doing it two slightly different ways would produce two
+// slightly different devices.
+
+// Ready-made device templates (EG4 inverters, meters, …), fetched once and cached.
+let nodeTemplatesCache               = null;
+async function loadNodeTemplates()                 {
+  if (nodeTemplatesCache) return nodeTemplatesCache;
+  const r = await api('/api/node-templates');
+  nodeTemplatesCache = (r.body?.ok && r.body.templates) ? r.body.templates : [];
+  return nodeTemplatesCache;
+}
+
+// Instantiate a template into the live config: create its Modbus connection (if any) and its pre-wired
+// nodes/links, all under an id prefix so the same device can be imported more than once without clashes.
+function instantiateTemplate(tpl     , prefix        , host        , unitId        , flow     )           {
+  const nodes = ensure(flow, 'Nodes', []);
+  const links = ensure(flow, 'Links', []);
+  let connId                    ;
+  if (tpl.transport === 'modbus' && tpl.modbus) {
+    const conns = ensure(ensure(state.data, 'Modbus', {}), 'Connections', []);
+    connId = prefix;
+    conns.push({ Id: connId, Name: tpl.name, Host: host || '', Port: tpl.modbus.port, UnitId: unitId,
+      PollIntervalSeconds: tpl.modbus.pollIntervalSeconds, Framing: tpl.modbus.framing || 'tcp', Enabled: true });
+  }
+  const idOf = (key        ) => prefix + '-' + key;
+  const added           = [];
+  (tpl.nodes || []).forEach((tn     ) => {
+    const node      = { Id: idOf(tn.key), Label: tn.label, Kind: tn.kind, Sources: (tn.sources || []).map((s     ) => {
+      const src      = { Type: tpl.transport, Metric: s.metric };
+      if (s.unit) src.Unit = s.unit;
+      if (s.scale != null && s.scale !== 1) src.Scale = s.scale;
+      if (tpl.transport === 'modbus') {
+        src.Connection = connId; src.Register = s.register; src.RegisterType = s.registerType;
+        src.DataType = s.dataType; src.WordOrder = s.wordOrder;
+      } else { if (s.topic) src.Topic = s.topic; if (s.jsonField) src.JsonField = s.jsonField; }
+      return src;
+    }) };
+    nodes.push(node); added.push(node.Id);
+    if (tn.feedsKey) links.push({ From: idOf(tn.key), To: idOf(tn.feedsKey) });
+  });
+  return added;
+}
+
+function renderImportPanel(flow     , existingIds             , rerender            )              {
+  const panel = el('div', { class: 'tpl-import' });
+  panel.appendChild(el('div', { class: 'desc', text: 'Import a known device to pre-fill its nodes and register bindings. Review and Save afterwards; addresses are community starting points — verify against your firmware.' }));
+  const row = el('div', { class: 'ld-toolbar' });
+  const sel = el('select', { style: { width: 'auto' } })                     ;
+  const prefixIn = el('input', { type: 'text', placeholder: 'id prefix (e.g. eg4)' })                    ;
+  const hostIn = el('input', { type: 'text', placeholder: 'Modbus host / IP' })                    ;
+  const unitIn = el('input', { type: 'number', placeholder: 'unit', style: { width: '70px' } })                    ;
+  const importBtn = btn('Import', 'primary');
+  const note = el('div', { class: 'desc' });
+  row.append(sel, prefixIn, hostIn, unitIn, importBtn);
+  panel.append(row, note);
+
+  loadNodeTemplates().then(tpls => {
+    if (!tpls.length) { note.textContent = 'No device templates available.'; return; }
+    tpls.forEach((t     ) => sel.appendChild(el('option', { value: t.id, text: t.vendor + ' · ' + t.name })));
+    const showMeta = () => {
+      const t = tpls.find((x     ) => x.id === sel.value);
+      if (!t) return;
+      prefixIn.value = t.id; hostIn.style.display = t.transport === 'modbus' ? '' : 'none';
+      unitIn.style.display = t.transport === 'modbus' ? '' : 'none';
+      unitIn.value = t.modbus ? String(t.modbus.unitId) : '';
+      note.innerHTML = '';
+      note.append(el('span', { text: (t.description || '') + ' ' }));
+      if (t.sourceUrl) { const a = document.createElement('a'); a.href = t.sourceUrl; a.target = '_blank'; a.textContent = 'Register source ↗'; a.style.color = 'var(--accent)'; note.appendChild(a); }
+    };
+    sel.onchange = showMeta; showMeta();
+    importBtn.onclick = () => {
+      const t = tpls.find((x     ) => x.id === sel.value); if (!t) return;
+      const prefix = (prefixIn.value || '').trim(); if (!prefix) { toast('An id prefix is required.', false); return; }
+      const clash = (t.nodes || []).map((n     ) => prefix + '-' + n.key).find((id        ) => existingIds.has(id));
+      if (clash) { toast(`Node id '${clash}' already exists — pick a different prefix.`, false); return; }
+      const added = instantiateTemplate(t, prefix, hostIn.value.trim(), parseInt(unitIn.value) || 1, flow);
+      toast(`Imported ${t.name}: ${added.length} node(s). Set the Modbus host if needed, then Save.`, true);
+      rerender();
+    };
+  });
+  return panel;
+}
+
 // ── palette.ts ──────────────────────────────────────────────────
 // Ctrl+K page switcher.
 //
@@ -4484,345 +4572,9 @@ function moveNodeCard(ev     ) {
 
 function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 
-// Ready-made device templates (EG4 inverters, meters, …), fetched once and cached.
-let nodeTemplatesCache               = null;
-async function loadNodeTemplates()                 {
-  if (nodeTemplatesCache) return nodeTemplatesCache;
-  const r = await api('/api/node-templates');
-  nodeTemplatesCache = (r.body?.ok && r.body.templates) ? r.body.templates : [];
-  return nodeTemplatesCache;
-}
+// Device templates and the panels that import them live in node-templates.ts — the MQTT Import page
+// and the Nodes page both instantiate them, and two ways of writing the same device is one too many.
 
-// Instantiate a template into the live config: create its Modbus connection (if any) and its pre-wired
-// nodes/links, all under an id prefix so the same device can be imported more than once without clashes.
-function instantiateTemplate(tpl     , prefix        , host        , unitId        , flow     )           {
-  const nodes = ensure(flow, 'Nodes', []);
-  const links = ensure(flow, 'Links', []);
-  let connId                    ;
-  if (tpl.transport === 'modbus' && tpl.modbus) {
-    const conns = ensure(ensure(state.data, 'Modbus', {}), 'Connections', []);
-    connId = prefix;
-    conns.push({ Id: connId, Name: tpl.name, Host: host || '', Port: tpl.modbus.port, UnitId: unitId,
-      PollIntervalSeconds: tpl.modbus.pollIntervalSeconds, Framing: tpl.modbus.framing || 'tcp', Enabled: true });
-  }
-  const idOf = (key        ) => prefix + '-' + key;
-  const added           = [];
-  (tpl.nodes || []).forEach((tn     ) => {
-    const node      = { Id: idOf(tn.key), Label: tn.label, Kind: tn.kind, Sources: (tn.sources || []).map((s     ) => {
-      const src      = { Type: tpl.transport, Metric: s.metric };
-      if (s.unit) src.Unit = s.unit;
-      if (s.scale != null && s.scale !== 1) src.Scale = s.scale;
-      if (tpl.transport === 'modbus') {
-        src.Connection = connId; src.Register = s.register; src.RegisterType = s.registerType;
-        src.DataType = s.dataType; src.WordOrder = s.wordOrder;
-      } else { if (s.topic) src.Topic = s.topic; if (s.jsonField) src.JsonField = s.jsonField; }
-      return src;
-    }) };
-    nodes.push(node); added.push(node.Id);
-    if (tn.feedsKey) links.push({ From: idOf(tn.key), To: idOf(tn.feedsKey) });
-  });
-  return added;
-}
-
-// The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit, and drop the
-// pre-wired nodes into the config for review.
-/// Import power/energy readings other integrations announce over Home Assistant MQTT discovery.
-///
-/// Discovery is used rather than per-integration topic patterns because it states the unit, the device
-/// class and the payload shape.
-function renderDiscoverPanel(flow     , rerender            )              {
-  const panel = el('div', { class: 'tpl-import' });
-  panel.appendChild(el('div', {
-    class: 'desc',
-    text: 'Readings other integrations publish to this broker — power, energy, current, voltage, frequency. '
-        + 'Pick the ones to add as nodes; nothing is created until you do, and nothing is saved until you '
-        + 'press Save. Add topic shapes for other publishers under MQTT → ImportProfiles.',
-  }));
-
-  const bar = el('div', { class: 'ld-toolbar' });
-  // Where to look. Discovery states the unit and device class, so it is the default; the topic profiles
-  // exist for publishers that announce nothing, where the shape of the topic is all there is to go on.
-  const srcSel = el('select', { style: { width: 'auto' } })                     ;
-  srcSel.appendChild(el('option', { value: 'discovery', text: 'Home Assistant discovery' }));
-  // The rest come from the server: built-in profiles plus MQTT.ImportProfiles.
-  api('/api/mqtt/profiles').then((r     ) => {
-    ((r.body && r.body.profiles) || []).forEach((p     ) =>
-      srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
-  });
-  const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' })                    ;
-  // Where the imported nodes hang, and which way round. An appliance monitor is a load: the panel supplies
-  // the fridge, not the reverse. Wiring it the other way adds its draw to the panel's total and counts it
-  // twice, since the appliance is already inside the panel's unmeasured remainder.
-  const dirSel = el('select', { style: { width: 'auto' } })                     ;
-  dirSel.appendChild(el('option', { value: 'load', text: 'drawn from' }));
-  dirSel.appendChild(el('option', { value: 'source', text: 'feeding' }));
-  const feedSel = el('select', { style: { width: 'auto' } })                     ;
-  feedSel.appendChild(el('option', { value: '', text: '— not wired —' }));
-  (flow.Nodes || []).forEach((n     ) =>
-    feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
-  const scan = btn('Scan broker', 'primary');
-  const addBtn = btn('Add selected', 'primary');
-  const copyBtn = btn('Copy this profile to config');
-  copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
-                + 'metric map can be edited.';
-  bar.append(srcSel, scan,
-    el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
-    el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
-  const note = el('div', { class: 'desc' });
-  const list = el('div');
-  panel.append(bar, note, list);
-
-  // Tagged on import so the per-destination filters can exclude them. A reading imported from Home
-  // Assistant and re-exported to it arrives back as a second copy.
-  tagIn.title = 'Applied to every node added here. Use it in a destination’s tag filter to avoid '
-              + 'exporting these readings back to where they came from.';
-
-  const picked = new Set        ();
-  // Topics already bound anywhere in the config: a reading is "already imported" when its topic is bound,
-  // not when some node happens to share its id. That lets a device's remaining metrics be added later.
-  const boundTopics = new Set        ();
-  (flow.Nodes || []).forEach((n     ) =>
-    (n.Sources || []).forEach((src     ) => { if (src.Topic) boundTopics.add(src.Topic); }));
-
-  /// The node a reading belongs to: its device, not its individual measure.
-  const nodeIdFor = (r     ) =>
-    String(r.device || r.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || r.id;
-
-  // Rows and their unit selectors, so the bulk controls can drive them without a re-render.
-  let boxes                                            = [];
-  let unitSels                                             = [];
-
-  const render = (readings       ) => {
-    list.innerHTML = '';
-    boxes = []; unitSels = [];
-    if (!readings.length) {
-      note.textContent = srcSel.value === 'discovery'
-        ? 'No importable entities in the broker’s Home Assistant discovery. Publishers that announce nothing '
-          + 'will not appear here — try a topic profile instead.'
-        : 'No topics matched this profile’s shape. Check the pattern against what the publisher actually '
-          + 'sends, or add one under MQTT → ImportProfiles.';
-      return;
-    }
-    const tbl = el('table', { class: 'ld' });
-    const head = el('tr');
-    ['', 'Device', 'Reading', 'Metric', 'Unit', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
-    tbl.appendChild(el('thead', {}, head));
-    const body = el('tbody');
-    readings.forEach(r => {
-      const tr = el('tr');
-      const cb = el('input', { type: 'checkbox', class: 'switch' })                    ;
-      const already = boundTopics.has(r.topic);
-      // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
-      cb.disabled = !!r.unsupported || already;
-      cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); syncCount(); };
-      if (!cb.disabled) boxes.push({ reading: r, box: cb });
-      tr.appendChild(el('td', {}, cb));
-      tr.appendChild(el('td', { text: r.device || '—' }));
-      tr.appendChild(el('td', { text: r.label }));
-      tr.appendChild(el('td', { text: r.metric }));
-
-      // A topic-matched reading carries no unit. The choices are the units FlowUnits accepts for this
-      // metric; an unlisted string would not convert.
-      const unitCell = el('td');
-      if (r.unit) {
-        unitCell.appendChild(el('span', { text: r.unit }));
-      } else {
-        const choices           = r.units || [];
-        const unitSel = el('select', { style: { width: 'auto' } })                     ;
-        unitSel.appendChild(el('option', { value: '', text: '— pick —' }));
-        choices.forEach(u => unitSel.appendChild(el('option', { value: u, text: u })));
-        // Pre-filled with the metric's canonical unit. It is a form default the operator reviews against
-        // the sampled payload in the topic cell, and the bulk setters above change a whole metric at once.
-        r.unit = r.unit || r.canonicalUnit || '';
-        unitSel.value = r.unit || '';
-        unitSel.onchange = () => { r.unit = unitSel.value || undefined; };
-        unitCell.appendChild(unitSel);
-        unitSels.push({ reading: r, sel: unitSel });
-        if (!choices.length) unitCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'no units for this metric' }));
-      }
-      tr.appendChild(unitCell);
-
-      const topic = el('td');
-      topic.appendChild(el('code', { text: r.topic, style: { color: 'var(--muted)' } }));
-      if (r.sample != null && r.sample !== '')
-        topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: `last value: ${String(r.sample).slice(0, 60)}` }));
-      if (r.unsupported) topic.appendChild(el('div', { class: 'nh-warn', text: `Cannot import: ${r.unsupported}.` }));
-      else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already bound.' }));
-      tr.appendChild(topic);
-      body.appendChild(tr);
-    });
-    tbl.appendChild(body);
-    list.appendChild(bulkBar(readings));
-    list.appendChild(tbl);
-    // Repeated below the table. With twenty rows the toolbar scrolls off the top, leaving the page's Save
-    // button as the only visible action — and Save without Add writes a config with no imported nodes.
-    const footer = el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } });
-    const addAgain = btn('Add selected', 'primary');
-    addAgain.onclick = () => addBtn.onclick ({}       );
-    footer.append(addAgain, el('span', { class: 'desc', style: { margin: '0' }, text: 'Adds the ticked rows as nodes. Save writes them to the config.' }));
-    list.appendChild(footer);
-    syncCount();
-  };
-
-  /// Keep both Add buttons showing how many rows are ticked.
-  const syncCount = () => {
-    const n = picked.size;
-    const label = n ? `Add ${n} selected` : 'Add selected';
-    [addBtn, ...Array.from(list.querySelectorAll('button'))].forEach((b     ) => {
-      if (b && /^Add \d* ?selected$/.test(b.textContent || '')) b.textContent = label;
-    });
-  };
-
-  /// Select-all, and one unit setter per metric present, so twenty rows are not twenty clicks.
-  const bulkBar = (readings       ) => {
-    const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 6px' } });
-
-    const all = btn('Select all');
-    all.onclick = () => {
-      const turnOn = boxes.some(b => !b.box.checked);
-      boxes.forEach(b => {
-        b.box.checked = turnOn;
-        turnOn ? picked.add(b.reading.id) : picked.delete(b.reading.id);
-      });
-      all.textContent = turnOn ? 'Select none' : 'Select all';
-      syncCount();
-    };
-    row.appendChild(all);
-
-    // One setter per metric in the results: the answer is usually the same for every row of a metric
-    // (every ESPHome power sensor is W), and differs between metrics.
-    const metrics = [...new Set(readings.filter(r => !r.unit || r.units?.length).map(r => r.metric))].sort();
-    metrics.forEach(metric => {
-      const choices           = (readings.find(r => r.metric === metric) || {}).units || [];
-      if (choices.length < 2) return;   // nothing to choose between
-      const sel = el('select', { style: { width: 'auto' } })                     ;
-      choices.forEach(u => sel.appendChild(el('option', { value: u, text: u })));
-      sel.value = (readings.find(r => r.metric === metric) || {}).canonicalUnit || choices[0];
-      sel.onchange = () => {
-        unitSels.filter(u => u.reading.metric === metric).forEach(u => {
-          u.sel.value = sel.value;
-          u.reading.unit = sel.value;
-        });
-      };
-      row.append(el('span', { class: 'desc', style: { margin: '0' }, text: `all ${metric}:` }), sel);
-    });
-
-    return row;
-  };
-
-  copyBtn.onclick = async () => {
-    const id = srcSel.value;
-    if (!id || id === 'discovery' || id.startsWith('custom:')) {
-      toast('Pick a built-in topic profile first.', false);
-      return;
-    }
-    const r = await api('/api/mqtt/profile?id=' + encodeURIComponent(id));
-    if (!r.body || !r.body.ok) { toast((r.body && r.body.message) || 'Could not read that profile.', false); return; }
-    const p = r.body.profile;
-    const mqtt = ensure(state.data, 'MQTT', {});
-    const list = ensure(mqtt, 'ImportProfiles', []);
-    if (list.some((x     ) => (x.Name || '').toLowerCase() === (p.label || '').toLowerCase())) {
-      toast(`'${p.label}' is already in ImportProfiles.`, false);
-      return;
-    }
-    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined, Metrics: p.metrics });
-    toast(`Copied '${p.label}' into MQTT → ImportProfiles. Edit it there, then Save.`, true);
-    refreshDirty();
-  };
-
-  let found        = [];
-  scan.onclick = async () => {
-    const src = srcSel.value;
-    note.textContent = 'Scanning the broker…';
-    const r = await api(src === 'discovery'
-      ? '/api/mqtt/importable'
-      : '/api/mqtt/importable/pattern?profile=' + encodeURIComponent(src));
-    if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
-    found = r.body.readings || [];
-    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
-    render(found);
-  };
-
-  addBtn.onclick = () => {
-    const take = found.filter(r => picked.has(r.id) && !r.unsupported && !boundTopics.has(r.topic));
-    if (!take.length) { toast('Nothing selected.', false); return; }
-    const tag = tagIn.value.trim();
-    const nodes = ensure(flow, 'Nodes', []);
-
-    // One node per device, with a source per metric. A device publishing power, energy, current and
-    // voltage is one thing with four readings, matching how a PDU outlet or an inverter is modelled.
-    const byDevice = new Map               ();
-    take.forEach(r => {
-      const key = nodeIdFor(r);
-      if (!byDevice.has(key)) byDevice.set(key, []);
-      byDevice.get(key) .push(r);
-    });
-
-    let added = 0, extended = 0;
-    byDevice.forEach((readings, deviceId) => {
-      let id = deviceId;
-      const sources = readings.map(r => ({
-        Type: 'mqtt', Topic: r.topic, Metric: r.metric,
-        // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
-        // reset detection. 'period' declared wrongly publishes a cumulative total as today's.
-        Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
-        Unit: r.unit || undefined,
-        JsonField: r.jsonField || undefined,
-      }));
-      readings.forEach(r => boundTopics.add(r.topic));
-
-      // A second pass over the same device adds its remaining readings to the node already there. The node
-      // has to be that device though: an ESPHome device called "grid" sanitises to the id of an existing
-      // grid node, and appending an appliance's topics to it would bind one device's readings onto another.
-      // Sameness is decided by the topics this scan found for the device, which is what an earlier import
-      // of it would have bound.
-      const deviceTopics = new Set(found.filter((f     ) => nodeIdFor(f) === id).map((f     ) => f.topic));
-      let existing = nodes.find((n     ) => n.Id === id);
-      if (existing && !(existing.Sources || []).some((src     ) => deviceTopics.has(src.Topic))) {
-        // Same id, different thing. Take the next free id rather than merging or overwriting.
-        let free = id, i = 2;
-        while (nodes.some((n     ) => n.Id === free)) free = `${id}_${i++}`;
-        toast(`A node named '${id}' already exists and is something else — imported as '${free}'.`, false);
-        id = free;
-        existing = undefined;
-      }
-      if (existing) {
-        ensure(existing, 'Sources', []).push(...sources);
-        extended++;
-        return;
-      }
-
-      const node      = {
-        Id: id,
-        Label: readings[0].device || id,
-        // 'none': an imported node is valued by its own bindings. 'auto' would aggregate children it does
-        // not have.
-        Mode: 'none',
-        Sources: sources,
-      };
-      if (tag) node.Tags = [tag];
-      nodes.push(node);
-      added++;
-      // One link per node, in the direction chosen. 'drawn from' makes the node a child of the target,
-      // which is what an appliance monitor is.
-      if (feedSel.value) {
-        ensure(flow, 'Links', []).push(dirSel.value === 'source'
-          ? { From: id, To: feedSel.value }
-          : { From: feedSel.value, To: id });
-      }
-    });
-
-    const parts = [added ? `${added} node(s)` : '', extended ? `${extended} extended` : ''].filter(Boolean);
-    toast(`Added ${parts.join(', ')} from ${take.length} reading(s). Press Save to write them to the config.`, true);
-    picked.clear();
-    rerender();
-  };
-
-  return panel;
-}
-
-/// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
-/// is used once when wiring something up, so it does not belong on the node editor's toolbar.
 function addMqttImportSection(nav     , sections     ) {
   const link = navLink(nav, 'MQTT Import', '⇤');
   // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
@@ -4853,46 +4605,6 @@ function addMqttImportSection(nav     , sections     ) {
 
   link.onclick = () => { render(); activate(link, sec); };
   return { link, sec };
-}
-
-function renderImportPanel(flow     , existingIds             , rerender            )              {
-  const panel = el('div', { class: 'tpl-import' });
-  panel.appendChild(el('div', { class: 'desc', text: 'Import a known device to pre-fill its nodes and register bindings. Review and Save afterwards; addresses are community starting points — verify against your firmware.' }));
-  const row = el('div', { class: 'ld-toolbar' });
-  const sel = el('select', { style: { width: 'auto' } })                     ;
-  const prefixIn = el('input', { type: 'text', placeholder: 'id prefix (e.g. eg4)' })                    ;
-  const hostIn = el('input', { type: 'text', placeholder: 'Modbus host / IP' })                    ;
-  const unitIn = el('input', { type: 'number', placeholder: 'unit', style: { width: '70px' } })                    ;
-  const importBtn = btn('Import', 'primary');
-  const note = el('div', { class: 'desc' });
-  row.append(sel, prefixIn, hostIn, unitIn, importBtn);
-  panel.append(row, note);
-
-  loadNodeTemplates().then(tpls => {
-    if (!tpls.length) { note.textContent = 'No device templates available.'; return; }
-    tpls.forEach((t     ) => sel.appendChild(el('option', { value: t.id, text: t.vendor + ' · ' + t.name })));
-    const showMeta = () => {
-      const t = tpls.find((x     ) => x.id === sel.value);
-      if (!t) return;
-      prefixIn.value = t.id; hostIn.style.display = t.transport === 'modbus' ? '' : 'none';
-      unitIn.style.display = t.transport === 'modbus' ? '' : 'none';
-      unitIn.value = t.modbus ? String(t.modbus.unitId) : '';
-      note.innerHTML = '';
-      note.append(el('span', { text: (t.description || '') + ' ' }));
-      if (t.sourceUrl) { const a = document.createElement('a'); a.href = t.sourceUrl; a.target = '_blank'; a.textContent = 'Register source ↗'; a.style.color = 'var(--accent)'; note.appendChild(a); }
-    };
-    sel.onchange = showMeta; showMeta();
-    importBtn.onclick = () => {
-      const t = tpls.find((x     ) => x.id === sel.value); if (!t) return;
-      const prefix = (prefixIn.value || '').trim(); if (!prefix) { toast('An id prefix is required.', false); return; }
-      const clash = (t.nodes || []).map((n     ) => prefix + '-' + n.key).find((id        ) => existingIds.has(id));
-      if (clash) { toast(`Node id '${clash}' already exists — pick a different prefix.`, false); return; }
-      const added = instantiateTemplate(t, prefix, hostIn.value.trim(), parseInt(unitIn.value) || 1, flow);
-      toast(`Imported ${t.name}: ${added.length} node(s). Set the Modbus host if needed, then Save.`, true);
-      rerender();
-    };
-  });
-  return panel;
 }
 
 function addNodesSection(nav     , sections     ) {
@@ -5456,6 +5168,313 @@ function addEnergyOverviewSection(nav     , sections     ) {
   setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
+
+// ── sections/mqtt-import.ts ─────────────────────────────────────
+// MQTT Import: browse what a broker is publishing and turn it into energy-flow nodes.
+//
+// Its own page under Integrations, and its own file: it reads the broker rather than the PDU, it is used
+// once when wiring something up, and it has nothing to do with drawing a diagram — which is what the rest
+// of the flow code is for.
+
+// The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit, and drop the
+// pre-wired nodes into the config for review.
+/// Import power/energy readings other integrations announce over Home Assistant MQTT discovery.
+///
+/// Discovery is used rather than per-integration topic patterns because it states the unit, the device
+/// class and the payload shape.
+function renderDiscoverPanel(flow     , rerender            )              {
+  const panel = el('div', { class: 'tpl-import' });
+  panel.appendChild(el('div', {
+    class: 'desc',
+    text: 'Readings other integrations publish to this broker — power, energy, current, voltage, frequency. '
+        + 'Pick the ones to add as nodes; nothing is created until you do, and nothing is saved until you '
+        + 'press Save. Add topic shapes for other publishers under MQTT → ImportProfiles.',
+  }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  // Where to look. Discovery states the unit and device class, so it is the default; the topic profiles
+  // exist for publishers that announce nothing, where the shape of the topic is all there is to go on.
+  const srcSel = el('select', { style: { width: 'auto' } })                     ;
+  srcSel.appendChild(el('option', { value: 'discovery', text: 'Home Assistant discovery' }));
+  // The rest come from the server: built-in profiles plus MQTT.ImportProfiles.
+  api('/api/mqtt/profiles').then((r     ) => {
+    ((r.body && r.body.profiles) || []).forEach((p     ) =>
+      srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
+  });
+  const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' })                    ;
+  // Where the imported nodes hang, and which way round. An appliance monitor is a load: the panel supplies
+  // the fridge, not the reverse. Wiring it the other way adds its draw to the panel's total and counts it
+  // twice, since the appliance is already inside the panel's unmeasured remainder.
+  const dirSel = el('select', { style: { width: 'auto' } })                     ;
+  dirSel.appendChild(el('option', { value: 'load', text: 'drawn from' }));
+  dirSel.appendChild(el('option', { value: 'source', text: 'feeding' }));
+  const feedSel = el('select', { style: { width: 'auto' } })                     ;
+  feedSel.appendChild(el('option', { value: '', text: '— not wired —' }));
+  (flow.Nodes || []).forEach((n     ) =>
+    feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
+  const scan = btn('Scan broker', 'primary');
+  const addBtn = btn('Add selected', 'primary');
+  const copyBtn = btn('Copy this profile to config');
+  copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
+                + 'metric map can be edited.';
+  bar.append(srcSel, scan,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
+  const note = el('div', { class: 'desc' });
+  const list = el('div');
+  panel.append(bar, note, list);
+
+  // Tagged on import so the per-destination filters can exclude them. A reading imported from Home
+  // Assistant and re-exported to it arrives back as a second copy.
+  tagIn.title = 'Applied to every node added here. Use it in a destination’s tag filter to avoid '
+              + 'exporting these readings back to where they came from.';
+
+  const picked = new Set        ();
+  // Topics already bound anywhere in the config: a reading is "already imported" when its topic is bound,
+  // not when some node happens to share its id. That lets a device's remaining metrics be added later.
+  const boundTopics = new Set        ();
+  (flow.Nodes || []).forEach((n     ) =>
+    (n.Sources || []).forEach((src     ) => { if (src.Topic) boundTopics.add(src.Topic); }));
+
+  /// The node a reading belongs to: its device, not its individual measure.
+  const nodeIdFor = (r     ) =>
+    String(r.device || r.id || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || r.id;
+
+  // Rows and their unit selectors, so the bulk controls can drive them without a re-render.
+  let boxes                                            = [];
+  let unitSels                                             = [];
+
+  const render = (readings       ) => {
+    list.innerHTML = '';
+    boxes = []; unitSels = [];
+    if (!readings.length) {
+      note.textContent = srcSel.value === 'discovery'
+        ? 'No importable entities in the broker’s Home Assistant discovery. Publishers that announce nothing '
+          + 'will not appear here — try a topic profile instead.'
+        : 'No topics matched this profile’s shape. Check the pattern against what the publisher actually '
+          + 'sends, or add one under MQTT → ImportProfiles.';
+      return;
+    }
+    const tbl = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['', 'Device', 'Reading', 'Metric', 'Unit', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
+    tbl.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    readings.forEach(r => {
+      const tr = el('tr');
+      const cb = el('input', { type: 'checkbox', class: 'switch' })                    ;
+      const already = boundTopics.has(r.topic);
+      // Two reasons a row cannot be taken: already modelled, or not bindable from its template.
+      cb.disabled = !!r.unsupported || already;
+      cb.onchange = () => { cb.checked ? picked.add(r.id) : picked.delete(r.id); syncCount(); };
+      if (!cb.disabled) boxes.push({ reading: r, box: cb });
+      tr.appendChild(el('td', {}, cb));
+      tr.appendChild(el('td', { text: r.device || '—' }));
+      tr.appendChild(el('td', { text: r.label }));
+      tr.appendChild(el('td', { text: r.metric }));
+
+      // A topic-matched reading carries no unit. The choices are the units FlowUnits accepts for this
+      // metric; an unlisted string would not convert.
+      const unitCell = el('td');
+      if (r.unit) {
+        unitCell.appendChild(el('span', { text: r.unit }));
+      } else {
+        const choices           = r.units || [];
+        const unitSel = el('select', { style: { width: 'auto' } })                     ;
+        unitSel.appendChild(el('option', { value: '', text: '— pick —' }));
+        choices.forEach(u => unitSel.appendChild(el('option', { value: u, text: u })));
+        // Pre-filled with the metric's canonical unit. It is a form default the operator reviews against
+        // the sampled payload in the topic cell, and the bulk setters above change a whole metric at once.
+        r.unit = r.unit || r.canonicalUnit || '';
+        unitSel.value = r.unit || '';
+        unitSel.onchange = () => { r.unit = unitSel.value || undefined; };
+        unitCell.appendChild(unitSel);
+        unitSels.push({ reading: r, sel: unitSel });
+        if (!choices.length) unitCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'no units for this metric' }));
+      }
+      tr.appendChild(unitCell);
+
+      const topic = el('td');
+      topic.appendChild(el('code', { text: r.topic, style: { color: 'var(--muted)' } }));
+      if (r.sample != null && r.sample !== '')
+        topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: `last value: ${String(r.sample).slice(0, 60)}` }));
+      if (r.unsupported) topic.appendChild(el('div', { class: 'nh-warn', text: `Cannot import: ${r.unsupported}.` }));
+      else if (already) topic.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'Already bound.' }));
+      tr.appendChild(topic);
+      body.appendChild(tr);
+    });
+    tbl.appendChild(body);
+    list.appendChild(bulkBar(readings));
+    list.appendChild(tbl);
+    // Repeated below the table. With twenty rows the toolbar scrolls off the top, leaving the page's Save
+    // button as the only visible action — and Save without Add writes a config with no imported nodes.
+    const footer = el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } });
+    const addAgain = btn('Add selected', 'primary');
+    addAgain.onclick = () => addBtn.onclick ({}       );
+    footer.append(addAgain, el('span', { class: 'desc', style: { margin: '0' }, text: 'Adds the ticked rows as nodes. Save writes them to the config.' }));
+    list.appendChild(footer);
+    syncCount();
+  };
+
+  /// Keep both Add buttons showing how many rows are ticked.
+  const syncCount = () => {
+    const n = picked.size;
+    const label = n ? `Add ${n} selected` : 'Add selected';
+    [addBtn, ...Array.from(list.querySelectorAll('button'))].forEach((b     ) => {
+      if (b && /^Add \d* ?selected$/.test(b.textContent || '')) b.textContent = label;
+    });
+  };
+
+  /// Select-all, and one unit setter per metric present, so twenty rows are not twenty clicks.
+  const bulkBar = (readings       ) => {
+    const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 6px' } });
+
+    const all = btn('Select all');
+    all.onclick = () => {
+      const turnOn = boxes.some(b => !b.box.checked);
+      boxes.forEach(b => {
+        b.box.checked = turnOn;
+        turnOn ? picked.add(b.reading.id) : picked.delete(b.reading.id);
+      });
+      all.textContent = turnOn ? 'Select none' : 'Select all';
+      syncCount();
+    };
+    row.appendChild(all);
+
+    // One setter per metric in the results: the answer is usually the same for every row of a metric
+    // (every ESPHome power sensor is W), and differs between metrics.
+    const metrics = [...new Set(readings.filter(r => !r.unit || r.units?.length).map(r => r.metric))].sort();
+    metrics.forEach(metric => {
+      const choices           = (readings.find(r => r.metric === metric) || {}).units || [];
+      if (choices.length < 2) return;   // nothing to choose between
+      const sel = el('select', { style: { width: 'auto' } })                     ;
+      choices.forEach(u => sel.appendChild(el('option', { value: u, text: u })));
+      sel.value = (readings.find(r => r.metric === metric) || {}).canonicalUnit || choices[0];
+      sel.onchange = () => {
+        unitSels.filter(u => u.reading.metric === metric).forEach(u => {
+          u.sel.value = sel.value;
+          u.reading.unit = sel.value;
+        });
+      };
+      row.append(el('span', { class: 'desc', style: { margin: '0' }, text: `all ${metric}:` }), sel);
+    });
+
+    return row;
+  };
+
+  copyBtn.onclick = async () => {
+    const id = srcSel.value;
+    if (!id || id === 'discovery' || id.startsWith('custom:')) {
+      toast('Pick a built-in topic profile first.', false);
+      return;
+    }
+    const r = await api('/api/mqtt/profile?id=' + encodeURIComponent(id));
+    if (!r.body || !r.body.ok) { toast((r.body && r.body.message) || 'Could not read that profile.', false); return; }
+    const p = r.body.profile;
+    const mqtt = ensure(state.data, 'MQTT', {});
+    const list = ensure(mqtt, 'ImportProfiles', []);
+    if (list.some((x     ) => (x.Name || '').toLowerCase() === (p.label || '').toLowerCase())) {
+      toast(`'${p.label}' is already in ImportProfiles.`, false);
+      return;
+    }
+    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined, Metrics: p.metrics });
+    toast(`Copied '${p.label}' into MQTT → ImportProfiles. Edit it there, then Save.`, true);
+    refreshDirty();
+  };
+
+  let found        = [];
+  scan.onclick = async () => {
+    const src = srcSel.value;
+    note.textContent = 'Scanning the broker…';
+    const r = await api(src === 'discovery'
+      ? '/api/mqtt/importable'
+      : '/api/mqtt/importable/pattern?profile=' + encodeURIComponent(src));
+    if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
+    found = r.body.readings || [];
+    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
+    render(found);
+  };
+
+  addBtn.onclick = () => {
+    const take = found.filter(r => picked.has(r.id) && !r.unsupported && !boundTopics.has(r.topic));
+    if (!take.length) { toast('Nothing selected.', false); return; }
+    const tag = tagIn.value.trim();
+    const nodes = ensure(flow, 'Nodes', []);
+
+    // One node per device, with a source per metric. A device publishing power, energy, current and
+    // voltage is one thing with four readings, matching how a PDU outlet or an inverter is modelled.
+    const byDevice = new Map               ();
+    take.forEach(r => {
+      const key = nodeIdFor(r);
+      if (!byDevice.has(key)) byDevice.set(key, []);
+      byDevice.get(key) .push(r);
+    });
+
+    let added = 0, extended = 0;
+    byDevice.forEach((readings, deviceId) => {
+      let id = deviceId;
+      const sources = readings.map(r => ({
+        Type: 'mqtt', Topic: r.topic, Metric: r.metric,
+        // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
+        // reset detection. 'period' declared wrongly publishes a cumulative total as today's.
+        Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
+        Unit: r.unit || undefined,
+        JsonField: r.jsonField || undefined,
+      }));
+      readings.forEach(r => boundTopics.add(r.topic));
+
+      // A second pass over the same device adds its remaining readings to the node already there. The node
+      // has to be that device though: an ESPHome device called "grid" sanitises to the id of an existing
+      // grid node, and appending an appliance's topics to it would bind one device's readings onto another.
+      // Sameness is decided by the topics this scan found for the device, which is what an earlier import
+      // of it would have bound.
+      const deviceTopics = new Set(found.filter((f     ) => nodeIdFor(f) === id).map((f     ) => f.topic));
+      let existing = nodes.find((n     ) => n.Id === id);
+      if (existing && !(existing.Sources || []).some((src     ) => deviceTopics.has(src.Topic))) {
+        // Same id, different thing. Take the next free id rather than merging or overwriting.
+        let free = id, i = 2;
+        while (nodes.some((n     ) => n.Id === free)) free = `${id}_${i++}`;
+        toast(`A node named '${id}' already exists and is something else — imported as '${free}'.`, false);
+        id = free;
+        existing = undefined;
+      }
+      if (existing) {
+        ensure(existing, 'Sources', []).push(...sources);
+        extended++;
+        return;
+      }
+
+      const node      = {
+        Id: id,
+        Label: readings[0].device || id,
+        // 'none': an imported node is valued by its own bindings. 'auto' would aggregate children it does
+        // not have.
+        Mode: 'none',
+        Sources: sources,
+      };
+      if (tag) node.Tags = [tag];
+      nodes.push(node);
+      added++;
+      // One link per node, in the direction chosen. 'drawn from' makes the node a child of the target,
+      // which is what an appliance monitor is.
+      if (feedSel.value) {
+        ensure(flow, 'Links', []).push(dirSel.value === 'source'
+          ? { From: id, To: feedSel.value }
+          : { From: feedSel.value, To: id });
+      }
+    });
+
+    const parts = [added ? `${added} node(s)` : '', extended ? `${extended} extended` : ''].filter(Boolean);
+    toast(`Added ${parts.join(', ')} from ${take.length} reading(s). Press Save to write them to the config.`, true);
+    picked.clear();
+    rerender();
+  };
+
+  return panel;
+}
+
+/// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
+/// is used once when wiring something up, so it does not belong on the node editor's toolbar.
 
 // ── sections/nodedata.ts ────────────────────────────────────────
 // Node Data: every reading the energy flow is collecting, in one table.
