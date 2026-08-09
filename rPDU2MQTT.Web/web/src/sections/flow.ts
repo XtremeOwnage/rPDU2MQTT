@@ -1005,10 +1005,14 @@ function contradictionBanner(items: { id: string, label: string, share: number }
 /// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
 function contradictionShare(n: any, reading: number | null): number | null {
   if (n.imbalance == null || reading == null || !isFinite(reading)) return null;
-  // A measured node's gap is throughput − reading, so the throughput is the larger side. Everything else
-  // reports outflow − inflow, where the reading IS the outflow. Either way the denominator is the bigger
-  // of the two sides — the amount the node is claiming to handle.
-  const throughput = n.derivation === 'measured' ? reading + n.imbalance : reading;
+  // The denominator is what the node is handling — the larger of its two sides.
+  //
+  // This used to reconstruct it as `reading + imbalance`, which was true while a measured node's imbalance
+  // meant "throughput − reading". It stopped being true when an imbalance became outflow − inflow for every
+  // node, and the arithmetic went on producing a plausible number from a premise that no longer held. The
+  // server states the throughput now, so there is nothing to reconstruct; a node without one is reporting
+  // the larger side as its own value already.
+  const throughput = typeof n.throughput === 'number' ? n.throughput : reading;
   if (!(throughput > 0)) return null;
   return Math.min(1, Math.abs(n.imbalance) / throughput);
 }

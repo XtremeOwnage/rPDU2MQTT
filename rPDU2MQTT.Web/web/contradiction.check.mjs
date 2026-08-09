@@ -25,7 +25,12 @@ const graph = (inverterImbalance, metric = 'energytoday') => ({
   ok: true, metric, units: 'kWh',
   nodes: [
     { id: 'solar', label: 'Solar (PV)', kind: 'solar', value: 129.9, derivation: 'measured', imbalance: null },
-    { id: 'inverter', label: 'EG4 FlexBoss 21', kind: 'inverter', value: 2.1, derivation: 'measured', imbalance: inverterImbalance },
+    // 200 passes through the node, 127.8 of it unaccounted for, and its own sensor reads 2.1. The share is
+    // of the throughput the server states. Reconstructed as reading + imbalance it would be 129.9, and the
+    // same node would read as 98% instead of 64% — an arithmetic that was right only while a measured
+    // node's imbalance meant "throughput - reading", and went on looking plausible after it stopped.
+    { id: 'inverter', label: 'EG4 FlexBoss 21', kind: 'inverter', value: 2.1, derivation: 'measured',
+      imbalance: inverterImbalance, throughput: 200 },
     { id: 'panel', label: 'Main Panel', kind: 'panel', value: 2.1, derivation: 'measured', imbalance: 0.09 },
   ],
   links: [
@@ -55,10 +60,14 @@ async function render(inverterImbalance, metric, withheld = []) {
   return getEl('sections');
 }
 
-// --- The live case: 129.9 unaccounted against a 2.1 reading.
-let sections = await render(129.9);
+// --- The live case: 127.8 of a 129.9 throughput unaccounted for.
+let sections = await render(127.8);
 const banners = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
 if (banners.length !== 1) fail(`expected one contradiction banner, got ${banners.length}`);
+// The share is of the throughput the server states — 127.8 / 129.9 — not of a figure rebuilt from the
+// reading. Rebuilt, the same node reads as 100% because 127.8 dwarfs its 2.1 reading.
+if (!/64%/.test(banners[0].textContent))
+  fail(`the share is not a share of the node's throughput: ${banners[0].textContent.slice(0, 160)}`);
 
 const text = banners[0].textContent;
 if (!text.includes('EG4 FlexBoss 21')) fail('the banner does not name the node it is about');
