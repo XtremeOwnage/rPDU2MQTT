@@ -23,6 +23,7 @@ const MODULES = [
   'theme.ts',
   'realtime.ts',
   'dirty.ts',
+  'flow-vocabulary.ts',
   'energy.ts',
   'history-control.ts',
   'charts.ts',
@@ -34,6 +35,7 @@ const MODULES = [
   'sections/control.ts',
   'sections/livedata.ts',
   'sections/flow.ts',
+  'sections/node-editor.ts',
   'sections/energy-board.ts',
   'sections/mqtt-import.ts',
   'sections/nodedata.ts',
@@ -48,14 +50,29 @@ const MODULES = [
   'main.ts',
 ];
 
-// Drop import lines and the leading `export ` keyword: the bundle is one shared scope, like the
+// Drop import statements and the leading `export ` keyword: the bundle is one shared scope, like the
 // original single file, so cross-module names resolve directly.
+//
+// A multi-line import counts. Only the first line was dropped before, so an import broken across lines —
+// which is how a module with a dozen named imports is written — left its closing brace behind and the
+// whole bundle failed to parse. The error pointed at the brace rather than the import, which is a long way
+// from the cause.
 function debundle(js) {
-  return js
-    .split('\n')
-    .filter(line => !/^\s*import\b/.test(line))
-    .map(line => line.replace(/^(\s*)export\s+(?=(const|let|var|function|async|class)\b)/, '$1'))
-    .join('\n');
+  const out = [];
+  let inImport = false;
+  for (const line of js.split('\n')) {
+    if (inImport) {                                  // …still inside a multi-line import
+      if (/\bfrom\s*['"]/.test(line) || /^\s*['"]/.test(line)) inImport = false;
+      continue;
+    }
+    if (/^\s*import\b/.test(line)) {
+      // One-liners end on the same line; anything else continues until the `from '...'`.
+      if (!/\bfrom\s*['"]/.test(line) && !/;\s*$/.test(line)) inImport = true;
+      continue;
+    }
+    out.push(line.replace(/^(\s*)export\s+(?=(const|let|var|function|async|class|type|interface)\b)/, '$1'));
+  }
+  return out.join('\n');
 }
 
 // Safe, parser-free JS tidy-up: trim trailing whitespace and collapse runs of blank lines. (Does not

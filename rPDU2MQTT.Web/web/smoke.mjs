@@ -417,6 +417,14 @@ if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not
 if (!dataText.includes('1,234')) fail('a reading with no timestamp was not shown at all');
 if (!dataText.includes('no timestamp')) fail('a reading with no timestamp is reported as never having arrived');
 
+// --- The bundler: a multi-line import is still an import -------------------------------------------
+// Only the first line used to be dropped, so a module written with a dozen named imports across several
+// lines left its closing brace in the bundle and nothing parsed at all. The error pointed at the brace.
+const bundle = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
+for (const stray of [/^\s*import\s/m, /^\s*\}\s*from\s/m, /^\s*from\s+['"]/m])
+  if (stray.test(bundle))
+    fail(`the bundle still contains an import statement (${stray}) — a multi-line import was only half removed`);
+
 // --- Stylesheet: the toggle switch's specificity ---------------------------------------------------
 // Nothing here renders CSS, so a cascade bug ships invisibly — this one did. `input[type=checkbox]` is
 // (0,1,1) and `.switch` is (0,1,0), so a bare checkbox rule silently outranks the switch and collapses
