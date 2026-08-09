@@ -186,6 +186,17 @@ for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'D
   if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
 }
 
+// No History section in this config, so there is nothing to pick a moment from — and a date control whose
+// every answer would be "history is turned off" is worse than no control.
+const energyLink = navLinksNow().find(a => a.dataset.label === 'Energy');
+if (!energyLink) fail('no Energy tab');
+energyLink.click();
+await new Promise(r => setTimeout(r, 100));
+const histBars = query(getEl('sections'), 'div', true).filter(d => (d.className || '').includes('history-bar'));
+if (!histBars.length) fail('no history control was built at all');
+if (!histBars.every(b => (b.className || '').includes('is-hidden')))
+  fail('a date picker is offered while the History feature is off');
+
 // The roll-up is a table: nothing on it is drawn and nothing animates, so the switches that change how a
 // diagram is drawn described a diagram that was not on the page.
 const rollupLink = navLinksNow().find(a => a.dataset.label === 'Roll-up');

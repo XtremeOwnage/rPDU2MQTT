@@ -74,6 +74,19 @@ public sealed class HistoricalFlowValueSource : IFlowValueSource
     public bool TryGetValue(string nodeId, string metric, out double value)
     {
         value = 0;
+
+        // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own
+        // (battery#in), because that is how the exporter writes it. Without this the builder never finds a
+        // return lane in history, so a past view of a battery showed it discharging and never charging —
+        // and the Energy Overview filled that gap from the LIVE cache, putting this second's charge rate
+        // under a date from last week.
+        if (metric.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal))
+        {
+            var baseMetric = metric[..^FlowMetricKey.InSuffix.Length];
+            if (!string.Equals(baseMetric, this.metric, StringComparison.OrdinalIgnoreCase)) return false;
+            return values.TryGetValue(nodeId + FlowMetricKey.InSuffix, out value);
+        }
+
         // Answering a metric these values are not in would hand the power roll-up an energy figure.
         if (!string.Equals(metric, this.metric, StringComparison.OrdinalIgnoreCase)) return false;
         return values.TryGetValue(nodeId, out value);

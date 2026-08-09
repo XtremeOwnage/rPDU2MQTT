@@ -596,8 +596,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 if (!config.History.Enabled || history is null)
                     return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
 
-                var ids = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
+                // The nodes, plus their return lanes. The lane is a series of its own (battery#in), so a
+                // window that does not ask for it comes back with the supply direction only — and a view
+                // built from that has no charge or export in it at all.
+                var live_ = FlowGraphBuilder.Build(data, config.EnergyFlow, m, live).Nodes
                     .Where(n => !n.Synthetic).Select(n => n.Id).ToList();
+                var ids = live_.Concat(live_.Select(id => id + FlowMetricKey.InSuffix)).ToList();
 
                 if (spanDays > 1)
                 {

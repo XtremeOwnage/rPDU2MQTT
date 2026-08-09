@@ -3539,7 +3539,20 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh),
     // which are the only way to tell a source that has expired from one that never published at all.
     const liveInfo: Record<string, any> = {};
-    const q = [
+
+    // A past view must not read the live cache. It did, so a board showing last Tuesday took its
+    // charge/export and its state of charge from this second and printed them under that date — the same
+    // mistake as painting a live diagram over a chosen day, in the one place that was still doing it.
+    // Historically the in-direction comes from the graph itself: the return lanes are series of their own.
+    const historical = !!r.body.historical;
+    const inFromGraph: Record<string, number> = {};
+    if (historical)
+      (r.body.nodes || []).forEach((n: any) => {
+        const id = String(n.id || '');
+        if (id.endsWith('#in') && typeof n.value === 'number') inFromGraph[id.slice(0, -3) + '|' + metric + '#in'] = n.value;
+      });
+
+    const q = historical ? [] : [
       ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: metric + '#in' })),
       ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
     ];
@@ -3552,9 +3565,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
         });
       } catch { /* no live cache — these reads just stay absent */ }
     }
-    const sumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|${metric}#in`; if (k in liveBy) { s += liveBy[k]; known = true; } }); return known ? s : null; };
-    // Battery SoC: average across battery nodes that report it (a bank reads as one figure).
-    const socVals = battIds.map(id => liveBy[`${id}|soc`]).filter((v): v is number => typeof v === 'number');
+    const inBy = historical ? inFromGraph : liveBy;
+    const sumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|${metric}#in`; if (k in inBy) { s += inBy[k]; known = true; } }); return known ? s : null; };
+    // Battery SoC: average across battery nodes that report it (a bank reads as one figure). Only live —
+    // the exporter keeps no series for it, so a past view has none, and showing today's would be a reading
+    // from the wrong moment dressed as that day's.
+    const socVals = historical ? [] : battIds.map(id => liveBy[`${id}|soc`]).filter((v): v is number => typeof v === 'number');
     const soc = socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null;
 
     // Formatting and gauges follow the metric. A node's Max is a full-scale power figure, so a dial against
