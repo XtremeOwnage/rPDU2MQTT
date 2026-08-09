@@ -644,6 +644,363 @@ function sumKnown(values                               )                {
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
 
+// ── history-control.ts ──────────────────────────────────────────
+// Choosing a moment to look at, shared by every view that can show one.
+//
+// Its own module because two pages build it — the Sankey and the Energy board — and a control with two
+// implementations is a control that answers differently depending on which page you are standing on. What
+// it produces is the query (`at`, `span`) and the sentence describing what came back, so those two things
+// are decided once as well.
+
+/// The `at`/`span` part of a flow query, and the sentence that says what came back.
+///
+/// Both pages ask the same question and must describe the answer the same way — a diagram or a board that
+/// looks live while showing last Tuesday is the worst thing either page can do.
+function historyQuery(hist                                          )         {
+  const at = hist.at();
+  if (!at) return '';
+  const span = hist.span();
+  return '&at=' + encodeURIComponent(at) + (span > 1 ? '&span=' + span : '');
+}
+
+function historyNote(body     )         {
+  if (!body || !body.historical) return '';
+  const when = new Date(body.at).toLocaleString();
+  const days = Number(body.spanDays) || 1;
+  const what = days > 1 ? `${days} days to ${new Date(body.at).toLocaleDateString()}` : when;
+  // A window with days missing from it is not that window. Name the nodes rather than quietly showing a
+  // short total as a whole one.
+  const short = (body.incomplete || [])                                    ;
+  const gap = short.length
+    ? ` · incomplete: ${short.slice(0, 4).map(x => `${x.node} ${x.days}/${days}d`).join(', ')}${short.length > 4 ? `, +${short.length - 4} more` : ''}`
+    : '';
+  return `showing ${what} from ${body.source}${gap}`;
+}
+
+/// Which part of the moment was just changed. The caller needs it to tell "the whole of a day" (an energy
+/// question) from "this instant of it" (a power one) — the two want different metrics, and guessing from
+/// the value alone cannot distinguish a freshly-picked day from a re-render.
+
+/// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
+///
+/// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
+/// the page renders whatever it gets back — a historical view is the same diagram built from the values of
+/// that instant, not a second rendering path.
+function historyControl(onChange                             )
+
+  {
+  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
+  // Separate date and time inputs, not a datetime-local: that control reports '' until BOTH halves are
+  // filled, so picking a day and leaving the time blank sent nothing and the page silently stayed live.
+  // Split, the time is genuinely optional — blank means the end of the chosen day.
+  const input = el('input', { type: 'date' })                    ;
+  const timeIn = el('input', { type: 'time', step: '1' })                    ;
+  const prev = btn('◀');
+  const next = btn('▶');
+  const live = btn('Live', 'primary');
+  // Which of the two things you are looking at, said plainly and in the same place every time. The date
+  // control alone does not answer it at a glance — an empty date reads as "not set yet" as easily as "now",
+  // and a diagram of last Tuesday looks exactly like a diagram of this second.
+  const badge = el('span', { class: 'pill good', text: 'LIVE' });
+  const note = el('span', { class: 'desc', style: { margin: '0' } });
+
+  live.title = 'Back to the current reading';
+
+  const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
+  const spanDays = () => Math.max(1, Number(spanSel.value) || 1);
+
+  // The arrows move by whatever is being shown: a day at a time on a single day, a week at a time on a
+  // week, a month on a month. Stepping one day through a 30-day window means 30 presses to see the window
+  // before it, and every one of those presses is a fresh set of history queries.
+  const step = (dir        ) => {
+    const from = input.value || today();
+    const d = new Date(from + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
+    d.setDate(d.getDate() + dir * spanDays());
+    const iso = d.toLocaleDateString('en-CA');
+    input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
+    onChange('day');
+  };
+
+  input.onchange = () => onChange('day');
+  timeIn.onchange = () => onChange('time');
+  prev.onclick = () => step(-1);
+  next.onclick = () => step(1);
+  const stepLabel = () => { const n = spanDays(); return n === 1 ? 'day' : n === 7 ? 'week' : `${n} days`; };
+  live.onclick = () => { input.value = ''; timeIn.value = ''; spanSel.value = '1'; syncSpan(); note.textContent = ''; onChange('live'); };
+
+  // The picker exists only if there is a backend to read from. With History switched off, a date control
+  // whose every answer is "history is turned off" is worse than no control at all.
+  //
+  // Read live rather than at build time, and re-read on every tab switch, so turning the feature on under
+  // Features brings the picker out without a reload.
+  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
+  const syncEnabled = () => {
+    const on = historyOn();
+    row.classList[on ? 'remove' : 'add']('is-hidden');
+    // A day still selected when the feature is switched off has to stop being requested, or the page goes
+    // on asking for a moment that nothing can answer.
+    if (!on && input.value) { input.value = ''; timeIn.value = ''; spanSel.value = '1'; note.textContent = ''; onChange('live'); }
+  };
+
+  // One control rather than five: the arrows and inputs share a border and only the outer corners round,
+  // so the group reads as a single thing instead of a row of loose buttons.
+  const group = el('div', { class: 'input-group' }, prev, input, timeIn, next);
+
+  // How much of the past to add up. A week is the sum of seven daily totals — they all re-base at the same
+  // moment, so they add; a lifetime counter and an instantaneous power reading do not, which is why the
+  // server refuses a span for anything but the daily total and this offers one only alongside a date.
+  const spanSel = el('select', { title: 'Add up the daily totals over this many days, ending on the chosen day.' })                     ;
+  [['1', 'that day'], ['7', '7 days to it'], ['30', '30 days to it']]
+    .forEach(([v, t]) => spanSel.appendChild(el('option', { value: v, text: t })));
+  spanSel.onchange = () => { syncSpan(); onChange('span'); };
+
+  // A time within the day says nothing about a week of them, so the two cannot both be set.
+  const syncSpan = () => {
+    prev.title = 'Previous ' + stepLabel();
+    next.title = 'Next ' + stepLabel();
+    const many = spanDays() > 1;
+    timeIn.disabled = many;
+    if (many) timeIn.value = '';
+    timeIn.title = many
+      ? 'Not used over a span of days — each day is counted whole.'
+      : 'Optional. Leave blank for the end of the day — the day’s complete totals.';
+  };
+
+  row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
+    el('span', { class: 'desc', style: { margin: '0' }, text: 'covering' }), spanSel, live, note);
+  syncSpan();
+  syncEnabled();
+  window.addEventListener?.('rpdu:activate', syncEnabled);
+  return {
+    row,
+    /// The instant to ask for.
+    ///
+    /// With a time, that time on the chosen day. Without one, the end of the day: a daily total is only
+    /// complete then, and midnight would return the total a moment after it re-based, which is zero. Either
+    /// way an instant still ahead of now is clamped to now, because nothing is recorded past it.
+    at: () => {
+      if (!historyOn() || !input.value) return '';
+      const when = new Date(`${input.value}T${timeIn.value || '23:59:59'}`);
+      const now = new Date();
+      return (when > now ? now : when).toISOString();
+    },
+    day: () => (historyOn() ? input.value : ''),
+    time: () => timeIn.value,
+    /// Days to add up, ending on the chosen day. 1 is the plain "that moment" view.
+    span: () => (historyOn() && input.value ? spanDays() : 1),
+    setNote: (t        ) => {
+      note.textContent = t;
+      // The badge follows what was actually rendered, not what the picker says: a date that produced no
+      // answer leaves the live view on screen, and calling that historical would be a lie about the figures.
+      const past = !!t;
+      badge.className = 'pill ' + (past ? 'warn' : 'good');
+      badge.textContent = past ? 'HISTORICAL' : 'LIVE';
+      badge.title = past ? t : 'These are the latest readings.';
+    },
+  };
+}
+
+// The tag selected on the diagram, kept across redraws: the Sankey repaints on every live push, and a
+// highlight that cleared itself every few seconds would be unusable.
+
+// ── charts.ts ───────────────────────────────────────────────────
+// Drawing a series as bars: the axis, the gaps, the signs and the hover card.
+//
+// Separated from the page that uses it because it is a drawing problem, not an energy one — and because
+// the rules it encodes are the ones worth keeping in one place. A day with no reading is an empty slot and
+// never a zero-height bar; a negative value (battery charge, grid export) belongs below the zero line
+// rather than cancelling a positive one; and the hover target is the whole day column, because a stacked
+// segment can be a pixel tall.
+
+// The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
+// vocabulary so a node is the same colour wherever it appears.
+const KIND_COLOR                         = {
+  solar: 'var(--warn, #d08700)',
+  battery: 'var(--good, #46c46a)',
+  grid: 'var(--accent, #4f8cff)',
+  load: '#b06fd0',
+  outlet: '#7f8ea3',
+  pdu: '#5c7fa3',
+  panel: '#c98b3f',
+  inverter: '#3fb0a8',
+};
+const colorFor = (kind        , i        ) =>
+  KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
+
+/// One drawable series: a name, a colour, and one value per day — null where there is no reading.
+
+const SVG = 'http://www.w3.org/2000/svg';
+const svgTag = (tag        , attrs                     ) => {
+  const e = document.createElementNS(SVG, tag);
+  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
+  return e;
+};
+
+/// The hover card. One card for the page, moved and refilled — a card per chart would leak one per redraw.
+let card      = null;
+function hoverCard()      {
+  if (!card) {
+    card = el('div', { class: 'node-card trend-card' });
+    document.body.appendChild(card);
+  }
+  return card;
+}
+function hideCard() { if (card) card.classList.remove('show'); }
+
+/**
+ * A day-by-day bar chart.
+ *
+ * `stacked` adds the day's series into one bar ("where did the day go"); otherwise they sit side by side
+ * ("how do these compare"). A day where every series is null is drawn as an empty slot and reported, never
+ * as a bar of zero.
+ */
+function barChart(opts
+
+ )                             {
+  const { days, lines, units, stacked } = opts;
+  const has = (d        ) => lines.some(l => l.values[d] != null);
+  const dayTotal = (d        ) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
+
+  // Charge and export are negative quantities — energy leaving in the other direction — so the axis has to
+  // hold both signs. Stacked, each sign builds away from zero on its own side; drawn on one axis they
+  // would cancel visually and a busy day would look like an idle one.
+  const posOf = (d        ) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
+  const negOf = (d        ) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
+  const peak = opts.max ?? Math.max(
+    stacked ? Math.max(...days.map((_, d) => (has(d) ? posOf(d) : 0)), 0)
+      : Math.max(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
+    0);
+  const trough = Math.min(
+    stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
+      : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
+    0);
+  const span = (peak - trough) || 1;
+
+  const W = Math.max(720, days.length * 26);
+  const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const slot = plotW / days.length;
+  const x = (d        ) => padL + slot * d;
+  const barW = Math.max(3, slot * 0.72);
+  const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
+  const zeroY = y(0);
+
+  const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = trough + (span / ticks) * i, yy = y(v);
+    svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
+    const t = svgTag('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
+    t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0))) + (opts.pct ? '%' : '');
+    svg.appendChild(t);
+  }
+
+  let gaps = 0;
+  days.forEach((day, d) => {
+    if (!has(d)) {
+      gaps++;
+      const g = svgTag('rect', {
+        x: x(d) + (slot - barW) / 2, y: padT, width: barW, height: plotH,
+        fill: 'var(--line)', opacity: 0.25, class: 'trend-gap',
+      });
+      const title = document.createElementNS(SVG, 'title');
+      title.textContent = `${day} — no reading from the history backend`;
+      g.appendChild(title);
+      svg.appendChild(g);
+    } else {
+      // The period still in progress is drawn faded: it is a real reading of an unfinished day, and beside
+      // finished ones at full strength it reads as a quiet day rather than an early one.
+      const partial = day === opts.partial;
+      const paint = (attrs                     ) => {
+        const r = svgTag('rect', partial ? { ...attrs, opacity: 0.55 } : attrs);
+        if (partial) {
+          const t = document.createElementNS(SVG, 'title');
+          t.textContent = `${day} — still in progress, not a full day`;
+          r.appendChild(t);
+        }
+        svg.appendChild(r);
+      };
+      if (stacked) {
+        // Each sign stacks away from zero on its own side.
+        let up = 0, down = 0;
+        lines.forEach(l => {
+          const v = l.values[d];
+          if (v == null || v === 0) return;
+          const from = v > 0 ? up : down;
+          const to = from + v;
+          paint({
+            x: x(d) + (slot - barW) / 2, y: Math.min(y(from), y(to)), width: barW,
+            height: Math.max(1, Math.abs(y(to) - y(from))), fill: l.color,
+          });
+          if (v > 0) up = to; else down = to;
+        });
+      } else {
+        const each = barW / lines.length;
+        lines.forEach((l, i) => {
+          const v = l.values[d];
+          if (v == null || v === 0) return;
+          paint({
+            x: x(d) + (slot - barW) / 2 + each * i, y: Math.min(zeroY, y(v)),
+            width: Math.max(1, each - 1), height: Math.max(1, Math.abs(y(v) - zeroY)), fill: l.color,
+          });
+        });
+      }
+    }
+
+    const every = Math.ceil(days.length / 12);
+    if (d % every === 0) {
+      const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
+      t.textContent = day.slice(5);
+      svg.appendChild(t);
+    }
+  });
+
+  // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
+  svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+
+  // A full-height hit area per day, over the bars. Hovering a thin bar is a game of skill, and a stacked
+  // segment can be a pixel tall — the question is "what happened on this day", so the day is the target.
+  days.forEach((day, d) => {
+    const hit = svgTag('rect', {
+      x: x(d), y: padT, width: slot, height: plotH, fill: 'transparent', class: 'trend-hit', 'data-day': day,
+    });
+    const show = (ev     ) => {
+      const c = hoverCard();
+      c.innerHTML = '';
+      c.appendChild(el('div', { class: 'nh-title', text: day + (day === opts.partial ? ' · so far' : '') }));
+      if (day === opts.partial)
+        c.appendChild(el('div', { class: 'desc', style: { margin: '0 0 2px' }, text: 'still in progress — not a full day' }));
+      if (!has(d)) {
+        c.appendChild(el('div', { class: 'nh-warn', text: 'no reading from the history backend' }));
+      } else {
+        lines.forEach(l => {
+          const v = l.values[d];
+          c.appendChild(el('div', { class: 'nh-row' },
+            el('span', { class: 'nh-name' },
+              el('span', { class: 'trend-swatch', style: { background: l.color } }),
+              l.label),
+            el('span', { class: 'nh-num', text: v == null ? '—' : `${formatNum(Number(v.toFixed(2)))}${opts.pct ? '%' : ' ' + units}` })));
+        });
+        if (stacked && lines.length > 1)
+          c.appendChild(el('div', { class: 'nh-row nh-total' },
+            el('span', { class: 'nh-name', text: 'Total' }),
+            el('span', { class: 'nh-num', text: `${formatNum(Number(dayTotal(d).toFixed(2)))} ${units}` })));
+      }
+      c.classList.add('show');
+      const px = (ev && ev.clientX) || 0, py = (ev && ev.clientY) || 0;
+      c.style.left = Math.max(8, px + 14) + 'px';
+      c.style.top = Math.max(8, py + 14) + 'px';
+    };
+    hit.addEventListener('mouseenter', show);
+    hit.addEventListener('mousemove', show);
+    hit.addEventListener('mouseleave', hideCard);
+    svg.appendChild(hit);
+  });
+
+  return { svg, gaps };
+}
+
 // ── palette.ts ──────────────────────────────────────────────────
 // Ctrl+K page switcher.
 //
@@ -2557,156 +2914,9 @@ function animateToggle(onToggle            )              {
   return lbl;
 }
 
-/// The `at`/`span` part of a flow query, and the sentence that says what came back.
-///
-/// Both pages ask the same question and must describe the answer the same way — a diagram or a board that
-/// looks live while showing last Tuesday is the worst thing either page can do.
-function historyQuery(hist                                          )         {
-  const at = hist.at();
-  if (!at) return '';
-  const span = hist.span();
-  return '&at=' + encodeURIComponent(at) + (span > 1 ? '&span=' + span : '');
-}
+// The "show a past moment" control, and the wording for what comes back, live in history-control.ts:
+// the Energy board builds the same control, and two of them would drift.
 
-function historyNote(body     )         {
-  if (!body || !body.historical) return '';
-  const when = new Date(body.at).toLocaleString();
-  const days = Number(body.spanDays) || 1;
-  const what = days > 1 ? `${days} days to ${new Date(body.at).toLocaleDateString()}` : when;
-  // A window with days missing from it is not that window. Name the nodes rather than quietly showing a
-  // short total as a whole one.
-  const short = (body.incomplete || [])                                    ;
-  const gap = short.length
-    ? ` · incomplete: ${short.slice(0, 4).map(x => `${x.node} ${x.days}/${days}d`).join(', ')}${short.length > 4 ? `, +${short.length - 4} more` : ''}`
-    : '';
-  return `showing ${what} from ${body.source}${gap}`;
-}
-
-/// Which part of the moment was just changed. The caller needs it to tell "the whole of a day" (an energy
-/// question) from "this instant of it" (a power one) — the two want different metrics, and guessing from
-/// the value alone cannot distinguish a freshly-picked day from a re-render.
-
-/// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
-///
-/// Kept deliberately plain: a datetime input and a Live button. The value goes to the server as ?at=, and
-/// the page renders whatever it gets back — a historical view is the same diagram built from the values of
-/// that instant, not a second rendering path.
-function historyControl(onChange                             )
-
-  {
-  const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
-  // Separate date and time inputs, not a datetime-local: that control reports '' until BOTH halves are
-  // filled, so picking a day and leaving the time blank sent nothing and the page silently stayed live.
-  // Split, the time is genuinely optional — blank means the end of the chosen day.
-  const input = el('input', { type: 'date' })                    ;
-  const timeIn = el('input', { type: 'time', step: '1' })                    ;
-  const prev = btn('◀');
-  const next = btn('▶');
-  const live = btn('Live', 'primary');
-  // Which of the two things you are looking at, said plainly and in the same place every time. The date
-  // control alone does not answer it at a glance — an empty date reads as "not set yet" as easily as "now",
-  // and a diagram of last Tuesday looks exactly like a diagram of this second.
-  const badge = el('span', { class: 'pill good', text: 'LIVE' });
-  const note = el('span', { class: 'desc', style: { margin: '0' } });
-
-  live.title = 'Back to the current reading';
-
-  const today = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in local time
-  const spanDays = () => Math.max(1, Number(spanSel.value) || 1);
-
-  // The arrows move by whatever is being shown: a day at a time on a single day, a week at a time on a
-  // week, a month on a month. Stepping one day through a 30-day window means 30 presses to see the window
-  // before it, and every one of those presses is a fresh set of history queries.
-  const step = (dir        ) => {
-    const from = input.value || today();
-    const d = new Date(from + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
-    d.setDate(d.getDate() + dir * spanDays());
-    const iso = d.toLocaleDateString('en-CA');
-    input.value = iso > today() ? today() : iso;   // no future days: there is nothing recorded there
-    onChange('day');
-  };
-
-  input.onchange = () => onChange('day');
-  timeIn.onchange = () => onChange('time');
-  prev.onclick = () => step(-1);
-  next.onclick = () => step(1);
-  const stepLabel = () => { const n = spanDays(); return n === 1 ? 'day' : n === 7 ? 'week' : `${n} days`; };
-  live.onclick = () => { input.value = ''; timeIn.value = ''; spanSel.value = '1'; syncSpan(); note.textContent = ''; onChange('live'); };
-
-  // The picker exists only if there is a backend to read from. With History switched off, a date control
-  // whose every answer is "history is turned off" is worse than no control at all.
-  //
-  // Read live rather than at build time, and re-read on every tab switch, so turning the feature on under
-  // Features brings the picker out without a reload.
-  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
-  const syncEnabled = () => {
-    const on = historyOn();
-    row.classList[on ? 'remove' : 'add']('is-hidden');
-    // A day still selected when the feature is switched off has to stop being requested, or the page goes
-    // on asking for a moment that nothing can answer.
-    if (!on && input.value) { input.value = ''; timeIn.value = ''; spanSel.value = '1'; note.textContent = ''; onChange('live'); }
-  };
-
-  // One control rather than five: the arrows and inputs share a border and only the outer corners round,
-  // so the group reads as a single thing instead of a row of loose buttons.
-  const group = el('div', { class: 'input-group' }, prev, input, timeIn, next);
-
-  // How much of the past to add up. A week is the sum of seven daily totals — they all re-base at the same
-  // moment, so they add; a lifetime counter and an instantaneous power reading do not, which is why the
-  // server refuses a span for anything but the daily total and this offers one only alongside a date.
-  const spanSel = el('select', { title: 'Add up the daily totals over this many days, ending on the chosen day.' })                     ;
-  [['1', 'that day'], ['7', '7 days to it'], ['30', '30 days to it']]
-    .forEach(([v, t]) => spanSel.appendChild(el('option', { value: v, text: t })));
-  spanSel.onchange = () => { syncSpan(); onChange('span'); };
-
-  // A time within the day says nothing about a week of them, so the two cannot both be set.
-  const syncSpan = () => {
-    prev.title = 'Previous ' + stepLabel();
-    next.title = 'Next ' + stepLabel();
-    const many = spanDays() > 1;
-    timeIn.disabled = many;
-    if (many) timeIn.value = '';
-    timeIn.title = many
-      ? 'Not used over a span of days — each day is counted whole.'
-      : 'Optional. Leave blank for the end of the day — the day’s complete totals.';
-  };
-
-  row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
-    el('span', { class: 'desc', style: { margin: '0' }, text: 'covering' }), spanSel, live, note);
-  syncSpan();
-  syncEnabled();
-  window.addEventListener?.('rpdu:activate', syncEnabled);
-  return {
-    row,
-    /// The instant to ask for.
-    ///
-    /// With a time, that time on the chosen day. Without one, the end of the day: a daily total is only
-    /// complete then, and midnight would return the total a moment after it re-based, which is zero. Either
-    /// way an instant still ahead of now is clamped to now, because nothing is recorded past it.
-    at: () => {
-      if (!historyOn() || !input.value) return '';
-      const when = new Date(`${input.value}T${timeIn.value || '23:59:59'}`);
-      const now = new Date();
-      return (when > now ? now : when).toISOString();
-    },
-    day: () => (historyOn() ? input.value : ''),
-    time: () => timeIn.value,
-    /// Days to add up, ending on the chosen day. 1 is the plain "that moment" view.
-    span: () => (historyOn() && input.value ? spanDays() : 1),
-    setNote: (t        ) => {
-      note.textContent = t;
-      // The badge follows what was actually rendered, not what the picker says: a date that produced no
-      // answer leaves the live view on screen, and calling that historical would be a lie about the figures.
-      const past = !!t;
-      badge.className = 'pill ' + (past ? 'warn' : 'good');
-      badge.textContent = past ? 'HISTORICAL' : 'LIVE';
-      badge.title = past ? t : 'These are the latest readings.';
-    },
-  };
-}
-
-// The tag selected on the diagram, kept across redraws: the Sankey repaints on every live push, and a
-// highlight that cleared itself every few seconds would be unusable.
 let activeTag                = null;
 
 /// Chips for every tag in use, highlighting the nodes carrying it (#342).
@@ -4754,6 +4964,15 @@ function addNodesSection(nav     , sections     ) {
   nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }
 
+// ── sections/energy-board.ts ────────────────────────────────────
+// The Energy Overview: where power is flowing right now, as four tiles and an animated diagram.
+//
+// Split out of flow.ts, which had grown to four unrelated pages in one file. It depends on exactly three
+// things from the rest of the flow code — the moment picker and the two functions that phrase its query
+// and its answer — and those now live in history-control.ts, so this page and the Sankey cannot describe
+// the same window differently.
+// The energy rules every view shares — see energy.ts for why they are not written twice.
+
 // The Energy overview (#energy-rollup C): an at-a-glance board of where power is flowing right now —
 // solar in, battery charging/discharging, grid import/export, and the house load — summed from the nodes
 // tagged solar/battery/grid. It reads the same live values everything else does; anything unmeasured shows
@@ -5403,194 +5622,8 @@ function addNodeDataSection(nav     , sections     ) {
 // nobody measured.
 // The energy rules every view shares, so this page and the Energy Overview cannot answer differently.
 
-// The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
-// vocabulary so a node is the same colour wherever it appears.
-const KIND_COLOR                         = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
-  load: '#b06fd0',
-  outlet: '#7f8ea3',
-  pdu: '#5c7fa3',
-  panel: '#c98b3f',
-  inverter: '#3fb0a8',
-};
-const colorFor = (kind        , i        ) =>
-  KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
-
-/// One drawable series: a name, a colour, and one value per day — null where there is no reading.
-
-const SVG = 'http://www.w3.org/2000/svg';
-const svgTag = (tag        , attrs                     ) => {
-  const e = document.createElementNS(SVG, tag);
-  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
-  return e;
-};
-
-/// The hover card. One card for the page, moved and refilled — a card per chart would leak one per redraw.
-let card      = null;
-function hoverCard()      {
-  if (!card) {
-    card = el('div', { class: 'node-card trend-card' });
-    document.body.appendChild(card);
-  }
-  return card;
-}
-function hideCard() { if (card) card.classList.remove('show'); }
-
-/**
- * A day-by-day bar chart.
- *
- * `stacked` adds the day's series into one bar ("where did the day go"); otherwise they sit side by side
- * ("how do these compare"). A day where every series is null is drawn as an empty slot and reported, never
- * as a bar of zero.
- */
-function barChart(opts
-
- )                             {
-  const { days, lines, units, stacked } = opts;
-  const has = (d        ) => lines.some(l => l.values[d] != null);
-  const dayTotal = (d        ) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
-
-  // Charge and export are negative quantities — energy leaving in the other direction — so the axis has to
-  // hold both signs. Stacked, each sign builds away from zero on its own side; drawn on one axis they
-  // would cancel visually and a busy day would look like an idle one.
-  const posOf = (d        ) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
-  const negOf = (d        ) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
-  const peak = opts.max ?? Math.max(
-    stacked ? Math.max(...days.map((_, d) => (has(d) ? posOf(d) : 0)), 0)
-      : Math.max(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
-  const trough = Math.min(
-    stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
-      : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
-  const span = (peak - trough) || 1;
-
-  const W = Math.max(720, days.length * 26);
-  const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const slot = plotW / days.length;
-  const x = (d        ) => padL + slot * d;
-  const barW = Math.max(3, slot * 0.72);
-  const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
-  const zeroY = y(0);
-
-  const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
-
-  const ticks = 4;
-  for (let i = 0; i <= ticks; i++) {
-    const v = trough + (span / ticks) * i, yy = y(v);
-    svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
-    const t = svgTag('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
-    t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0))) + (opts.pct ? '%' : '');
-    svg.appendChild(t);
-  }
-
-  let gaps = 0;
-  days.forEach((day, d) => {
-    if (!has(d)) {
-      gaps++;
-      const g = svgTag('rect', {
-        x: x(d) + (slot - barW) / 2, y: padT, width: barW, height: plotH,
-        fill: 'var(--line)', opacity: 0.25, class: 'trend-gap',
-      });
-      const title = document.createElementNS(SVG, 'title');
-      title.textContent = `${day} — no reading from the history backend`;
-      g.appendChild(title);
-      svg.appendChild(g);
-    } else {
-      // The period still in progress is drawn faded: it is a real reading of an unfinished day, and beside
-      // finished ones at full strength it reads as a quiet day rather than an early one.
-      const partial = day === opts.partial;
-      const paint = (attrs                     ) => {
-        const r = svgTag('rect', partial ? { ...attrs, opacity: 0.55 } : attrs);
-        if (partial) {
-          const t = document.createElementNS(SVG, 'title');
-          t.textContent = `${day} — still in progress, not a full day`;
-          r.appendChild(t);
-        }
-        svg.appendChild(r);
-      };
-      if (stacked) {
-        // Each sign stacks away from zero on its own side.
-        let up = 0, down = 0;
-        lines.forEach(l => {
-          const v = l.values[d];
-          if (v == null || v === 0) return;
-          const from = v > 0 ? up : down;
-          const to = from + v;
-          paint({
-            x: x(d) + (slot - barW) / 2, y: Math.min(y(from), y(to)), width: barW,
-            height: Math.max(1, Math.abs(y(to) - y(from))), fill: l.color,
-          });
-          if (v > 0) up = to; else down = to;
-        });
-      } else {
-        const each = barW / lines.length;
-        lines.forEach((l, i) => {
-          const v = l.values[d];
-          if (v == null || v === 0) return;
-          paint({
-            x: x(d) + (slot - barW) / 2 + each * i, y: Math.min(zeroY, y(v)),
-            width: Math.max(1, each - 1), height: Math.max(1, Math.abs(y(v) - zeroY)), fill: l.color,
-          });
-        });
-      }
-    }
-
-    const every = Math.ceil(days.length / 12);
-    if (d % every === 0) {
-      const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
-      t.textContent = day.slice(5);
-      svg.appendChild(t);
-    }
-  });
-
-  // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
-  svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
-
-  // A full-height hit area per day, over the bars. Hovering a thin bar is a game of skill, and a stacked
-  // segment can be a pixel tall — the question is "what happened on this day", so the day is the target.
-  days.forEach((day, d) => {
-    const hit = svgTag('rect', {
-      x: x(d), y: padT, width: slot, height: plotH, fill: 'transparent', class: 'trend-hit', 'data-day': day,
-    });
-    const show = (ev     ) => {
-      const c = hoverCard();
-      c.innerHTML = '';
-      c.appendChild(el('div', { class: 'nh-title', text: day + (day === opts.partial ? ' · so far' : '') }));
-      if (day === opts.partial)
-        c.appendChild(el('div', { class: 'desc', style: { margin: '0 0 2px' }, text: 'still in progress — not a full day' }));
-      if (!has(d)) {
-        c.appendChild(el('div', { class: 'nh-warn', text: 'no reading from the history backend' }));
-      } else {
-        lines.forEach(l => {
-          const v = l.values[d];
-          c.appendChild(el('div', { class: 'nh-row' },
-            el('span', { class: 'nh-name' },
-              el('span', { class: 'trend-swatch', style: { background: l.color } }),
-              l.label),
-            el('span', { class: 'nh-num', text: v == null ? '—' : `${formatNum(Number(v.toFixed(2)))}${opts.pct ? '%' : ' ' + units}` })));
-        });
-        if (stacked && lines.length > 1)
-          c.appendChild(el('div', { class: 'nh-row nh-total' },
-            el('span', { class: 'nh-name', text: 'Total' }),
-            el('span', { class: 'nh-num', text: `${formatNum(Number(dayTotal(d).toFixed(2)))} ${units}` })));
-      }
-      c.classList.add('show');
-      const px = (ev && ev.clientX) || 0, py = (ev && ev.clientY) || 0;
-      c.style.left = Math.max(8, px + 14) + 'px';
-      c.style.top = Math.max(8, py + 14) + 'px';
-    };
-    hit.addEventListener('mouseenter', show);
-    hit.addEventListener('mousemove', show);
-    hit.addEventListener('mouseleave', hideCard);
-    svg.appendChild(hit);
-  });
-
-  return { svg, gaps };
-}
+// The bar chart itself — axis, gaps, signs, hover — lives in charts.ts. This file is the page: which
+// windows can be asked for, which series go on which chart, and what each one means.
 
 function addTrendsSection(nav     , sections     ) {
   const link = navLink(nav, 'Trends', '▦');
