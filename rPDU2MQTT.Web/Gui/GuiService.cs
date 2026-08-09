@@ -606,9 +606,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     if (m != FlowSpan.SpannableMetric)
                         return new { ok = false, message = $"A span of days only means something for the daily total ({FlowSpan.SpannableMetric}); '{m}' cannot be added across days." };
 
-                    var perDay = new List<IReadOnlyDictionary<string, double>>();
-                    foreach (var day in FlowSpan.Days(at, spanDays))
-                        perDay.Add(await history.ValuesAtAsync(ids, m, day, cts.Token));
+                    // The same two rules the Trends page uses, for the same reason. Each day is read at its
+                    // own rollover — sampled at the current time of day instead, every figure in the window
+                    // is that day up to whenever you happened to ask, drawn as though it were a whole one.
+                    // And the window is one range request: a day at a time is thirty round trips for a
+                    // month, which is what made this slow enough to notice.
+                    var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
+                    var when = EnergyPeriod.RecentPeriodEnds(at, zone, config.EnergyFlow.Aggregation.PeriodStartHour, spanDays);
+                    var perDay = await history.SeriesAsync(ids, m, when.Select(w => w.AtUtc).ToList(), cts.Token);
 
                     var (totals, covered) = FlowSpan.Fold(perDay);
                     if (totals.Count == 0)

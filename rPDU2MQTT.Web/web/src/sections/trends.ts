@@ -9,6 +9,8 @@
 // for the days whose inputs are all present: a percentage computed from a missing figure is a number
 // nobody measured.
 import { api, btn, el, activate, formatNum, navLink, instanceSelector, withInstance } from '../helpers.js';
+// The energy rules every view shares, so this page and the Energy Overview cannot answer differently.
+import { homeEnergy, selfSufficiencyPct, sumKnown } from '../energy.js';
 
 // The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
 // vocabulary so a node is the same colour wherever it appears.
@@ -348,10 +350,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const byKind = (kind: string): (number | null)[] | null => {
     const members = (body.series || []).filter((s: any) => s.kind === kind);
     if (!members.length) return null;
-    return (body.days || []).map((_: string, d: number) => {
-      const vals = members.map((s: any) => signed(s)[d]).filter((v: any) => v != null);
-      return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) : null;
-    });
+    return (body.days || []).map((_: string, d: number) => sumKnown(members.map((s: any) => signed(s)[d])));
   };
 
   const section = (title: string, note: string, made: { svg: any; gaps: number }, legend: Line[]) => {
@@ -412,10 +411,7 @@ export function addTrendsSection(nav: any, sections: any) {
     // Import above the line, export below it, and the net is what the two leave.
     const gridSupply = (body.series || []).filter((s: any) => s.kind === 'grid' && !isReturn(s));
     const gridReturn = (body.series || []).filter((s: any) => s.kind === 'grid' && isReturn(s));
-    const sumOf = (list: any[]) => days.map((_, d) => {
-      const vals = list.map((s: any) => signed(s)[d]).filter((v: any) => v != null);
-      return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) : null;
-    });
+    const sumOf = (list: any[]) => days.map((_, d) => sumKnown(list.map((s: any) => signed(s)[d])));
     const gridIn = byKind('grid');
     if (gridSupply.length) {
       const imports = sumOf(gridSupply), exports_ = gridReturn.length ? sumOf(gridReturn) : null;
@@ -435,25 +431,16 @@ export function addTrendsSection(nav: any, sections: any) {
     // different quantity — the share of this second's supply — and putting it under the same name would
     // invite reading a momentary grid draw as a bad day.
     if (!intraDay() && gridIn && (load || solar)) {
-      // Only the kinds that exist here. A system with no battery has no battery series, which is not the
-      // same as a battery that failed to report — treating the two alike blanked the whole chart.
-      const present = [solar, batt, gridIn].filter((k): k is (number | null)[] => !!k);
-      // The balance uses each kind's NET: charge stores energy rather than consuming it, and export leaves
-      // the house. Both are already negative here, so the sum is what the home actually took.
-      const home = days.map((_, d) => {
-        if (load) return load[d];
-        const parts = present.map(k => k[d]);
-        return parts.some(p => p == null) ? null : parts.reduce((a: any, b: any) => a + b, 0);
-      });
-      // What the house drew from the grid is the import, not the net. Netting export off first lets a day
-      // that imported 9 and exported 4 read as though only 5 came from the grid, which is not what
-      // happened — the same reason the Energy Overview counts import here.
+      // A kind this system does not have is left out of the balance entirely; one that exists but did not
+      // report that day is a null, which the rules treat as unknown. Charge and export are already
+      // negative, so the nets subtract rather than add.
       const drawn = sumOf(gridSupply);
-      const pct = days.map((_, d) => {
-        const h = home[d], g = drawn[d];
-        if (h == null || g == null || h <= 0) return null;
-        return Math.max(0, Math.min(100, ((h - Math.max(0, g)) / h) * 100));
-      });
+      const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
+        ...(solar ? { solar: solar[d] } : {}),
+        ...(batt ? { battery: batt[d] } : {}),
+        ...(gridIn ? { grid: gridIn[d] } : {}),
+        ...(load ? { load: load[d] } : {}),
+      }), drawn[d]));
       if (pct.some(v => v != null)) {
         const ssLines: Line[] = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
         section('Self-sufficiency per day',

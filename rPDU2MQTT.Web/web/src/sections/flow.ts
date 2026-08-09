@@ -2,6 +2,8 @@
 import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
+// The energy rules every view shares, so this board and the Trends page cannot answer differently.
+import { homeEnergy, selfSufficiencyPct, coveredEnergy } from '../energy.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 
@@ -3579,11 +3581,14 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     let home: number | null = null, homeSub = '';
     if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
     else {
-      const unknownFeeder = (solar.present && solar.value == null) || (batt.present && batt.value == null) || (gridK.present && gridK.value == null);
-      if (!unknownFeeder && (solar.present || batt.present || gridK.present)) {
-        home = (solar.value || 0) + (battNet || 0) + (gridNet || 0);
-        homeSub = 'balance of measured sources';
-      }
+      // Same rule as the Trends page: a kind the system does not have is left out, one that exists but has
+      // not reported is unknown and stops the balance rather than counting as nothing.
+      home = homeEnergy({
+        ...(solar.present ? { solar: solar.value } : {}),
+        ...(batt.present ? { battery: battNet } : {}),
+        ...(gridK.present ? { grid: gridNet } : {}),
+      });
+      if (home != null) homeSub = 'balance of measured sources';
     }
 
     // Self-sufficiency is an ENERGY question — over some window, what share of the home's kWh came from
@@ -3695,9 +3700,11 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was NOT drawn from
     // the grid. Only when the home energy and grid import both resolve and the house has actually used
     // energy; anything else would be dividing a guess.
-    if (eHome != null && eHome > 0 && eFromGrid != null) {
-      const covered = Math.max(0, eHome - eFromGrid);
-      const pct = Math.max(0, Math.min(100, Math.round((covered / eHome) * 100)));
+    const ssPct = selfSufficiencyPct(eHome, eFromGrid);
+    const ssCovered = coveredEnergy(eHome, eFromGrid);
+    if (ssPct != null && ssCovered != null) {
+      const covered = ssCovered;
+      const pct = Math.round(ssPct);
       const row = el('div', { class: 'energy-selfsuff' });
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),

@@ -583,6 +583,67 @@ function formatValue(v     , secret          ) {
   return String(v);
 }
 
+// ── energy.ts ───────────────────────────────────────────────────
+// The arithmetic every energy view shares: what the home took, what came from the grid, and the share that
+// did not.
+//
+// These rules were written twice — once on the Energy Overview and once on Trends — and the two disagreed.
+// Both had to be corrected separately when netting export against import turned out to flatter the figure,
+// and the second correction was only made because the first had been. A rule with two implementations has
+// two behaviours; this is the one.
+//
+// Everything here is scalar and null-aware, so a page with one window calls it once and a page with a bar
+// per day calls it per day. Null means unknown and never zero: a percentage computed from a figure nobody
+// measured is not a measurement, and every function here returns null rather than inventing the input.
+
+/// The direction-resolved figures a window is described by. Each is null when nothing determined it, and
+/// absent (undefined) when the system has no such kind at all — a house with no battery is not a house
+/// whose battery failed to report, and only the second one should stop the arithmetic.
+
+                                                    
+
+/// What the home actually took over the window.
+///
+/// Tagged load nodes if the hierarchy has them; otherwise the balance of the measured sources, which is
+/// only a balance if every source present is known — one unknown feeder makes the total a guess, so it is
+/// null instead. Charge and export are already negative in `battery` and `grid`, so they subtract: energy
+/// stored or sent back was not consumed here.
+function homeEnergy(parts             )                {
+  if (parts.load !== undefined) return parts.load;
+
+  const present = ([parts.solar, parts.battery, parts.grid]                                 )
+    .filter(v => v !== undefined)                     ;
+  if (!present.length) return null;
+  if (present.some(v => v == null)) return null;
+  return present.reduce((a, b) => a  + b , 0);
+}
+
+/// The share of the home's energy that did not come from the grid, 0–100, or null when it cannot be said.
+///
+/// The denominator is what the home took; the numerator is that less what the grid supplied. `gridImport`
+/// is the supply direction alone, never the net: a day that imported 10 kWh and exported 10 did not avoid
+/// drawing anything, and netting first would report it as fully self-sufficient.
+function selfSufficiencyPct(home               , gridImport               )                {
+  if (home == null || gridImport == null || home <= 0) return null;
+  const covered = home - Math.max(0, gridImport);
+  return Math.max(0, Math.min(100, (covered / home) * 100));
+}
+
+/// How much of the home's energy solar and battery covered, in the same units — the figure the bar shows
+/// beside the percentage. Null on the same terms.
+function coveredEnergy(home               , gridImport               )                {
+  if (home == null || gridImport == null) return null;
+  return Math.max(0, home - Math.max(0, gridImport));
+}
+
+/// Add up a set of readings, treating "no reading" as absent rather than zero.
+///
+/// Returns null when nothing in the set reported, so a sum is never a partial one wearing a total's name.
+function sumKnown(values                               )                {
+  const known = values.filter(v => v != null)            ;
+  return known.length ? known.reduce((a, b) => a + b, 0) : null;
+}
+
 // ── palette.ts ──────────────────────────────────────────────────
 // Ctrl+K page switcher.
 //
@@ -1432,6 +1493,7 @@ function addLiveDataSection(nav     , sections     ) {
 
 // ── sections/flow.ts ────────────────────────────────────────────
 // Energy Flow: a read-only Sankey + the layered arrow-graph hierarchy editor.
+// The energy rules every view shares, so this board and the Trends page cannot answer differently.
 
 // Metrics a live source can supply: [stored key (matches PDU Measurement.Type), friendly label, canonical
 // unit, selectable input units]. The key stays the PDU vocabulary so live values roll up with outlets; the
@@ -5003,11 +5065,14 @@ function addEnergyOverviewSection(nav     , sections     ) {
     let home                = null, homeSub = '';
     if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
     else {
-      const unknownFeeder = (solar.present && solar.value == null) || (batt.present && batt.value == null) || (gridK.present && gridK.value == null);
-      if (!unknownFeeder && (solar.present || batt.present || gridK.present)) {
-        home = (solar.value || 0) + (battNet || 0) + (gridNet || 0);
-        homeSub = 'balance of measured sources';
-      }
+      // Same rule as the Trends page: a kind the system does not have is left out, one that exists but has
+      // not reported is unknown and stops the balance rather than counting as nothing.
+      home = homeEnergy({
+        ...(solar.present ? { solar: solar.value } : {}),
+        ...(batt.present ? { battery: battNet } : {}),
+        ...(gridK.present ? { grid: gridNet } : {}),
+      });
+      if (home != null) homeSub = 'balance of measured sources';
     }
 
     // Self-sufficiency is an ENERGY question — over some window, what share of the home's kWh came from
@@ -5119,9 +5184,11 @@ function addEnergyOverviewSection(nav     , sections     ) {
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was NOT drawn from
     // the grid. Only when the home energy and grid import both resolve and the house has actually used
     // energy; anything else would be dividing a guess.
-    if (eHome != null && eHome > 0 && eFromGrid != null) {
-      const covered = Math.max(0, eHome - eFromGrid);
-      const pct = Math.max(0, Math.min(100, Math.round((covered / eHome) * 100)));
+    const ssPct = selfSufficiencyPct(eHome, eFromGrid);
+    const ssCovered = coveredEnergy(eHome, eFromGrid);
+    if (ssPct != null && ssCovered != null) {
+      const covered = ssCovered;
+      const pct = Math.round(ssPct);
       const row = el('div', { class: 'energy-selfsuff' });
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
@@ -5318,6 +5385,7 @@ function addNodeDataSection(nav     , sections     ) {
 // facts and only the second is a claim. And a derived chart (self-sufficiency, grid import) is drawn only
 // for the days whose inputs are all present: a percentage computed from a missing figure is a number
 // nobody measured.
+// The energy rules every view shares, so this page and the Energy Overview cannot answer differently.
 
 // The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
 // vocabulary so a node is the same colour wherever it appears.
@@ -5655,10 +5723,7 @@ function addTrendsSection(nav     , sections     ) {
   const byKind = (kind        )                           => {
     const members = (body.series || []).filter((s     ) => s.kind === kind);
     if (!members.length) return null;
-    return (body.days || []).map((_        , d        ) => {
-      const vals = members.map((s     ) => signed(s)[d]).filter((v     ) => v != null);
-      return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
-    });
+    return (body.days || []).map((_        , d        ) => sumKnown(members.map((s     ) => signed(s)[d])));
   };
 
   const section = (title        , note        , made                            , legend        ) => {
@@ -5719,10 +5784,7 @@ function addTrendsSection(nav     , sections     ) {
     // Import above the line, export below it, and the net is what the two leave.
     const gridSupply = (body.series || []).filter((s     ) => s.kind === 'grid' && !isReturn(s));
     const gridReturn = (body.series || []).filter((s     ) => s.kind === 'grid' && isReturn(s));
-    const sumOf = (list       ) => days.map((_, d) => {
-      const vals = list.map((s     ) => signed(s)[d]).filter((v     ) => v != null);
-      return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
-    });
+    const sumOf = (list       ) => days.map((_, d) => sumKnown(list.map((s     ) => signed(s)[d])));
     const gridIn = byKind('grid');
     if (gridSupply.length) {
       const imports = sumOf(gridSupply), exports_ = gridReturn.length ? sumOf(gridReturn) : null;
@@ -5742,25 +5804,16 @@ function addTrendsSection(nav     , sections     ) {
     // different quantity — the share of this second's supply — and putting it under the same name would
     // invite reading a momentary grid draw as a bad day.
     if (!intraDay() && gridIn && (load || solar)) {
-      // Only the kinds that exist here. A system with no battery has no battery series, which is not the
-      // same as a battery that failed to report — treating the two alike blanked the whole chart.
-      const present = [solar, batt, gridIn].filter((k)                         => !!k);
-      // The balance uses each kind's NET: charge stores energy rather than consuming it, and export leaves
-      // the house. Both are already negative here, so the sum is what the home actually took.
-      const home = days.map((_, d) => {
-        if (load) return load[d];
-        const parts = present.map(k => k[d]);
-        return parts.some(p => p == null) ? null : parts.reduce((a     , b     ) => a + b, 0);
-      });
-      // What the house drew from the grid is the import, not the net. Netting export off first lets a day
-      // that imported 9 and exported 4 read as though only 5 came from the grid, which is not what
-      // happened — the same reason the Energy Overview counts import here.
+      // A kind this system does not have is left out of the balance entirely; one that exists but did not
+      // report that day is a null, which the rules treat as unknown. Charge and export are already
+      // negative, so the nets subtract rather than add.
       const drawn = sumOf(gridSupply);
-      const pct = days.map((_, d) => {
-        const h = home[d], g = drawn[d];
-        if (h == null || g == null || h <= 0) return null;
-        return Math.max(0, Math.min(100, ((h - Math.max(0, g)) / h) * 100));
-      });
+      const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
+        ...(solar ? { solar: solar[d] } : {}),
+        ...(batt ? { battery: batt[d] } : {}),
+        ...(gridIn ? { grid: gridIn[d] } : {}),
+        ...(load ? { load: load[d] } : {}),
+      }), drawn[d]));
       if (pct.some(v => v != null)) {
         const ssLines         = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
         section('Self-sufficiency per day',

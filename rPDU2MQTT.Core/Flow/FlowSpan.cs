@@ -21,18 +21,11 @@ public static class FlowSpan
     /// <summary>The metric a span can be taken over. Anything else is refused.</summary>
     public const string SpannableMetric = "energytoday";
 
-    /// <summary>
-    /// The instants to sample, one per day, ending at <paramref name="end"/> and walking back. The same
-    /// time of day each time: whatever moment the caller asked for is what each day is measured at, so a
-    /// window ending at a day's last second is made of whole days.
-    /// </summary>
-    public static IReadOnlyList<DateTime> Days(DateTime end, int days)
-    {
-        var count = Math.Max(1, days);
-        var list = new List<DateTime>(count);
-        for (var i = count - 1; i >= 0; i--) list.Add(end.AddDays(-i));
-        return list;
-    }
+    // Which instants represent the last N days is EnergyPeriod.RecentPeriodEnds, and only that. This class
+    // used to answer it too, by walking back in 24-hour steps from the moment asked about — so every figure
+    // in a window was that day up to whatever time of day it happened to be, presented as a whole one. Two
+    // answers to one question meant fixing it in one place and leaving the other wrong, which is exactly
+    // what happened: the Trends page was corrected and the span view was not.
 
     /// <summary>
     /// Add up one reading per node per day, and count the days each node actually had.

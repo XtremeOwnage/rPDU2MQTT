@@ -23,6 +23,7 @@ const MODULES = [
   'theme.ts',
   'realtime.ts',
   'dirty.ts',
+  'energy.ts',
   'palette.ts',
   'overrides.ts',
   'sections/paths.ts',

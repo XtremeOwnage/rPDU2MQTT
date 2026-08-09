@@ -78,6 +78,22 @@ public class PeriodEndsTests
     }
 
     [Fact]
+    public void EveryViewOfTheLastNDaysAsksTheSameQuestion()
+    {
+        // One answer to "which instants are the last N days", used by the Trends charts and by the span
+        // view on the Flow and Energy pages. Two answers meant the second one kept sampling at the current
+        // time of day long after the first was fixed.
+        var at = new DateTime(2026, 8, 8, 19, 5, 0, DateTimeKind.Utc);
+
+        var week = EnergyPeriod.RecentPeriodEnds(at, Chicago, 0, 7);
+
+        Assert.Equal(7, week.Count);
+        // Each completed day at its own rollover, not at 14:05 on that day.
+        Assert.All(week.Take(6), e => Assert.Equal(new TimeSpan(4, 59, 59), e.AtUtc.TimeOfDay));
+        Assert.All(week.Take(6), e => Assert.True(e.Complete));
+    }
+
+    [Fact]
     public void TheDaysComeBackOldestFirst_OneEach()
     {
         var ends = EnergyPeriod.RecentPeriodEnds(DateTime.UtcNow, TimeZoneInfo.Utc, 0, 30);
