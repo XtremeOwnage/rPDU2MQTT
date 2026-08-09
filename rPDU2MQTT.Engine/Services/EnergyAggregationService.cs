@@ -29,7 +29,7 @@ namespace rPDU2MQTT.Services;
 /// enabled — the rise of a metered counter is measured.
 /// </para>
 /// </summary>
-public sealed class EnergyAggregationService : BackgroundService, IFlowValueSource
+public sealed class EnergyAggregationService : BackgroundService, IFlowValueSource, Core.Flow.IPeriodTotalsReady
 {
     private const string PowerMetric = "realpower";
     private const string EnergyMetric = "energy";
@@ -117,8 +117,16 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     public int LoadTotals()
     {
         states = new Dictionary<string, EnergyState>(store.Load(), StringComparer.OrdinalIgnoreCase);
+        loaded = true;
         return states.Count;
     }
+
+    /// <summary>
+    /// Whether the carried-over totals are in yet. Until they are, every daily figure derived from them is
+    /// unworked-out rather than zero — see <see cref="Core.Flow.IPeriodTotalsReady"/>.
+    /// </summary>
+    public bool PeriodTotalsReady => !Periods || loaded;
+    private volatile bool loaded;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

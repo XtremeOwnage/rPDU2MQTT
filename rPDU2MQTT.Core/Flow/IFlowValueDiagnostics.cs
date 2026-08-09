@@ -29,3 +29,23 @@ public interface IFlowValueDiagnostics
     /// <summary>Every (node, metric) pair currently held, so a UI can show what has ever reported.</summary>
     IReadOnlyCollection<(string Node, string Metric)> ReportedKeys { get; }
 }
+
+/// <summary>
+/// Whether the daily totals this source derives have been restored from the store yet.
+///
+/// <para>
+/// They live in a store precisely so a restart continues rather than starts again, but the restore is not
+/// instant. In the window before it, a leaf has no period total (absent, correctly) while an aggregate over
+/// those leaves still resolves — from links that are known and carry zero — so the roll-up publishes a
+/// confident 0 for a tier that simply has not been worked out yet. One scrape of that is enough to write it
+/// into a history backend for good, and on a cluster that rolls this workload often, "for good" is often.
+/// </para>
+/// <para>
+/// A gap is the honest reading for those few seconds. Same rule as everywhere else here: unknown is not
+/// zero.
+/// </para>
+/// </summary>
+public interface IPeriodTotalsReady
+{
+    bool PeriodTotalsReady { get; }
+}
