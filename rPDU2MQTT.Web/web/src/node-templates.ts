@@ -1,9 +1,4 @@
-// Ready-made device templates: an EG4 inverter, a meter, and whatever else the server ships.
-//
-// Two callers — the MQTT Import page and the Nodes page's "Import device" panel — which is why this is a
-// module and not a private helper of either. Instantiating a template writes real config (a Modbus
-// connection, pre-wired nodes and links), so doing it two slightly different ways would produce two
-// slightly different devices.
+// Ready-made device templates, and the two panels that import them (MQTT Import, and the Nodes page).
 import { api, btn, el, ensure, toast } from './helpers.js';
 import { state } from './state.js';
 
@@ -17,7 +12,6 @@ async function loadNodeTemplates(): Promise<any[]> {
 }
 
 // Instantiate a template into the live config: create its Modbus connection (if any) and its pre-wired
-// nodes/links, all under an id prefix so the same device can be imported more than once without clashes.
 function instantiateTemplate(tpl: any, prefix: string, host: string, unitId: number, flow: any): string[] {
   const nodes = ensure(flow, 'Nodes', []);
   const links = ensure(flow, 'Links', []);

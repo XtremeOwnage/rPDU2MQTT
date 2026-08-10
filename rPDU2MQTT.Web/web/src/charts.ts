@@ -1,14 +1,7 @@
-// Drawing a series as bars: the axis, the gaps, the signs and the hover card.
-//
-// Separated from the page that uses it because it is a drawing problem, not an energy one — and because
-// the rules it encodes are the ones worth keeping in one place. A day with no reading is an empty slot and
-// never a zero-height bar; a negative value (battery charge, grid export) belongs below the zero line
-// rather than cancelling a positive one; and the hover target is the whole day column, because a stacked
-// segment can be a pixel tall.
+// Day-by-day bar charts: axis, empty days, signed values, hover card.
 import { el, formatNum } from './helpers.js';
 
 // The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
-// vocabulary so a node is the same colour wherever it appears.
 export const KIND_COLOR: Record<string, string> = {
   solar: 'var(--warn, #d08700)',
   battery: 'var(--good, #46c46a)',
@@ -59,8 +52,6 @@ export function barChart(opts: {
   const dayTotal = (d: number) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
 
   // Charge and export are negative quantities — energy leaving in the other direction — so the axis has to
-  // hold both signs. Stacked, each sign builds away from zero on its own side; drawn on one axis they
-  // would cancel visually and a busy day would look like an idle one.
   const posOf = (d: number) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
   const negOf = (d: number) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
   const peak = opts.max ?? Math.max(
@@ -107,7 +98,6 @@ export function barChart(opts: {
       svg.appendChild(g);
     } else {
       // The period still in progress is drawn faded: it is a real reading of an unfinished day, and beside
-      // finished ones at full strength it reads as a quiet day rather than an early one.
       const partial = day === opts.partial;
       const paint = (attrs: Record<string, any>) => {
         const r = svgTag('rect', partial ? { ...attrs, opacity: 0.55 } : attrs);
@@ -157,7 +147,6 @@ export function barChart(opts: {
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
 
   // A full-height hit area per day, over the bars. Hovering a thin bar is a game of skill, and a stacked
-  // segment can be a pixel tall — the question is "what happened on this day", so the day is the target.
   days.forEach((day, d) => {
     const hit = svgTag('rect', {
       x: x(d), y: padT, width: slot, height: plotH, fill: 'transparent', class: 'trend-hit', 'data-day': day,

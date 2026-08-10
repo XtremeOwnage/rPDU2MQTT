@@ -17,7 +17,6 @@ namespace rPDU2MQTT.Services;
 public class EnergyFlowMqttExportService : baseMQTTService
 {
     // Discovery config topics we've already retired (once per process) — the duplicate energyflow sensors
-    // an earlier build published for outlets/PDU tiers (#177). Cleared by an empty retained message.
     private readonly HashSet<string> clearedDuplicates = new();
     // Discovery configs retired because the tag filter now excludes their node. Cleared once per process.
     private readonly HashSet<string> retiredByFilter = new();
@@ -46,31 +45,21 @@ public class EnergyFlowMqttExportService : baseMQTTService
         DataTimestampUtc = oldest;
 
         // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement, so
-        // each tier gets a total (kWh) it can contribute to the Energy Dashboard.
         var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric, live);
         var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
         var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric, live);
         // Energy since local midnight — the only energy roll-up whose tiers are comparable to each other,
-        // because every counter it is built from was re-based at the same instant. Built unconditionally;
-        // an unavailable total simply publishes null, exactly as the in-direction one does.
         var todayGraph = FlowGraphBuilder.Build(merged, flow, EnergyPeriod.Metric, live);
 
         // ...but not until the carried-over totals are back. On a fresh process the leaves have no period
-        // figure yet while an aggregate over them still resolves from links that are known and carry zero,
-        // so a tier would publish a confident 0 for a day nobody has added up. Home Assistant records that:
-        // a daily total dropping to zero reads as a meter reset, and HA corrects history that was right.
-        // Unavailable for those few seconds is the honest state. (Prometheus is held back the same way.)
         var periodsReady = (live as Core.Flow.IPeriodTotalsReady)?.PeriodTotalsReady ?? true;
 
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
         // Outlets and PDU tiers already have native HA energy sensors from PDU discovery; publishing an
-        // energyflow sensor for them too would duplicate the record in HA (#177). Only the synthetic
-        // hierarchy tiers (panels/circuits/grid/etc.) get an energyflow discovery device.
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
         // Nodes that declare an in-direction (charge/export) energy source get a second energy sensor, fed
-        // from the direction-qualified cache key. This is what lights up HA's battery-charge / grid-export.
         var energyInNodes = flow.Nodes
             .Where(n => n.AllSources().Any(s =>
                 string.Equals(s.Metric, energyMetric, StringComparison.OrdinalIgnoreCase) &&
@@ -85,18 +74,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Synthetic nodes are for the diagram only — see FlowNode.Synthetic. Publishing one would put a
-        // '#' in the topic, which is the MQTT wildcard and not legal in a publish topic.
         var tagFilter = cfg.EnergyFlow.MqttExportTags;
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             // Tag filter (#342): what this destination receives. It never changes a value — the node still
-            // reports on the diagram and still goes to every other destination.
             if (!tagFilter.Allows(node.Tags))
             {
                 // Retire the discovery config with it. A node exported before the filter was set has a
-                // retained config on the broker; leaving it there keeps the device in Home Assistant with a
-                // state topic that no longer updates, which reads as a fault rather than as excluded.
-                // Once per process, and clearing a topic that was never published is a no-op.
                 if (publishDiscovery)
                 {
                     var excludedTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
@@ -107,32 +91,25 @@ public class EnergyFlowMqttExportService : baseMQTTService
             }
 
             // Nothing determines this tier's power — no measurement, and no single path that conservation
-            // pins down. Publishing it would put a fabricated 0 W into Home Assistant's history, which is
-            // worse than the sensor going unavailable: one is a gap, the other is a lie that gets recorded.
             if (!FlowExport.TryNodeValue(graph, node.Id, out var power))
                 continue;
 
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
             var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
             // Only feeders that are themselves being exported. A via_device pointing at a device this
-            // destination never receives would leave Home Assistant with a dangling parent for every node
-            // whose feeder the tag filter removed.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
                               || tagFilter.Allows(pn.Tags))
                 .ToList();
 
             // The in-direction (charge/export) energy, when this node declares one and a fresh value exists —
-            // null otherwise, so HA's energy_in sensor reads unavailable rather than a fabricated 0.
             double? energyIn = energyInNodes.Contains(node.Id) && live is not null
                 && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
 
             // Today's total. Null — not 0 — when nothing determines it, so HA marks the sensor unavailable
-            // rather than recording a zero that would read as "this tier used nothing today".
             double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
 
             // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export), so the
-            // published power sensor swings ± the way HA's stat_rate wants. A one-way node keeps its plain power.
             double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
             // Battery state of charge (%), when this node has a soc source with a fresh value.
             double? soc = socNodes.Contains(node.Id) && live is not null && live.TryGetValue(node.Id, "soc", out var s) ? s : null;
@@ -176,13 +153,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
         }
 
         // Node groups (#groups): each group publishes its own summed tier alongside its members, so a
-        // dashboard can chart "Incoming PV" as one series. Skipped when no member has a known value — never a
-        // fabricated zero, the same rule as the nodes.
         foreach (var g in flow.Groups ?? new())
         {
             if (string.IsNullOrWhiteSpace(g.Id)) continue;
             // An anchor group's id IS a real node (e.g. Solar PV over its MPPTs); that node already published
-            // its own tier in the loop above, so publishing a group tier under the same id would duplicate it.
             if (graph.Nodes.Any(n => string.Equals(n.Id, g.Id, StringComparison.OrdinalIgnoreCase))) continue;
 
             var total = FlowGroups.Total(graph, g);

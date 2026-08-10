@@ -1,10 +1,4 @@
-// The Nodes page: the table of virtual nodes, the groups, and the tag rules for the ones nobody typed out.
-//
-// Configuration, not visualisation. The Flow page draws the hierarchy; this one is where it is written
-// down — which node exists, what feeds it, which group it belongs to, what it is tagged.
-//
-// flowCandidates and wouldLoop stay here with it: both answer questions about the hierarchy as configured
-// (what can be wired to what, and whether wiring it would close a cycle) rather than about what is drawn.
+// The Nodes page: the virtual-node table, node groups, and the tag rules for PDUs and outlets.
 import { api, btn, el, ensure, activate, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
@@ -24,8 +18,6 @@ export function flowCandidates(lastGraph: any, customNodes: any[]) {
 }
 
 // Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
-// entry to hang a tag on — and there are hundreds of them. A rule matches node ids, so one line tags a
-// whole PDU's outlets and another tags one outlet, with nothing inherited behind your back.
 export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: () => void) {
   const rules = ensure(flow, 'AutoTags', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -54,7 +46,6 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
     tr.appendChild(el('td', {}, tagsIn));
 
     // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
-    // is the whole failure mode here — it looks configured and does nothing.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
     tr.appendChild(el('td', {}, el('span', {
       class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
@@ -78,7 +69,6 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
 }
 
 /// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
-/// literal — an outlet id is full of ':' and a PDU name can hold a '.'.
 export function globMatches(pattern: string, id: string): boolean {
   if (!pattern) return false;
   const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
@@ -86,7 +76,6 @@ export function globMatches(pattern: string, id: string): boolean {
 }
 
 // Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
-// export a summed total. Members keep their own links and exports — a group is an overlay plus a roll-up.
 export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: () => void) {
   const groups = ensure(flow, 'Groups', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -114,7 +103,6 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
   box.appendChild(addBar);
 
   // Anchor a group on an existing node: that node becomes the group (keeping its own value), and its members
-  // fold into it. This is the "make Solar PV a group over its MPPTs" path.
   const anchorRow = el('div', { class: 'ld-toolbar' });
   anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
   const anchorSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
@@ -169,11 +157,6 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
 }
 
 // The open node editor, as a modal over the table (#292).
-//
-// It used to render beneath the table, which put the form at the bottom of a long page — nowhere near the
-// row you clicked — and forced the table itself to stay wide enough to host it, which small screens can't
-// give. The panel lives on <body>, so it outlives the re-render of the surface underneath it and is rebuilt
-// in place instead: the node object's identity is what the editor holds, and that survives a re-render.
 export let nodeModal: { id: string, body: any, close: () => void } | null = null;
 
 export function closeNodeModal() {
@@ -194,7 +177,6 @@ export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, e
 }
 
 /// Would adding from -> to close a cycle? The builder walks whatever it is handed, so a loop expressed in
-/// config would recurse rather than fail.
 export function wouldLoop(links: any[], from: string, to: string) {
   const adj: any = {};
   links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
@@ -210,8 +192,6 @@ export function wouldLoop(links: any[], from: string, to: string) {
 }
 
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
-// node; Edit opens the full editor (name, kind, mode, value, bindings, feeders/children) in a modal.
-// Deleting a node takes its bound sources with it (they live on the node).
 export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
@@ -247,16 +227,10 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
     // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
-    //
-    // The column used to be the other way round, "what this node feeds". Every row of imported appliances
-    // then read "— none —" while being fed by the main panel, and setting a node's place in the hierarchy
-    // meant finding its parent's row and editing a list. You put a thing under its feeder, so the control
-    // is on the thing.
     const incoming = links.filter((l: any) => l.To === n.Id).map((l: any) => l.From);
     const fedByCell = el('td');
     if (incoming.length > 1) {
       // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter — and one
-      // dropdown cannot express it. Shown, and edited in the node's own editor.
       fedByCell.appendChild(el('span', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') }));
     } else {
       const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
@@ -307,8 +281,6 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     };
 
     // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
-    // part worth copying — a second panel string, another breaker on the same meter); its wiring doesn't,
-    // since the copy usually feeds somewhere else.
     const copy = btn('Copy');
     copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
     copy.onclick = () => {
@@ -381,7 +353,6 @@ export function addNodesSection(nav: any, sections: any) {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
       // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
-      // 'auto' share) invents a figure the user never entered. Opt into inference deliberately.
       const node: any = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
@@ -405,13 +376,11 @@ export function addNodesSection(nav: any, sections: any) {
 
   const load = async () => {
     // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
-    // is global, so a failed/empty graph just means fewer wiring candidates, not an error.
     const r = await api(withInstance('/api/flow', instSel));
     lastGraph = r.body?.ok ? r.body : null;
     render();
   };
   link.onclick = () => { activate(link, sec); load(); };
   // The editor panel is mounted on <body>, so switching pages would otherwise leave it floating over
-  // whatever you switched to.
   nav.addEventListener('click', (e: any) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }

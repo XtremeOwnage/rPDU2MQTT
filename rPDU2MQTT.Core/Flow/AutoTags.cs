@@ -6,16 +6,6 @@ namespace rPDU2MQTT.Core.Flow;
 /// <summary>
 /// Tags for the nodes nobody configured: the PDUs and outlets derived from what the bridge polls.
 ///
-/// <para>
-/// A custom node carries its own tags. An outlet has nowhere to put them — it exists because the PDU
-/// reports it, and there can be hundreds — so filtering a view or gating an export by "rack 1" or
-/// "critical" was possible for the nodes you had typed out and impossible for everything else.
-/// </para>
-/// <para>
-/// Matching is on the node id with <c>*</c> as the only wildcard, which is what makes one rule cover a
-/// whole PDU and another a single outlet. Nothing is inherited implicitly: <c>outlet:rack_pdu_1:*</c> tags
-/// those outlets because it says so, not because a tag on the PDU quietly flowed downhill.
-/// </para>
 /// </summary>
 public static class AutoTags
 {

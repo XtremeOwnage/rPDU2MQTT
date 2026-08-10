@@ -12,46 +12,17 @@ public static class FlowExport
 {
     /// <summary>
     /// A node's rolled-up value, or 0 when the graph could not determine one.
-    /// <para>
-    /// The builder computes this now (see <see cref="FlowNode.Value"/>), so exports agree with the diagram
-    /// instead of re-deriving it. Callers that must distinguish "unknown" from "zero" — anything that
-    /// publishes a reading — should read <see cref="FlowNode.Value"/> and skip nulls; see
-    /// <see cref="TryNodeValue"/>.
-    /// </para>
     /// </summary>
     /// <summary>
     /// A node's daily total for a destination that records history, or <see langword="null"/> when there is
     /// not one to give.
     ///
-    /// <para>
-    /// <paramref name="periodTotalsReady"/> is false while a fresh process is still restoring the totals it
-    /// carried over. In that window the leaves have no period figure but an aggregate over them still
-    /// resolves — from links that are known and carry zero — so a tier would publish a confident 0 for a day
-    /// nobody has added up. Home Assistant records that: a daily total dropping to zero reads as a meter
-    /// reset, and HA then corrects history that was already right.
-    /// </para>
-    /// <para>
-    /// One function because two destinations need the same answer, and the last thing to be duplicated
-    /// across them — whether a node belongs in a history store — was got wrong in both.
-    /// </para>
     /// </summary>
     public static double? PeriodTotal(FlowGraph graph, string id, bool periodTotalsReady)
         => periodTotalsReady && TryNodeValue(graph, id, out var v) ? v : null;
 
     /// Does this node belong in a metrics store (Prometheus, and anything else keeping a series per node)?
     ///
-    /// <para>
-    /// The unmetered remainder does not: it is arithmetic about a hierarchy, and recording it as a device's
-    /// history invites reading it as one. A return lane does: battery charge and grid export are bound
-    /// sources read in the other direction, as measured as the supply beside them. Both ids contain '#',
-    /// which is why they were excluded together and why a history backend could show a battery discharging
-    /// every day and never charging.
-    /// </para>
-    /// <para>
-    /// Here rather than in the exporter so the rule is one thing that can be checked, instead of a
-    /// condition restated wherever it is needed — the mistake that lost the reading ages, and the tags on
-    /// the return lanes, each in their own place.
-    /// </para>
     /// </summary>
     public static bool ToMetricsStore(FlowNode node) => !node.Synthetic || node.ReturnLane;
 
@@ -68,8 +39,6 @@ public static class FlowExport
         if (node?.Value is { } known) { value = known; return true; }
 
         // No value on the node: derive it from the links whose flow is known (the larger of in vs. out).
-        // A node the builder marked unknown has only unknown links, so this correctly finds nothing —
-        // while a graph assembled by hand, whose nodes carry no values, still resolves.
         double inflow = 0, outflow = 0;
         var anyKnown = false;
         foreach (var l in graph.Links)
@@ -154,23 +123,6 @@ public static class FlowExport
     /// Retained Home Assistant discovery configs this exporter published and would no longer publish today —
     /// the ones to clear.
     ///
-    /// <para>
-    /// A discovery config is retained, so it outlives the thing it described. An outlet that gains a native
-    /// energy sensor (so the flow export correctly stops publishing a duplicate for it), a node renamed, a
-    /// tier deleted from the hierarchy — each leaves its config sitting on the broker, and Home Assistant
-    /// goes on showing the device as though it were real. Seen on a live system: fifteen orphaned devices,
-    /// several of them a second and third copy of an outlet that already had one.
-    /// </para>
-    /// <para>
-    /// Nothing revisits them on its own. The publish loop only ever walks the nodes that exist <em>now</em>,
-    /// so a config for something that no longer exists is unreachable by construction — it can only be found
-    /// by looking at what is actually retained and subtracting what we mean to publish.
-    /// </para>
-    /// <para>
-    /// Deliberately narrow: only topics under the discovery prefix, only the <c>device</c> component, and only
-    /// ids beginning with <see cref="DeviceIdPrefix"/>. Another integration's discovery — or this project's own
-    /// native PDU discovery, which a different service owns — must never be touched by this.
-    /// </para>
     /// </summary>
     /// <param name="retainedTopics">Every retained topic currently on the broker.</param>
     /// <param name="currentDeviceIds">The device ids the exporter would publish right now.</param>
@@ -288,14 +240,10 @@ public static class FlowExport
             },
         };
         // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export — as a
-        // second total_increasing sensor, which is what lets HA's Energy Dashboard show battery charge and
-        // grid return. Its unique_id matches EnergyInUniqueId so the dashboard sync can resolve it.
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
                 Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
         // Energy since local midnight. total_increasing rather than total+last_reset: HA reads the drop at
-        // rollover as a meter reset and starts a new day, which is exactly the semantics, and it avoids
-        // having to publish a last_reset timestamp that must then agree with our rollover to the second.
         if (includeEnergyToday)
             doc["components"]!.AsObject()[$"{id}_energy_today"] =
                 Sensor($"{id}_energy_today", "Energy today", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_today }}");

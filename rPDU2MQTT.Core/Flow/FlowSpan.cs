@@ -3,18 +3,6 @@ namespace rPDU2MQTT.Core.Flow;
 /// <summary>
 /// Energy over a window of days, from the daily totals that already exist.
 ///
-/// <para>
-/// A week's energy is the sum of seven days' totals — and only those. Daily totals all re-base at the same
-/// moment, so they can be added; lifetime counters cannot (a PDU's has run since it was commissioned, a
-/// node's since you bound it), and an instantaneous power reading is not a quantity of energy at all. So a
-/// span is offered for the daily total and refused for everything else, rather than quietly summing
-/// figures that do not add up.
-/// </para>
-/// <para>
-/// A day the backend has nothing for is a day missing from the sum, not a zero. The fold counts what it
-/// actually saw per node so the caller can say "5 of 7 days" instead of presenting a short week as a whole
-/// one.
-/// </para>
 /// </summary>
 public static class FlowSpan
 {
@@ -22,10 +10,6 @@ public static class FlowSpan
     public const string SpannableMetric = "energytoday";
 
     // Which instants represent the last N days is EnergyPeriod.RecentPeriodEnds, and only that. This class
-    // used to answer it too, by walking back in 24-hour steps from the moment asked about — so every figure
-    // in a window was that day up to whatever time of day it happened to be, presented as a whole one. Two
-    // answers to one question meant fixing it in one place and leaving the other wrong, which is exactly
-    // what happened: the Trends page was corrected and the span view was not.
 
     /// <summary>
     /// Add up one reading per node per day, and count the days each node actually had.

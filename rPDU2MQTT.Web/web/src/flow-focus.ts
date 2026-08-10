@@ -1,9 +1,4 @@
-// Reading the diagram: what lights up when you point at something.
-//
-// Clicking a node lights everything upstream of it; a tag chip dims everything not carrying it; hovering
-// shows the node's own figures. All three highlight and none of them filter — removing nodes from a Sankey
-// removes the ribbons into them too, so a node whose feeders were hidden reads as unsourced and the totals
-// along the remaining chain stop adding up.
+// Highlighting on the flow chart: the supply path behind a node, the nodes carrying a tag, and the hover
 import { btn, el } from './helpers.js';
 
 export let activeTag: string | null = null;
@@ -26,7 +21,6 @@ export function tagToggles(nodes: any[], svg: any, apply: (tag: string | null) =
       ? 'Showing every node with this tag; click to clear.'
       : `Highlight the nodes tagged “${tag}”. Nothing is hidden and no figure changes — the rest are dimmed.`;
     // Read the state at click time, not the value captured when the chip was built: the row is rebuilt on
-    // every toggle, but a chip that outlives its rebuild would keep re-selecting the tag it already has.
     chip.onclick = () => {
       const selected = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
       activeTag = selected ? null : tag;
@@ -38,20 +32,8 @@ export function tagToggles(nodes: any[], svg: any, apply: (tag: string | null) =
 }
 
 /// The strip above a view: the switches that change how it is drawn, then the group chips.
-///
-/// `drawn` says whether this view is a drawing. The roll-up is a table — nothing on it is drawn and nothing
-/// animates — so offering "Unmeasured load" and "Animate flow" there described a diagram that was not on
-/// the page. The group chips still belong: collapsing a group changes the table's rows.
 
 // The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
-// bindings, and feeders/children — separate from the Flow visualization. Both edit the shared EnergyFlow.
-// --- Focus a supply path --------------------------------------------------------------------------
-// "Where does this node's power come from?" is the question the diagram is worst at once there are more
-// than a handful of ribbons. Clicking a node lights everything upstream of it and dims the rest.
-//
-// Done by classing the <svg> and the elements on the path, never by rewriting their fill-opacity: that
-// attribute already carries meaning (a hairline says the quantity is unknown), and overwriting it to dim
-// would destroy the very thing the diagram is being read for.
 export let focusedNode: string | null = null;
 
 export function focusPath(svg: any, incoming: any, id: string) {
@@ -59,7 +41,6 @@ export function focusPath(svg: any, incoming: any, id: string) {
   focusedNode = id;
 
   // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
-  // graph acyclic — this walks whatever it is handed.
   const onPath = new Set<string>([id]);
   const links = new Set<string>();
   const stack = [id];
@@ -79,10 +60,6 @@ export function focusPath(svg: any, incoming: any, id: string) {
 }
 
 /// Highlight every node carrying `tag`, dimming the rest (#342).
-///
-/// A highlight and not a filter: removing nodes from a Sankey removes the ribbons into them too, so a
-/// node whose feeders were hidden would read as unsourced and the totals along the remaining chain would
-/// no longer add up. Dimming answers "which of these are tagged X" without changing a single figure.
 export function focusTag(svg: any, nodesById: Map<string, any>, tag: string) {
   const tagged = new Set<string>();
   nodesById.forEach((n, id) => {
@@ -93,7 +70,6 @@ export function focusTag(svg: any, nodesById: Map<string, any>, tag: string) {
   svg.querySelectorAll('[data-node]').forEach((e: any) =>
     e.classList[tagged.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
   // Ribbons stay dim throughout: a link is not tagged, and lighting one because an end happens to be
-  // would say the flow itself is part of the selection.
   svg.querySelectorAll('[data-src]').forEach((e: any) => e.classList.remove('on-path'));
   svg.classList.add('flow-focus');
 }
@@ -106,7 +82,6 @@ export function clearFocus(svg: any) {
 }
 
 // --- Node hover card ------------------------------------------------------------------------------
-// One element reused by every node, rather than one per node: the Sankey can hold hundreds of outlets.
 export let nodeCardEl: any = null;
 
 export function showNodeCard(host: any, ev: any, rows: any[]) {
@@ -135,4 +110,3 @@ export function moveNodeCard(ev: any) {
 export function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 
 // Device templates and the panels that import them live in node-templates.ts — the MQTT Import page
-// and the Nodes page both instantiate them, and two ways of writing the same device is one too many.

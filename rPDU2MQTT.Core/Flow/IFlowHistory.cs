@@ -3,15 +3,6 @@ namespace rPDU2MQTT.Core.Flow;
 /// <summary>
 /// Reads what a set of flow nodes read at a past instant (#372).
 ///
-/// <para>
-/// One method, because that is the whole question a dashboard asks of history: the values at a moment. The
-/// diagram is then built from those exactly as it is built from live ones — same builder, same roll-up,
-/// same rules about what is unknown — so a historical view cannot drift from the live one.
-/// </para>
-/// <para>
-/// A node the backend has nothing for is <b>absent</b> from the result, never zero. The builder reads an
-/// absent node as unmeasured and says so; a zero would be a reading nobody took.
-/// </para>
 /// </summary>
 public interface IFlowHistory
 {
@@ -25,16 +16,6 @@ public interface IFlowHistory
     /// <summary>
     /// One reading per node at each of <paramref name="steps"/>.
     ///
-    /// <para>
-    /// A chart asks for tens or hundreds of moments at once, and asking for them one at a time is a
-    /// timeout rather than a chart — six hours at five-minute resolution is 72 round trips. A backend that
-    /// can answer a range in one request overrides this; the default keeps the seam honest for one that
-    /// cannot.
-    /// </para>
-    /// <para>
-    /// A step with no reading is an absent entry, never a carried-forward value: a flat line drawn through
-    /// a gap cannot be told from a reading that genuinely did not change.
-    /// </para>
     /// </summary>
     async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
         IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
@@ -76,10 +57,6 @@ public sealed class HistoricalFlowValueSource : IFlowValueSource
         value = 0;
 
         // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own
-        // (battery#in), because that is how the exporter writes it. Without this the builder never finds a
-        // return lane in history, so a past view of a battery showed it discharging and never charging —
-        // and the Energy Overview filled that gap from the LIVE cache, putting this second's charge rate
-        // under a date from last week.
         if (metric.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal))
         {
             var baseMetric = metric[..^FlowMetricKey.InSuffix.Length];

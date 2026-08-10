@@ -10,16 +10,6 @@ public readonly record struct FlowReading(double Value, DateTime AtUtc, int Stal
 /// <summary>
 /// Optional companion to <see cref="IFlowValueSource"/>: reports not just a value but <i>when</i> it
 /// arrived and whether it has expired.
-/// <para>
-/// <see cref="IFlowValueSource.TryGetValue"/> deliberately hides an expired reading — the roll-up and the
-/// exports must never carry one. But "no value" and "a value that stopped updating an hour ago" are very
-/// different problems to diagnose, and collapsing them is what makes a dead publisher look like a
-/// misconfigured binding. A UI needs to tell them apart, so this exposes the reading either way.
-/// </para>
-/// <para>
-/// Kept separate from <see cref="IFlowValueSource"/> so a source that can't answer this — a future CT
-/// clamp, an inverter API — is under no obligation to.
-/// </para>
 /// </summary>
 public interface IFlowValueDiagnostics
 {
@@ -33,17 +23,6 @@ public interface IFlowValueDiagnostics
 /// <summary>
 /// Whether the daily totals this source derives have been restored from the store yet.
 ///
-/// <para>
-/// They live in a store precisely so a restart continues rather than starts again, but the restore is not
-/// instant. In the window before it, a leaf has no period total (absent, correctly) while an aggregate over
-/// those leaves still resolves — from links that are known and carry zero — so the roll-up publishes a
-/// confident 0 for a tier that simply has not been worked out yet. One scrape of that is enough to write it
-/// into a history backend for good, and on a cluster that rolls this workload often, "for good" is often.
-/// </para>
-/// <para>
-/// A gap is the honest reading for those few seconds. Same rule as everywhere else here: unknown is not
-/// zero.
-/// </para>
 /// </summary>
 public interface IPeriodTotalsReady
 {

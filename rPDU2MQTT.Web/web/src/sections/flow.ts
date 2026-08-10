@@ -1,8 +1,4 @@
-// The Sankey: the energy hierarchy drawn as ribbons, at a moment in time.
-//
-// What is left of what used to be this whole GUI's flow code. The vocabulary it speaks, the switches that
-// decide how much of it to draw, the banners over it, the highlighting on it, the page that edits its
-// nodes and the one that imports them are all their own modules now — this file is the drawing.
+// The Sankey: the energy hierarchy drawn as ribbons for one metric at one moment.
 import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
@@ -17,14 +13,10 @@ import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './n
 import { renderNodeEditor } from './node-editor.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
-// Every page speaks it, so it is not this file’s to own.
 
 // Editing a node — the form, the topic picker, the Modbus explorer, the rename — is in node-editor.ts.
-// This file draws the hierarchy; that one edits a node in it.
 
 // Bring an EnergyFlow config up to the current shape in place (idempotent) — run on load by both the Flow
-// and Nodes tabs since either can be opened first: legacy single-feeder Parents → directed Links, per-node
-// Mqtt → the general Sources list, and a bare Value → the explicit 'static' mode.
 export function migrateEnergyFlow(flow: any) {
   const links = ensure(flow, 'Links', []);
   const legacy = ensure(flow, 'Parents', {});
@@ -45,7 +37,6 @@ export async function saveConfig(onSaved: () => void) {
   const ok = r.ok && r.body.ok;
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
   // This writes the same document the shell's save bar tracks, so re-baseline here too — otherwise the
-  // bar would keep claiming there are unsaved changes that have in fact just been written.
   if (ok) { setBaseline(payload); onSaved(); }
 }
 
@@ -65,23 +56,12 @@ export function addFlowSection(nav: any, sections: any) {
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it. Power (W) is the live snapshot; Energy
-  // (kWh) is the cumulative total, so the diagram reads as "how much has flowed" rather than "how much now".
-  //
-  // "Energy today" is the one energy view whose arithmetic holds. Lifetime totals come from epochs that have
-  // nothing to do with each other — a PDU's firmware counter has run since the unit was commissioned, a
-  // derived node's since its binding was configured — so a panel can legitimately report eleven times what
-  // its own feeder does. Daily totals all start at the same midnight, so they actually sum.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' }) as HTMLSelectElement;
   [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   const count = document.createElement('span'); count.className = 'ld-count';
   // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
-  // and in a container that is UTC unless someone set TZ — so a day can end at 7pm local and look like the
-  // totals reset for no reason. Shown only on the daily metric, where it changes how to read the chart.
-  // Animating the ribbons is decoration, and decoration that cannot be switched off is a nuisance on a
-  // dashboard left up on a wall. Off by default for the same reason, and remembered locally rather than in
-  // the config: it is a per-viewer preference, not a property of the system.
   const animKey = 'rpdu2mqtt.flow.animate';
   const animateFlow = () => localStorage.getItem(animKey) === '1';
 
@@ -112,18 +92,12 @@ export function addFlowSection(nav: any, sections: any) {
   metricSel.onchange = () => { load(); showDayNote(); };
   bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
-  // so the metric moves with it. Picking a *time* is the opposite: an instant is exactly when power is the
-  // right question, so the metric is left alone. Either way this is a default at the moment of the pick,
-  // not a rule enforced on every load: choosing Power afterwards used to be undone by the next refresh.
   let hadDay = false;
   const hist = historyControl((what: any) => {
     // Only on the way out of live. Stepping between days, or re-picking one, keeps whatever you are
-    // looking at — having the metric snap back every time the arrow is pressed is not a default, it is a
-    // refusal to let you choose.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     // Only the daily total can be added across days, so asking for a span asks for that metric — the
-    // server refuses any other, and a refusal where an answer was expected is not a useful default.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
       if (metricSel.value !== 'energytoday') metricSel.value = 'energytoday';
       showDayNote();
@@ -134,8 +108,6 @@ export function addFlowSection(nav: any, sections: any) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Three separate jobs used to be stacked below the diagram on this one page: a table of what each node
-  // grain rolled up, the editor that wires the hierarchy, and the settings that govern the roll-up. Each
-  // gets its own page under Energy Flow, so the Flow page is the diagram.
   const subPage = (label: string, icon: string, desc: string) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
@@ -158,14 +130,12 @@ export function addFlowSection(nav: any, sections: any) {
     'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose. Fetched beside the graph rather than folded into it: it
-  // describes the ingest, not the drawing, and it must still be reported when the graph itself is empty.
   let withheldSources: any[] = [];
 
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
   // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
-  // (measured leaves report their source, aggregates sum their children, residuals the remainder).
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -204,7 +174,6 @@ export function addFlowSection(nav: any, sections: any) {
     };
 
     // Sum a group's members per metric — only members that actually have a value, so a group is never a
-    // fabricated total (matches the diagram and the server export).
     const groupMetrics = (g: any) => {
       const sums: Record<string, number> = {};
       (g.Members || []).forEach((m: string) => (byNode[m]?.metrics || []).forEach((mm: any) => { sums[mm.metric] = (sums[mm.metric] || 0) + mm.value; }));
@@ -233,7 +202,6 @@ export function addFlowSection(nav: any, sections: any) {
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
-    // at exactly one level of detail rather than both at once...
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     // ...and finally honour the unmetered-remainder view switch.
     const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
@@ -245,14 +213,11 @@ export function addFlowSection(nav: any, sections: any) {
 
     const units = graph.units || '';
     // Which metric is actually on screen, taken from the graph rather than the selector: the two disagree
-    // while a fetch is in flight, and a live push repaints without the selector being touched at all.
     const lifetimeEnergy = String(graph.metric || metricSel.value || '').toLowerCase() === 'energy';
     const incoming: any = {}, outgoing: any = {};
     nodes.forEach((n: any) => { incoming[n.id] = []; outgoing[n.id] = []; });
     links.forEach((l: any) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
     // The server decides a node's value and, crucially, whether one is known at all — null means nothing
-    // measures it and nothing downstream determines it. Never substitute 0 for that: 0 is a claim (solar at
-    // night really is 0 W) and showing it for an unmeasured node is exactly the fabrication we removed.
     const byId: any = {};
     nodes.forEach((n: any) => { byId[n.id] = n; });
     const known = (id: string) => byId[id] && byId[id].value != null;
@@ -273,20 +238,6 @@ export function addFlowSection(nav: any, sections: any) {
     nodes.forEach((n: any) => col(n.id));
 
     // Then pull every node as far RIGHT as its nearest child allows, so it lands next to what it powers.
-    //
-    // Longest-path alone left-justifies every root, which is fine while the graph is shallow but breaks as
-    // soon as one branch is deeper than another. Add panels -> strings -> MPPTs upstream of an inverter and
-    // Grid, having no feeder of its own, stays pinned in column 0 while the inverter moves out to column 3
-    // — so its ribbon, several kW wide, is dragged straight across the string and MPPT columns and over
-    // their bars and labels. Nothing reserves a lane for a link that skips a tier.
-    //
-    // A sink keeps its column; everyone else sits one step left of its earliest child. Every edge still
-    // points strictly rightward, because a node always ends up strictly left of all its children.
-    // Processed children-first (descending depth) so a child's column is final before its parent reads it.
-    //
-    // This is the same rule the hierarchy editor on the Nodes tab already applies, for the same reason —
-    // it hit this first with Battery -> inverter skipping past Solar. The two views now agree on where a
-    // node belongs, instead of the diagram and its editor disagreeing about the same topology.
     nodes.slice().sort((a: any, b: any) => colMemo[b.id] - colMemo[a.id]).forEach((n: any) => {
       const outs = outgoing[n.id] || [];
       if (outs.length) colMemo[n.id] = Math.max(0, Math.min(...outs.map((l: any) => colMemo[l.target])) - 1);
@@ -305,7 +256,6 @@ export function addFlowSection(nav: any, sections: any) {
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading, or the flows through it if those are
-    // larger. Never smaller than the ribbons it must accommodate.
     const throughput = (id: string) => {
       let inSum = 0, outSum = 0;
       (incoming[id] || []).forEach((l: any) => { if (l.known !== false) inSum += l.value || 0; });
@@ -319,15 +269,8 @@ export function addFlowSection(nav: any, sections: any) {
 
     const pos: any = {};
     // Every node's label needs a full text line, whatever its bar height — otherwise a stack of small
-    // "0 W" / "no data" nodes collides its labels into an unreadable smear. So a node occupies a *row* at
-    // least this tall (its bar is centered inside it), while the bar itself stays proportional.
     const labelRow = 15;
     // A link's pull on the layout. Weighting purely by value means a zero-carrying link exerts none at
-    // all — and at night the whole solar chain is zero, so `w` stayed 0, bary() returned Infinity, and
-    // every MPPT and the PV aggregate sorted to the bottom of their columns while the inverter they feed
-    // stayed up beside the grid. The chain came out as scattered orphans joined by invisible ribbons.
-    // A floor keeps a zero link meaning "these two are wired together" without letting it outvote a
-    // measured one.
     const wFloor = maxTotal / 1000;
     const linkW = (l: any) => Math.max(l.value || 0, wFloor);
     // Barycenter of the feeders that are already positioned (forward pass) …
@@ -340,16 +283,6 @@ export function addFlowSection(nav: any, sections: any) {
       let y = padTop;
       cn.forEach((n: any) => {
         // Bar height is proportional to what actually passes THROUGH the node, not to its own reading.
-        //
-        // Those are not always the same number, and when they differ the bar is the thing that lies. An
-        // inverter bound to `load_power` reports its AC-load leg only, so one taking 8,344 W of PV and
-        // sending 5,652 W of it to charge a battery reported 2,526 W — and drew a bar a third the width of
-        // the ribbons entering and leaving it. The reading was correct; the geometry was not, and geometry is
-        // the whole point of a Sankey. The label still shows the node's own value, and the discrepancy is
-        // flagged separately.
-        //
-        // An unknown or measured-zero node is a thin marker (it has no magnitude to show) rather than a
-        // fixed slab. The row it sits in is what guarantees label spacing.
         const h = known(n.id) ? Math.max(2, throughput(n.id) * pxPerUnit) : 3;
         const rowH = Math.max(h, labelRow);
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
@@ -359,8 +292,6 @@ export function addFlowSection(nav: any, sections: any) {
     };
 
     // The unmetered remainder sits at the bottom of its column, below every measured sibling (#366). It is
-    // what is left after the metered children are subtracted, so reading it above them inverts the order the
-    // figure is arrived at, and it moves up and down the column as the remainder changes size.
     const remainder = (id: string) => (id || '').includes('#unmeasured') ? 1 : 0;
 
     // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
@@ -370,8 +301,6 @@ export function addFlowSection(nav: any, sections: any) {
       placeColumn(cn, c);
     });
     // Backward: right-to-left, order each column by what it feeds. The forward pass alone can only order a
-    // column by its inputs, so column 0 — which has none — was sorted purely by size and a zero-output
-    // feeder always sank to the bottom, however far that was from the node it powers.
     for (let c = cols.length - 2; c >= 0; c--) {
       if (!cols[c]) continue;
       cols[c].sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
@@ -382,20 +311,6 @@ export function addFlowSection(nav: any, sections: any) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
-    //
-    // The two passes above only ever *order* a column; every column still starts at padTop. That is fine
-    // while columns are of similar height, and comes apart when a short one feeds into a tall one: pulling
-    // Grid rightward to hug the inverter (#307) put it above Solar in the same column, which pushed Solar
-    // ~530px down — while the three idle MPPTs feeding it stayed pinned at the top of the column to their
-    // left, joined to it by hairlines running the full height of the chart. Ordering cannot fix that; only
-    // the column's offset can, and nothing was setting one.
-    //
-    // Translating the whole column keeps the order and spacing both passes just settled, and moves it by the
-    // link-weighted average of how far each of its nodes misses what it powers. Right-to-left, so a column
-    // reads targets that have already stopped moving.
-    // Two sweeps: right-to-left settles each column against what it feeds, then left-to-right lets the
-    // feeders answer back now that their targets have moved. One sweep alone leaves the first column it
-    // touched positioned against neighbours that then moved.
     const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
     for (const c of relaxOrder) {
       const cn = cols[c];
@@ -406,11 +321,6 @@ export function addFlowSection(nav: any, sections: any) {
         if (!sp) return;
         const mid = sp.y + sp.h / 2;
         // Both sides, not just what it feeds.
-        //
-        // Weighing only the targets drags a column to the centre of what it powers, with nothing holding the
-        // other end: a pair of PDUs fanning out to a dozen outlets got pulled up above the top edge of the
-        // panel feeding them, so its ribbons rose out of the panel, crossed back down, and drew an S through
-        // the middle of the chart. A column belongs between its feeders and its consumers, so both pull.
         (outgoing[n.id] || []).forEach((l: any) => {
           const tp = pos[l.target];
           if (!tp) return;
@@ -426,22 +336,11 @@ export function addFlowSection(nav: any, sections: any) {
       });
       if (!w) continue;
       // Never above the top margin, and never so far down that the column leaves the canvas — a chain that
-      // hugs its target off-screen is no more readable than one that drifted away from it.
       const top = Math.min(...cn.map((n: any) => pos[n.id].y));
       const foot = Math.max(...cn.map((n: any) => pos[n.id].y + pos[n.id].h));
       const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
 
       // Only rescue a column that has genuinely come adrift; leave a well-placed one alone.
-      //
-      // This pass exists for the night-time case, where three idle MPPTs sorted ~530px away from the Solar
-      // node they feed and the chart read as scattered orphans. Applied to every column regardless, it also
-      // nudged columns that were already correct — and a nudge is not free. A panel feeding two PDUs stacks
-      // its ribbons flush by construction (the targets' heights sum to the source's), so any shift at all
-      // lifts the targets off the source's edge and bends what should be a straight band into an S. Seen on
-      // a live diagram: ribbons rising out of the top of the panel that fed them before turning back down.
-      //
-      // The test is overlap, not distance: if the column still spans where its flow wants it, the stacking
-      // has already done the job and moving it can only make things worse.
       const reach = Math.max(8, (foot - top) / 2);
       if (Math.abs(shift) < reach) continue;
       cn.forEach((n: any) => { pos[n.id].y += shift; });
@@ -456,15 +355,6 @@ export function addFlowSection(nav: any, sections: any) {
     focusedNode = null;
 
     // Ribbons (filled bezier bands). The draw order IS the stacking order — outOff/inOff accumulate as we
-    // go — so it has to satisfy both ends at once.
-    //
-    // Target y alone was not enough. It stacks a node's *outgoing* links correctly (they appear in
-    // ascending target order), but says nothing about the order of the links arriving at any one target:
-    // several MPPTs feeding one inverter all share a target, so they stacked in array order and the
-    // ribbons crossed — a plain fan-in drawn as a braid. Adding source y as the tiebreak means the links
-    // into a node arrive in the same vertical order as the nodes they come from, so parallel feeders no
-    // longer cross. Both keys together satisfy source and target stacking simultaneously.
-    // Clip ids must be unique within the document, and a redraw rebuilds the whole svg.
     let flowClipSeq = 0;
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
@@ -473,9 +363,6 @@ export function addFlowSection(nav: any, sections: any) {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
-      // zero is the same picture — 0 W scales to a 1px band at 30% opacity, i.e. nothing — so at night the
-      // solar chain looked disconnected rather than idle. Both get a visible hairline; only the ribbons
-      // carrying something get a proportional band.
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
@@ -489,39 +376,18 @@ export function addFlowSection(nav: any, sections: any) {
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint — the
-        // opacity above encodes whether a value is known, and must not be overwritten to dim them.
         'data-src': l.source, 'data-dst': l.target,
       }));
 
       // A stream drawn along the ribbon's centre line, so the diagram shows direction and rate rather than
-      // just magnitude. Width already says how much; this says how hard, which a static Sankey cannot.
-      //
-      // Speed is tied to intensity — flow per unit of ribbon width, i.e. how fast the stuff is actually
-      // moving — not to the raw value. Tying it to the value would march the widest ribbon fastest simply
-      // for being wide, which reads as "more" twice and says nothing new.
-      //
-      // Skipped for anything unknown or idle: a hairline that animates claims motion nobody measured, and
-      // "no data" must never look busier than a real reading.
       if (animateFlow() && !unknownLink && !idleLink) {
         // The stream is the band, not a line drawn down the middle of it.
-        //
-        // Stroking a thin centre line looked like a stray dash wandering loose over the diagram: 6px of
-        // thread inside a 200px ribbon reads as an unrelated squiggle, and where ribbons overlap it appeared
-        // to cross into bands it had nothing to do with. So the stroke is the ribbon's full height and is
-        // clipped to the ribbon itself — it can no longer paint a pixel outside the flow it describes, and
-        // it reads as the band moving rather than as something crawling along it.
         const clipId = `fs${flowClipSeq++}`;
         const clip = svgEl('clipPath', { id: clipId });
         clip.appendChild(svgEl('path', { d: ribbonPath }));
         svg.appendChild(clip);
 
         // Lanes of thin particles, not one stroke as tall as the band.
-        //
-        // A dashed stroke draws its gaps across the whole stroke width, so stroking the centre line at the
-        // ribbon's full height turns every dash into a full-height vertical bar: on a wide ribbon that reads
-        // as a venetian blind rather than as movement. Several thin lanes spread across the band, offset
-        // from one another, read as a current — and they degrade correctly, because a hairline ribbon simply
-        // gets one lane and looks exactly as it did.
         const lanes = Math.max(1, Math.min(6, Math.round(h / 16)));
         const laneW = Math.max(1.5, Math.min(3.5, (h / lanes) * 0.4));
         // Faster where the flow is denser, clamped either side so nothing crawls or strobes.
@@ -552,14 +418,11 @@ export function addFlowSection(nav: any, sections: any) {
     });
 
     // A group reads like a node: click the group node to toggle it, or click any expanded member to fold it
-    // back — the toggles above stay as an alternative. memberGroup maps a member to its group; groupById maps
-    // a group's id (including an anchor group, whose id is a real node) so the anchor toggles either way.
     const memberGroup: Record<string, any> = {};
     const groupById: Record<string, any> = {};
     flowGroups().forEach((g: any) => { groupById[g.Id] = g; (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }); });
 
     // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
-    // where they cross a ribbon).
     const contradicted: { id: string, label: string, share: number }[] = [];
     nodes.forEach((n: any) => {
       const p = pos[n.id]; if (!p) return;
@@ -577,9 +440,6 @@ export function addFlowSection(nav: any, sections: any) {
         'data-node': n.id,
       });
       // A <title> must NOT be a child of <text>: its text node is part of the <text> element's content and
-      // gets painted onto the chart. That is how a tooltip explaining an imbalance ended up rendered across
-      // the diagram as a wall of words. Hang it on a wrapping <g> instead, where it is a tooltip and nothing
-      // else.
       const labGroup = svgEl('g', {});
       const explain = (text: string) => {
         const t = svgEl('title');
@@ -587,8 +447,6 @@ export function addFlowSection(nav: any, sections: any) {
         labGroup.appendChild(t);
       };
       // An inferred figure is never dressed as a measured one. It is arithmetic about the hierarchy someone
-      // drew — sound, but not something anything metered — so it says so on its face, in the one place the
-      // number is actually read.
       const inferredNode = n.derivation === 'inferred';
       lab.textContent = unknownNode ? `${n.label} · no data`
         : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
@@ -598,7 +456,6 @@ export function addFlowSection(nav: any, sections: any) {
         explain('Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.');
       }
       // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
-      // diagram instead of drawing the larger number at full height and letting it look intentional.
       else if (inferredNode) {
         lab.setAttribute('font-style', 'italic');
         lab.setAttribute('fill-opacity', '0.85');
@@ -611,14 +468,6 @@ export function addFlowSection(nav: any, sections: any) {
         lab.textContent += ' ⚠';
         const reading = nodeValue(n.id);
         // Past the line, the label stops looking like every other figure on the chart and the node is
-        // named in a banner above it. The number is still shown — hiding a reading the hardware actually
-        // gave would be its own kind of lying — but it is no longer presented as settled.
-        // Not on lifetime energy. Those counters started whenever each device or binding was first seen —
-        // a PDU's outlet totals have been running for years, an inverter's for weeks, a derived one since
-        // the last restart — so the two sides of a node are answering about different spans and a large
-        // gap is the expected result, not a fault. Checked live: a main panel read 96% "unaccounted" purely
-        // because its outlets have been counting far longer than its feeder. The ⚠ and its tooltip still
-        // say so, and the tooltip already points at "Energy today", where every figure covers one window.
         const share = lifetimeEnergy ? null : contradictionShare(n, reading);
         if (share != null && share >= CONTRADICTION_SHARE) {
           lab.setAttribute('fill', 'var(--warn, #d08700)');
@@ -626,13 +475,6 @@ export function addFlowSection(nav: any, sections: any) {
           contradicted.push({ id: n.id, label: n.label, share });
         }
         // Two different discrepancies wear the same marker, and they need different sentences.
-        //
-        // For a MEASURED node the server sends throughput − reading, so the flows through it exceed what its
-        // own sensor reports. Subtracting the imbalance from the reading — which is what this used to do —
-        // is meaningless there and printed things like "-49.625 kWh arrives", which is not a quantity.
-        //
-        // For anything else it is outflow − inflow, and the reading IS the outflow, so inflow is the
-        // difference and the original wording holds.
         explain(n.derivation === 'measured'
           ? `This node reports ${formatNum(reading)} ${units}, but ${formatNum(reading + n.imbalance)} ${units} `
             + `passes through it — ${formatNum(n.imbalance)} ${units} more than it accounts for. Its sensor is `
@@ -650,9 +492,6 @@ export function addFlowSection(nav: any, sections: any) {
       svg.appendChild(labGroup);
 
         // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
-      // sources are bound to it. All of that is already on the client, so the card costs no extra request —
-      // and it's the only place a node's *intensive* readings (voltage, soc, temperature) can be shown, since
-      // those are deliberately absent from the ribbons.
       const card = () => {
         const rows: any[] = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
@@ -669,7 +508,6 @@ export function addFlowSection(nav: any, sections: any) {
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
         // A sensor on one leg of a bidirectional device — an inverter measuring its AC load while also
-        // charging a battery. Its flows reconcile, so this is a note about coverage, not a warning.
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
             text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
@@ -704,8 +542,6 @@ export function addFlowSection(nav: any, sections: any) {
       });
 
       // Click to trace where this node's supply comes from: everything upstream stays lit, the rest dims.
-      // Click again — or anywhere off a node — to restore. Group nodes keep click for expand/collapse,
-      // which is their established affordance; use the toggles above to open one, then trace inside it.
       if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
         [rect, lab].forEach((elm: any) => {
           elm.style.cursor = 'pointer';
@@ -729,7 +565,6 @@ export function addFlowSection(nav: any, sections: any) {
     });
 
     // Surface the unknowns rather than leaving them to be spotted: a node with no data is a gap in the
-    // measurement, and the point of this diagram is knowing which parts of the house are actually covered.
     const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '');
@@ -760,11 +595,6 @@ export function addFlowSection(nav: any, sections: any) {
   };
 
   // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.
-  //
-  // The generic config form deliberately hides EnergyFlow (these visual editors replace it), so each of
-  // these had been dropped onto whichever page it affected — the MQTT export and the day boundary under
-  // the hierarchy editor, the rest further down the same page. Answering "how is this rolled up?" meant
-  // scrolling a diagram editor. They are the same controls, bound to the same document, in one place.
   const renderSettings = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
     migrateEnergyFlow(flow);
@@ -806,8 +636,6 @@ export function addFlowSection(nav: any, sections: any) {
     hourSel.value = String(agg.PeriodStartHour || 0);
 
     // Zones come from the schema, which the server filled with the ones IT can resolve — a zone missing
-    // from this list would not resolve at runtime either, so offering it would only produce a silent
-    // fallback to the host zone.
     const zoneNode = (state.schema || []).find((n: any) => n.key === 'EnergyFlow')?.properties
       ?.find((n: any) => n.key === 'Aggregation')?.properties?.find((n: any) => n.key === 'PeriodTimeZone');
     const zones: string[] = zoneNode?.enumValues || [''];
@@ -831,8 +659,6 @@ export function addFlowSection(nav: any, sections: any) {
     body.appendChild(aggRow);
 
     // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
-    // container it is UTC unless someone set TZ. Not knowing that is how "Energy today" appears to reset at
-    // 7pm for no reason.
     const clock = el('div', { class: 'desc' }) as HTMLElement;
     body.appendChild(clock);
     api('/api/time').then((r: any) => {
@@ -854,7 +680,6 @@ export function addFlowSection(nav: any, sections: any) {
     body.appendChild(el('h3', { text: 'What the diagram may state', style: { margin: '14px 0 4px' } }));
 
     // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
-    // nothing measured — sound arithmetic about the hierarchy you drew, and only as true as that hierarchy.
     const inferRow = el('div', { class: 'desc' }) as HTMLElement;
     const inferChk = el('input', { type: 'checkbox' }) as HTMLInputElement;
     inferChk.checked = flow.InferFromConservation !== false;   // defaults on
@@ -872,17 +697,12 @@ export function addFlowSection(nav: any, sections: any) {
     body.appendChild(aggIntegrate);
 
     // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram
-    // itself. They change what you are looking at rather than what is configured, they are per-viewer
-    // (browser-local, never saved), and a view switch on another page is one you cannot see the effect of.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
       'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
       + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
-  //     node's right ● output port onto another node to add a directed feed. A node can have many feeders
-  //     (a transfer switch fed by grid + generator + inverter) and producers are just feeds pointing into
-  //     what they power (solar → inverter). Columns are auto-laid-out by depth to minimise crossings. ---
   const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
   const NW = 190, NH = 46;
 
@@ -909,7 +729,6 @@ export function addFlowSection(nav: any, sections: any) {
     const autoParent = (id: string) => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
 
     // Edges: explicit directed Links, plus the auto PDU → outlet feed (suppressed once an outlet is
-    // explicitly fed). `custom` edges are user links (deletable); auto edges are dashed and fixed.
     const customTo = new Set(links.map((l: any) => l.To));
     const edges: any[] = [];
     cand.forEach((c: any) => { const ap = autoParent(c.id); if (ap && cand.has(ap) && !customTo.has(c.id)) edges.push({ from: ap, to: c.id, custom: false }); });
@@ -929,10 +748,6 @@ export function addFlowSection(nav: any, sections: any) {
     };
     [...cand.keys()].forEach(id => col(id));
     // Pull each node as far RIGHT as its nearest child allows (longest-path left-justifies every root, which
-    // leaves a feeder that skips a tier — Battery → inverter, past Solar — trailing a long line across the
-    // columns above it). A sink keeps its column; everyone else sits one step left of its earliest child, so
-    // it lands right next to what it powers. Processed children-first (descending depth); every edge still
-    // points strictly rightward because a node ends up strictly left of all its children.
     const colX: any = {};
     [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
       const outs = outgoing[id] || [];
@@ -997,7 +812,6 @@ export function addFlowSection(nav: any, sections: any) {
       if (c.custom) {
         const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
         // Rename in place: double-click the node to relabel it. Only the Label changes — Id stays fixed, so
-        // every link/source keyed off it survives. (Ids aren't editable here for exactly that reason.)
         t1.setAttribute('title', 'Double-click to rename'); g.style.cursor = 'pointer';
         g.addEventListener('dblclick', (e: any) => {
           e.preventDefault();
@@ -1013,11 +827,9 @@ export function addFlowSection(nav: any, sections: any) {
     });
 
     // Interactions: drag a node's output port onto another node to add a directed feed. Map screen
-    // coords through the SVG CTM so the drag line stays correct under zoom/scroll.
     const toUser = (cx: number, cy: number) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
     let linkFrom: any = null, tempLine: any = null, hovered: any = null;
     // Drag the empty canvas to pan (engages past a small threshold, so a click/double-click on a node or the
-    // ✕ still registers). A port-drag creates a link instead — that path sets linkFrom and never pans.
     let panStart: any = null, panning = false;
     scroll.style.cursor = 'grab';
     const highlight = (id: any) => {
@@ -1085,14 +897,12 @@ export function addFlowSection(nav: any, sections: any) {
   refresh.onclick = load;
 
   // A sub-page repaints with the data only while it is the page you are on — saving from the hierarchy
-  // editor reloads the graph, and rebuilding a page nobody is looking at would drop a drag in progress.
   const redrawSubPages = () => {
     if (edPage.sec.classList.contains('active')) renderEditor();
     if (treePage.sec.classList.contains('active')) renderTree();
   };
 
   // The editor draws every node the diagram knows about, not just the configured ones, so it needs the
-  // graph — reachable now without going via the Flow page first.
   const openSubPage = async (page: any, render: () => void) => {
     activate(page.link, page.sec);
     if (!lastGraph) await load();
@@ -1103,10 +913,6 @@ export function addFlowSection(nav: any, sections: any) {
   settingsPage.link.onclick = () => { activate(settingsPage.link, settingsPage.sec); renderSettings(); };
 
   // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
-  // hierarchy editor and the tree are left alone, so a push can't yank the ground out from under a drag.
-  //
-  // Updates are ignored while a past moment is on screen. A push carries the current readings, and painting
-  // them under a chosen date shows live figures labelled as that date — the plainest way to mislead.
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
     (body: any) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });

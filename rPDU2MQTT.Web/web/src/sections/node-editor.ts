@@ -1,9 +1,4 @@
-// Editing one node: its name, kind, how it is valued, and the live sources bound to it — plus the dialogs
-// that go with it (the topic picker, the Modbus register explorer, the rename).
-//
-// Its own module because this is a form, not a diagram. It needs one thing from the flow code — the
-// feeder-loop check, since rewiring a node here can close a cycle — and the pages that open it need three
-// things back.
+// Editing one node — name, kind, how it is valued, its live sources — and the dialogs it opens: the topic
 import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
@@ -15,21 +10,13 @@ import {
 } from '../flow-vocabulary.js';
 
 // --- Browsing what's out there: MQTT topics, and a Modbus device's registers ----------------------
-//
-// The topic index behind these only exists while we're asking for it — every call renews a short lease and
-// the broker subscription is dropped when nobody is browsing (see ITopicIndexGrain). So autocomplete costs a
-// subscription while this editor is open and nothing at all afterwards; there's no background indexer.
 
 let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
-/// `onClose` fires only on those three — a caller closing the panel itself already knows, and firing it
-/// there would loop when the callback re-renders the surface that owns the panel.
 export function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
   // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings — type,
-  // metric, counter, unit and a full MQTT topic — and at 860px the topic column was cut off mid-string on
-  // the machines this is actually used from. The floor keeps it usable on a narrow screen.
   const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'max(min(75vw, 1600px), min(860px, 92vw))', maxHeight: '80vh', overflow: 'auto' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
@@ -122,7 +109,6 @@ function openTopicPicker(current: string, onPick: (topic: string) => void) {
   body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
 
   // Which broker filter to subscribe to. Default '#' (everything); a broker whose ACL forbids the bare
-  // wildcard can narrow it, e.g. 'solar_assistant/#', and still browse under that prefix.
   const filterBar = el('div', { class: 'ld-toolbar' });
   const filterIn = el('input', { type: 'text', value: '#', placeholder: '# (everything)', style: { width: '220px' } }) as HTMLInputElement;
   filterIn.title = 'The topic filter to subscribe to while browsing. If the broker denies “#”, narrow it (e.g. solar_assistant/#).';
@@ -250,8 +236,6 @@ function openModbusExplorer(src: any, onPick: () => void) {
 }
 
 /// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
-/// Parents map, and every downstream path derived from it — so this rewrites the references in the config and
-/// is honest about the ones it can't reach.
 export function openRenameDialog(node: any, flow: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
   const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
   const links: any[] = ensure(flow, 'Links', []);
@@ -262,7 +246,6 @@ export function openRenameDialog(node: any, flow: any, existingIds: Set<string>,
   body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
 
   // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
-  // rather than letting someone discover it when their history stops.
   const warn = el('div', {
     class: 'desc',
     style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
@@ -310,13 +293,10 @@ export function field(labelText: string, control: HTMLElement, hint?: string) {
 }
 
 // Per-node editor (#129): name, kind, mode, fixed value, a battery's storage, and the live value bindings —
-// one row per metric, each carrying a Type (MQTT today) and its transport fields, all editable in place
-// (including the topic, which the old flat table couldn't change).
 export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, rerender: (close?: boolean) => void) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
   // No frame and no header of its own: this is rendered into a modal panel that already carries the node's
-  // name and a Close button (#292).
   const box = el('div', { class: 'node-editor' });
 
   const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
@@ -349,11 +329,8 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   }
 
   // The gauge's ceiling, for the kinds the Energy page draws a dial for. Deliberately not offered on every
-  // kind: a dial belongs on something with a rating (an array's peak, an inverter, a main breaker), and
-  // offering it everywhere invites a number that means nothing.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
     // Tags (#342): free text, comma-separated. No fixed vocabulary and no validation — the groupings worth
-    // having cut across the wiring ("everything on the UPS", "upstairs") and nobody can guess them up front.
     const tagsIn = el('input', { type: 'text', value: (node.Tags || []).join(', '), placeholder: 'critical, rack-1' });
     tagsIn.onchange = () => {
       const list = tagsIn.value.split(',').map((t: string) => t.trim()).filter((t: string) => t);
@@ -385,11 +362,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
   // Battery and grid flow both ways, so their sources carry a Direction: 'out' (the supply value the roll-up
-  // reads) vs 'in' (charge/export, exported as the energy_in sensor HA's dashboard picks up). Other kinds only
-  // ever flow one way, so the column stays hidden for them. Labels are role-specific so the choice reads plainly.
-  // Label the direction by what it physically IS, not the internal out/in convention (which, relative to the
-  // node, makes grid *import* the "out" value — technically right but reads backwards). The user picks
-  // Import/Export or Charge/Discharge; the out/in mapping stays under the hood.
   const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
   const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge', in: 'Charge', split: 'Split: + discharge / − charge' }
     : node.Kind === 'grid' ? { out: 'Import', in: 'Export', split: 'Split: + import / − export' }
@@ -423,7 +395,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       tr.appendChild(el('td', {}, typeSel));
 
       // Offer this kind's metrics (friendly labels), but keep an already-chosen one even if the kind wouldn't
-      // list it. Changing the metric resets the unit (units differ per metric) and re-renders the row.
       const metricSel = el('select', { style: { width: 'auto' } });
       const metric = src.Metric || 'realpower';
       const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
@@ -431,7 +402,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       metricSel.value = metric;
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
       // Say at the point of choosing that this one won't roll up — otherwise the only clue is a parent
-      // node reading "no data", which looks like a broken binding rather than the correct answer.
       const metricCell = el('td', {}, metricSel);
       if (!isAdditiveMetric(metric)) {
         metricCell.appendChild(el('div', {
@@ -444,8 +414,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       tr.appendChild(metricCell);
 
       // Direction (battery/grid only, and only for a directional metric — voltage/soc have no direction, so
-      // their cell stays blank). A signed metric (power/current) also offers 'split': one ± value fanned into
-      // both out and in, so a single Solar-Assistant-style topic drives charge AND discharge.
       if (bidirectional) {
         const cell = el('td');
         if (DIRECTIONAL_METRICS.includes(metric)) {
@@ -467,10 +435,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       }
 
       // Does this counter run forever, or does the device reset it every day? Only energy accumulates, so
-      // every other metric's cell stays blank. Getting it wrong is silent and expensive: measuring the
-      // "rise" of a counter the device resets at midnight loses the whole day, because it drops to zero and
-      // climbs again unobserved. One publisher can do both — Solar Assistant's total/load_energy is
-      // cumulative while total/pv_energy resets — so it cannot be inferred from the source.
       {
         const cell = el('td');
         if (metric === 'energy') {
@@ -535,7 +499,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         tr.appendChild(el('td', {}, details));
       } else {
         // Source = the topic, with autocomplete off what the broker is actually carrying, and a Browse
-        // button for picking one by eye. Details = the JSON field, itself autocompleted from the payload.
         const topicCell = el('td');
         const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } }) as HTMLInputElement;
         const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } }) as HTMLInputElement;
@@ -564,7 +527,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       }
 
       // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
-      // nothing downstream has to learn a second knob — the checkbox is just its sign, spelled out.
       const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
       const setScale = (magnitude: number, invert: boolean) => {
         const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
@@ -587,7 +549,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       tr.appendChild(invCell);
 
       // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
-      // come from the shared live cache the running ingests fill — so you can confirm a mapping reads right.
       const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: '…' });
       liveCells.push({ src, cell: liveCell });
       tr.appendChild(liveCell);
@@ -601,7 +562,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     box.appendChild(tbl);
 
     // Live "Current" value for every binding: Modbus is read straight from the device (works before saving);
-    // MQTT and any future type come from the shared live cache the running ingests fill. Auto-refreshes.
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
       const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
@@ -609,8 +569,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
       // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
-      // the worker already polls it. So auto-refresh reads the shared live cache (no device access); only an
-      // explicit "Test device read" opens its own connection, to check a binding before it's saved/polled.
       const refresh = async (probe = false) => {
         let probeMsg = '';
         if (probe) {
@@ -634,8 +592,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         }
 
         // Every binding not just device-probed reads the shared live cache the running ingests fill. A 'split'
-        // source is stored as two keys (out + in), so query both and show their signed sum (out − in) — the
-        // original ± value — rather than just the out key, which reads 0 whenever the flow is on the in side.
         const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
         if (cached.length) {
           try {
@@ -665,7 +621,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
       refresh(false);
       // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops. Polls at
-      // 2s — the grain mirror updates about that fast, so a live power value shouldn't lag by 5+ seconds.
       const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 2000);
     }
   }
@@ -701,7 +656,6 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       chip.append(nm(other), x); row.appendChild(chip);
     });
     // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets — so it
-    // comes with a search box that filters it as you type (Enter takes the single match).
     const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
     const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
     const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
