@@ -6,19 +6,6 @@ namespace rPDU2MQTT.Services.Gui;
 
 /// <summary>
 /// Which settings a save takes effect on immediately, and which wait for a restart.
-///
-/// <para>
-/// Saving writes the whole document to the configuration source, but only part of it can be applied to a
-/// process that is already running: the rest was read at startup and is held by services that never look
-/// again. Until this existed, the difference was invisible — the GUI showed the saved value, the bridge
-/// went on behaving the old way, and a test button reported a feature as off seconds after it was switched
-/// on. The disagreement is real; the only question is whether anyone is told about it.
-/// </para>
-/// <para>
-/// The list below is what the save handler actually copies into the running configuration, and nothing
-/// else. It is deliberately a list of what *is* live rather than of what is not: adding a setting to it is
-/// a claim that the running process re-reads it, and that claim belongs beside the code that makes it true.
-/// </para>
 /// </summary>
 public static class ConfigApply
 {
@@ -46,11 +33,6 @@ public static class ConfigApply
 
     /// <summary>
     /// Every setting that differs between two configuration documents, as dotted paths.
-    ///
-    /// <para>
-    /// Objects are walked; arrays and scalars are compared whole. An element-by-element diff of the node
-    /// list would say no more than "EnergyFlow.Nodes changed", which is the answer either way.
-    /// </para>
     /// </summary>
     public static IReadOnlyList<string> ChangedPaths(JsonNode? before, JsonNode? after)
     {

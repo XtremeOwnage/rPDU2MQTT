@@ -11,32 +11,16 @@ namespace rPDU2MQTT.Core.Flow;
 public static class FlowExport
 {
     /// <summary>
-    /// A node's rolled-up value, or 0 when the graph could not determine one.
-    /// <para>
-    /// The builder computes this now (see <see cref="FlowNode.Value"/>), so exports agree with the diagram
-    /// instead of re-deriving it. Callers that must distinguish "unknown" from "zero" — anything that
-    /// publishes a reading — should read <see cref="FlowNode.Value"/> and skip nulls; see
-    /// <see cref="TryNodeValue"/>.
-    /// </para>
-    /// </summary>
-    /// <summary>
     /// A node's daily total for a destination that records history, or <see langword="null"/> when there is
     /// not one to give.
-    ///
-    /// <para>
-    /// <paramref name="periodTotalsReady"/> is false while a fresh process is still restoring the totals it
-    /// carried over. In that window the leaves have no period figure but an aggregate over them still
-    /// resolves — from links that are known and carry zero — so a tier would publish a confident 0 for a day
-    /// nobody has added up. Home Assistant records that: a daily total dropping to zero reads as a meter
-    /// reset, and HA then corrects history that was already right.
-    /// </para>
-    /// <para>
-    /// One function because two destinations need the same answer, and the last thing to be duplicated
-    /// across them — whether a node belongs in a history store — was got wrong in both.
-    /// </para>
     /// </summary>
     public static double? PeriodTotal(FlowGraph graph, string id, bool periodTotalsReady)
         => periodTotalsReady && TryNodeValue(graph, id, out var v) ? v : null;
+
+    /// <summary>
+    /// Does this node belong in a metrics store (Prometheus, and anything else keeping a series per node)?
+    /// </summary>
+    public static bool ToMetricsStore(FlowNode node) => !node.Synthetic || node.ReturnLane;
 
     public static double NodeValue(FlowGraph graph, string id)
         => TryNodeValue(graph, id, out var value) ? value : 0;
@@ -51,8 +35,6 @@ public static class FlowExport
         if (node?.Value is { } known) { value = known; return true; }
 
         // No value on the node: derive it from the links whose flow is known (the larger of in vs. out).
-        // A node the builder marked unknown has only unknown links, so this correctly finds nothing —
-        // while a graph assembled by hand, whose nodes carry no values, still resolves.
         double inflow = 0, outflow = 0;
         var anyKnown = false;
         foreach (var l in graph.Links)
@@ -119,11 +101,7 @@ public static class FlowExport
     /// The discovery device ids the MQTT export publishes right now: every non-synthetic node the tag
     /// filter allows, minus those already covered by native PDU discovery.
     /// </summary>
-    /// <remarks>
-    /// Shared with the orphan sweep so the two agree. A node the exporter has stopped publishing must not
-    /// count as current, or its retained config is never swept and the device stays in Home Assistant with
-    /// a state topic that no longer updates.
-    /// </remarks>
+    /// <remarks>Shared with the orphan sweep so the two agree on what is current.</remarks>
     public static IReadOnlyList<string> ExportedDeviceIds(
         FlowGraph graph, Models.Config.NodeTagFilter? tagFilter, IReadOnlyDictionary<string, string>? nativeIds = null)
         => [.. graph.Nodes
@@ -136,24 +114,6 @@ public static class FlowExport
     /// <summary>
     /// Retained Home Assistant discovery configs this exporter published and would no longer publish today —
     /// the ones to clear.
-    ///
-    /// <para>
-    /// A discovery config is retained, so it outlives the thing it described. An outlet that gains a native
-    /// energy sensor (so the flow export correctly stops publishing a duplicate for it), a node renamed, a
-    /// tier deleted from the hierarchy — each leaves its config sitting on the broker, and Home Assistant
-    /// goes on showing the device as though it were real. Seen on a live system: fifteen orphaned devices,
-    /// several of them a second and third copy of an outlet that already had one.
-    /// </para>
-    /// <para>
-    /// Nothing revisits them on its own. The publish loop only ever walks the nodes that exist <em>now</em>,
-    /// so a config for something that no longer exists is unreachable by construction — it can only be found
-    /// by looking at what is actually retained and subtracting what we mean to publish.
-    /// </para>
-    /// <para>
-    /// Deliberately narrow: only topics under the discovery prefix, only the <c>device</c> component, and only
-    /// ids beginning with <see cref="DeviceIdPrefix"/>. Another integration's discovery — or this project's own
-    /// native PDU discovery, which a different service owns — must never be touched by this.
-    /// </para>
     /// </summary>
     /// <param name="retainedTopics">Every retained topic currently on the broker.</param>
     /// <param name="currentDeviceIds">The device ids the exporter would publish right now.</param>
@@ -167,9 +127,8 @@ public static class FlowExport
     /// identifier rather than <see cref="DeviceIdPrefix"/>.
     /// </summary>
     /// <param name="deviceIdPrefix">
-    /// Only ids starting with this are considered. It is the entire safety boundary: everything else on the
-    /// broker belongs to another integration, and clearing one of those deletes someone's devices out of
-    /// Home Assistant with nothing to put them back.
+    /// Only ids starting with this are considered — the entire safety boundary, since everything else on the
+    /// broker belongs to another integration.
     /// </param>
     public static IReadOnlyList<string> OrphanedDiscoveryTopics(
         IEnumerable<string> retainedTopics, IEnumerable<string> currentDeviceIds, string discoveryPrefix,
@@ -270,15 +229,11 @@ public static class FlowExport
                 [$"{id}_power"] = Sensor($"{id}_power", "Power", "power", "measurement", string.IsNullOrWhiteSpace(powerUnits) ? "W" : powerUnits, "{{ value_json.power }}"),
             },
         };
-        // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export — as a
-        // second total_increasing sensor, which is what lets HA's Energy Dashboard show battery charge and
-        // grid return. Its unique_id matches EnergyInUniqueId so the dashboard sync can resolve it.
+        // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export.
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
                 Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
-        // Energy since local midnight. total_increasing rather than total+last_reset: HA reads the drop at
-        // rollover as a meter reset and starts a new day, which is exactly the semantics, and it avoids
-        // having to publish a last_reset timestamp that must then agree with our rollover to the second.
+        // Energy since local midnight.
         if (includeEnergyToday)
             doc["components"]!.AsObject()[$"{id}_energy_today"] =
                 Sensor($"{id}_energy_today", "Energy today", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_today }}");

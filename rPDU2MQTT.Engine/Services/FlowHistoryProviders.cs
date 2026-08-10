@@ -8,12 +8,6 @@ namespace rPDU2MQTT.Services;
 
 /// <summary>
 /// Past flow values from the Prometheus that scrapes this bridge.
-///
-/// <para>
-/// The exporter already publishes one series per node and metric, so a query at an instant is exactly the
-/// question the dashboard asks. Nothing new is stored, and the answer comes from the same numbers the live
-/// view showed at the time.
-/// </para>
 /// </summary>
 public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHistory
 {
@@ -25,8 +19,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         if (baseUrl.Length == 0) return (false, "no PrometheusUrl set");
         try
         {
-            // Its own readiness endpoint: cheap, and it answers whether the server is up rather than
-            // whether one query happens to match anything.
+            // Its own readiness endpoint: it answers whether the server is up.
             var response = await http.GetAsync($"{baseUrl}/-/ready", ct);
             return response.IsSuccessStatusCode
                 ? (true, baseUrl)
@@ -34,9 +27,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // HttpClient reports its own timeout as a cancellation. Passed on as-is it reaches the GUI as
-            // "The operation was canceled.", which reads as the request being abandoned rather than the
-            // server never answering.
+            // HttpClient reports its own timeout as a cancellation.
             return (false, $"{baseUrl}: no answer within {http.Timeout.TotalSeconds:0}s");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -58,8 +49,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         if (baseUrl.Length == 0 || nodeIds.Count == 0 || steps.Count == 0) return empty;
 
         var unix = steps.Select(s => new DateTimeOffset(DateTime.SpecifyKind(s, DateTimeKind.Utc)).ToUnixTimeSeconds()).ToList();
-        // The step Prometheus is asked for has to be the one the caller wants back, or the samples land
-        // between the slots they were meant for.
+        // The step Prometheus is asked for has to be the one the caller wants back.
         var stride = steps.Count > 1 ? Math.Max(1, unix[1] - unix[0]) : 1;
 
         var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
@@ -118,12 +108,6 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
 
 /// <summary>
 /// Past flow values from EmonCMS feeds.
-///
-/// <para>
-/// Unlike Prometheus, EmonCMS holds no series keyed by flow node — this bridge posts PDU measurements to it
-/// by input name. So a node is matched to the feed of the same name, and a node with no such feed simply
-/// has no history. That is reported as absent rather than guessed at from a similarly-named feed.
-/// </para>
 /// </summary>
 public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHistory
 {
@@ -143,8 +127,7 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
             return (false, $"{baseUrl}: no answer within {http.Timeout.TotalSeconds:0}s");
         }
         catch (Exception ex) { return (false, $"{baseUrl}: {ex.Message}"); }
-        // Reachable but with no feeds is still a working backend with nothing to show, and saying so is
-        // more use than a bare "ok".
+        // Reachable but with no feeds is still a working backend with nothing to show.
         return list.Count > 0 ? (true, $"{baseUrl} · {list.Count} feed(s)") : (false, $"{baseUrl}: no feeds readable");
     }
 
@@ -208,13 +191,6 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
 
 /// <summary>
 /// Chooses the backend per call from the live configuration.
-///
-/// <para>
-/// Registered unconditionally. Binding the choice at startup — one provider constructed only when
-/// <c>History.Enabled</c> was already true — meant turning history on, or switching backend, did nothing
-/// until the process restarted. Every other toggle in this project takes effect on the next pass, and the
-/// config the GUI edits is the same instance read here.
-/// </para>
 /// </summary>
 public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IFlowHistory
 {

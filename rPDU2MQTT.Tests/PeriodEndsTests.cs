@@ -3,15 +3,7 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// When a daily total is a day's total.
-///
-/// <para>
-/// The chart sampled each day at "now minus 24 hours", so at three in the afternoon every bar on a
-/// month-long chart was that day up to three o'clock — a real reading of something nobody asked for, drawn
-/// identically to a finished day. A completed period is read at its own rollover.
-/// </para>
-/// </summary>
+/// <summary>A completed period is read at its own rollover, not at "now minus 24 hours".</summary>
 public class PeriodEndsTests
 {
     private static readonly TimeZoneInfo Chicago = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");
@@ -75,6 +67,22 @@ public class PeriodEndsTests
             Assert.Equal(59, local.Minute);
             Assert.Equal(59, local.Second);
         }
+    }
+
+    [Fact]
+    public void EveryViewOfTheLastNDaysAsksTheSameQuestion()
+    {
+        // One answer to "which instants are the last N days", used by the Trends charts and by the span
+        // view on the Flow and Energy pages. Two answers meant the second one kept sampling at the current
+        // time of day long after the first was fixed.
+        var at = new DateTime(2026, 8, 8, 19, 5, 0, DateTimeKind.Utc);
+
+        var week = EnergyPeriod.RecentPeriodEnds(at, Chicago, 0, 7);
+
+        Assert.Equal(7, week.Count);
+        // Each completed day at its own rollover, not at 14:05 on that day.
+        Assert.All(week.Take(6), e => Assert.Equal(new TimeSpan(4, 59, 59), e.AtUtc.TimeOfDay));
+        Assert.All(week.Take(6), e => Assert.True(e.Complete));
     }
 
     [Fact]

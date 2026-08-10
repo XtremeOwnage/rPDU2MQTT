@@ -2,13 +2,6 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Which period a moment belongs to, for <see cref="EnergyState.PeriodKWh"/>.
-///
-/// <para>
-/// The period is a <b>local</b> day. That matters: "today" is what an operator reads off the Energy
-/// Dashboard and what a utility bills against, and neither of them rolls over at UTC midnight. The zone is
-/// resolved once and passed in, so the whole roll-up shares one boundary — nodes rolling at different
-/// instants would reintroduce exactly the incomparability the period exists to remove.
-/// </para>
 /// </summary>
 public static class EnergyPeriod
 {
@@ -22,23 +15,13 @@ public static class EnergyPeriod
     /// <summary>Local time in <paramref name="zone"/> for an instant, whatever Kind the instant carries.</summary>
     public static DateTime Local(DateTime utc, TimeZoneInfo zone)
     {
-        // A stored DateTime round-trips through JSON as Unspecified; treat it as the UTC it is, because
-        // ConvertTimeFromUtc rejects a value already marked Local and would throw on a machine in a
-        // non-UTC zone — a crash in the sampler rather than a wrong date.
+        // A stored DateTime round-trips through JSON as Unspecified; treat it as the UTC it is.
         var instant = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
         return TimeZoneInfo.ConvertTimeFromUtc(instant, zone);
     }
 
     /// <summary>
     /// The key for the period <paramref name="utc"/> falls in.
-    ///
-    /// <para>
-    /// <paramref name="startHour"/> moves the boundary off midnight — a utility whose day runs 06:00 to
-    /// 06:00, a shift pattern, or simply a preference not to have the chart reset while someone is looking
-    /// at it. Shifting the local clock back by that many hours and then taking the date does the whole job:
-    /// 05:00 with a start hour of 6 lands on the previous day's key, which is what "the day that began at
-    /// 06:00 yesterday" means.
-    /// </para>
     /// </summary>
     public static string KeyFor(DateTime utc, TimeZoneInfo zone, int startHour = 0)
         => Local(utc, zone).AddHours(-Clamp(startHour)).ToString("yyyy-MM-dd");
@@ -56,16 +39,6 @@ public static class EnergyPeriod
 
     /// <summary>
     /// When the period in progress began — where the counters last re-based.
-    ///
-    /// <para>
-    /// What "today so far" means. Not the last 24 hours and not the viewer's midnight: the daily totals are
-    /// cut on this boundary, so a chart of today anchored anywhere else covers a different day from the
-    /// totals beside it. Just after the boundary the window is minutes long, and that is the honest answer.
-    /// </para>
-    /// <para>
-    /// Computed in local time rather than by subtracting a day from the next rollover, so a clock change
-    /// does not put the start an hour inside the previous period.
-    /// </para>
     /// </summary>
     public static DateTime PeriodStart(DateTime utc, TimeZoneInfo zone, int startHour = 0)
     {
@@ -79,21 +52,6 @@ public static class EnergyPeriod
     /// <summary>
     /// One instant per day for the last <paramref name="days"/> periods, oldest first, with the day each
     /// belongs to.
-    ///
-    /// <para>
-    /// A daily total is only a day's total at the end of that day. Sampling "now minus 24 hours" reads the
-    /// counter part-way through — at three in the afternoon, every bar on a month-long chart is that day up
-    /// to three o'clock, which is a real number of a thing nobody asked about and looks exactly like a
-    /// complete day. Each completed period is therefore read a second before its rollover.
-    /// </para>
-    /// <para>
-    /// The current period has not ended, so it is read at <paramref name="nowUtc"/> and labelled with its
-    /// own key: today so far is worth seeing, as long as it is not presented as a finished day.
-    /// </para>
-    /// <para>
-    /// Walked in local time rather than by subtracting 24 hours, so a clock change does not slide every
-    /// earlier boundary an hour off the day it belongs to.
-    /// </para>
     /// </summary>
     public static IReadOnlyList<(DateTime AtUtc, string Day, bool Complete)> RecentPeriodEnds(
         DateTime nowUtc, TimeZoneInfo zone, int startHour, int days)

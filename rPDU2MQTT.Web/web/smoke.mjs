@@ -1,10 +1,6 @@
 // Behavioral smoke test for the bundled GUI: stub a minimal DOM + fetch, run app.js, and let
-// load() -> build() construct every section. Catches cross-module wiring/reference errors that a mere
-// syntax check would miss. Not a substitute for a browser, but it exercises the whole setup path.
-//
-// The schema is the REAL one (schema.fixture.json, dumped from ConfigSchema.Build()), not an empty list:
-// an empty schema renders no sections at all, which made this test pass no matter what build() did with
-// them. Regenerate the fixture when config sections change — see the header note in that file.
+// load() -> build() construct every section, catching cross-module wiring errors a syntax check would miss.
+// The schema is the real one (schema.fixture.json) — regenerate it when config sections change.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -186,6 +182,17 @@ for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'D
   if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
 }
 
+// No History section in this config, so there is nothing to pick a moment from — and a date control whose
+// every answer would be "history is turned off" is worse than no control.
+const energyLink = navLinksNow().find(a => a.dataset.label === 'Energy');
+if (!energyLink) fail('no Energy tab');
+energyLink.click();
+await new Promise(r => setTimeout(r, 100));
+const histBars = query(getEl('sections'), 'div', true).filter(d => (d.className || '').includes('history-bar'));
+if (!histBars.length) fail('no history control was built at all');
+if (!histBars.every(b => (b.className || '').includes('is-hidden')))
+  fail('a date picker is offered while the History feature is off');
+
 // The roll-up is a table: nothing on it is drawn and nothing animates, so the switches that change how a
 // diagram is drawn described a diagram that was not on the page.
 const rollupLink = navLinksNow().find(a => a.dataset.label === 'Roll-up');
@@ -245,11 +252,7 @@ if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not cl
 nodesLink.click();
 await new Promise(r => setTimeout(r, 50));
 
-// The column is "Fed by", the direction the hierarchy is built in: you put a thing under its feeder, so
-// the control is on the thing. The other way round, a row read "— none —" for a node that plainly had a
-// feeder, and re-parenting it meant finding the parent's row.
-// By the row's id cell, not by its text: every row's dropdown lists every other node, so matching on text
-// finds whichever row happens to mention the name first.
+// Matched by the row's id cell, not its text: every row's dropdown lists every other node.
 const nodeRow = (id) => query(getEl('sections'), 'tr', true).find(r => query(r, 'code')?.textContent === id);
 const solarRow = nodeRow('solar');
 if (!solarRow) fail('no row for the solar node in the virtual-node table');
@@ -406,13 +409,17 @@ if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not
 if (!dataText.includes('1,234')) fail('a reading with no timestamp was not shown at all');
 if (!dataText.includes('no timestamp')) fail('a reading with no timestamp is reported as never having arrived');
 
+// --- The bundler: a multi-line import is still an import -------------------------------------------
+// Only the first line used to be dropped, so a module written with a dozen named imports across several
+// lines left its closing brace in the bundle and nothing parsed at all. The error pointed at the brace.
+const bundle = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
+for (const stray of [/^\s*import\s/m, /^\s*\}\s*from\s/m, /^\s*from\s+['"]/m])
+  if (stray.test(bundle))
+    fail(`the bundle still contains an import statement (${stray}) — a multi-line import was only half removed`);
+
 // --- Stylesheet: the toggle switch's specificity ---------------------------------------------------
-// Nothing here renders CSS, so a cascade bug ships invisibly — this one did. `input[type=checkbox]` is
-// (0,1,1) and `.switch` is (0,1,0), so a bare checkbox rule silently outranks the switch and collapses
-// every toggle in the config form to a 16px circle with its thumb outside it.
-//
-// This does not evaluate the cascade (that needs a browser). It pins the one invariant that broke: a
-// checkbox sizing rule must not also match a switch.
+// `input[type=checkbox]` is (0,1,1) and outranks `.switch` at (0,1,0), so a checkbox sizing rule must not
+// also match a switch. This pins that invariant; it does not evaluate the cascade, which needs a browser.
 const sheet = await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8');
 for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}]*)\}/g)) {
   const selector = m[2].trim(), body = m[3];

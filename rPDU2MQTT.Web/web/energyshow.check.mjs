@@ -1,8 +1,5 @@
-// The Energy board's Show toggle (#371): power now, or energy for the day so far.
-//
-// Two properties matter. A node's Max is a full-scale power figure, so no dial is drawn against a kWh
-// reading. And the grid's day figure is the NET — import minus export, signed — because a magnitude reads
-// the same for a day that imported 5 kWh and one that exported 5.
+// The Energy board's Show toggle (#371): power now, or energy for the day so far. No dial is drawn against a
+// kWh reading (Max is a power figure), and the grid's day figure is the signed net of import minus export.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -13,7 +10,8 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
 const fail = (m) => { console.error('energy-show check FAILED: ' + m); process.exit(1); };
 const cn = (e) => String((e && (e.className || (e.attrs && e.attrs.class))) || '');
 
-const cfg = { EnergyFlow: { Nodes: [{ Id: 'grid', Kind: 'grid', Max: 9000 }, { Id: 'solar', Kind: 'solar', Max: 9000 }], Links: [] } };
+// History on, so the date control exists and a past view can be asked for.
+const cfg = { EnergyFlow: { Nodes: [{ Id: 'grid', Kind: 'grid', Max: 9000 }, { Id: 'solar', Kind: 'solar', Max: 9000 }], Links: [] }, History: { Enabled: true } };
 
 const power = {
   ok: true, metric: 'realpower', units: 'W',
@@ -35,9 +33,23 @@ const lifetime = {
   links: [],
 };
 
+// A past view of the board. Its return lanes are series of their own, so the graph carries them; SoC is not
+// exported at all, so history has none.
+const pastDay = {
+  ok: true, metric: 'energytoday', units: 'kWh', historical: true,
+  at: '2026-08-03T04:59:59Z', source: 'prometheus',
+  nodes: [
+    { id: 'solar', label: 'Solar', kind: 'solar', value: 12.5 },
+    { id: 'grid', label: 'Grid', kind: 'grid', value: 3.5 },
+    { id: 'grid#in', label: 'Grid (export)', kind: 'grid', value: 1.5 },
+  ],
+  links: [],
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
     url.includes('/api/schema') ? schema :
+    url.includes('at=') ? pastDay :
     url.includes('/api/instances') ? { ok: true, instances: [] } :
     url.includes('/api/config') ? cfg :
     url.includes('/api/flow/live') ? { ok: true, values: [{ node: 'grid', metric: 'energytoday#in', value: 7.5 }] } :
@@ -59,12 +71,12 @@ const tileText = (label) => {
   return t;
 };
 
-// History is off in this config, so there is no moment to pick — a date control whose every answer would
-// be "history is turned off" is worse than no control.
+// History is on here, so the moment picker is offered. (That it is hidden when the feature is off is
+// pinned in smoke, whose config has no History section.)
 const histBar = query(getEl('sections'), 'div', true).filter(d => cn(d).includes('history-bar'));
 if (!histBar.length) fail('the board never built a history control');
-if (!histBar.every(b => cn(b).includes('is-hidden')))
-  fail('the date picker is offered while the History feature is off');
+if (histBar.every(b => cn(b).includes('is-hidden')))
+  fail('the date picker is hidden while the History feature is on');
 
 // On the power view, self-sufficiency covers TODAY. It used to fetch lifetime energy, so a board of live
 // watts carried a figure describing every kWh since each counter was first bound — one that barely moves
@@ -107,6 +119,31 @@ if (!ss) fail('no self-sufficiency figure on the energy view');
 if (!ss.textContent.includes('94%')) fail(`self-sufficiency is not the day's: ${ss.textContent}`);
 if (!/today/.test(ss.textContent) || /lifetime/.test(ss.textContent))
   fail(`self-sufficiency does not say it covers the day being shown: ${ss.textContent}`);
+
+// --- A past view reads nothing from the live cache ---------------------------------------------------
+// It used to: a board showing last Tuesday took its charge/export and its state of charge from this second
+// and printed them under that date. The in-direction comes from the graph, which carries the return lanes;
+// SoC has no history at all, so it is absent rather than today's.
+const liveAsks = [];
+const histSel = query(getEl('sections'), 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
+if (!histSel) fail('no date control on the energy board');
+
+// Everything the page asks for from here on, so a live read during a past view is visible.
+const seen = [];
+const realFetch = sandbox.fetch;
+sandbox.fetch = async (url, opt) => { seen.push(String(url)); return realFetch(url, opt); };
+
+histSel.value = '2026-08-03';
+histSel.onchange({});
+await new Promise(r => setTimeout(r, 400));
+
+if (seen.some(u => u.includes('/api/flow/live')))
+  fail('a past view of the board still read the live cache');
+
+const pastTiles = tiles().map(t => t.textContent).join(' | ');
+// 3.5 imported, 1.5 exported: the net is 2, and it came from the graph rather than from now.
+if (!/2 kWh/.test(pastTiles)) fail(`the past view's grid net is wrong: ${pastTiles}`);
+if (/%/.test(pastTiles.split('GRID')[0] || '')) fail(`a state of charge was shown for a day history has none for: ${pastTiles}`);
 
 console.log('energy-show: the board switches between power and energy today; no dial against a power '
   + 'ceiling on kWh; the grid shows the signed net for the day; self-sufficiency covers that same day');

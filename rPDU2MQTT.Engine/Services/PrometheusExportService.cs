@@ -62,8 +62,7 @@ public class PrometheusExportService : baseMQTTService
         }
     }
 
-    // Per-instance metrics: every pod refreshes and serves its own /metrics (and pushes its own gauges), so
-    // this is NOT run-once cluster-wide — don't leader-gate it.
+    // Per-instance metrics: every pod refreshes and serves its own /metrics (and pushes its own gauges).
     protected override bool LeaderGated => false;
 
     protected override Task Execute(CancellationToken cancellationToken)
@@ -86,8 +85,7 @@ public class PrometheusExportService : baseMQTTService
                 set.Add(LabelKey(values));
             }
 
-        // An outlet that goes away — unplugged, renamed, a PDU dropped from the config — otherwise leaves its
-        // series behind frozen at its last reading, indefinitely, looking exactly like a live one.
+        // An outlet that goes away — unplugged, renamed, a PDU dropped from the config.
         foreach (var (name, set) in written)
             if (gauges.TryGetValue(name, out var g))
                 Prune(g, set);
@@ -98,17 +96,6 @@ public class PrometheusExportService : baseMQTTService
 
     /// <summary>
     /// The energy-flow hierarchy as its own metric family: one series per tier, per metric.
-    ///
-    /// <para>
-    /// Everything above raised a gauge from a PDU reading, so a panel, an inverter, the grid — every tier the
-    /// hierarchy exists to describe — was absent from Prometheus entirely. They reached MQTT and Home
-    /// Assistant and stopped there, which is the wrong place to stop for the one export people build
-    /// dashboards on.
-    /// </para>
-    /// <para>
-    /// A separate family rather than the reading-shaped one above, because a tier has no device/outlet/number
-    /// to label it by; forcing it into that shape would mean empty labels on every series.
-    /// </para>
     /// </summary>
     private void ExportFlowTiers()
     {
@@ -121,8 +108,7 @@ public class PrometheusExportService : baseMQTTService
             var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType)
                 ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
 
-            // Power defines the topology (and therefore the tier labels); the other two are the same
-            // roll-up over a different measurement.
+            // Power defines the topology (and therefore the tier labels).
             var power = Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
             var labels = power.Nodes.ToDictionary(n => n.Id, n => n, StringComparer.OrdinalIgnoreCase);
 
@@ -139,13 +125,11 @@ public class PrometheusExportService : baseMQTTService
 
                 foreach (var node in graph.Nodes)
                 {
-                    // Synthetic nodes (…#in, …#unmeasured) describe an arithmetic result, not a device — the
-                    // same rule the MQTT export applies, and for the same reason.
-                    if (node.Synthetic) continue;
+                    // The unmetered remainder is arithmetic about a hierarchy, not a device.
+                    if (!Core.Flow.FlowExport.ToMetricsStore(node)) continue;
                     // Tag filter (#342): which nodes this scrape carries. Never changes a value.
                     if (!cfg.Prometheus.NodeTags.Allows(node.Tags)) continue;
-                    // Unknown is not zero. A tier nothing determines must be absent from the scrape, so a
-                    // dashboard shows a gap rather than recording a confident 0 that was never measured.
+                    // Unknown is not zero.
                     if (node.Value is not { } v) continue;
 
                     var tier = Core.Flow.FlowExport.Parents(power, node.Id).FirstOrDefault() ?? "";
@@ -155,15 +139,6 @@ public class PrometheusExportService : baseMQTTService
                 }
 
                 // Drop every label set we did NOT write this pass.
-                //
-                // A Prometheus gauge remembers every combination of labels it has ever been given, and keeps
-                // serving each one's last value forever. So a node that stops reporting, or whose `tier`
-                // changes when the hierarchy is re-wired, leaves its old series behind frozen at whatever it
-                // last read — and the scrape then carries two contradictory rows for the same node. Seen on a
-                // live system: the inverter appearing twice, at 82.6 and 67.1 kWh, one of them a ghost.
-                //
-                // This is the same rule the rest of the flow already follows. A value we can no longer stand
-                // behind must disappear, not linger looking current.
                 Prune(gauge, written);
             }
         }
@@ -178,18 +153,6 @@ public class PrometheusExportService : baseMQTTService
 
     /// <summary>
     /// Forget every label set this gauge holds that was not written in the pass just finished.
-    ///
-    /// <para>
-    /// A Prometheus gauge remembers every combination of labels it has ever been given and keeps serving each
-    /// one's last value forever. Nothing ages out. So a series whose subject disappeared — an outlet
-    /// unplugged, a node re-wired so its tier label changed — stays in the scrape at whatever it last read,
-    /// indistinguishable from a live reading. Seen on this system: the inverter appearing twice in one
-    /// scrape, 82.6 kWh and 67.1 kWh, one of them a ghost.
-    /// </para>
-    /// <para>
-    /// Same rule as everywhere else here: a value we can no longer stand behind disappears rather than
-    /// lingering while it looks current.
-    /// </para>
     /// </summary>
     internal static void Prune(Collector<Gauge.Child> gauge, HashSet<string> written)
     {

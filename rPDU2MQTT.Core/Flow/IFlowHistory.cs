@@ -2,40 +2,13 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Reads what a set of flow nodes read at a past instant (#372).
-///
-/// <para>
-/// One method, because that is the whole question a dashboard asks of history: the values at a moment. The
-/// diagram is then built from those exactly as it is built from live ones — same builder, same roll-up,
-/// same rules about what is unknown — so a historical view cannot drift from the live one.
-/// </para>
-/// <para>
-/// A node the backend has nothing for is <b>absent</b> from the result, never zero. The builder reads an
-/// absent node as unmeasured and says so; a zero would be a reading nobody took.
-/// </para>
 /// </summary>
 public interface IFlowHistory
 {
     /// <summary>Which backend this is, as named in config ("prometheus", "emoncms").</summary>
     string Id { get; }
 
-    /// <summary>
-    /// The value each node held at <paramref name="atUtc"/>, keyed by node id. Nodes with no data are
-    /// omitted.
-    /// </summary>
-    /// <summary>
-    /// One reading per node at each of <paramref name="steps"/>.
-    ///
-    /// <para>
-    /// A chart asks for tens or hundreds of moments at once, and asking for them one at a time is a
-    /// timeout rather than a chart — six hours at five-minute resolution is 72 round trips. A backend that
-    /// can answer a range in one request overrides this; the default keeps the seam honest for one that
-    /// cannot.
-    /// </para>
-    /// <para>
-    /// A step with no reading is an absent entry, never a carried-forward value: a flat line drawn through
-    /// a gap cannot be told from a reading that genuinely did not change.
-    /// </para>
-    /// </summary>
+    /// <summary>One reading per node at each of <paramref name="steps"/>.</summary>
     async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
         IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
     {
@@ -44,13 +17,11 @@ public interface IFlowHistory
         return out_;
     }
 
+    /// <summary>The value each node held at <paramref name="atUtc"/>; nodes with no data are omitted.</summary>
     Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct);
 
-    /// <summary>
-    /// Is the backend answering? Reported on the Status board, so a history source that cannot be reached
-    /// says so there rather than only when someone picks a date and gets nothing.
-    /// </summary>
+    /// <summary>Is the backend answering? Reported on the Status board.</summary>
     Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct);
 }
 
@@ -74,6 +45,15 @@ public sealed class HistoricalFlowValueSource : IFlowValueSource
     public bool TryGetValue(string nodeId, string metric, out double value)
     {
         value = 0;
+
+        // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own.
+        if (metric.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal))
+        {
+            var baseMetric = metric[..^FlowMetricKey.InSuffix.Length];
+            if (!string.Equals(baseMetric, this.metric, StringComparison.OrdinalIgnoreCase)) return false;
+            return values.TryGetValue(nodeId + FlowMetricKey.InSuffix, out value);
+        }
+
         // Answering a metric these values are not in would hand the power roll-up an energy figure.
         if (!string.Equals(metric, this.metric, StringComparison.OrdinalIgnoreCase)) return false;
         return values.TryGetValue(nodeId, out value);

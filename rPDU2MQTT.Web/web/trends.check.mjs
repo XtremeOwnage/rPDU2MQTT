@@ -1,9 +1,5 @@
-// The Trends page: daily energy over time.
-//
-// The property worth pinning is what happens to a day the backend has nothing for. Drawing it as a
-// zero-height bar states that nothing was used that day; leaving it out of the axis silently shortens the
-// month. It is an empty slot, counted, and left out of the totals — and the totals say how many days they
-// actually cover, because a total over 5 of 7 days is not a week.
+// The Trends page: daily energy over time. A day the backend has nothing for is an empty slot, counted and
+// left out of the totals, and the totals say how many days they actually cover.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -22,6 +18,11 @@ const series = {
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [30, 32, null, null, 28, null, 35] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [5, 4, null, null, 9, 6, 3] },
+    // The return lanes, which the exporter now publishes: charge and export are measurements, and they are
+    // the other direction — the chart has to subtract them, not add them.
+    { node: 'battery', label: 'Battery', kind: 'battery', values: [8, 9, null, null, 7, 2, 6] },
+    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [10, 11, null, null, 9, 3, 8] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [1, 2, null, null, 4, 0, 1] },
   ],
 };
 
@@ -73,7 +74,7 @@ if (!/stepSeconds|days=/.test(asked[0])) fail('the range was not expressed in th
 const charts = query(sec, 'svg', true);
 if (charts.length < 2) fail(`expected several charts, drew ${charts.length}`);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Daily energy by node', 'Grid import per day', 'Self-sufficiency per day'])
+for (const want of ['Daily energy by node', 'Grid per day', 'Self-sufficiency per day'])
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
 const byNode = charts[0];
@@ -99,8 +100,9 @@ if (!cardEl || !cardEl.classList.contains('show')) fail('hovering a day showed n
 const cardText = cardEl.textContent;
 for (const want of ['2026-08-05', 'Solar', '28', 'Grid', '9'])
   if (!cardText.includes(want)) fail(`the hover card does not say what is being looked at: "${cardText}"`);
-// Stacked, so the day's total belongs on the card too.
-if (!cardText.includes('37')) fail(`the hover card omits the day's total: "${cardText}"`);
+// Stacked, so the day's total belongs on the card — and it nets: 28 solar + 9 import + 7 discharge
+// - 9 charge - 4 export = 31. Unsigned it would read 57, the same energy counted on the way in and out.
+if (!cardText.includes('31')) fail(`the hover card omits or miscounts the day's total: "${cardText}"`);
 
 // A day nothing reported says so rather than showing a row of zeroes.
 hits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { clientX: 10, clientY: 10 });
@@ -108,12 +110,14 @@ if (!/no reading/.test(query(sandbox.document.body, '.trend-card').textContent))
   fail('hovering an empty day does not say it is empty');
 
 // Self-sufficiency is a percentage of the home's energy, and only for days that have both figures. On
-// 2026-08-05 the home is 28 solar + 9 grid = 37, of which 9 came from the grid: (37-9)/37 = 75.68%.
+// 2026-08-05 the home is what it actually took: 28 solar + (7 discharge - 9 charge) + (9 import - 4
+// export) = 31. Of that, 9 came from the grid — the import, not the net, because exporting 4 did not
+// avoid drawing anything: (31-9)/31 = 70.97%.
 const ssChart = charts[headings.indexOf('Self-sufficiency per day')];
 const ssHits = query(ssChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
 ssHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 const ssText = query(sandbox.document.body, '.trend-card').textContent;
-if (!ssText.includes('75.68')) fail(`self-sufficiency for the day is wrong: "${ssText}"`);
+if (!ssText.includes('70.97')) fail(`self-sufficiency for the day is wrong: "${ssText}"`);
 
 // A day with no grid figure has no percentage: 2026-08-06 has grid but no solar, so the home cannot be
 // determined and estimating one would put a number nobody measured on a chart.
@@ -133,6 +137,21 @@ if (!query(sec, 'tr', true).some(r => r.textContent.includes('Solar')))
 const allChip = query(sec, 'button', true).find(b => b.textContent === 'All');
 allChip.click();
 await new Promise(r => setTimeout(r, 50));
+
+// Charge and export are the other direction, so they are drawn below the line and subtract. Counted as
+// supply they inflate the day: the same energy shows up once as produced and again as given back.
+const supplyChart = charts[headings.indexOf('Where the day’s energy came from')];
+const supplyHits = query(supplyChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
+supplyHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 5, clientY: 5 });
+const supplyText = query(sandbox.document.body, '.trend-card').textContent;
+if (!/-9|−9/.test(supplyText)) fail(`battery charge is not shown as negative: "${supplyText}"`);
+if (!/-4|−4/.test(supplyText)) fail(`grid export is not shown as negative: "${supplyText}"`);
+// 28 solar + 7 discharge + 9 import - 9 charge - 4 export = 31, not the 57 an unsigned stack would total.
+if (!supplyText.includes('31')) fail(`the day's energy does not net out: "${supplyText}"`);
+
+// The zero line is where the two sides meet, so a bar's side of it is the sign.
+const zeroLines = query(supplyChart, 'line', true).filter(l => l.attrs.stroke === 'var(--muted)');
+if (!zeroLines.length) fail('no zero line on a chart that draws both signs');
 
 // The period still in progress is a real reading of an unfinished day. Drawn beside finished ones at full
 // strength it reads as a quiet day rather than an early one, and averaged in with them it drags the mean
@@ -169,7 +188,7 @@ if (!noneBtn) fail('no way to clear the node selection');
 noneBtn.click();
 await new Promise(r => setTimeout(r, 50));
 const emptyHeads = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Grid import per day', 'Self-sufficiency per day'])
+for (const want of ['Grid per day', 'Self-sufficiency per day'])
   if (!emptyHeads.includes(want)) fail(`clearing the node selection hid "${want}", which is not about the selection`);
 if (query(sec, 'tr', true).some(r => r.textContent.includes('of 7')))
   fail('the totals still list nodes after the selection was cleared');

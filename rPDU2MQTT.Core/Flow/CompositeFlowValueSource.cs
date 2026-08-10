@@ -22,15 +22,6 @@ public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSource
 
     /// <summary>
     /// When each reading arrived, from whichever ingest holds it.
-    ///
-    /// <para>
-    /// Merging this was missed when the composite was introduced, and the consequence was silent: the Node
-    /// Data page asks the API for readings and their ages, the API asks for these diagnostics, and a
-    /// composite that did not offer them answered "no reading" for every row. Every source on the page read
-    /// "— / never" while the diagram beside it drew their values perfectly, because the diagram only needs
-    /// <see cref="TryGetValue"/>. A capability that quietly disappears when two ingests are combined is
-    /// worse than one that was never there.
-    /// </para>
     /// </summary>
     public bool TryDescribe(string nodeId, string metric, out FlowReading reading)
     {
