@@ -7,7 +7,6 @@ namespace rPDU2MQTT.Services;
 /// <summary>
 /// Derives energy (kWh) from the power readings already being collected, for nodes that report power but
 /// no cumulative energy — a CT clamp, an inverter's live wattage.
-///
 /// </summary>
 public sealed class EnergyAggregationService : BackgroundService, IFlowValueSource, Core.Flow.IPeriodTotalsReady
 {
@@ -45,13 +44,12 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     /// <summary>
     /// The derived total for a node, if one has been accumulated. Only once a sample has actually been
     /// taken — reporting 0 for a node that has never been measured would be a claim, not a gap.
-    ///
     /// </summary>
     public bool TryGetValue(string nodeId, string metric, out double value)
     {
         value = 0;
 
-        // The return lane (battery charge / grid export) is a counter in its own right and is accumulated
+        // The return lane (battery charge / grid export) is a counter in its own right.
         var key = nodeId;
         if (string.Equals(metric, PeriodInMetric, StringComparison.OrdinalIgnoreCase))
         {
@@ -68,11 +66,11 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         if (!states.TryGetValue(key, out var s) || s.LastSampleUtc == default)
             return false;
 
-        // A period total is only meaningful once its baseline was captured; a state carried over from a
+        // A period total is only meaningful once its baseline was captured.
         if (period && s.PeriodKey is null)
             return false;
 
-        // KWh on a counter-observed state is OUR re-based total, deliberately starting at zero the moment we
+        // KWh on a counter-observed state is OUR re-based total.
         if (!period && s.LastCounterKWh is not null)
             return false;
 
@@ -127,7 +125,7 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         catch (OperationCanceledException) { /* shutting down */ }
         finally
         {
-            // A clean stop is the one chance to record the last few samples; losing them silently would
+            // A clean stop is the one chance to record the last few samples.
             try { store.Save(states); } catch (Exception ex) { Log.Warning($"Could not persist energy totals on shutdown: {ex.Message}"); }
         }
     }
@@ -149,27 +147,27 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             var id = node.Id?.Trim();
             if (string.IsNullOrEmpty(id)) continue;
 
-            // A node bound to a real cumulative energy source is re-based exactly as an outlet is: its face
+            // A node bound to a real cumulative energy source is re-based exactly as an outlet is.
             if (Periods && upstream.TryGetValue(id, EnergyMetric, out var counter))
             {
                 next[id] = EnergyIntegrator.Observe(Prev(next, id), counter, now, periodKey);
                 sampled++;
             }
-            // Nothing meters this node's energy, so derive it from power — but only when asked to, because
+            // Nothing meters this node's energy, so derive it from power — but only when asked to.
             else if (Integrating && upstream.TryGetValue(id, PowerMetric, out var watts))
             {
                 next[id] = EnergyIntegrator.Accumulate(Prev(next, id), watts, now, maxGap, periodKey);
                 sampled++;
             }
 
-            // The return lane — a battery being charged, a grid being exported to — is a separate counter
+            // The return lane — a battery being charged, a grid being exported to.
             if (Periods && upstream.TryGetValue(id, EnergyInMetric, out var inCounter))
             {
                 var inId = id + FlowMetricKey.InSuffix;
                 next[inId] = EnergyIntegrator.Observe(Prev(next, inId), inCounter, now, periodKey);
                 sampled++;
 
-                // Now that both energy directions are known for this node, check the power source's sign
+                // Now that both energy directions are known for this node.
                 AuditDirection(id, next, now);
             }
         }
@@ -185,11 +183,10 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
 
     /// <summary>
     /// Where each node's counters stood at the start of the current comparison window.
-    ///
     /// </summary>
     private readonly Dictionary<string, (DateTime At, double Out, double In)> directionWindow = new(StringComparer.OrdinalIgnoreCase);
 
-    // Long enough that a coarse counter (often 0.1 kWh resolution) has actually moved, short enough that the
+    // Long enough that a coarse counter (often 0.1 kWh resolution) has actually moved.
     private static readonly TimeSpan DirectionWindow = TimeSpan.FromMinutes(10);
 
     private void AuditDirection(string id, Dictionary<string, EnergyState> next, DateTime now)
@@ -223,7 +220,6 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     /// <summary>
     /// Fold each outlet's firmware counter into a total of our own, so its daily figure shares an epoch with
     /// every derived node's.
-    ///
     /// </summary>
     private int SampleOutlets(Dictionary<string, EnergyState> next, string? periodKey, DateTime now)
     {

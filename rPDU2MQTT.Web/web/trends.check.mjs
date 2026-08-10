@@ -1,9 +1,5 @@
-// The Trends page: daily energy over time.
-//
-// The property worth pinning is what happens to a day the backend has nothing for. Drawing it as a
-// zero-height bar states that nothing was used that day; leaving it out of the axis silently shortens the
-// month. It is an empty slot, counted, and left out of the totals — and the totals say how many days they
-// actually cover, because a total over 5 of 7 days is not a week.
+// The Trends page: daily energy over time. A day the backend has nothing for is an empty slot, counted and
+// left out of the totals, and the totals say how many days they actually cover.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';

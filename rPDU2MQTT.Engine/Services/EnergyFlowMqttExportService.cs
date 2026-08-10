@@ -16,7 +16,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public class EnergyFlowMqttExportService : baseMQTTService
 {
-    // Discovery config topics we've already retired (once per process) — the duplicate energyflow sensors
+    // Discovery config topics we've already retired (once per process).
     private readonly HashSet<string> clearedDuplicates = new();
     // Discovery configs retired because the tag filter now excludes their node. Cleared once per process.
     private readonly HashSet<string> retiredByFilter = new();
@@ -44,22 +44,22 @@ public class EnergyFlowMqttExportService : baseMQTTService
             return;
         DataTimestampUtc = oldest;
 
-        // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement, so
+        // Power defines the hierarchy/topics; energy is the same roll-up over the energy measurement.
         var graph = FlowGraphBuilder.Build(merged, flow, FlowGraphBuilder.DefaultMetric, live);
         var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType) ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
         var energyGraph = FlowGraphBuilder.Build(merged, flow, energyMetric, live);
-        // Energy since local midnight — the only energy roll-up whose tiers are comparable to each other,
+        // Energy since local midnight — the only energy roll-up whose tiers are comparable to each other.
         var todayGraph = FlowGraphBuilder.Build(merged, flow, EnergyPeriod.Metric, live);
 
-        // ...but not until the carried-over totals are back. On a fresh process the leaves have no period
+        // ...but not until the carried-over totals are back.
         var periodsReady = (live as Core.Flow.IPeriodTotalsReady)?.PeriodTotalsReady ?? true;
 
         var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
         var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
-        // Outlets and PDU tiers already have native HA energy sensors from PDU discovery; publishing an
+        // Outlets and PDU tiers already have native HA energy sensors from PDU discovery.
         var native = FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
-        // Nodes that declare an in-direction (charge/export) energy source get a second energy sensor, fed
+        // Nodes that declare an in-direction (charge/export) energy source get a second energy sensor.
         var energyInNodes = flow.Nodes
             .Where(n => n.AllSources().Any(s =>
                 string.Equals(s.Metric, energyMetric, StringComparison.OrdinalIgnoreCase) &&
@@ -73,14 +73,14 @@ public class EnergyFlowMqttExportService : baseMQTTService
             .Select(n => n.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Synthetic nodes are for the diagram only — see FlowNode.Synthetic. Publishing one would put a
+        // Synthetic nodes are for the diagram only — see FlowNode.Synthetic.
         var tagFilter = cfg.EnergyFlow.MqttExportTags;
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
-            // Tag filter (#342): what this destination receives. It never changes a value — the node still
+            // Tag filter (#342): what this destination receives.
             if (!tagFilter.Allows(node.Tags))
             {
-                // Retire the discovery config with it. A node exported before the filter was set has a
+                // Retire the discovery config with it.
                 if (publishDiscovery)
                 {
                     var excludedTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
@@ -90,13 +90,13 @@ public class EnergyFlowMqttExportService : baseMQTTService
                 continue;
             }
 
-            // Nothing determines this tier's power — no measurement, and no single path that conservation
+            // Nothing determines this tier's power — no measurement.
             if (!FlowExport.TryNodeValue(graph, node.Id, out var power))
                 continue;
 
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
             var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
-            // Only feeders that are themselves being exported. A via_device pointing at a device this
+            // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
                               || tagFilter.Allows(pn.Tags))
@@ -106,10 +106,10 @@ public class EnergyFlowMqttExportService : baseMQTTService
             double? energyIn = energyInNodes.Contains(node.Id) && live is not null
                 && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
 
-            // Today's total. Null — not 0 — when nothing determines it, so HA marks the sensor unavailable
+            // Today's total. Null — not 0 — when nothing determines it.
             double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
 
-            // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export), so the
+            // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export).
             double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
             // Battery state of charge (%), when this node has a soc source with a fresh value.
             double? soc = socNodes.Contains(node.Id) && live is not null && live.TryGetValue(node.Id, "soc", out var s) ? s : null;
@@ -152,11 +152,11 @@ public class EnergyFlowMqttExportService : baseMQTTService
             }
         }
 
-        // Node groups (#groups): each group publishes its own summed tier alongside its members, so a
+        // Node groups (#groups): each group publishes its own summed tier alongside its members.
         foreach (var g in flow.Groups ?? new())
         {
             if (string.IsNullOrWhiteSpace(g.Id)) continue;
-            // An anchor group's id IS a real node (e.g. Solar PV over its MPPTs); that node already published
+            // An anchor group's id is a real node that already published its own tier above, so skip it.
             if (graph.Nodes.Any(n => string.Equals(n.Id, g.Id, StringComparison.OrdinalIgnoreCase))) continue;
 
             var total = FlowGroups.Total(graph, g);

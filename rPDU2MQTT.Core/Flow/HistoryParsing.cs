@@ -11,7 +11,6 @@ public static class HistoryParsing
 {
     /// <summary>
     /// The query that reads one value per node, whatever produced it.
-    ///
     /// </summary>
     public static string NodeQuery(string metricName, IReadOnlyCollection<string> nodeIds)
         => $"max by (node) ({metricName}{{node=~\"{NodeMatcher(nodeIds)}\"}})";
@@ -19,7 +18,6 @@ public static class HistoryParsing
     /// <summary>
     /// A Prometheus range answer: one series per node, each a list of [timestamp, value] pairs, folded onto
     /// the step boundaries the caller asked for.
-    ///
     /// </summary>
     public static IReadOnlyList<IReadOnlyDictionary<string, double>> PrometheusRange(string json, IReadOnlyList<long> stepsUnix)
     {
@@ -28,7 +26,7 @@ public static class HistoryParsing
         for (var i = 0; i < steps; i++) slots.Add(new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase));
         if (steps == 0) return slots;
 
-        // Which slot a sample belongs to. Prometheus aligns to the step it was given, but a server clock or
+        // Which slot a sample belongs to.
         var index = new Dictionary<long, int>();
         for (var i = 0; i < steps; i++) index[stepsUnix[i]] = i;
         var first = stepsUnix[0];

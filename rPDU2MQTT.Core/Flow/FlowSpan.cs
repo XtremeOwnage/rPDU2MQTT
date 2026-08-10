@@ -2,14 +2,13 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Energy over a window of days, from the daily totals that already exist.
-///
 /// </summary>
 public static class FlowSpan
 {
     /// <summary>The metric a span can be taken over. Anything else is refused.</summary>
     public const string SpannableMetric = "energytoday";
 
-    // Which instants represent the last N days is EnergyPeriod.RecentPeriodEnds, and only that. This class
+    // Which instants represent the last N days is EnergyPeriod.RecentPeriodEnds, and only that.
 
     /// <summary>
     /// Add up one reading per node per day, and count the days each node actually had.

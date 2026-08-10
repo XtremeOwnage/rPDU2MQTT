@@ -3,15 +3,7 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// When a daily total is a day's total.
-///
-/// <para>
-/// The chart sampled each day at "now minus 24 hours", so at three in the afternoon every bar on a
-/// month-long chart was that day up to three o'clock — a real reading of something nobody asked for, drawn
-/// identically to a finished day. A completed period is read at its own rollover.
-/// </para>
-/// </summary>
+/// <summary>A completed period is read at its own rollover, not at "now minus 24 hours".</summary>
 public class PeriodEndsTests
 {
     private static readonly TimeZoneInfo Chicago = TimeZoneInfo.FindSystemTimeZoneById("America/Chicago");

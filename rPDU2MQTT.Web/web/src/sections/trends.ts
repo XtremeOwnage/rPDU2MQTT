@@ -4,7 +4,7 @@ import { api, btn, el, activate, formatNum, navLink, instanceSelector, withInsta
 import { homeEnergy, selfSufficiencyPct, sumKnown } from '../energy.js';
 import { barChart, hideCard, colorFor, KIND_COLOR, type Line } from '../charts.js';
 
-// The bar chart itself — axis, gaps, signs, hover — lives in charts.ts. This file is the page: which
+// The bar chart itself — axis, gaps, signs, hover — lives in charts.ts.
 
 export function addTrendsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Trends', '▦');
@@ -22,9 +22,9 @@ export function addTrendsSection(nav: any, sections: any) {
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
 
-  // Two kinds of range, and they answer different questions with different metrics. Within a day the
+  // Two kinds of range, and they answer different questions with different metrics.
   const RANGES: [string, string, string][] = [
-    // Not "the last 24 hours": today starts where the counters last re-based, on the configured boundary,
+    // Not "the last 24 hours": today starts where the counters last re-based.
     ['today=1&step=300', 'today so far', 'power'],
     ['minutes=360&step=300', 'last 6 hours', 'power'],
     ['minutes=1440&step=900', 'last 24 hours', 'power'],
@@ -57,7 +57,7 @@ export function addTrendsSection(nav: any, sections: any) {
 
   let body: any = null;
   const off = new Set<string>();
-  // Which column the table is ordered by. Numeric columns start at the biggest, which is the number being
+  // Which column the table is ordered by.
   const sort = { col: 1, desc: true };
 
   const load = async () => {
@@ -79,7 +79,7 @@ export function addTrendsSection(nav: any, sections: any) {
 
   const shown = () => (body?.series || []).filter((s: any) => !off.has(s.node));
 
-  /// The selection the page opens with: the leaves the Energy board treats as the whole picture, so what
+  /// The selection the page opens with: the leaves the Energy board treats as the whole picture.
   const resetSelection = () => {
     off.clear();
     const kinds = new Set((body?.series || []).map((s: any) => s.kind));
@@ -99,7 +99,7 @@ export function addTrendsSection(nav: any, sections: any) {
       const chip = btn((allOn ? '● ' : '○ ') + tag);
       chip.title = `${members.length} node(s) tagged "${tag}" — click to chart exactly these`;
       chip.onclick = () => {
-        // Selecting a tag charts that tag and nothing else. Adding its nodes to whatever was already on
+        // Selecting a tag charts that tag and nothing else.
         off.clear();
         (body.series || []).forEach((s: any) => { if (!(s.tags || []).includes(tag)) off.add(s.node); });
         draw();
@@ -172,7 +172,7 @@ export function addTrendsSection(nav: any, sections: any) {
       || (body.at || []).map((iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     const series = shown();
     const units = body.units || 'kWh';
-    // The last period has not ended. Every chart fades it, and the totals leave it out — averaging a
+    // The last period has not ended.
     const partial: string | null = body.partial || null;
 
     // --- Per node, as chosen ---------------------------------------------------------------------
@@ -208,9 +208,9 @@ export function addTrendsSection(nav: any, sections: any) {
 
     // --- Self-sufficiency ---------------------------------------------------------------------------
     const solar = byKind('solar'), batt = byKind('battery'), load = byKind('load');
-    // Self-sufficiency is a share of energy over a period. The same arithmetic on instantaneous power is a
+    // Self-sufficiency is a share of energy over a period.
     if (!intraDay() && gridIn && (load || solar)) {
-      // A kind this system does not have is left out of the balance entirely; one that exists but did not
+      // A kind this system does not have is left out of the balance entirely.
       const drawn = sumOf(gridSupply);
       const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
         ...(solar ? { solar: solar[d] } : {}),
@@ -264,7 +264,7 @@ export function addTrendsSection(nav: any, sections: any) {
         .filter(([v, day]: any) => v != null && day !== partial);
       const sum = vals.reduce((a: number, [v]: any) => a + v, 0);
       const best = vals.reduce((a: any, b: any) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as any);
-      // Energy from power samples: each sample stands for one step of time. Rectangle integration, so it
+      // Energy from power samples: each sample stands for one step of time.
       const kwh = intraDay() && step > 0 ? (sum * step) / 3_600_000 : null;
       return {
         label: s.label || s.node,
@@ -297,7 +297,7 @@ export function addTrendsSection(nav: any, sections: any) {
         text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}` : '—', sort: r => r.peakAt },
     ];
 
-    // Sorted by whichever column you clicked. Twelve nodes over ninety days is a table you read by
+    // Sorted by whichever column you clicked.
     if (sort.col >= cols.length) sort.col = 0;
     const key = cols[sort.col].sort;
     rows.sort((a: any, b: any) => {

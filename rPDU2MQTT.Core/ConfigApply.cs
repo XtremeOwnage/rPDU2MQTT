@@ -6,7 +6,6 @@ namespace rPDU2MQTT.Services.Gui;
 
 /// <summary>
 /// Which settings a save takes effect on immediately, and which wait for a restart.
-///
 /// </summary>
 public static class ConfigApply
 {
@@ -34,7 +33,6 @@ public static class ConfigApply
 
     /// <summary>
     /// Every setting that differs between two configuration documents, as dotted paths.
-    ///
     /// </summary>
     public static IReadOnlyList<string> ChangedPaths(JsonNode? before, JsonNode? after)
     {

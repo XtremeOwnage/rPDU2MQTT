@@ -11,7 +11,7 @@ async function loadNodeTemplates(): Promise<any[]> {
   return nodeTemplatesCache;
 }
 
-// Instantiate a template into the live config: create its Modbus connection (if any) and its pre-wired
+// Instantiate a template into the live config: its Modbus connection (if any) and its pre-wired nodes.
 function instantiateTemplate(tpl: any, prefix: string, host: string, unitId: number, flow: any): string[] {
   const nodes = ensure(flow, 'Nodes', []);
   const links = ensure(flow, 'Links', []);

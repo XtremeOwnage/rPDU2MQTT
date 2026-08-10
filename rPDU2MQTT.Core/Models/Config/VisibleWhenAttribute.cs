@@ -3,7 +3,6 @@ namespace rPDU2MQTT.Models.Config;
 /// <summary>
 /// Marks a setting that only applies when a sibling setting has one of the given values — the Prometheus
 /// URL under History, which means nothing when the provider is EmonCMS.
-///
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class VisibleWhenAttribute : Attribute

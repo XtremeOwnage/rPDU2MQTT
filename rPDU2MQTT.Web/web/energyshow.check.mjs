@@ -1,8 +1,5 @@
-// The Energy board's Show toggle (#371): power now, or energy for the day so far.
-//
-// Two properties matter. A node's Max is a full-scale power figure, so no dial is drawn against a kWh
-// reading. And the grid's day figure is the NET — import minus export, signed — because a magnitude reads
-// the same for a day that imported 5 kWh and one that exported 5.
+// The Energy board's Show toggle (#371): power now, or energy for the day so far. No dial is drawn against a
+// kWh reading (Max is a power figure), and the grid's day figure is the signed net of import minus export.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';

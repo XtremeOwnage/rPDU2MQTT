@@ -1,7 +1,7 @@
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 import { el, formatNum } from './helpers.js';
 
-// The kinds worth a colour of their own; anything else shares the neutral run. Matches the Sankey's
+// The kinds worth a colour of their own; anything else shares the neutral run.
 export const KIND_COLOR: Record<string, string> = {
   solar: 'var(--warn, #d08700)',
   battery: 'var(--good, #46c46a)',
@@ -36,13 +36,8 @@ export function hoverCard(): any {
 }
 export function hideCard() { if (card) card.classList.remove('show'); }
 
-/**
- * A day-by-day bar chart.
- *
- * `stacked` adds the day's series into one bar ("where did the day go"); otherwise they sit side by side
- * ("how do these compare"). A day where every series is null is drawn as an empty slot and reported, never
- * as a bar of zero.
- */
+// A day-by-day bar chart. `stacked` adds the day's series into one bar, otherwise they sit side by side; a
+// day where every series is null is drawn as an empty slot and reported, never as a bar of zero.
 export function barChart(opts: {
   days: string[]; lines: Line[]; units: string; stacked: boolean; max?: number; pct?: boolean;
   partial?: string | null;
@@ -51,7 +46,7 @@ export function barChart(opts: {
   const has = (d: number) => lines.some(l => l.values[d] != null);
   const dayTotal = (d: number) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
 
-  // Charge and export are negative quantities — energy leaving in the other direction — so the axis has to
+  // Charge and export are negative quantities — energy leaving in the other direction.
   const posOf = (d: number) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
   const negOf = (d: number) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
   const peak = opts.max ?? Math.max(
@@ -97,7 +92,7 @@ export function barChart(opts: {
       g.appendChild(title);
       svg.appendChild(g);
     } else {
-      // The period still in progress is drawn faded: it is a real reading of an unfinished day, and beside
+      // The period still in progress is drawn faded: it is a real reading of an unfinished day.
       const partial = day === opts.partial;
       const paint = (attrs: Record<string, any>) => {
         const r = svgTag('rect', partial ? { ...attrs, opacity: 0.55 } : attrs);
@@ -146,7 +141,7 @@ export function barChart(opts: {
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
 
-  // A full-height hit area per day, over the bars. Hovering a thin bar is a game of skill, and a stacked
+  // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
     const hit = svgTag('rect', {
       x: x(d), y: padT, width: slot, height: plotH, fill: 'transparent', class: 'trend-hit', 'data-day': day,

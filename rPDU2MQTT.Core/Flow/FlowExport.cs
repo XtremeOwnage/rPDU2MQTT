@@ -11,18 +11,14 @@ namespace rPDU2MQTT.Core.Flow;
 public static class FlowExport
 {
     /// <summary>
-    /// A node's rolled-up value, or 0 when the graph could not determine one.
-    /// </summary>
-    /// <summary>
     /// A node's daily total for a destination that records history, or <see langword="null"/> when there is
     /// not one to give.
-    ///
     /// </summary>
     public static double? PeriodTotal(FlowGraph graph, string id, bool periodTotalsReady)
         => periodTotalsReady && TryNodeValue(graph, id, out var v) ? v : null;
 
+    /// <summary>
     /// Does this node belong in a metrics store (Prometheus, and anything else keeping a series per node)?
-    ///
     /// </summary>
     public static bool ToMetricsStore(FlowNode node) => !node.Synthetic || node.ReturnLane;
 
@@ -105,11 +101,7 @@ public static class FlowExport
     /// The discovery device ids the MQTT export publishes right now: every non-synthetic node the tag
     /// filter allows, minus those already covered by native PDU discovery.
     /// </summary>
-    /// <remarks>
-    /// Shared with the orphan sweep so the two agree. A node the exporter has stopped publishing must not
-    /// count as current, or its retained config is never swept and the device stays in Home Assistant with
-    /// a state topic that no longer updates.
-    /// </remarks>
+    /// <remarks>Shared with the orphan sweep so the two agree on what is current.</remarks>
     public static IReadOnlyList<string> ExportedDeviceIds(
         FlowGraph graph, Models.Config.NodeTagFilter? tagFilter, IReadOnlyDictionary<string, string>? nativeIds = null)
         => [.. graph.Nodes
@@ -122,7 +114,6 @@ public static class FlowExport
     /// <summary>
     /// Retained Home Assistant discovery configs this exporter published and would no longer publish today —
     /// the ones to clear.
-    ///
     /// </summary>
     /// <param name="retainedTopics">Every retained topic currently on the broker.</param>
     /// <param name="currentDeviceIds">The device ids the exporter would publish right now.</param>
@@ -136,9 +127,8 @@ public static class FlowExport
     /// identifier rather than <see cref="DeviceIdPrefix"/>.
     /// </summary>
     /// <param name="deviceIdPrefix">
-    /// Only ids starting with this are considered. It is the entire safety boundary: everything else on the
-    /// broker belongs to another integration, and clearing one of those deletes someone's devices out of
-    /// Home Assistant with nothing to put them back.
+    /// Only ids starting with this are considered — the entire safety boundary, since everything else on the
+    /// broker belongs to another integration.
     /// </param>
     public static IReadOnlyList<string> OrphanedDiscoveryTopics(
         IEnumerable<string> retainedTopics, IEnumerable<string> currentDeviceIds, string discoveryPrefix,
@@ -239,11 +229,11 @@ public static class FlowExport
                 [$"{id}_power"] = Sensor($"{id}_power", "Power", "power", "measurement", string.IsNullOrWhiteSpace(powerUnits) ? "W" : powerUnits, "{{ value_json.power }}"),
             },
         };
-        // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export — as a
+        // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export.
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
                 Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
-        // Energy since local midnight. total_increasing rather than total+last_reset: HA reads the drop at
+        // Energy since local midnight.
         if (includeEnergyToday)
             doc["components"]!.AsObject()[$"{id}_energy_today"] =
                 Sensor($"{id}_energy_today", "Energy today", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_today }}");

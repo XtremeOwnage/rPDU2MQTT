@@ -17,13 +17,12 @@ public static class FlowGraphBuilder
     /// <summary>
     /// Where a group's anchor node feeds a target and its members feed that same target, re-point the
     /// members at the anchor so the chain reads members → anchor → target.
-    ///
     /// </summary>
     public static IReadOnlyList<EnergyFlowLink> NestGroupMembers(EnergyFlowConfig flow)
     {
         if (flow.Groups.Count == 0 || flow.Links.Count == 0) return flow.Links;
 
-        // A member only nests under an anchor that is itself a node in the graph; a purely synthetic group
+        // A member only nests under an anchor that is itself a node in the graph.
         var nodeIds = new HashSet<string>(flow.Nodes.Select(n => n.Id ?? ""), StringComparer.OrdinalIgnoreCase);
         var anchorOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var g in flow.Groups)
@@ -45,7 +44,7 @@ public static class FlowGraphBuilder
         foreach (var l in flow.Links)
         {
             var from = l.From ?? ""; var to = l.To ?? "";
-            // Only rewrite when the anchor demonstrably feeds the same target — otherwise this member's
+            // Only rewrite when the anchor demonstrably feeds the same target.
             if (anchorOf.TryGetValue(from, out var anchor) && anchorFeeds.Contains(anchor + "␟" + to))
                 to = anchor;
             if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) continue;   // member already fed its anchor
@@ -98,7 +97,7 @@ public static class FlowGraphBuilder
             return false;
         }
 
-        // Add an edge only if it keeps the graph acyclic. The editor blocks loops in the UI, but the
+        // Add an edge only if it keeps the graph acyclic.
         bool AddEdgeSafe(string from, string to)
         {
             if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase)) return false;  // self-loop
@@ -107,7 +106,7 @@ public static class FlowGraphBuilder
             return true;
         }
 
-        // Nodes the user has explicitly wired a feeder for (via Links or legacy Parents) — their auto
+        // Nodes the user has explicitly wired a feeder for (via Links or legacy Parents).
         var explicitlyFed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var l in flow.Links) if (!string.IsNullOrEmpty(l.To)) explicitlyFed.Add(l.To);
         foreach (var child in flow.Parents.Keys) if (!string.IsNullOrEmpty(child)) explicitlyFed.Add(child);
@@ -150,14 +149,14 @@ public static class FlowGraphBuilder
             }
         }
 
-        // Custom upstream nodes (#129). A node is a leaf source when it has a value of its own: a live
+        // Custom upstream nodes (#129).
         foreach (var n in flow.Nodes)
             if (!string.IsNullOrEmpty(n.Id))
             {
                 label[n.Id] = string.IsNullOrEmpty(n.Label) ? n.Id : n.Label;
-                // The node's declared kind (battery, inverter, panel, …) styles the diagram; fall back to
+                // The node's declared kind (battery, inverter, panel, …) styles the diagram.
                 if (!kind.ContainsKey(n.Id)) kind[n.Id] = string.IsNullOrWhiteSpace(n.Kind) ? "node" : n.Kind.Trim().ToLowerInvariant();
-                // Tags travel with the node so a view can filter on them (#342). Trimmed, blanks dropped and
+                // Tags travel with the node so a view can filter on them (#342).
                 var tagged = (n.Tags ?? [])
                     .Select(t => t?.Trim() ?? "")
                     .Where(t => t.Length > 0)
@@ -166,13 +165,13 @@ public static class FlowGraphBuilder
                 if (tagged.Count > 0) tags[n.Id] = tagged;
                 if (live is not null && live.TryGetValue(n.Id, metric, out var liveValue))
                 {
-                    // A live reading is authoritative even at 0: solar at night generates nothing, and the
+                    // A live reading is authoritative even at 0: solar at night generates nothing.
                     leaf[n.Id] = Math.Max(0, liveValue);
                 }
                 else if (n.Value is > 0) leaf[n.Id] = n.Value.Value;
             }
 
-        // Custom directed links (From feeds To) plus legacy Parents (parent feeds child) — only when both
+        // Custom directed links (From feeds To) plus legacy Parents (parent feeds child).
         var wiredEdges = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         static string EdgeKey(string from, string to) => from + "␟" + to;
         foreach (var l in NestGroupMembers(flow))
@@ -183,7 +182,7 @@ public static class FlowGraphBuilder
                 if (AddEdgeSafe(parent, child)) wiredEdges.Add(EdgeKey(parent, child));
         bool Wired(string from, string to) => wiredEdges.Contains(EdgeKey(from, to));
 
-        // Which feeders point into each node — used to split a node's demand across them (so a node
+        // Which feeders point into each node.
         var incoming = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
             foreach (var to in kids)
@@ -192,14 +191,14 @@ public static class FlowGraphBuilder
                 fs.Add(from);
             }
 
-        // Per-node value mode (#129): governs how an unmeasured node is valued. A node with a live/static
+        // Per-node value mode (#129): governs how an unmeasured node is valued.
         var mode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in flow.Nodes)
             if (!string.IsNullOrEmpty(n.Id))
                 mode[n.Id] = string.IsNullOrWhiteSpace(n.Mode) ? "auto" : n.Mode.Trim().ToLowerInvariant();
         string Mode(string id) => mode.TryGetValue(id, out var m) ? m : "auto";
 
-        // Need(id): power this node must receive = its known value (outlet sink or producer), else the sum
+        // Need(id): power this node must receive = its known value (outlet sink or producer).
         var needMemo = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         double Need(string id, HashSet<string> path)
         {
@@ -212,26 +211,26 @@ public static class FlowGraphBuilder
             needMemo[id] = v;
             return v;
         }
-        // Demand a single child draws through one of its feeders (its downstream need, split if it has
+        // Demand a single child draws through one of its feeders, split if it has several.
         double DemandShare(string child, HashSet<string> path)
             => Need(child, path) / Math.Max(1, incoming.TryGetValue(child, out var f) ? f.Count : 1);
 
-        // A 'none' node never infers a value, and a 'static' node with no value here (a valued one is
+        // A 'none' node never infers a value.
         static bool Inert(string m) => m is "none" or "static";
 
-        // Which unmeasured feeders may supply what a node still needs after its measured feeders have
+        // Which unmeasured feeders may supply what a node still needs after its measured feeders are counted.
         var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in flow.Nodes)
         {
             if (string.IsNullOrEmpty(n.Id) || leaf.ContainsKey(n.Id)) continue;
-            // Metric-specific on purpose: a node bound only for realpower is not "failing" to report energy,
+            // Metric-specific on purpose: a node bound only for realpower is not failing to report energy.
             if (n.AllSources().Any(src => string.Equals(
                     FlowMetricKey.ForAccumulation(src.Metric ?? "", src.Accumulation), metric, StringComparison.OrdinalIgnoreCase)))
                 expectsReading.Add(n.Id);
         }
         bool Unavailable(string id) => expectsReading.Contains(id);
 
-        // Every node that ended up carrying a conservation back-fill, so its value can be labelled `inferred`
+        // Every node that ended up carrying a conservation back-fill.
         var inferred = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Did this node have a CHOICE of feeders? That is the line between a roll-up and an attribution.
@@ -240,7 +239,7 @@ public static class FlowGraphBuilder
 
         List<string> Absorbers(string to)
         {
-            // Switched off: an attribution among alternatives is not made, and the node reads "no data"
+            // Switched off: an attribution among alternatives is not made.
             if (HasAlternatives(to) && !flow.InferFromConservation) return new List<string>();
 
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
@@ -250,22 +249,22 @@ public static class FlowGraphBuilder
             return unmeasured.Count == 1 ? unmeasured : new List<string>();
         }
 
-        // Is the flow along this link determined by measurements at all? False when several unmeasured
+        // Is the flow along this link determined by measurements at all?
         bool Knowable(string from, string to)
         {
-            // An intensive metric — voltage, frequency, power factor, state of charge, temperature — does
+            // An intensive metric — voltage, frequency, power factor, state of charge, temperature.
             if (!FlowUnits.IsAdditive(metric)) return false;
 
             if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
-            // A feeder whose own source has stopped reporting carries an unknowable amount — not zero. Its
+            // A feeder whose own source has stopped reporting carries an unknowable amount — not zero.
             if (Unavailable(from)) return false;
 
             var feeders = incoming.TryGetValue(to, out var fs) ? fs : new List<string>();
             var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
 
-            // A designated residual is told what it carries, so its own flow is determined. Its unmeasured
+            // A designated residual is told what it carries, so its own flow is determined.
             if (unmeasured.Any(f => Mode(f) == "residual")) return Mode(from) == "residual";
 
             // One unmeasured path is determined by conservation. Several is a real unknown.
@@ -303,14 +302,14 @@ public static class FlowGraphBuilder
             var measured = feeders.Where(leaf.ContainsKey).Sum(f => EdgeFlow(f, to, path));
             var remainder = Math.Max(0, Need(to, path) - measured);
             var share = remainder / absorbers.Count;
-            // Only an attribution gets the label. Where this feeder was the only route, the figure is the
+            // Only an attribution gets the label.
             if (share > 0 && HasAlternatives(to)) inferred.Add(from);
             return share;
         }
 
-        // Emit one link per edge, valued by the flow it carries. A link whose flow is *unknowable* is still
+        // Emit one link per edge, valued by the flow it carries.
         var links = new List<FlowLink>();
-        // Every node the topology wires up, whether or not its link survives the filter below. Deriving the
+        // Every node the topology wires up, whether or not its link survives the filter below.
         var wired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
             foreach (var to in kids)
@@ -320,10 +319,10 @@ public static class FlowGraphBuilder
                 var known = Knowable(from, to);
                 var value = known ? EdgeFlow(from, to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) : 0;
 
-                // A known-but-zero link is normally left off the diagram (an idle outlet, or a pure source
+                // A known-but-zero link is normally left off the diagram, unless dropping it would detach the chain below.
                 var passThroughZero = Wired(from, to) && incoming.TryGetValue(from, out var upstream) && upstream.Count > 0;
 
-                // The same reasoning one step earlier, for the link *into* an inert ('none', or valueless
+                // The same reasoning one step earlier, for the link into an inert node that sits mid-chain.
                 var midChainInert = Inert(Mode(to)) && outgoing.TryGetValue(to, out var below) && below.Count > 0;
 
                 if (known && value <= 0 && !passThroughZero && !midChainInert) continue;
@@ -348,7 +347,7 @@ public static class FlowGraphBuilder
                     + (k == "battery" ? " (charging)" : k == "grid" ? " (export)" : " (in)");
                 kind[sinkId] = k;
                 leaf[sinkId] = drawn;
-                // The same tags as the node it belongs to: a filter that keeps the battery must keep its
+                // The same tags as the node it belongs to.
                 if (tags.TryGetValue(n.Id, out var nt)) tags[sinkId] = nt;
                 links.Add(new FlowLink(hub, sinkId, drawn, true));
                 wired.Add(hub); wired.Add(sinkId);
@@ -381,7 +380,7 @@ public static class FlowGraphBuilder
         }
         foreach (var l in unmeasured) { links.Add(l); wired.Add(l.Source); wired.Add(l.Target); }
 
-        // A node's own value: its measurement if it has one, else what its known links determine (a root
+        // A node's own value: its measurement if it has one.
         double? ValueOf(string id)
         {
             if (leaf.TryGetValue(id, out var measured)) return measured;
@@ -404,15 +403,15 @@ public static class FlowGraphBuilder
             return (inflow, outflow, anyIn, anyOut);
         }
 
-        // Outflow a node's supply cannot account for. Only where both sides are actually determined: a root
+        // Outflow a node's supply cannot account for.
         double? ImbalanceOf(string id)
         {
             var (inflow, outflow, anyIn, anyOut) = Sides(id);
             if (!anyIn || !anyOut) return null;
 
-            // A node whose own reading is smaller than what passes through it is NOT contradicted. An
+            // A node whose own reading is smaller than what passes through it is NOT contradicted.
             var gap = outflow - inflow;
-            // Rounding noise and honest conversion loss are not contradictions; 2% matches the floor the
+            // Rounding noise and honest conversion loss are not contradictions.
             return gap > 1 && gap > inflow * 0.02 ? gap : null;
         }
 
@@ -427,12 +426,12 @@ public static class FlowGraphBuilder
             return over > 1 && over > reading * 0.02 ? throughput : null;
         }
 
-        // Where a node's number came from. Provenance travels with the value so no consumer has to guess,
+        // Where a node's number came from.
         string DerivationOf(string id)
         {
             if (leaf.ContainsKey(id)) return FlowDerivation.Measured;
             if (ValueOf(id) is null) return FlowDerivation.Unknown;
-            // A node that absorbed a remainder is inferred even if it also sums children — the back-fill is
+            // A node that absorbed a remainder is inferred even if it also sums children.
             return inferred.Contains(id) ? FlowDerivation.Inferred : FlowDerivation.Summed;
         }
 

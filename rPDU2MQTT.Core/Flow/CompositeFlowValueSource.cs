@@ -22,7 +22,6 @@ public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSource
 
     /// <summary>
     /// When each reading arrived, from whichever ingest holds it.
-    ///
     /// </summary>
     public bool TryDescribe(string nodeId, string metric, out FlowReading reading)
     {

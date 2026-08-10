@@ -2,7 +2,6 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Which period a moment belongs to, for <see cref="EnergyState.PeriodKWh"/>.
-///
 /// </summary>
 public static class EnergyPeriod
 {
@@ -16,14 +15,13 @@ public static class EnergyPeriod
     /// <summary>Local time in <paramref name="zone"/> for an instant, whatever Kind the instant carries.</summary>
     public static DateTime Local(DateTime utc, TimeZoneInfo zone)
     {
-        // A stored DateTime round-trips through JSON as Unspecified; treat it as the UTC it is, because
+        // A stored DateTime round-trips through JSON as Unspecified; treat it as the UTC it is.
         var instant = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
         return TimeZoneInfo.ConvertTimeFromUtc(instant, zone);
     }
 
     /// <summary>
     /// The key for the period <paramref name="utc"/> falls in.
-    ///
     /// </summary>
     public static string KeyFor(DateTime utc, TimeZoneInfo zone, int startHour = 0)
         => Local(utc, zone).AddHours(-Clamp(startHour)).ToString("yyyy-MM-dd");
@@ -41,7 +39,6 @@ public static class EnergyPeriod
 
     /// <summary>
     /// When the period in progress began — where the counters last re-based.
-    ///
     /// </summary>
     public static DateTime PeriodStart(DateTime utc, TimeZoneInfo zone, int startHour = 0)
     {
@@ -55,7 +52,6 @@ public static class EnergyPeriod
     /// <summary>
     /// One instant per day for the last <paramref name="days"/> periods, oldest first, with the day each
     /// belongs to.
-    ///
     /// </summary>
     public static IReadOnlyList<(DateTime AtUtc, string Day, bool Complete)> RecentPeriodEnds(
         DateTime nowUtc, TimeZoneInfo zone, int startHour, int days)

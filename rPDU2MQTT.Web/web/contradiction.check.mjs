@@ -1,12 +1,5 @@
-// A node whose figure its own flows contradict has to be impossible to miss.
-//
-// The bug this exists for: an inverter carried a 129.9 kWh gap — more energy arriving than it accounted for
-// by two orders of magnitude — and the only signal was a small "⚠" appended to a label printed in exactly
-// the same weight as every honest number on the chart. The contradiction was computed, displayed, and
-// ignored for a day. A node 3% out looked identical to one that could not possibly be right.
-//
-// So: past a quarter of throughput unaccounted for, the node is named above the chart. Below it, nothing
-// changes — small gaps are rounding and sampling skew, and a banner that cries wolf gets scrolled past.
+// Past a quarter of throughput unaccounted for, a node is named in a banner above the chart; below that
+// threshold nothing changes, since small gaps are rounding and sampling skew.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -25,10 +18,7 @@ const graph = (inverterImbalance, metric = 'energytoday') => ({
   ok: true, metric, units: 'kWh',
   nodes: [
     { id: 'solar', label: 'Solar (PV)', kind: 'solar', value: 129.9, derivation: 'measured', imbalance: null },
-    // 200 passes through the node, 127.8 of it unaccounted for, and its own sensor reads 2.1. The share is
-    // of the throughput the server states. Reconstructed as reading + imbalance it would be 129.9, and the
-    // same node would read as 98% instead of 64% — an arithmetic that was right only while a measured
-    // node's imbalance meant "throughput - reading", and went on looking plausible after it stopped.
+    // 200 passes through, 127.8 unaccounted for, own sensor reads 2.1: the share is of the stated throughput.
     { id: 'inverter', label: 'EG4 FlexBoss 21', kind: 'inverter', value: 2.1, derivation: 'measured',
       imbalance: inverterImbalance, throughput: 200 },
     { id: 'panel', label: 'Main Panel', kind: 'panel', value: 2.1, derivation: 'measured', imbalance: 0.09 },
@@ -93,13 +83,8 @@ sections = await render(0.12);   // 5% of a 2.22 throughput
 const quiet = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
 if (quiet.length) fail(`a ${'5%'} gap raised a contradiction banner — the threshold is not being applied`);
 
-// --- Lifetime energy: the same enormous gap, and deliberately silent.
-//
-// Those counters started whenever each device or binding was first seen — a PDU's outlet totals have been
-// running for years, an inverter's for weeks — so the two sides of a node describe different spans and a
-// large gap is the expected result. Checked against the live system: a main panel read 96% "unaccounted"
-// for exactly that reason. Banner-ing it would be the crying wolf this threshold exists to avoid, and the
-// ⚠ tooltip already explains it and points at "Energy today".
+// --- Lifetime energy: the same enormous gap, and deliberately silent. Those counters start whenever each
+// device or binding was first seen, so the two sides of a node cover different spans and a large gap is expected.
 sections = await render(129.9, 'energy');
 const lifetime = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
 if (lifetime.length) fail('a lifetime-energy gap raised a contradiction banner — those counters start at different times');

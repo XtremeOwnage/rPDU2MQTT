@@ -2,7 +2,6 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// How a <see cref="FlowNode"/> came by its value.
-///
 /// </summary>
 public static class FlowDerivation
 {
@@ -27,44 +26,27 @@ public static class FlowDerivation
 /// How far this node's flows exceed what it claims. For an unmeasured node that is <c>outflow - inflow</c>;
 /// for a measured one it is how far its throughput exceeds its own reading. <see langword="null"/> when they
 /// reconcile, or when there is not enough determined on both sides to compare.
-///
 /// </param>
-/// <param name="Derivation">
-/// How this node's value was arrived at — see <see cref="FlowDerivation"/>. Carried because a number's
-/// provenance is part of the number: an inferred figure is not wrong, but it is not a measurement either,
-/// and rendering it identically to a metered reading is how a diagram states something it cannot back up.
-/// </param>
+/// <param name="Derivation">How this node's value was arrived at — see <see cref="FlowDerivation"/>.</param>
 /// <param name="Throughput">
-/// What passes through the node, when that is more than its own reading covers — an inverter measuring its
-/// AC-load leg while also charging a battery. <see langword="null"/> when the reading covers the throughput,
-/// when the node is not measured, or when there is not enough on both sides to tell.
-///
+/// What passes through the node, when that is more than its own reading covers. <see langword="null"/> when
+/// the reading covers it, the node is not measured, or there is not enough on both sides to tell.
 /// </param>
 public sealed record FlowNode(
     string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
     string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null, double? Throughput = null)
 {
-    /// <summary>
-    /// A node the builder invented for the diagram, rather than one the operator configured: a
-    /// bidirectional node's return lane (<c>…#in</c>) and a pass-through's unmetered remainder
-    /// (<c>…#unmeasured</c>).
-    ///
-    /// </summary>
+    /// <summary>A node the builder invented: a return lane (<c>…#in</c>) or unmetered remainder (<c>…#unmeasured</c>).</summary>
     public bool Synthetic => Id.Contains('#');
 
-    /// <summary>
-    /// A bidirectional node's return lane: battery charge, grid export.
-    ///
-    /// </summary>
+    /// <summary>A bidirectional node's return lane: battery charge, grid export.</summary>
     public bool ReturnLane => Id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal);
 }
 
 /// <summary>A weighted link between two <see cref="FlowNode"/>s (energy flows Source → Target).</summary>
 /// <param name="Known">
-/// Is <paramref name="Value"/> actually derived from measurements? False means the topology says this link
-/// exists but nothing determines how much flows along it — typically several unmeasured feeders into one
-/// node, where any split between them would be invented. Such a link carries 0 and must be presented as
-/// "no data", never as zero flow.
+/// Is <paramref name="Value"/> derived from measurements? False means the link exists but nothing determines
+/// how much flows along it; it carries 0 and must be presented as "no data", never as zero flow.
 /// </param>
 public sealed record FlowLink(string Source, string Target, double Value, bool Known = true);
 

@@ -1,4 +1,4 @@
-// The energy arithmetic shared by the Energy Overview and Trends: what the home took, what the grid
+// The energy arithmetic shared by the Energy Overview and Trends: what the home took.
 export type EnergyParts = {
   solar?: number | null;
   /// Battery net: discharge minus charge. Negative on a day that stored more than it gave back.
@@ -29,7 +29,7 @@ export function selfSufficiencyPct(home: number | null, gridImport: number | nul
   return Math.max(0, Math.min(100, (covered / home) * 100));
 }
 
-/// How much of the home's energy solar and battery covered, in the same units — the figure the bar shows
+/// How much of the home's energy solar and battery covered, in the same units.
 export function coveredEnergy(home: number | null, gridImport: number | null): number | null {
   if (home == null || gridImport == null) return null;
   return Math.max(0, home - Math.max(0, gridImport));

@@ -1,8 +1,8 @@
-// How much of the flow chart to draw: the unmetered-remainder and animation switches (browser-local), and
+// How much of the flow chart to draw: the unmetered-remainder and animation switches (browser-local).
 import { btn, el, toast } from './helpers.js';
 import { state } from './state.js';
 
-// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs. Collapse
+// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs.
 export const collapsedGroups = new Set<string>();
 export const seenGroups = new Set<string>();   // groups we've applied the default (collapsed) to at least once
 
@@ -10,7 +10,7 @@ export function flowGroups(): any[] {
   return (state.data?.EnergyFlow?.Groups || []).filter((g: any) => g && g.Id);
 }
 
-// Collapse each group the FIRST time we see it (a group exists to tidy the diagram; opening it is the
+// Collapse each group the first time we see it; after that, respect the viewer's choice.
 export function ensureGroupState() {
   flowGroups().forEach((g: any) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
 }
@@ -22,23 +22,8 @@ export function collapsedMemberMap(): Record<string, any> {
   return map;
 }
 
-// Fold a graph's {nodes, links} so each collapsed group becomes a single node (its members' sum), with the
-/**
- * An expanded group shows its members *instead of* its anchor, not as well as it.
- *
- * The anchor (a group whose Id is also a real node — "Solar (PV)" over MPPT_1..3) stays the node everything
- * else uses: the rollup, the MQTT export, the HA feed. On the diagram it is one level of detail, and its
- * members are the other. Drawing both put an extra hop in the chain — members → anchor → inverter — which
- * added nothing (the anchor's reading just IS the members' sum) and braided the links into an X.
- *
- * So expanding substitutes: the members take over the anchor's outgoing links and the anchor drops out.
- * Collapsing does the reverse, which collapseGraph already handles. Both views carry the same total, and
- * the toggle changes only how finely it is broken down.
- *
- * Skipped when the anchor feeds more than one target: splitting each member's contribution across several
- * downstream nodes would mean inventing a split nothing measures. Chaining is wrong there too, but it is
- * at least not a fabricated number, so that case keeps the hop.
- */
+// An expanded group shows its members instead of its anchor: they take over its outgoing links and it drops
+// out. Skipped when the anchor feeds more than one target, where splitting members across them is invented.
 export function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id));
   if (!groups.length) return { nodes, links };
@@ -83,7 +68,7 @@ export function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links
   });
 
   const remap = (id: string) => (memberOf[id] ? memberOf[id].Id : id);
-  // Drop the collapsed members, keep everyone else, add the group nodes (only groups that actually have a
+  // Drop the collapsed members, keep everyone else.
   const present = new Set<string>();
   // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
   const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
@@ -111,7 +96,7 @@ export function setShowUnmeasured(on: boolean) {
   try { localStorage.setItem('rpdu-flow-unmeasured', on ? '1' : '0'); } catch { /* private mode: this session only */ }
 }
 
-/// Drop the unmetered-remainder nodes and their links when the view is switched off. Return lanes (#in)
+/// Drop the unmetered-remainder nodes and their links when the view is switched off.
 export function applyUnmeasuredPref(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   if (showUnmeasured) return { nodes, links };
   const hidden = new Set(nodes.filter((n: any) => String(n.id || '').endsWith('#unmeasured')).map((n: any) => n.id));
@@ -137,7 +122,7 @@ export function unmeasuredToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
-/// The "Animate flow" view switch. Purely local: a per-viewer preference, not a property of the system, and
+/// The "Animate flow" view switch. Purely local: a per-viewer preference.
 export function animateToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
     class: 'desc',
@@ -153,12 +138,12 @@ export function animateToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
-// The "show a past moment" control, and the wording for what comes back, live in history-control.ts:
+// The "show a past moment" control, and the wording for what comes back, live in history-control.ts.
 
 export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | null {
   const groups = flowGroups();
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  // The view switches are not about groups and must not disappear with them — this used to return null
+  // The view switches are not about groups and must not disappear with them.
   if (drawn) {
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
@@ -169,7 +154,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
     const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
-    // A group with no members has nothing to fold — collapsing/expanding it is a no-op, so say so instead of
+    // A group with no members has nothing to fold — collapsing/expanding it is a no-op.
     chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
       : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
     chip.onclick = () => {
@@ -178,7 +163,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
     };
     row.appendChild(chip);
   });
-  // Where membership is edited — the toggles only collapse/expand; you add or remove a group's nodes on the
+  // Where membership is edited — the toggles only collapse/expand.
   row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
   return row;
 }

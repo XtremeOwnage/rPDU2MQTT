@@ -1,4 +1,4 @@
-// Highlighting on the flow chart: the supply path behind a node, the nodes carrying a tag, and the hover
+// Highlighting on the flow chart: the supply path behind a node, the nodes carrying a tag.
 import { btn, el } from './helpers.js';
 
 export let activeTag: string | null = null;
@@ -20,7 +20,7 @@ export function tagToggles(nodes: any[], svg: any, apply: (tag: string | null) =
     chip.title = on
       ? 'Showing every node with this tag; click to clear.'
       : `Highlight the nodes tagged “${tag}”. Nothing is hidden and no figure changes — the rest are dimmed.`;
-    // Read the state at click time, not the value captured when the chip was built: the row is rebuilt on
+    // Read the state at click time.
     chip.onclick = () => {
       const selected = activeTag != null && activeTag.toLowerCase() === tag.toLowerCase();
       activeTag = selected ? null : tag;
@@ -33,14 +33,14 @@ export function tagToggles(nodes: any[], svg: any, apply: (tag: string | null) =
 
 /// The strip above a view: the switches that change how it is drawn, then the group chips.
 
-// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued, live-value
+// The dedicated Nodes tab (#129): configure the virtual nodes — kind, how they're valued.
 export let focusedNode: string | null = null;
 
 export function focusPath(svg: any, incoming: any, id: string) {
   if (focusedNode === id) { clearFocus(svg); return; }
   focusedNode = id;
 
-  // Everything that feeds it, transitively. Guarded against cycles even though the builder keeps the
+  // Everything that feeds it, transitively.
   const onPath = new Set<string>([id]);
   const links = new Set<string>();
   const stack = [id];
@@ -69,7 +69,7 @@ export function focusTag(svg: any, nodesById: Map<string, any>, tag: string) {
   focusedNode = null;
   svg.querySelectorAll('[data-node]').forEach((e: any) =>
     e.classList[tagged.has(e.getAttribute('data-node')) ? 'add' : 'remove']('on-path'));
-  // Ribbons stay dim throughout: a link is not tagged, and lighting one because an end happens to be
+  // Ribbons stay dim throughout: a link is not tagged.
   svg.querySelectorAll('[data-src]').forEach((e: any) => e.classList.remove('on-path'));
   svg.classList.add('flow-focus');
 }
@@ -109,4 +109,4 @@ export function moveNodeCard(ev: any) {
 
 export function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 
-// Device templates and the panels that import them live in node-templates.ts — the MQTT Import page
+// Device templates and the panels that import them live in node-templates.ts.

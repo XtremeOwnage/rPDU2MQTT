@@ -5,17 +5,7 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// Battery charge and grid export reach the history backends.
-///
-/// <para>
-/// Both were excluded as "synthetic" alongside the unmetered remainder, because both ids contain '#'. But
-/// the remainder is arithmetic about a hierarchy while a return lane is a bound source read in the other
-/// direction — as measured as the supply beside it. The consequence was a history that could show a battery
-/// discharging every day and never charging, and a chart of "where the day's energy came from" that counted
-/// solar once as production and again as the discharge of what it had stored.
-/// </para>
-/// </summary>
+/// <summary>Battery charge and grid export reach the history backends.</summary>
 public class ReturnLaneExportTests
 {
     private sealed class Fixed(Dictionary<string, double> v) : IFlowValueSource

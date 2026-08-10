@@ -54,16 +54,8 @@ const MODULES = [
   'main.ts',
 ];
 
-// Drop import statements and the leading `export ` keyword: the bundle is one shared scope, like the
-// original single file, so cross-module names resolve directly.
-//
-// A multi-line import counts. Only the first line was dropped before, so an import broken across lines —
-// which is how a module with a dozen named imports is written — left its closing brace behind and the
-// whole bundle failed to parse. The error pointed at the brace rather than the import, which is a long way
-// from the cause.
-// A module listed twice is concatenated twice, and every top-level name in it collides with itself. The
-// error that produces — "Identifier 'x' has already been declared", pointing at the second copy — says
-// nothing about the list it came from.
+// Drop import statements (including multi-line ones) and the leading `export ` keyword: the bundle is one
+// shared scope, so cross-module names resolve directly. A module listed twice is refused by name below.
 {
   const seen = new Set();
   const twice = MODULES.filter(m => seen.size === seen.add(m).size);

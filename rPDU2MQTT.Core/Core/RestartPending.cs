@@ -2,7 +2,6 @@ namespace rPDU2MQTT.Core;
 
 /// <summary>
 /// The settings that have been saved but are not what this process is running.
-///
 /// </summary>
 public sealed class RestartPending
 {

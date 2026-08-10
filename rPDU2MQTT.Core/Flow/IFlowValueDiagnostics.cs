@@ -22,7 +22,6 @@ public interface IFlowValueDiagnostics
 
 /// <summary>
 /// Whether the daily totals this source derives have been restored from the store yet.
-///
 /// </summary>
 public interface IPeriodTotalsReady
 {

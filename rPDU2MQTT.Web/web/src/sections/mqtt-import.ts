@@ -5,7 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
 import { loadNodeTemplates, instantiateTemplate } from '../node-templates.js';
 
-// The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit, and drop the
+// The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit.
 function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   const panel = el('div', { class: 'tpl-import' });
   panel.appendChild(el('div', {
@@ -16,7 +16,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   }));
 
   const bar = el('div', { class: 'ld-toolbar' });
-  // Where to look. Discovery states the unit and device class, so it is the default; the topic profiles
+  // Where to look. Discovery states the unit and device class, so it is the default.
   const srcSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   srcSel.appendChild(el('option', { value: 'discovery', text: 'Home Assistant discovery' }));
   // The rest come from the server: built-in profiles plus MQTT.ImportProfiles.
@@ -25,7 +25,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       srcSel.appendChild(el('option', { value: p.id, text: p.label + ' topics' })));
   });
   const tagIn = el('input', { type: 'text', value: 'imported', placeholder: 'tag (optional)' }) as HTMLInputElement;
-  // Where the imported nodes hang, and which way round. An appliance monitor is a load: the panel supplies
+  // Where the imported nodes hang, and which way round.
   const dirSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   dirSel.appendChild(el('option', { value: 'load', text: 'drawn from' }));
   dirSel.appendChild(el('option', { value: 'source', text: 'feeding' }));
@@ -45,12 +45,12 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   const list = el('div');
   panel.append(bar, note, list);
 
-  // Tagged on import so the per-destination filters can exclude them. A reading imported from Home
+  // Tagged on import so the per-destination filters can exclude them.
   tagIn.title = 'Applied to every node added here. Use it in a destination’s tag filter to avoid '
               + 'exporting these readings back to where they came from.';
 
   const picked = new Set<string>();
-  // Topics already bound anywhere in the config: a reading is "already imported" when its topic is bound,
+  // Topics already bound anywhere in the config: a reading is "already imported" when its topic is bound.
   const boundTopics = new Set<string>();
   (flow.Nodes || []).forEach((n: any) =>
     (n.Sources || []).forEach((src: any) => { if (src.Topic) boundTopics.add(src.Topic); }));
@@ -92,7 +92,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       tr.appendChild(el('td', { text: r.label }));
       tr.appendChild(el('td', { text: r.metric }));
 
-      // A topic-matched reading carries no unit. The choices are the units FlowUnits accepts for this
+      // A topic-matched reading carries no unit.
       const unitCell = el('td');
       if (r.unit) {
         unitCell.appendChild(el('span', { text: r.unit }));
@@ -101,7 +101,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
         const unitSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
         unitSel.appendChild(el('option', { value: '', text: '— pick —' }));
         choices.forEach(u => unitSel.appendChild(el('option', { value: u, text: u })));
-        // Pre-filled with the metric's canonical unit. It is a form default the operator reviews against
+        // Pre-filled with the metric's canonical unit.
         r.unit = r.unit || r.canonicalUnit || '';
         unitSel.value = r.unit || '';
         unitSel.onchange = () => { r.unit = unitSel.value || undefined; };
@@ -123,7 +123,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
     tbl.appendChild(body);
     list.appendChild(bulkBar(readings));
     list.appendChild(tbl);
-    // Repeated below the table. With twenty rows the toolbar scrolls off the top, leaving the page's Save
+    // Repeated below the table.
     const footer = el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } });
     const addAgain = btn('Add selected', 'primary');
     addAgain.onclick = () => addBtn.onclick!({} as any);
@@ -157,7 +157,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
     };
     row.appendChild(all);
 
-    // One setter per metric in the results: the answer is usually the same for every row of a metric
+    // One setter per metric in the results: the answer is usually the same for every row of a metric.
     const metrics = [...new Set(readings.filter(r => !r.unit || r.units?.length).map(r => r.metric))].sort();
     metrics.forEach(metric => {
       const choices: string[] = (readings.find(r => r.metric === metric) || {}).units || [];
@@ -216,7 +216,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
     const tag = tagIn.value.trim();
     const nodes = ensure(flow, 'Nodes', []);
 
-    // One node per device, with a source per metric. A device publishing power, energy, current and
+    // One node per device, with a source per metric.
     const byDevice = new Map<string, any[]>();
     take.forEach(r => {
       const key = nodeIdFor(r);
@@ -229,14 +229,14 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       let id = deviceId;
       const sources = readings.map(r => ({
         Type: 'mqtt', Topic: r.topic, Metric: r.metric,
-        // 'lifetime': the daily figure is derived from it, and a counter that resets is handled by the
+        // 'lifetime': the daily figure is derived from it.
         Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
         Unit: r.unit || undefined,
         JsonField: r.jsonField || undefined,
       }));
       readings.forEach(r => boundTopics.add(r.topic));
 
-      // A second pass over the same device adds its remaining readings to the node already there. The node
+      // A second pass over the same device adds its remaining readings to the node already there.
       const deviceTopics = new Set(found.filter((f: any) => nodeIdFor(f) === id).map((f: any) => f.topic));
       let existing = nodes.find((n: any) => n.Id === id);
       if (existing && !(existing.Sources || []).some((src: any) => deviceTopics.has(src.Topic))) {
@@ -256,14 +256,14 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       const node: any = {
         Id: id,
         Label: readings[0].device || id,
-        // 'none': an imported node is valued by its own bindings. 'auto' would aggregate children it does
+        // 'none': an imported node is valued by its own bindings.
         Mode: 'none',
         Sources: sources,
       };
       if (tag) node.Tags = [tag];
       nodes.push(node);
       added++;
-      // One link per node, in the direction chosen. 'drawn from' makes the node a child of the target,
+      // One link per node, in the direction chosen.
       if (feedSel.value) {
         ensure(flow, 'Links', []).push(dirSel.value === 'source'
           ? { From: id, To: feedSel.value }
@@ -280,7 +280,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   return panel;
 }
 
-/// Its own page under Integrations -> MQTT (#342 follow-on). It reads the broker rather than the PDU and
+/// Its own page under Integrations -> MQTT (#342 follow-on): it reads the broker rather than the PDU.
 
 export function addMqttImportSection(nav: any, sections: any) {
   const link = navLink(nav, 'MQTT Import', '⇤');

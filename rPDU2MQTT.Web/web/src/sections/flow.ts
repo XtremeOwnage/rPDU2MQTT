@@ -16,7 +16,7 @@ import { renderNodeEditor } from './node-editor.js';
 
 // Editing a node — the form, the topic picker, the Modbus explorer, the rename — is in node-editor.ts.
 
-// Bring an EnergyFlow config up to the current shape in place (idempotent) — run on load by both the Flow
+// Bring an EnergyFlow config up to the current shape in place (idempotent).
 export function migrateEnergyFlow(flow: any) {
   const links = ensure(flow, 'Links', []);
   const legacy = ensure(flow, 'Parents', {});
@@ -36,7 +36,7 @@ export async function saveConfig(onSaved: () => void) {
   const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const ok = r.ok && r.body.ok;
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
-  // This writes the same document the shell's save bar tracks, so re-baseline here too — otherwise the
+  // This writes the same document the shell's save bar tracks, so re-baseline here too.
   if (ok) { setBaseline(payload); onSaved(); }
 }
 
@@ -55,13 +55,13 @@ export function addFlowSection(nav: any, sections: any) {
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
-  // Which measurement the flow is drawn by — link widths follow it. Power (W) is the live snapshot; Energy
+  // Which measurement the flow is drawn by — link widths follow it.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' }) as HTMLSelectElement;
   [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   const count = document.createElement('span'); count.className = 'ld-count';
-  // What window "today" actually means, next to the selector that chose it. The boundary is the *server's*,
+  // What window "today" actually means, next to the selector that chose it.
   const animKey = 'rpdu2mqtt.flow.animate';
   const animateFlow = () => localStorage.getItem(animKey) === '1';
 
@@ -94,10 +94,10 @@ export function addFlowSection(nav: any, sections: any) {
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what: any) => {
-    // Only on the way out of live. Stepping between days, or re-picking one, keeps whatever you are
+    // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
-    // Only the daily total can be added across days, so asking for a span asks for that metric — the
+    // Only the daily total can be added across days, so asking for a span asks for that metric.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
       if (metricSel.value !== 'energytoday') metricSel.value = 'energytoday';
       showDayNote();
@@ -107,7 +107,7 @@ export function addFlowSection(nav: any, sections: any) {
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
-  // Three separate jobs used to be stacked below the diagram on this one page: a table of what each node
+  // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
   const subPage = (label: string, icon: string, desc: string) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
@@ -129,13 +129,13 @@ export function addFlowSection(nav: any, sections: any) {
   const settingsPage = subPage('Settings', '⚙',
     'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
   let lastGraph: any = null;
-  // Bindings the server is dropping on purpose. Fetched beside the graph rather than folded into it: it
+  // Bindings the server is dropping on purpose.
   let withheldSources: any[] = [];
 
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
-  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain
+  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain.
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -173,7 +173,7 @@ export function addFlowSection(nav: any, sections: any) {
       tr.appendChild(c1); tr.appendChild(c2); tb.appendChild(tr);
     };
 
-    // Sum a group's members per metric — only members that actually have a value, so a group is never a
+    // Sum a group's members per metric — only members that actually have a value.
     const groupMetrics = (g: any) => {
       const sums: Record<string, number> = {};
       (g.Members || []).forEach((m: string) => (byNode[m]?.metrics || []).forEach((mm: any) => { sums[mm.metric] = (sums[mm.metric] || 0) + mm.value; }));
@@ -201,7 +201,7 @@ export function addFlowSection(nav: any, sections: any) {
     ensureGroupState();
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
-    // ...then substitute the members for the anchor on any group left expanded, so a group is always shown
+    // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     // ...and finally honour the unmetered-remainder view switch.
     const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
@@ -212,12 +212,12 @@ export function addFlowSection(nav: any, sections: any) {
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
-    // Which metric is actually on screen, taken from the graph rather than the selector: the two disagree
+    // Which metric is actually on screen.
     const lifetimeEnergy = String(graph.metric || metricSel.value || '').toLowerCase() === 'energy';
     const incoming: any = {}, outgoing: any = {};
     nodes.forEach((n: any) => { incoming[n.id] = []; outgoing[n.id] = []; });
     links.forEach((l: any) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
-    // The server decides a node's value and, crucially, whether one is known at all — null means nothing
+    // The server decides a node's value and, crucially, whether one is known at all.
     const byId: any = {};
     nodes.forEach((n: any) => { byId[n.id] = n; });
     const known = (id: string) => byId[id] && byId[id].value != null;
@@ -255,7 +255,7 @@ export function addFlowSection(nav: any, sections: any) {
     const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
-    // What the node has to be tall enough to carry: its own reading, or the flows through it if those are
+    // What the node has to be tall enough to carry: its own reading.
     const throughput = (id: string) => {
       let inSum = 0, outSum = 0;
       (incoming[id] || []).forEach((l: any) => { if (l.known !== false) inSum += l.value || 0; });
@@ -268,9 +268,9 @@ export function addFlowSection(nav: any, sections: any) {
     const colX = (c: number) => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
     const pos: any = {};
-    // Every node's label needs a full text line, whatever its bar height — otherwise a stack of small
+    // Every node's label needs a full text line, whatever its bar height.
     const labelRow = 15;
-    // A link's pull on the layout. Weighting purely by value means a zero-carrying link exerts none at
+    // A link's pull on the layout.
     const wFloor = maxTotal / 1000;
     const linkW = (l: any) => Math.max(l.value || 0, wFloor);
     // Barycenter of the feeders that are already positioned (forward pass) …
@@ -291,7 +291,7 @@ export function addFlowSection(nav: any, sections: any) {
       return y;
     };
 
-    // The unmetered remainder sits at the bottom of its column, below every measured sibling (#366). It is
+    // The unmetered remainder sits at the bottom of its column, below every measured sibling (#366).
     const remainder = (id: string) => (id || '').includes('#unmeasured') ? 1 : 0;
 
     // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
@@ -300,7 +300,7 @@ export function addFlowSection(nav: any, sections: any) {
       else cn.sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       placeColumn(cn, c);
     });
-    // Backward: right-to-left, order each column by what it feeds. The forward pass alone can only order a
+    // Backward: right-to-left, order each column by what it feeds.
     for (let c = cols.length - 2; c >= 0; c--) {
       if (!cols[c]) continue;
       cols[c].sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
@@ -335,7 +335,7 @@ export function addFlowSection(nav: any, sections: any) {
         });
       });
       if (!w) continue;
-      // Never above the top margin, and never so far down that the column leaves the canvas — a chain that
+      // Never above the top margin, and never so far down that the column leaves the canvas.
       const top = Math.min(...cn.map((n: any) => pos[n.id].y));
       const foot = Math.max(...cn.map((n: any) => pos[n.id].y + pos[n.id].h));
       const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
@@ -354,7 +354,7 @@ export function addFlowSection(nav: any, sections: any) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands). The draw order IS the stacking order — outOff/inOff accumulate as we
+    // Ribbons (filled bezier bands).
     let flowClipSeq = 0;
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
@@ -362,7 +362,7 @@ export function addFlowSection(nav: any, sections: any) {
     ).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
-      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known. A *measured*
+      // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
@@ -375,11 +375,11 @@ export function addFlowSection(nav: any, sections: any) {
         fill: unknownLink ? 'var(--muted)' : color,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
-        // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint — the
+        // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
         'data-src': l.source, 'data-dst': l.target,
       }));
 
-      // A stream drawn along the ribbon's centre line, so the diagram shows direction and rate rather than
+      // A stream drawn along the ribbon's centre line.
       if (animateFlow() && !unknownLink && !idleLink) {
         // The stream is the band, not a line drawn down the middle of it.
         const clipId = `fs${flowClipSeq++}`;
@@ -417,12 +417,12 @@ export function addFlowSection(nav: any, sections: any) {
       s.outOff += h; t.inOff += h;
     });
 
-    // A group reads like a node: click the group node to toggle it, or click any expanded member to fold it
+    // A group reads like a node: click the group node to toggle it.
     const memberGroup: Record<string, any> = {};
     const groupById: Record<string, any> = {};
     flowGroups().forEach((g: any) => { groupById[g.Id] = g; (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }); });
 
-    // Nodes + labels (to the right of each node, vertically centered; a bg halo keeps them legible
+    // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted: { id: string, label: string, share: number }[] = [];
     nodes.forEach((n: any) => {
       const p = pos[n.id]; if (!p) return;
@@ -439,14 +439,14 @@ export function addFlowSection(nav: any, sections: any) {
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
-      // A <title> must NOT be a child of <text>: its text node is part of the <text> element's content and
+      // A <title> must not be a child of <text>: its text node would become part of the <text> element's content.
       const labGroup = svgEl('g', {});
       const explain = (text: string) => {
         const t = svgEl('title');
         t.textContent = text;
         labGroup.appendChild(t);
       };
-      // An inferred figure is never dressed as a measured one. It is arithmetic about the hierarchy someone
+      // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       lab.textContent = unknownNode ? `${n.label} · no data`
         : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
@@ -455,7 +455,7 @@ export function addFlowSection(nav: any, sections: any) {
         lab.setAttribute('font-style', 'italic');
         explain('Nothing measures this node, and no single path determines it. Bind a live source to it, or mark one of its feeders as "residual" to say where the remainder comes from.');
       }
-      // More leaves this node than arrives at it — not a state the hardware can be in, so say so on the
+      // More leaves this node than arrives at it — not a state the hardware can be in.
       else if (inferredNode) {
         lab.setAttribute('font-style', 'italic');
         lab.setAttribute('fill-opacity', '0.85');
@@ -467,7 +467,7 @@ export function addFlowSection(nav: any, sections: any) {
       else if (n.imbalance != null) {
         lab.textContent += ' ⚠';
         const reading = nodeValue(n.id);
-        // Past the line, the label stops looking like every other figure on the chart and the node is
+        // Past the line the node is named in a banner above the chart; the number is still shown.
         const share = lifetimeEnergy ? null : contradictionShare(n, reading);
         if (share != null && share >= CONTRADICTION_SHARE) {
           lab.setAttribute('fill', 'var(--warn, #d08700)');
@@ -491,7 +491,7 @@ export function addFlowSection(nav: any, sections: any) {
       labGroup.appendChild(lab);
       svg.appendChild(labGroup);
 
-        // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds, and which
+        // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds.
       const card = () => {
         const rows: any[] = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
@@ -507,7 +507,7 @@ export function addFlowSection(nav: any, sections: any) {
               : 'summed from what it feeds'));
         if (n.imbalance != null)
           rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
-        // A sensor on one leg of a bidirectional device — an inverter measuring its AC load while also
+        // A sensor on one leg of a bidirectional device.
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
             text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
@@ -564,7 +564,7 @@ export function addFlowSection(nav: any, sections: any) {
       }
     });
 
-    // Surface the unknowns rather than leaving them to be spotted: a node with no data is a gap in the
+    // Surface the unknowns rather than leaving them to be spotted.
     const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '');
@@ -635,7 +635,7 @@ export function addFlowSection(nav: any, sections: any) {
     for (let h = 0; h < 24; h++) hourSel.appendChild(el('option', { value: String(h), text: String(h).padStart(2, '0') + ':00' }));
     hourSel.value = String(agg.PeriodStartHour || 0);
 
-    // Zones come from the schema, which the server filled with the ones IT can resolve — a zone missing
+    // Zones come from the schema, which the server filled with the ones IT can resolve.
     const zoneNode = (state.schema || []).find((n: any) => n.key === 'EnergyFlow')?.properties
       ?.find((n: any) => n.key === 'Aggregation')?.properties?.find((n: any) => n.key === 'PeriodTimeZone');
     const zones: string[] = zoneNode?.enumValues || [''];
@@ -658,7 +658,7 @@ export function addFlowSection(nav: any, sections: any) {
       el('span', { class: 'desc', style: { margin: '0' }, text: 'Day ends at:' }), hourSel, zoneSel);
     body.appendChild(aggRow);
 
-    // The server's own clock, right where the boundary is set — it is the clock the day is cut on, and in a
+    // The server's own clock, right where the boundary is set — it is the clock the day is cut on.
     const clock = el('div', { class: 'desc' }) as HTMLElement;
     body.appendChild(clock);
     api('/api/time').then((r: any) => {
@@ -679,7 +679,7 @@ export function addFlowSection(nav: any, sections: any) {
 
     body.appendChild(el('h3', { text: 'What the diagram may state', style: { margin: '14px 0 4px' } }));
 
-    // Conservation back-fill. A switch you can see, because it is the one place the diagram states a number
+    // Conservation back-fill. A switch you can see.
     const inferRow = el('div', { class: 'desc' }) as HTMLElement;
     const inferChk = el('input', { type: 'checkbox' }) as HTMLInputElement;
     inferChk.checked = flow.InferFromConservation !== false;   // defaults on
@@ -696,13 +696,13 @@ export function addFlowSection(nav: any, sections: any) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram
+    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
       'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
       + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
   };
 
-  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target). Drag from a
+  // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target).
   const colors = ['#4f8cff', '#46c46a', '#fa4', '#f49', '#9f4', '#4ff'];
   const NW = 190, NH = 46;
 
@@ -728,7 +728,7 @@ export function addFlowSection(nav: any, sections: any) {
 
     const autoParent = (id: string) => { const m = /^outlet:(.+):\d+$/.exec(id); return m ? 'pdu:' + m[1] : null; };
 
-    // Edges: explicit directed Links, plus the auto PDU → outlet feed (suppressed once an outlet is
+    // Edges: explicit directed Links, plus the auto PDU → outlet feed.
     const customTo = new Set(links.map((l: any) => l.To));
     const edges: any[] = [];
     cand.forEach((c: any) => { const ap = autoParent(c.id); if (ap && cand.has(ap) && !customTo.has(c.id)) edges.push({ from: ap, to: c.id, custom: false }); });
@@ -747,7 +747,7 @@ export function addFlowSection(nav: any, sections: any) {
       seen.delete(id); return colMemo[id] = c;
     };
     [...cand.keys()].forEach(id => col(id));
-    // Pull each node as far RIGHT as its nearest child allows (longest-path left-justifies every root, which
+    // Pull each node as far right as its nearest child allows, so it lands next to what it powers.
     const colX: any = {};
     [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
       const outs = outgoing[id] || [];
@@ -811,7 +811,7 @@ export function addFlowSection(nav: any, sections: any) {
       g.appendChild(svgEl('circle', { cx: NW, cy: NH / 2, r: 7, fill: color, style: 'cursor:crosshair', 'data-port': c.id }));
       if (c.custom) {
         const rm = svgEl('text', { x: NW - 13, y: 15, fill: 'var(--bad)', 'font-size': '13', style: 'cursor:pointer', 'data-rm': c.id }); rm.textContent = '✕'; g.appendChild(rm);
-        // Rename in place: double-click the node to relabel it. Only the Label changes — Id stays fixed, so
+        // Rename in place: double-click the node to relabel it.
         t1.setAttribute('title', 'Double-click to rename'); g.style.cursor = 'pointer';
         g.addEventListener('dblclick', (e: any) => {
           e.preventDefault();
@@ -826,10 +826,10 @@ export function addFlowSection(nav: any, sections: any) {
       nodeLayer.appendChild(g); nodeG[c.id] = g;
     });
 
-    // Interactions: drag a node's output port onto another node to add a directed feed. Map screen
+    // Interactions: drag a node's output port onto another node to add a directed feed.
     const toUser = (cx: number, cy: number) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
     let linkFrom: any = null, tempLine: any = null, hovered: any = null;
-    // Drag the empty canvas to pan (engages past a small threshold, so a click/double-click on a node or the
+    // Drag the empty canvas to pan, engaging past a small threshold so a click on a node still registers.
     let panStart: any = null, panning = false;
     scroll.style.cursor = 'grab';
     const highlight = (id: any) => {
@@ -896,13 +896,13 @@ export function addFlowSection(nav: any, sections: any) {
   };
   refresh.onclick = load;
 
-  // A sub-page repaints with the data only while it is the page you are on — saving from the hierarchy
+  // A sub-page repaints with the data only while it is the page you are on.
   const redrawSubPages = () => {
     if (edPage.sec.classList.contains('active')) renderEditor();
     if (treePage.sec.classList.contains('active')) renderTree();
   };
 
-  // The editor draws every node the diagram knows about, not just the configured ones, so it needs the
+  // The editor draws every node the diagram knows about, not just the configured ones.
   const openSubPage = async (page: any, render: () => void) => {
     activate(page.link, page.sec);
     if (!lastGraph) await load();
@@ -912,7 +912,7 @@ export function addFlowSection(nav: any, sections: any) {
   edPage.link.onclick = () => openSubPage(edPage, renderEditor);
   settingsPage.link.onclick = () => { activate(settingsPage.link, settingsPage.sec); renderSettings(); };
 
-  // The Sankey follows the readings while the tab is open (#281). Only the diagram is repainted — the
+  // The Sankey follows the readings while the tab is open (#281).
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
     (body: any) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });

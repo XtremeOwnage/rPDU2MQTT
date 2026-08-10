@@ -5,7 +5,6 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Tags for the nodes nobody configured: the PDUs and outlets derived from what the bridge polls.
-///
 /// </summary>
 public static class AutoTags
 {

@@ -17,7 +17,7 @@ export function flowCandidates(lastGraph: any, customNodes: any[]) {
   return cand;
 }
 
-// Tags for the nodes nobody typed out (#342). An outlet exists because the PDU reports it, so there is no
+// Tags for the nodes nobody typed out (#342).
 export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: () => void) {
   const rules = ensure(flow, 'AutoTags', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -45,7 +45,7 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
     };
     tr.appendChild(el('td', {}, tagsIn));
 
-    // What the pattern covers right now, from the nodes actually on the graph. A rule that matches nothing
+    // What the pattern covers right now, from the nodes actually on the graph.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
     tr.appendChild(el('td', {}, el('span', {
       class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
@@ -68,14 +68,14 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
   return box;
 }
 
-/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard and everything else is
+/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard.
 export function globMatches(pattern: string, id: string): boolean {
   if (!pattern) return false;
   const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
   return new RegExp(rx, 'i').test(id);
 }
 
-// Group manager (#groups): define named groups of nodes that collapse into one node on the flow graphs and
+// Group manager (#groups): named groups of nodes that collapse into one node on the flow graphs.
 export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: () => void) {
   const groups = ensure(flow, 'Groups', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -102,7 +102,7 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
   addBar.append(idIn, labIn, kindSel, addBtn);
   box.appendChild(addBar);
 
-  // Anchor a group on an existing node: that node becomes the group (keeping its own value), and its members
+  // Anchor a group on an existing node: that node becomes the group (keeping its own value).
   const anchorRow = el('div', { class: 'ld-toolbar' });
   anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
   const anchorSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
@@ -176,7 +176,7 @@ export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, e
   nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close?: boolean) => { if (close) editing.id = null; rerender(); }));
 }
 
-/// Would adding from -> to close a cycle? The builder walks whatever it is handed, so a loop expressed in
+/// Would adding from -> to close a cycle?
 export function wouldLoop(links: any[], from: string, to: string) {
   const adj: any = {};
   links.forEach(l => (adj[l.From] = adj[l.From] || []).push(l.To));
@@ -191,7 +191,7 @@ export function wouldLoop(links: any[], from: string, to: string) {
   return false;
 }
 
-// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab). Each row is a
+// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab).
 export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
@@ -230,7 +230,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     const incoming = links.filter((l: any) => l.To === n.Id).map((l: any) => l.From);
     const fedByCell = el('td');
     if (incoming.length > 1) {
-      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter — and one
+      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter.
       fedByCell.appendChild(el('span', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') }));
     } else {
       const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
@@ -280,7 +280,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
       openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
     };
 
-    // Copy: the same node under a free id, opened for renaming. Its bindings come along (that's the tedious
+    // Copy: the same node under a free id, opened for renaming.
     const copy = btn('Copy');
     copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
     copy.onclick = () => {
@@ -352,7 +352,7 @@ export function addNodesSection(nav: any, sections: any) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
-      // Mode 'none' by default: a brand-new node has nothing measuring it, and inferring a size for it (the
+      // Mode 'none' by default: a brand-new node has nothing measuring it.
       const node: any = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
       customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
@@ -375,12 +375,12 @@ export function addNodesSection(nav: any, sections: any) {
   };
 
   const load = async () => {
-    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers; node config itself
+    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers.
     const r = await api(withInstance('/api/flow', instSel));
     lastGraph = r.body?.ok ? r.body : null;
     render();
   };
   link.onclick = () => { activate(link, sec); load(); };
-  // The editor panel is mounted on <body>, so switching pages would otherwise leave it floating over
+  // The editor panel is mounted on <body>.
   nav.addEventListener('click', (e: any) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }

@@ -1,7 +1,7 @@
-// The banners above the flow chart: sources the bridge is withholding, and nodes whose figure their own
+// The banners above the flow chart: sources the bridge is withholding.
 import { el } from './helpers.js';
 
-/// The banner naming every binding the bridge is dropping, and why. Separate from the contradiction banner
+/// The banner naming every binding the bridge is dropping, and why.
 export function withheldBanner(sources: any[]): HTMLElement {
   const box = el('div', { class: 'flow-contradiction' });
   box.appendChild(el('strong', {
@@ -24,7 +24,7 @@ export function withheldBanner(sources: any[]): HTMLElement {
   return box;
 }
 
-/// The banner naming every node whose figure its own flows contradict. Above the chart, not inside it: the
+/// The banner naming every node whose figure its own flows contradict, drawn above the chart.
 export function contradictionBanner(items: { id: string, label: string, share: number }[], onFocus: (id: string) => void): HTMLElement {
   const box = el('div', { class: 'flow-contradiction' });
   const n = items.length;
@@ -60,4 +60,4 @@ export function contradictionShare(n: any, reading: number | null): number | nul
   return Math.min(1, Math.abs(n.imbalance) / throughput);
 }
 
-// Show the "Unmeasured load" node on the diagram? A view preference, not config: the node is drawn from
+// Show the "Unmeasured load" node on the diagram?

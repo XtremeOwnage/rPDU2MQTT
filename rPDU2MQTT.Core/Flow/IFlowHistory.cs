@@ -2,21 +2,13 @@ namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
 /// Reads what a set of flow nodes read at a past instant (#372).
-///
 /// </summary>
 public interface IFlowHistory
 {
     /// <summary>Which backend this is, as named in config ("prometheus", "emoncms").</summary>
     string Id { get; }
 
-    /// <summary>
-    /// The value each node held at <paramref name="atUtc"/>, keyed by node id. Nodes with no data are
-    /// omitted.
-    /// </summary>
-    /// <summary>
-    /// One reading per node at each of <paramref name="steps"/>.
-    ///
-    /// </summary>
+    /// <summary>One reading per node at each of <paramref name="steps"/>.</summary>
     async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
         IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
     {
@@ -25,13 +17,11 @@ public interface IFlowHistory
         return out_;
     }
 
+    /// <summary>The value each node held at <paramref name="atUtc"/>; nodes with no data are omitted.</summary>
     Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct);
 
-    /// <summary>
-    /// Is the backend answering? Reported on the Status board, so a history source that cannot be reached
-    /// says so there rather than only when someone picks a date and gets nothing.
-    /// </summary>
+    /// <summary>Is the backend answering? Reported on the Status board.</summary>
     Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct);
 }
 
@@ -56,7 +46,7 @@ public sealed class HistoricalFlowValueSource : IFlowValueSource
     {
         value = 0;
 
-        // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own
+        // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own.
         if (metric.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal))
         {
             var baseMetric = metric[..^FlowMetricKey.InSuffix.Length];

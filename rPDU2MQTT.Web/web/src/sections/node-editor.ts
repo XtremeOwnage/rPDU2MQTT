@@ -1,4 +1,4 @@
-// Editing one node — name, kind, how it is valued, its live sources — and the dialogs it opens: the topic
+// Editing one node — name, kind, how it is valued, its live sources.
 import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
@@ -16,7 +16,7 @@ let pickerSeq = 0;
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 export function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
-  // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings — type,
+  // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings.
   const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'max(min(75vw, 1600px), min(860px, 92vw))', maxHeight: '80vh', overflow: 'auto' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
@@ -108,7 +108,7 @@ function openTopicPicker(current: string, onPick: (topic: string) => void) {
   const { body, close } = overlay('Browse broker topics');
   body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Nothing is indexed in the background — the subscription starts when you browse and stops when you stop.' }));
 
-  // Which broker filter to subscribe to. Default '#' (everything); a broker whose ACL forbids the bare
+  // Which broker filter to subscribe to.
   const filterBar = el('div', { class: 'ld-toolbar' });
   const filterIn = el('input', { type: 'text', value: '#', placeholder: '# (everything)', style: { width: '220px' } }) as HTMLInputElement;
   filterIn.title = 'The topic filter to subscribe to while browsing. If the broker denies “#”, narrow it (e.g. solar_assistant/#).';
@@ -235,7 +235,7 @@ function openModbusExplorer(src: any, onPick: () => void) {
   read.onclick(null);
 }
 
-/// Rename a node and carry its wiring with it. The id is the node's identity everywhere — links, the legacy
+/// Rename a node and carry its wiring with it; the id is the node's identity everywhere.
 export function openRenameDialog(node: any, flow: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
   const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
   const links: any[] = ensure(flow, 'Links', []);
@@ -245,7 +245,7 @@ export function openRenameDialog(node: any, flow: any, existingIds: Set<string>,
 
   body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
 
-  // The id is what every integration keys off, so a rename is a rename downstream too — say so plainly
+  // The id is what every integration keys off, so a rename is a rename downstream too.
   const warn = el('div', {
     class: 'desc',
     style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
@@ -296,7 +296,7 @@ export function field(labelText: string, control: HTMLElement, hint?: string) {
 export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, rerender: (close?: boolean) => void) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
-  // No frame and no header of its own: this is rendered into a modal panel that already carries the node's
+  // No frame and no header of its own: this renders into a modal panel that already carries the node's name.
   const box = el('div', { class: 'node-editor' });
 
   const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
@@ -328,9 +328,9 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
   }
 
-  // The gauge's ceiling, for the kinds the Energy page draws a dial for. Deliberately not offered on every
+  // The gauge's ceiling, for the kinds the Energy page draws a dial for.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
-    // Tags (#342): free text, comma-separated. No fixed vocabulary and no validation — the groupings worth
+    // Tags (#342): free text, comma-separated.
     const tagsIn = el('input', { type: 'text', value: (node.Tags || []).join(', '), placeholder: 'critical, rack-1' });
     tagsIn.onchange = () => {
       const list = tagsIn.value.split(',').map((t: string) => t.trim()).filter((t: string) => t);
@@ -361,7 +361,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
 
-  // Battery and grid flow both ways, so their sources carry a Direction: 'out' (the supply value the roll-up
+  // Battery and grid flow both ways.
   const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
   const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge', in: 'Charge', split: 'Split: + discharge / − charge' }
     : node.Kind === 'grid' ? { out: 'Import', in: 'Export', split: 'Split: + import / − export' }
@@ -394,14 +394,14 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
       tr.appendChild(el('td', {}, typeSel));
 
-      // Offer this kind's metrics (friendly labels), but keep an already-chosen one even if the kind wouldn't
+      // Offer this kind's metrics (friendly labels).
       const metricSel = el('select', { style: { width: 'auto' } });
       const metric = src.Metric || 'realpower';
       const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
       opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
       metricSel.value = metric;
       metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
-      // Say at the point of choosing that this one won't roll up — otherwise the only clue is a parent
+      // Say at the point of choosing that this one won't roll up.
       const metricCell = el('td', {}, metricSel);
       if (!isAdditiveMetric(metric)) {
         metricCell.appendChild(el('div', {
@@ -413,7 +413,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       }
       tr.appendChild(metricCell);
 
-      // Direction (battery/grid only, and only for a directional metric — voltage/soc have no direction, so
+      // Direction: battery/grid only, and only for a directional metric.
       if (bidirectional) {
         const cell = el('td');
         if (DIRECTIONAL_METRICS.includes(metric)) {
@@ -434,7 +434,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         tr.appendChild(cell);
       }
 
-      // Does this counter run forever, or does the device reset it every day? Only energy accumulates, so
+      // Does this counter run forever, or does the device reset it every day?
       {
         const cell = el('td');
         if (metric === 'energy') {
@@ -498,7 +498,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         details.append(regIn, regTypeSel, dtSel, woSel, explore);
         tr.appendChild(el('td', {}, details));
       } else {
-        // Source = the topic, with autocomplete off what the broker is actually carrying, and a Browse
+        // Source = the topic, with autocomplete off what the broker is actually carrying.
         const topicCell = el('td');
         const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } }) as HTMLInputElement;
         const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } }) as HTMLInputElement;
@@ -526,7 +526,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         tr.appendChild(fieldCell);
       }
 
-      // Scale carries the magnitude; Invert carries the sign. Kept as one number on the wire (Scale) so
+      // Scale carries the magnitude; Invert carries the sign.
       const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
       const setScale = (magnitude: number, invert: boolean) => {
         const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
@@ -561,14 +561,14 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     tbl.appendChild(body);
     box.appendChild(tbl);
 
-    // Live "Current" value for every binding: Modbus is read straight from the device (works before saving);
+    // Live "Current" value for every binding.
     if (liveCells.length) {
       const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
       const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
         if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || ('No live value yet. ' + LIVE_HINT); }
         else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
       };
-      // A Modbus device is a shared serial resource — many gateways accept only one client at a time, and
+      // A Modbus device is a shared serial resource — many gateways accept only one client at a time.
       const refresh = async (probe = false) => {
         let probeMsg = '';
         if (probe) {
@@ -591,7 +591,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
           }
         }
 
-        // Every binding not just device-probed reads the shared live cache the running ingests fill. A 'split'
+        // Every binding not just device-probed reads the shared live cache the running ingests fill.
         const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
         if (cached.length) {
           try {
@@ -620,7 +620,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       refreshBtn.onclick = () => refresh(true);
       box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
       refresh(false);
-      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops. Polls at
+      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
       const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 2000);
     }
   }
@@ -655,7 +655,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       x.onclick = () => { onRemove(other); rerender(); };
       chip.append(nm(other), x); row.appendChild(chip);
     });
-    // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets — so it
+    // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets.
     const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
     const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
     const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
