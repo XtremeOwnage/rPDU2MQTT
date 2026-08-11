@@ -86,6 +86,35 @@ public class PeriodEndsTests
     }
 
     [Fact]
+    public void YesterdayIsTheWholePeriodBeforeThisOne()
+    {
+        // 14:05 CDT on the 8th. "Today" runs from local midnight to now; "yesterday" is the 7th end to end.
+        var now = new DateTime(2026, 8, 8, 19, 5, 0, DateTimeKind.Utc);
+
+        var today = EnergyPeriod.Window(now, Chicago, 0, 0);
+        Assert.Equal(new DateTime(2026, 8, 8, 5, 0, 0, DateTimeKind.Utc), today.Start);
+        Assert.Equal(now, today.End);
+
+        var yesterday = EnergyPeriod.Window(now, Chicago, 0, 1);
+        Assert.Equal(new DateTime(2026, 8, 7, 5, 0, 0, DateTimeKind.Utc), yesterday.Start);
+        Assert.Equal(new DateTime(2026, 8, 8, 4, 59, 59, DateTimeKind.Utc), yesterday.End);
+    }
+
+    [Fact]
+    public void YesterdayKeepsItsOwnLengthAcrossAClockChange()
+    {
+        // The spring-forward day is 23 hours long. Subtracting 24 would start it an hour into the 7th.
+        var now = new DateTime(2026, 3, 9, 18, 0, 0, DateTimeKind.Utc);
+
+        var (start, end) = EnergyPeriod.Window(now, Chicago, 0, 1);
+
+        Assert.Equal("2026-03-08", EnergyPeriod.KeyFor(start, Chicago, 0));
+        Assert.Equal("2026-03-08", EnergyPeriod.KeyFor(end, Chicago, 0));
+        Assert.Equal(0, EnergyPeriod.Local(start, Chicago).Hour);
+        Assert.Equal(23, (end - start).TotalHours, 3);
+    }
+
+    [Fact]
     public void TheDaysComeBackOldestFirst_OneEach()
     {
         var ends = EnergyPeriod.RecentPeriodEnds(DateTime.UtcNow, TimeZoneInfo.Utc, 0, 30);
