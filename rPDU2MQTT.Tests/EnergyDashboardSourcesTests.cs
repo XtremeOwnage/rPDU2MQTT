@@ -156,6 +156,32 @@ public class EnergyDashboardSourcesTests
     }
 
     [Fact]
+    public void DeviceConsumption_ExcludesTheTiersThatOnlyFeedGeneration()
+    {
+        // The MPPTs feed the inverter through a PV string; none of that is something the home consumes (#382).
+        // The sub-panel behind the inverter, and the unclassified circuit under it, still are.
+        var graph = new FlowGraph(
+            new[]
+            {
+                new FlowNode("mppt1", "MPPT 1", "node"), new FlowNode("mppt2", "MPPT 2", "node"),
+                new FlowNode("string", "PV String", "node"), new FlowNode("inv", "Inverter", "inverter"),
+                new FlowNode("sub", "Sub Panel", "panel"), new FlowNode("circuit", "Kitchen", "node"),
+            },
+            new[]
+            {
+                new FlowLink("mppt1", "string", 100), new FlowLink("mppt2", "string", 100),
+                new FlowLink("string", "inv", 200), new FlowLink("inv", "sub", 200),
+                new FlowLink("sub", "circuit", 200),
+            },
+            "realpower", "W");
+        string? stat(string id) => "sensor." + id + "_energy";
+
+        var devices = EnergyDashboardSync.BuildDeviceConsumption(graph, stat, new[] { "grid", "solar", "battery", "inverter" });
+        Assert.Equal(new[] { "sensor.circuit_energy", "sensor.sub_energy" },
+            devices.Select(d => d.stat_consumption).OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
     public void StatsOf_ExtractsEveryReferencedEntity()
     {
         var grid = Assert.Single(EnergyDashboardSync.BuildEnergySources(

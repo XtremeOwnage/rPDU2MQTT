@@ -50,6 +50,23 @@ public static class EnergyPeriod
     }
 
     /// <summary>
+    /// The window of a period <paramref name="periodsBack"/> before the one <paramref name="utc"/> falls in:
+    /// 0 is the period in progress (ending at <paramref name="utc"/> itself), 1 is yesterday. Each hop reads
+    /// the boundary from the zone again, so a DST day is its own length rather than a fixed 24 hours.
+    /// </summary>
+    public static (DateTime Start, DateTime End) Window(DateTime utc, TimeZoneInfo zone, int startHour, int periodsBack)
+    {
+        var start = PeriodStart(utc, zone, startHour);
+        var end = utc;
+        for (var i = 0; i < Math.Max(0, periodsBack); i++)
+        {
+            end = start.AddSeconds(-1);
+            start = PeriodStart(end, zone, startHour);
+        }
+        return (start, end);
+    }
+
+    /// <summary>
     /// One instant per day for the last <paramref name="days"/> periods, oldest first, with the day each
     /// belongs to.
     /// </summary>

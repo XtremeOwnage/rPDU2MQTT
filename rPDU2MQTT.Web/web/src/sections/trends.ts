@@ -26,6 +26,8 @@ export function addTrendsSection(nav: any, sections: any) {
   const RANGES: [string, string, string][] = [
     // Not "the last 24 hours": today starts where the counters last re-based.
     ['today=1&step=300', 'today so far', 'power'],
+    // The whole previous period, on the same boundary — not "the 24 hours before now".
+    ['today=1&back=1&step=300', 'yesterday', 'power'],
     ['minutes=360&step=300', 'last 6 hours', 'power'],
     ['minutes=1440&step=900', 'last 24 hours', 'power'],
     ['days=7', 'last 7 days', 'energy'],
@@ -158,6 +160,9 @@ export function addTrendsSection(nav: any, sections: any) {
       box.appendChild(row);
     }
     charts.appendChild(box);
+    // A chart wider than the page opens on its oldest bars, and the newest are what the page is about —
+    // so start at the right-hand end (#378). scrollWidth is only known once the SVG is in the document.
+    scroll.scrollLeft = scroll.scrollWidth;
     return made.gaps;
   };
 

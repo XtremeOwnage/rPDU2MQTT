@@ -133,7 +133,8 @@ export function barChart(opts: {
     const every = Math.ceil(days.length / 12);
     if (d % every === 0) {
       const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
-      t.textContent = day.slice(5);
+      // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
+      t.textContent = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
       svg.appendChild(t);
     }
   });

@@ -935,7 +935,8 @@ function barChart(opts
     const every = Math.ceil(days.length / 12);
     if (d % every === 0) {
       const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
-      t.textContent = day.slice(5);
+      // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
+      t.textContent = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
       svg.appendChild(t);
     }
   });
@@ -5137,6 +5138,8 @@ function addTrendsSection(nav     , sections     ) {
   const RANGES                             = [
     // Not "the last 24 hours": today starts where the counters last re-based.
     ['today=1&step=300', 'today so far', 'power'],
+    // The whole previous period, on the same boundary — not "the 24 hours before now".
+    ['today=1&back=1&step=300', 'yesterday', 'power'],
     ['minutes=360&step=300', 'last 6 hours', 'power'],
     ['minutes=1440&step=900', 'last 24 hours', 'power'],
     ['days=7', 'last 7 days', 'energy'],
@@ -5269,6 +5272,9 @@ function addTrendsSection(nav     , sections     ) {
       box.appendChild(row);
     }
     charts.appendChild(box);
+    // A chart wider than the page opens on its oldest bars, and the newest are what the page is about —
+    // so start at the right-hand end (#378). scrollWidth is only known once the SVG is in the document.
+    scroll.scrollLeft = scroll.scrollWidth;
     return made.gaps;
   };
 

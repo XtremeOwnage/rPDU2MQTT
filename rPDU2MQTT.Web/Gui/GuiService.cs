@@ -1763,7 +1763,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             if (ctx.Request.Query["today"] == "1")
             {
                 var dayZone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
-                var began = EnergyPeriod.PeriodStart(end, dayZone, config.EnergyFlow.Aggregation.PeriodStartHour);
+                // ?back=<n> charts a whole earlier period instead — yesterday is back=1.
+                var back = int.TryParse(ctx.Request.Query["back"].ToString(), out var bk) ? Math.Clamp(bk, 0, 366) : 0;
+                (var began, end) = EnergyPeriod.Window(end, dayZone, config.EnergyFlow.Aggregation.PeriodStartHour, back);
                 var stepToday = int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? Math.Clamp(ts, 60, 3600) : 300;
                 var metricToday = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 var sinceStart = new List<DateTime>();

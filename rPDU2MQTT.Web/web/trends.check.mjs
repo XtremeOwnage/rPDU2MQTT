@@ -266,6 +266,11 @@ hit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
 const intraText = query(sandbox.document.body, '.trend-card').textContent;
 if (!intraText.includes(want) || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
 
+// …and so are the labels under it. Charting a day key drops its year, and doing that to a clock label left
+// the axis reading "AM" — the one part of the chart that says which hours it covers (#378).
+const axisText = query(sec, 'text', true).map(t => t.textContent);
+if (!axisText.includes(local(at[0]))) fail(`the axis is not labelled with the clock: ${axisText.join(', ')}`);
+
 // Columns sort. Twelve nodes over ninety days is a table you read by scanning for the biggest number.
 // Every node back on first: a one-row table is sorted whatever the code does, which is no test at all.
 query(sec, 'button', true).find(b => b.textContent === 'All').click();
@@ -282,6 +287,18 @@ nameHead.onclick();
 await new Promise(r => setTimeout(r, 50));
 if (order().join() !== [...byName].reverse().join()) fail('clicking the same column again did not reverse it');
 
+// Yesterday is the period before the one in progress, on the same boundary — the server knows where that
+// boundary is, so the page asks for a period back rather than subtracting 24 hours itself (#378).
+const yesterdaySel = query(sec, 'select', true).find(x => (x.children || []).some(o => (o.value || '').includes('back=1')));
+if (!yesterdaySel) fail('no "yesterday" range offered');
+yesterdaySel.value = 'today=1&back=1&step=300';
+yesterdaySel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+const askedYesterday = decodeURIComponent(asked.at(-1));
+if (!/today=1/.test(askedYesterday) || !/back=1/.test(askedYesterday))
+  fail(`yesterday was not asked for as the previous period: ${askedYesterday}`);
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
-  + 'many days they cover; within a day it charts power and integrates kWh; the table sorts');
+  + 'many days they cover; within a day it charts power on a clock axis and integrates kWh; yesterday is '
+  + 'the period before this one; the table sorts');

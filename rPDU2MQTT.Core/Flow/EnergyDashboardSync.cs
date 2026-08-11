@@ -44,20 +44,22 @@ public static class EnergyDashboardSync
         var excluded = excludeKinds is { Count: > 0 }
             ? new HashSet<string>(excludeKinds, StringComparer.OrdinalIgnoreCase)
             : null;
+        // Sources/storage/pass-through (grid, solar, battery, inverter) aren't "device consumption" — they
+        // clutter the list and double-count against the dashboard's own grid/solar/battery buckets. Neither
+        // are the tiers feeding them: an MPPT is generation, and listing it counts production as load (#382).
+        var notDevices = NotDevices(graph, excluded);
         var entries = new List<HaDeviceConsumption>();
         // Diagram-only nodes are not devices — see FlowNode.Synthetic.
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             if (include is not null && !include(node)) continue;
-            // Sources/storage/pass-through (grid, solar, battery, inverter) aren't "device consumption" — they
-            // clutter the list and double-count against the dashboard's own grid/solar/battery buckets.
-            if (excluded is not null && excluded.Contains(node.Kind ?? "node"))
+            if (notDevices.Contains(node.Id))
                 continue;
             var stat = statFor(node.Id);
             if (string.IsNullOrEmpty(stat))
                 continue;   // no energy sensor for this tier -> can't be an Energy-Dashboard device
             var power = powerFor?.Invoke(node.Id);   // optional real-time power sensor
-            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor, excluded), node.Label,
+            entries.Add(new HaDeviceConsumption(stat, NearestAncestorStat(graph, node.Id, statFor, notDevices), node.Label,
                 string.IsNullOrEmpty(power) ? null : power));
         }
         return entries;
@@ -142,9 +144,8 @@ public static class EnergyDashboardSync
     // Walk up the primary-feeder chain to the first ancestor that has an energy stat AND is itself a device
     // (not an excluded source/storage tier), so a device's included_in_stat never points at a tier we left out
     // of the list — and the link still spans intermediate tiers that have no sensor.
-    private static string? NearestAncestorStat(FlowGraph graph, string id, Func<string, string?> statFor, ISet<string>? excluded = null)
+    private static string? NearestAncestorStat(FlowGraph graph, string id, Func<string, string?> statFor, ISet<string> notDevices)
     {
-        var kindOf = graph.Nodes.ToDictionary(n => n.Id, n => n.Kind ?? "node", StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id };
         var current = id;
         while (true)
@@ -155,11 +156,46 @@ public static class EnergyDashboardSync
             var parent = parents[0];        // HA upstream is single-parent: follow the primary feeder
             if (!seen.Add(parent))
                 return null;                // cycle guard
-            var isExcluded = excluded is not null && excluded.Contains(kindOf.TryGetValue(parent, out var k) ? k : "node");
             var stat = statFor(parent);
-            if (!string.IsNullOrEmpty(stat) && !isExcluded)
+            if (!string.IsNullOrEmpty(stat) && !notDevices.Contains(parent))
                 return stat;
             current = parent;
         }
+    }
+
+    /// <summary>
+    /// The node ids that are not "individual devices": the excluded kinds themselves, plus the unclassified
+    /// tiers that only ever flow into one — an MPPT or a PV string wired into the inverter is generation, and
+    /// HA would otherwise chart that production as consumption (#382). A tier the user did classify (a panel,
+    /// a load, a PDU) is taken at its word, so a panel feeding an inverter stays a device.
+    /// </summary>
+    private static HashSet<string> NotDevices(FlowGraph graph, ISet<string>? excluded)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (excluded is null || excluded.Count == 0) return ids;
+
+        var kindOf = graph.Nodes.ToDictionary(n => n.Id, n => n.Kind ?? "node", StringComparer.OrdinalIgnoreCase);
+        bool IsExcludedKind(string id) => excluded.Contains(kindOf.TryGetValue(id, out var k) ? k : "node");
+        string[] Targets(string id) => graph.Links
+            .Where(l => string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Target).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        var walking = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool FeedsOnlyGeneration(string id)
+        {
+            // Only an unclassified tier is reclassified this way, and a leaf is a consumer, not a feeder.
+            var kind = kindOf.TryGetValue(id, out var k) ? k : "node";
+            if (!string.IsNullOrEmpty(kind) && !string.Equals(kind, "node", StringComparison.OrdinalIgnoreCase)) return false;
+            var targets = Targets(id);
+            if (targets.Length == 0 || !walking.Add(id)) return false;   // the guard also breaks a cycle
+            var only = targets.All(t => IsExcludedKind(t) || FeedsOnlyGeneration(t));
+            walking.Remove(id);
+            return only;
+        }
+
+        foreach (var node in graph.Nodes)
+            if (IsExcludedKind(node.Id) || FeedsOnlyGeneration(node.Id))
+                ids.Add(node.Id);
+        return ids;
     }
 }
