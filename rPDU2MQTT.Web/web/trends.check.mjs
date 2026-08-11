@@ -78,6 +78,9 @@ for (const want of ['Daily energy by node', 'Grid per day', 'Self-sufficiency pe
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
 const byNode = charts[0];
+// A totals row for exactly this node — "Grid" and "Grid (export)" are two rows, and a substring match on
+// the whole row would say the first is still listed when only the second is.
+const totalsRow = (name) => query(sec, 'tbody tr', true).find(r => query(r, 'td')?.textContent === name);
 const bars = query(byNode, 'rect', true);
 if (!bars.length) fail('no bars were drawn');
 
@@ -130,8 +133,7 @@ const tagChip = query(sec, 'button', true).find(b => b.textContent.includes('roo
 if (!tagChip) fail('no tag chips to select by');
 tagChip.click();
 await new Promise(r => setTimeout(r, 50));
-if (query(sec, 'tr', true).some(r => r.textContent.includes('Grid') && r.textContent.includes('of 7')))
-  fail('selecting a tag left untagged nodes on the chart');
+if (totalsRow('Grid')) fail('selecting a tag left untagged nodes on the chart');
 if (!query(sec, 'tr', true).some(r => r.textContent.includes('Solar')))
   fail('selecting a tag took its own node off the chart');
 const allChip = query(sec, 'button', true).find(b => b.textContent === 'All');
@@ -153,9 +155,9 @@ if (!supplyText.includes('31')) fail(`the day's energy does not net out: "${supp
 const zeroLines = query(supplyChart, 'line', true).filter(l => l.attrs.stroke === 'var(--muted)');
 if (!zeroLines.length) fail('no zero line on a chart that draws both signs');
 
-// The period still in progress is a real reading of an unfinished day. Drawn beside finished ones at full
-// strength it reads as a quiet day rather than an early one, and averaged in with them it drags the mean
-// down by however early you happen to be looking.
+// The period still in progress is a real reading of an unfinished day, and it counts. Drawn beside finished
+// ones at full strength it would read as a quiet day rather than an early one, so it is faded and said in
+// words — the marking is what keeps a part-day total from being mistaken for a whole one.
 const todayHit = hits.find(h => h.attrs['data-day'] === '2026-08-07');
 todayHit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
 const todayText = query(sandbox.document.body, '.trend-card').textContent;
@@ -167,19 +169,23 @@ if (!faded.length) fail('the unfinished day is drawn exactly like a finished one
 const status = query(sec, 'span', true).map(s => s.textContent).join(' ');
 if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: ${status.slice(0, 200)}`);
 
-// The totals cover the days that reported, and say how many that was: solar has 4 of 7 (30+32+28+35=125),
-// grid 5 of 7. A total presented as a week when it covers four days is how a gap becomes a saving.
+// The totals cover the days that reported, today included, and say how many that was: solar has 4 of 7
+// (30+32+28+35=125), grid 5 of 7. A total presented as a week when it covers four days is how a gap
+// becomes a saving, so the count is what a reader checks the total against.
 const rows = query(sec, 'tr', true);
 const solarRow = rows.find(r => r.textContent.includes('Solar'));
 if (!solarRow) fail('no totals row for solar');
-if (!solarRow.textContent.includes('90')) fail(`solar's total is not the sum of its finished days: ${solarRow.textContent}`);
-if (/125/.test(solarRow.textContent)) fail(`the day still in progress was counted in the total: ${solarRow.textContent}`);
-if (!/3 of 6/.test(solarRow.textContent)) fail(`solar's total does not say how many finished days it covers: ${solarRow.textContent}`);
+if (!solarRow.textContent.includes('125')) fail(`the day still in progress is missing from the total: ${solarRow.textContent}`);
+if (!/4 of 7/.test(solarRow.textContent)) fail(`solar's total does not say how many days it covers: ${solarRow.textContent}`);
 const gridRow = rows.find(r => r.textContent.includes('Grid'));
-if (!/4 of 6/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${gridRow.textContent}`);
+if (!/5 of 7/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${gridRow.textContent}`);
+// …and the page says the last of those days is not finished, in the note, the status line and the column.
+if (!/counts in the totals/.test(sec.textContent)) fail('nothing says the unfinished day is in the totals');
 
-// Its peak day is named, so "when did this happen" does not need a spreadsheet.
-if (!solarRow.textContent.includes('2026-08-02')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
+// Its peak day is named, so "when did this happen" does not need a spreadsheet. Here the highest reading
+// is the day still in progress, and a peak that may still rise is marked as such.
+if (!solarRow.textContent.includes('2026-08-07')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
+if (!/so far/.test(solarRow.textContent)) fail(`a peak on the unfinished day is not marked: ${solarRow.textContent}`);
 
 // The node selection governs the by-node chart and the totals — and nothing else. Emptying it used to hide
 // every chart, which said the selection drove them all, while they went on summing every node regardless.
@@ -190,7 +196,7 @@ await new Promise(r => setTimeout(r, 50));
 const emptyHeads = query(sec, 'h3', true).map(h => h.textContent);
 for (const want of ['Grid per day', 'Self-sufficiency per day'])
   if (!emptyHeads.includes(want)) fail(`clearing the node selection hid "${want}", which is not about the selection`);
-if (query(sec, 'tr', true).some(r => r.textContent.includes('of 7')))
+if (query(sec, 'tbody tr', true).length)
   fail('the totals still list nodes after the selection was cleared');
 if (!sec.textContent.includes('No nodes selected')) fail('nothing says the by-node chart is empty on purpose');
 
@@ -210,8 +216,7 @@ const before = query(sec, 'rect', true).length;
 gridChip.click();
 await new Promise(r => setTimeout(r, 50));
 if (query(sec, 'rect', true).length >= before) fail('taking a node off the chart changed nothing');
-if (query(sec, 'tr', true).some(r => r.textContent.includes('Grid') && r.textContent.includes('of 7')))
-  fail('a node taken off the chart is still in the totals');
+if (totalsRow('Grid')) fail('a node taken off the chart is still in the totals');
 
 // "Today so far" starts where the counters last re-based — the configured boundary, not a fixed 24 hours
 // and not the browser's midnight. A chart of today anchored anywhere else covers a different day from the
@@ -300,5 +305,6 @@ if (!/today=1/.test(askedYesterday) || !/back=1/.test(askedYesterday))
 
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
-  + 'many days they cover; within a day it charts power on a clock axis and integrates kWh; yesterday is '
+  + 'many days they cover; today counts, faded and marked as unfinished; within a day it charts power on a '
+  + 'clock axis and integrates kWh; yesterday is '
   + 'the period before this one; the table sorts');

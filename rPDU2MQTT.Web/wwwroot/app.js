@@ -5299,7 +5299,7 @@ function addTrendsSection(nav     , sections     ) {
         label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s),
       }));
       gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node',
-        'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it is not in the totals below.' : ''),
+        'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
         barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
@@ -5376,9 +5376,11 @@ function addTrendsSection(nav     , sections     ) {
 
     const step = Number(body.stepSeconds) || 0;
     const rows = series.map((s     ) => {
+      // The day in progress counts. It is a real reading of a real day — an early one, said so in the note,
+      // the fade and the hover — and leaving it out made the page disagree with the Energy board about today.
       const vals = s.values
         .map((v     , d        ) => [v, days[d]]                           )
-        .filter(([v, day]     ) => v != null && day !== partial);
+        .filter(([v]     ) => v != null);
       const sum = vals.reduce((a        , [v]     ) => a + v, 0);
       const best = vals.reduce((a     , b     ) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null       );
       // Energy from power samples: each sample stands for one step of time.
@@ -5394,24 +5396,30 @@ function addTrendsSection(nav     , sections     ) {
       };
     });
 
-    const denom = days.length - (partial ? 1 : 0);
+    const denom = days.length;
     const cols                                                                                                    = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
       { head: intraDay() ? `Peak (${units})` : `Total (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
         sort: r => r.headline ?? -Infinity,
         // Adding up power samples gives a number in watts that is a quantity of nothing.
-        title: intraDay() ? 'The highest sample in the window. Power samples are not added up — that would give a number in watts that is a quantity of nothing.' : 'Summed over the days that reported.' },
+        title: intraDay() ? 'The highest sample in the window. Power samples are not added up — that would give a number in watts that is a quantity of nothing.'
+          : 'Summed over the days that reported' + (partial ? `, including ${partial} as far as it has got.` : '.') },
       ...(intraDay() ? [{ head: 'Energy (kWh, est.)', num: true,
         text: (r     ) => r.kwh == null ? '—' : formatNum(Number(r.kwh.toFixed(3))),
         sort: (r     ) => r.kwh ?? -Infinity,
         title: `Each sample held for its ${step}s step and added up. An estimate: it assumes the power between samples was the sampled value, and it covers only the samples that exist.` }] : []),
       { head: `Mean per ${intraDay() ? 'sample' : 'day'} (${units})`, num: true,
-        text: r => r.mean == null ? '—' : formatNum(Number(r.mean.toFixed(2))), sort: r => r.mean ?? -Infinity },
+        text: r => r.mean == null ? '—' : formatNum(Number(r.mean.toFixed(2))), sort: r => r.mean ?? -Infinity,
+        // An early day counts as a whole one here, so say so rather than let a low mean look like a quiet week.
+        title: intraDay() || !partial ? undefined
+          : `Over the days that reported. ${partial} is one of them and is only part-way through, so the mean reads low until it ends.` },
       { head: `${intraDay() ? 'Samples' : 'Days'} with data`, num: true,
         text: r => `${r.covered} of ${denom}`, sort: r => r.covered },
       { head: intraDay() ? 'Peak at' : 'Peak day', num: false,
-        text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}` : '—', sort: r => r.peakAt },
+        // The day in progress can hold the peak, and it is a peak that may still rise — say which it is.
+        text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
+        sort: r => r.peakAt },
     ];
 
     // Sorted by whichever column you clicked.
