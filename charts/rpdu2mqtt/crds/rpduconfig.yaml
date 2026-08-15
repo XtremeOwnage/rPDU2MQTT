@@ -536,6 +536,27 @@ spec:
                   InputNameTemplate:
                     type: string
                     description: "Template for EmonCMS input keys. Placeholders: {device}, {source} (object-id form), {name} (formatted display name), {number} (outlet number), {type}, {units}. e.g. '{device}_{source}_{type}' -> rack_pdu_1_dell_md1200_realpower. Leave blank to use the full raw identifier."
+                  ExportFlowNodes:
+                    type: boolean
+                    description: Also send each energy-flow node (panels, inverters, batteries, the grid) as its own input, not just the PDU measurements. This is what gives those nodes history to read back.
+                  NodeTags:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Include:
+                        type: array
+                        items:
+                          type: string
+                        description: Only send nodes carrying at least one of these tags. Empty sends every node.
+                      Exclude:
+                        type: array
+                        items:
+                          type: string
+                        description: Never send nodes carrying any of these tags. Takes precedence over Include.
+                    description: Limit the exported energy-flow nodes to particular tags. Empty sends every node. Filtering changes only what is sent — never a value, and never any other destination.
+                  FlowInputNameTemplate:
+                    type: string
+                    description: "Template for an energy-flow node's EmonCMS input key. Placeholders: {node} (its id), {label}, {kind}, {metric}, {units}. e.g. '{node}_{metric}' -> solar_realpower. The history reader looks feeds up by this name."
                   MqttBaseTopic:
                     type: string
                     description: Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate). (Mqtt transport.)
@@ -562,11 +583,12 @@ spec:
                               - realpower
                               - apparentpower
                               - energy
+                              - energytoday
                               - current
                               - voltage
                               - frequency
                               - powerfactor
-                              description: The measurement type this applies to (raw PDU type name).
+                              description: The measurement type this applies to (raw PDU type name, or 'energytoday' for the energy-flow daily totals).
                             Engine:
                               type: string
                               enum:

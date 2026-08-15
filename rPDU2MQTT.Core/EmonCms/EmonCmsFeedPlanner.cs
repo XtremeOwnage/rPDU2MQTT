@@ -36,7 +36,13 @@ public sealed record EmonProcessIds(string LogToFeed, string? KwhToKwhd, string?
 /// </summary>
 public static class EmonCmsFeedPlanner
 {
-    public static EmonDesiredState BuildDesired(PduData data, Config config)
+    /// <param name="flow">
+    /// The energy-flow graphs to provision feeds for, one per exported metric (see <c>FlowTiers.Graphs</c>).
+    /// Null skips them — the feeds a hierarchy needs are the ones its history is read from, so a caller that
+    /// can build the graphs should pass them.
+    /// </param>
+    public static EmonDesiredState BuildDesired(
+        PduData data, Config config, IReadOnlyList<(string Metric, Core.Flow.FlowGraph Graph)>? flow = null)
     {
         var f = config.EmonCMS.Feeds;
         var tag = string.IsNullOrWhiteSpace(f.Tag) ? config.EmonCMS.Node : f.Tag!;
@@ -80,6 +86,42 @@ public static class EmonCmsFeedPlanner
                     virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, storageName);
             }
         }
+
+        // The energy-flow tiers. Same per-type settings, named from the node rather than a device/outlet —
+        // and named exactly as the export writes them, since that is what the history reader looks up.
+        if (flow is not null && config.EmonCMS.ExportFlowNodes)
+            foreach (var (metric, graph) in flow)
+            {
+                if (!byType.TryGetValue(metric, out var typeCfg)) continue;
+
+                foreach (var t in Core.Flow.FlowTiers.Of(graph, config.EmonCMS.NodeTags))
+                {
+                    var inputName = MetricsHelper.EmonCmsFlowInputName(t.Node.Id, t.Node.Label, t.Node.Kind, metric, config);
+                    if (!seenInputs.Add(inputName)) continue;
+
+                    var engine = (int)(typeCfg.Engine ?? f.Engine);
+                    var interval = typeCfg.IntervalSeconds ?? f.IntervalSeconds;
+
+                    feeds[inputName] = new DesiredFeed(inputName, tag, engine, interval, DataType: 1);
+
+                    string? dailyName = null;
+                    if (typeCfg.Daily)
+                    {
+                        dailyName = inputName + (f.IdempotentNames ? "_d" : " kWh/d");
+                        feeds[dailyName] = new DesiredFeed(dailyName, tag, engine, typeCfg.DailyIntervalSeconds, DataType: 2);
+                    }
+
+                    inputs.Add(new DesiredInputLog(inputName, inputName, dailyName));
+
+                    if (f.Virtual.Enabled)
+                    {
+                        var friendly = MetricsHelper.EmonCmsFlowFeedName(t.Node.Label, metric, config);
+                        var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                        if (!(string.Equals(friendly, inputName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
+                            virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, inputName);
+                    }
+                }
+            }
 
         return new EmonDesiredState(feeds.Values.ToList(), inputs, virtuals.Values.ToList());
     }

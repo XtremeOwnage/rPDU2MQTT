@@ -7,6 +7,7 @@ import { flowGroups } from '../flow-view.js';
 import { renderImportPanel } from '../node-templates.js';
 import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
+import { tagInput, renderTagManager } from '../tags.js';
 
 export function flowCandidates(lastGraph: any, customNodes: any[]) {
   const cand = new Map<string, any>();
@@ -38,12 +39,8 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
     matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
     tr.appendChild(el('td', {}, matchIn));
 
-    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' }) as HTMLInputElement;
-    tagsIn.onchange = () => {
-      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
-      refreshDirty(); rerender();
-    };
-    tr.appendChild(el('td', {}, tagsIn));
+    const tags = ensure(r, 'Tags', []);
+    tr.appendChild(el('td', {}, tagInput(tags, { placeholder: 'rack-1, critical', onChange: rerender })));
 
     // What the pattern covers right now, from the nodes actually on the graph.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
@@ -371,6 +368,7 @@ export function addNodesSection(nav: any, sections: any) {
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
     ed.appendChild(renderAutoTagRules(flow, cand, render));
+    ed.appendChild(renderTagManager(render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 

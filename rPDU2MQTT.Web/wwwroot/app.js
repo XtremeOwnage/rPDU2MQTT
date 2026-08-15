@@ -583,6 +583,240 @@ function formatValue(v     , secret          ) {
   return String(v);
 }
 
+// ── tags.ts ─────────────────────────────────────────────────────
+// The one place tags are spelled. Every tag in the document, a chip editor that completes from that list,
+// and the rename/remove that keeps every reference in step.
+//
+// Tags are free-form on purpose (#342), but a filter that names a tag nothing carries silently sends
+// nothing — and a typo in an exclude list is indistinguishable from a working one. So a tag is typed once,
+// where it is defined, and chosen from a list everywhere it is referenced.
+
+/// Where a tag can be defined: on a node, or on a rule that tags derived PDUs/outlets.
+function tagHolders()                                                                                                 {
+  const flow = (state.data || {}).EnergyFlow || {};
+  const out        = [];
+  (flow.Nodes || []).forEach((n     ) => out.push({
+    list: () => n.Tags, set: (v          ) => { n.Tags = v.length ? v : undefined; },
+    what: 'node', name: n.Label || n.Id || '(unnamed)',
+  }));
+  (flow.AutoTags || []).forEach((r     ) => out.push({
+    list: () => r.Tags, set: (v          ) => { r.Tags = v; },
+    what: 'rule', name: r.Match || '(empty match)',
+  }));
+  return out;
+}
+
+/// Where a tag is only referred to — the per-destination filters. Renaming has to reach these too, or a
+/// rename quietly turns a working filter into one that matches nothing.
+function tagReferences()                                                                                    {
+  const d = state.data || {};
+  const filters                  = [
+    [(d.Prometheus || {}).NodeTags, 'Prometheus'],
+    [(d.EmonCMS || {}).NodeTags, 'EmonCMS'],
+    [(d.EnergyFlow || {}).MqttExportTags, 'MQTT export'],
+    [((d.HomeAssistant || {}).EnergyDashboard || {}).NodeTags, 'HA Energy Dashboard'],
+  ];
+  const out        = [];
+  filters.forEach(([f, where]) => {
+    if (!f) return;
+    out.push({ list: () => f.Include, set: (v          ) => { f.Include = v; }, where: where + ' include' });
+    out.push({ list: () => f.Exclude, set: (v          ) => { f.Exclude = v; }, where: where + ' exclude' });
+  });
+  return out;
+}
+
+/// Every tag the document defines, in a stable order.
+function knownTags()           {
+  const seen = new Map                ();
+  tagHolders().forEach(h => (h.list() || []).forEach(t => {
+    const k = String(t || '').trim();
+    if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
+  }));
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/// How many things carry a tag, and what they are.
+function tagUsage(tag        )                                              {
+  const same = (t        ) => t.trim().toLowerCase() === tag.trim().toLowerCase();
+  return {
+    holders: tagHolders().filter(h => (h.list() || []).some(same)).map(h => `${h.what}: ${h.name}`),
+    references: tagReferences().filter(r => (r.list() || []).some(same)).map(r => r.where),
+  };
+}
+
+/// Rename a tag everywhere it appears — definitions and filters alike.
+function renameTag(from        , to        ) {
+  const same = (t        ) => t.trim().toLowerCase() === from.trim().toLowerCase();
+  const swap = (v                      ) => {
+    if (!v) return undefined;
+    const out           = [];
+    v.forEach(t => { const next = same(t) ? to.trim() : t; if (next && !out.some(x => x.toLowerCase() === next.toLowerCase())) out.push(next); });
+    return out;
+  };
+  [...tagHolders(), ...tagReferences()].forEach((h     ) => {
+    const current = h.list();
+    if (!current || !current.some(same)) return;
+    h.set(swap(current) || []);
+  });
+}
+
+/// Remove a tag from everything that carries or names it.
+function removeTag(tag        ) {
+  const same = (t        ) => t.trim().toLowerCase() === tag.trim().toLowerCase();
+  [...tagHolders(), ...tagReferences()].forEach((h     ) => {
+    const current = h.list();
+    if (!current || !current.some(same)) return;
+    h.set(current.filter((t        ) => !same(t)));
+  });
+}
+
+// The shared <datalist> every free-entry tag box completes from. One element, rebuilt whenever the set of
+// tags changes, so a tag defined on the Nodes page is offered on every other page without a reload.
+const DATALIST_ID = 'rpdu-known-tags';
+function syncTagDatalist() {
+  let dl      = document.getElementById(DATALIST_ID);
+  if (!dl) {
+    dl = el('datalist', { id: DATALIST_ID });
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = '';
+  knownTags().forEach(t => dl.appendChild(el('option', { value: t })));
+  return dl;
+}
+
+                                          
+
+/// A chip editor for a list of tags: the tags themselves, each removable, and one control to add another.
+/// `arr` is edited in place, so the caller's config object is always current.
+function tagInput(arr          , opts                  = {})              {
+  const wrap = el('div', { class: 'tag-input' });
+  const changed = () => { syncTagDatalist(); refreshDirty(); opts.onChange?.(); draw(); };
+
+  const add = (raw        ) => {
+    const t = (raw || '').trim();
+    if (!t) return false;
+    if (arr.some(x => String(x).trim().toLowerCase() === t.toLowerCase())) return true;   // already there
+    arr.push(t);
+    changed();
+    return true;
+  };
+
+  const draw = () => {
+    wrap.innerHTML = '';
+    arr.forEach((t, i) => {
+      const chip = el('span', { class: 'tag-chip' }, el('span', { text: String(t) }));
+      const x = el('button', { class: 'tag-x', title: `Remove “${t}”`, text: '✕' });
+      x.onclick = () => { arr.splice(i, 1); changed(); };
+      chip.appendChild(x);
+      // A filter naming a tag nothing defines matches nothing — worth seeing at a glance, not at 2am.
+      if (opts.strict && !knownTags().some(k => k.toLowerCase() === String(t).trim().toLowerCase())) {
+        chip.classList.add('tag-unknown');
+        chip.title = `No node or rule carries “${t}”, so this line does nothing.`;
+      }
+      wrap.appendChild(chip);
+    });
+
+    const known = knownTags().filter(k => !arr.some(x => String(x).trim().toLowerCase() === k.toLowerCase()));
+
+    if (opts.strict) {
+      // Chosen, never typed: the whole point of the strict form.
+      if (!known.length) {
+        wrap.appendChild(el('span', {
+          class: 'desc', style: { margin: '0' },
+          text: arr.length ? 'every tag is already listed' : 'no tags defined yet — tag a node or add a rule on the Nodes page',
+        }));
+        return;
+      }
+      const sel = el('select', { class: 'tag-pick' })                     ;
+      sel.appendChild(el('option', { value: '', text: '+ add tag…' }));
+      known.forEach(k => sel.appendChild(el('option', { value: k, text: k })));
+      sel.onchange = () => { if (sel.value) add(sel.value); };
+      wrap.appendChild(sel);
+      return;
+    }
+
+    // Free entry, completing from the tags that already exist — this is where a tag is born.
+    syncTagDatalist();
+    const input = el('input', {
+      type: 'text', class: 'tag-new', placeholder: opts.placeholder || 'add tag…', list: DATALIST_ID,
+    })                    ;
+    input.onkeydown = (ev     ) => {
+      if (ev.key !== 'Enter' && ev.key !== ',' && ev.key !== 'Tab') return;
+      if (ev.key === 'Tab' && !input.value.trim()) return;   // let Tab move on when there's nothing to commit
+      ev.preventDefault();
+      if (add(input.value)) input.value = '';
+      // Redrawing replaced this element, so put the cursor back where it was.
+      (wrap.querySelector('.tag-new')                    )?.focus();
+    };
+    // Committing on blur too: typing a tag and clicking Save should not lose it.
+    input.onblur = () => { if (input.value.trim()) { add(input.value); input.value = ''; } };
+    wrap.appendChild(input);
+  };
+
+  draw();
+  return wrap;
+}
+
+/// The "every tag, and what carries it" panel: rename or retire a tag across the whole config in one place.
+function renderTagManager(rerender            )              {
+  const box = el('div', { style: { margin: '18px 0' } });
+  box.appendChild(el('h3', { text: 'Tags in use', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', {
+    class: 'desc',
+    text: 'Every tag this configuration defines, and what carries it. Renaming one here rewrites it on every '
+        + 'node, every rule and every destination filter at once — which is the only way a rename does not '
+        + 'quietly turn a working filter into one that matches nothing.',
+  }));
+
+  const tags = knownTags();
+  if (!tags.length) {
+    box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' }, text: 'No tags yet. Add one to a node below, or to a rule for PDUs and outlets.' }));
+    return box;
+  }
+
+  const t = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Tag', 'Carried by', 'Filtered on', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  t.appendChild(el('thead', {}, head));
+  const tb = el('tbody');
+
+  tags.forEach(tag => {
+    const use = tagUsage(tag);
+    const tr = el('tr');
+
+    const name = el('input', { type: 'text', value: tag })                    ;
+    name.onchange = () => {
+      const next = name.value.trim();
+      if (!next || next === tag) { name.value = tag; return; }
+      renameTag(tag, next);
+      refreshDirty(); rerender();
+    };
+    tr.appendChild(el('td', {}, name));
+
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0' },
+      text: `${use.holders.length} node(s)/rule(s)`,
+      title: use.holders.join('\n') || 'nothing',
+    })));
+
+    tr.appendChild(el('td', {}, el('span', {
+      class: 'desc', style: { margin: '0' },
+      text: use.references.length ? use.references.join(', ') : '—',
+      title: use.references.length ? 'Destinations whose filter names this tag.' : 'No destination filter names this tag.',
+    })));
+
+    const del = btn('Remove', 'danger');
+    del.title = 'Take this tag off everything that carries it, and out of every filter that names it.';
+    del.onclick = () => { removeTag(tag); refreshDirty(); rerender(); };
+    tr.appendChild(el('td', {}, del));
+    tb.appendChild(tr);
+  });
+
+  t.appendChild(tb);
+  box.appendChild(t);
+  return box;
+}
+
 // ── flow-vocabulary.ts ──────────────────────────────────────────
 // The shared vocabulary: metrics, node kinds, node modes, source types, Modbus shapes.
 const METRICS                                       = [
@@ -3495,21 +3729,17 @@ function renderNodeEditor(node     , links       , cand                  , reren
     grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
   }
 
+  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
+  // export filter names, and hanging this off the gauge kinds below meant those could not be tagged at all.
+  const tags = ensure(node, 'Tags', []);
+  grid.appendChild(field('Tags', tagInput(tags, {
+    placeholder: 'critical, rack-1',
+    onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
+  }), 'Labels for filtering the Energy page, highlighting the diagram and deciding what each destination '
+    + 'exports. Type to add one — existing tags complete as you type. A tag never changes a reading.'));
+
   // The gauge's ceiling, for the kinds the Energy page draws a dial for.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
-    // Tags (#342): free text, comma-separated.
-    const tagsIn = el('input', { type: 'text', value: (node.Tags || []).join(', '), placeholder: 'critical, rack-1' });
-    tagsIn.onchange = () => {
-      const list = tagsIn.value.split(',').map((t        ) => t.trim()).filter((t        ) => t);
-      // De-duplicated case-insensitively: they are hand-typed, and the same tag twice is two identical chips.
-      const seen = new Set        ();
-      node.Tags = list.filter((t        ) => { const k = t.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
-      if (!node.Tags.length) node.Tags = undefined;
-      rerender();
-    };
-    grid.appendChild(field('Tags', tagsIn,
-      'Comma-separated labels for filtering the Energy page and highlighting the diagram. A tag never changes a reading.'));
-
     const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });
     maxIn.onchange = () => { const v = +maxIn.value; node.Max = (maxIn.value !== '' && !isNaN(v) && v > 0) ? v : undefined; };
     grid.appendChild(field('Gauge max (W)', maxIn,
@@ -3886,12 +4116,8 @@ function renderAutoTagRules(flow     , cand                  , rerender         
     matchIn.onchange = () => { r.Match = matchIn.value.trim(); refreshDirty(); rerender(); };
     tr.appendChild(el('td', {}, matchIn));
 
-    const tagsIn = el('input', { type: 'text', value: (r.Tags || []).join(', '), placeholder: 'rack-1, critical' })                    ;
-    tagsIn.onchange = () => {
-      r.Tags = tagsIn.value.split(',').map(x => x.trim()).filter(Boolean);
-      refreshDirty(); rerender();
-    };
-    tr.appendChild(el('td', {}, tagsIn));
+    const tags = ensure(r, 'Tags', []);
+    tr.appendChild(el('td', {}, tagInput(tags, { placeholder: 'rack-1, critical', onChange: rerender })));
 
     // What the pattern covers right now, from the nodes actually on the graph.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
@@ -4219,6 +4445,7 @@ function addNodesSection(nav     , sections     ) {
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
     ed.appendChild(renderAutoTagRules(flow, cand, render));
+    ed.appendChild(renderTagManager(render));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
@@ -6124,6 +6351,17 @@ function renderMap(node     , mapObj     , path          ) {
 function renderList(node     , arr       , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+
+  // A list of tag names is a list of references to something defined elsewhere, so it is chosen rather
+  // than typed: a mistyped tag here is a filter that silently matches nothing.
+  if (node.tagChoices) {
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    const picker = tagInput(arr, { strict: true });
+    fs.appendChild(picker);
+    registerField([...path], fs       , false);
+    return fs;
+  }
+
   const entries = document.createElement('div'); fs.appendChild(entries);
   const draw = (idx        ) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';

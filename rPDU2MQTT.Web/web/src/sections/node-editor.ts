@@ -3,6 +3,7 @@ import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
+import { tagInput } from '../tags.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
   NODE_KINDS, NODE_MODES, SIGNED_METRICS, SOURCE_TYPES,
@@ -328,21 +329,17 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
   }
 
+  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
+  // export filter names, and hanging this off the gauge kinds below meant those could not be tagged at all.
+  const tags = ensure(node, 'Tags', []);
+  grid.appendChild(field('Tags', tagInput(tags, {
+    placeholder: 'critical, rack-1',
+    onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
+  }), 'Labels for filtering the Energy page, highlighting the diagram and deciding what each destination '
+    + 'exports. Type to add one — existing tags complete as you type. A tag never changes a reading.'));
+
   // The gauge's ceiling, for the kinds the Energy page draws a dial for.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
-    // Tags (#342): free text, comma-separated.
-    const tagsIn = el('input', { type: 'text', value: (node.Tags || []).join(', '), placeholder: 'critical, rack-1' });
-    tagsIn.onchange = () => {
-      const list = tagsIn.value.split(',').map((t: string) => t.trim()).filter((t: string) => t);
-      // De-duplicated case-insensitively: they are hand-typed, and the same tag twice is two identical chips.
-      const seen = new Set<string>();
-      node.Tags = list.filter((t: string) => { const k = t.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
-      if (!node.Tags.length) node.Tags = undefined;
-      rerender();
-    };
-    grid.appendChild(field('Tags', tagsIn,
-      'Comma-separated labels for filtering the Energy page and highlighting the diagram. A tag never changes a reading.'));
-
     const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });
     maxIn.onchange = () => { const v = +maxIn.value; node.Max = (maxIn.value !== '' && !isNaN(v) && v > 0) ? v : undefined; };
     grid.appendChild(field('Gauge max (W)', maxIn,

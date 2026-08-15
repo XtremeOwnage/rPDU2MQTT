@@ -265,15 +265,38 @@
     border-color:color-mix(in srgb, var(--warn) 55%, var(--line));
   }
 
-  input[type=text], input[type=password], input[type=number], select, textarea.yaml {
+  /* date/time/search are here too. Left out, they fell through to the user agent's own control, which in
+     Chrome is a different font at a different height in a light colour scheme — the reason the toolbars
+     looked broken there and fine in Firefox. */
+  input[type=text], input[type=password], input[type=number], input[type=search],
+  input[type=date], input[type=time], input[type=datetime-local], select, textarea.yaml {
     width:100%; max-width:420px; padding:8px 11px; background:var(--bg); color:var(--fg); font:inherit;
     border:1px solid var(--line); border-radius:var(--r-sm);
     transition:border-color .12s, box-shadow .12s, background .12s;
   }
   :root[data-theme="light"] input[type=text], :root[data-theme="light"] input[type=password],
-  :root[data-theme="light"] input[type=number], :root[data-theme="light"] select,
+  :root[data-theme="light"] input[type=number], :root[data-theme="light"] input[type=search],
+  :root[data-theme="light"] input[type=date], :root[data-theme="light"] input[type=time],
+  :root[data-theme="light"] input[type=datetime-local], :root[data-theme="light"] select,
   :root[data-theme="light"] textarea.yaml { background:var(--panel); }
-  input[type=text]:hover, input[type=password]:hover, input[type=number]:hover, select:hover { border-color:var(--faint); }
+  /* Chrome lays a date/time value out in its own inline widget. Without this it keeps the UA metrics and
+     sits a couple of pixels off its neighbours in every joined control. */
+  input[type=date], input[type=time], input[type=datetime-local] { min-width:0; }
+  ::-webkit-datetime-edit { padding:0; }
+  ::-webkit-datetime-edit-fields-wrapper { padding:0; }
+  ::-webkit-inner-spin-button { display:none; }
+  /* The picker glyph is drawn dark; on a dark surface it is invisible without this. */
+  ::-webkit-calendar-picker-indicator { opacity:.75; cursor:pointer; filter:invert(1); }
+  ::-webkit-calendar-picker-indicator:hover { opacity:1; }
+  :root[data-theme="light"] ::-webkit-calendar-picker-indicator { filter:none; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme]) ::-webkit-calendar-picker-indicator { filter:none; }
+  }
+  /* Chrome renders search fields with a UA clear button and its own rounding; both fight the theme. */
+  input[type=search] { appearance:none; -webkit-appearance:none; }
+  ::-webkit-search-decoration, ::-webkit-search-cancel-button { -webkit-appearance:none; }
+  input[type=text]:hover, input[type=password]:hover, input[type=number]:hover,
+  input[type=search]:hover, input[type=date]:hover, input[type=time]:hover, select:hover { border-color:var(--faint); }
   input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:var(--ring); }
   input::placeholder { color:var(--faint); }
   input:disabled, select:disabled, textarea:disabled { opacity:.55; cursor:not-allowed; }
@@ -475,8 +498,35 @@
   .input-group > *:last-child { border-top-right-radius:4px; border-bottom-right-radius:4px; }
   /* The focused or hovered member sits above its neighbours so its own border is the one drawn. */
   .input-group > *:focus, .input-group > *:hover { z-index:1; }
-  .input-group input { padding:3px 6px; color-scheme:light dark; }
+  /* No color-scheme override here. It used to say `light dark`, which resolves against the OS preference
+     rather than the theme the page is actually painted in — so on a light desktop the dark app drew a
+     light native date picker inside a dark toolbar. Inheriting from :root keeps the two in step. */
+  .input-group input { padding:3px 6px; width:auto; max-width:none; }
   .input-group button.small { min-width:30px; padding:3px 8px; }
+  /* A joined control sizes to its content; the shared max-width for form fields makes no sense in a row. */
+  .input-group > input[type=date] { width:9.5em; }
+  .input-group > input[type=time] { width:8.5em; }
+
+  /* --- Tags ---------------------------------------------------------------------------------------- */
+  /* Chips plus one control to add another, so a tag is read at a glance and never half-typed into a
+     comma-separated string. */
+  .tag-input { display:flex; flex-wrap:wrap; align-items:center; gap:5px; }
+  .tag-chip {
+    display:inline-flex; align-items:center; gap:5px; padding:1px 4px 1px 9px; border-radius:var(--r-pill);
+    background:var(--accent-bg); border:1px solid var(--accent-dim); color:var(--fg); font-size:11.5px;
+    white-space:nowrap;
+  }
+  /* A filter naming a tag nothing carries does nothing at all — the failure this whole control exists for. */
+  .tag-chip.tag-unknown { background:var(--warn-bg); border-color:var(--warn); }
+  .tag-x {
+    border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:10px; line-height:1;
+    padding:2px 3px; border-radius:var(--r-pill);
+  }
+  .tag-x:hover { background:var(--bad-bg); color:var(--bad); }
+  .tag-input input.tag-new, .tag-input select.tag-pick {
+    width:auto; min-width:130px; max-width:220px; padding:3px 8px; font-size:12px;
+  }
+  .tag-input select.tag-pick { padding-right:26px; background-position:calc(100% - 14px) calc(50% + 1px), calc(100% - 9px) calc(50% + 1px); }
 
   /* Features page: each capability is a card with its switch, and a way through to its settings. */
   .feature-go { margin-top:var(--sp-2); }
@@ -551,6 +601,9 @@
   /* --- Tables ------------------------------------------------------------------------------------- */
   .ld-toolbar { display:flex; gap:var(--sp-3); align-items:center; flex-wrap:wrap; margin:var(--sp-2) 0 var(--sp-4); }
   .ld-toolbar input[type=text] { width:250px; }
+  /* A toolbar control sizes to what it holds. The form-field width (100%, up to 420px) belongs on a
+     stacked form, and applied here it stretched a three-option dropdown across half the page. */
+  .ld-toolbar > select, .history-bar > select { width:auto; min-width:130px; max-width:100%; }
   .ld-toolbar label, .ld-inst { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; }
   .ld-inst select { width:auto; }
   .ld-count { color:var(--faint); font-size:12px; }

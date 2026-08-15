@@ -5,6 +5,7 @@ import { state } from './state.js';
 import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
+import { tagInput } from './tags.js';
 import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
@@ -234,6 +235,17 @@ function renderMap(node: any, mapObj: any, path: string[]) {
 function renderList(node: any, arr: any[], path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+
+  // A list of tag names is a list of references to something defined elsewhere, so it is chosen rather
+  // than typed: a mistyped tag here is a filter that silently matches nothing.
+  if (node.tagChoices) {
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    const picker = tagInput(arr, { strict: true });
+    fs.appendChild(picker);
+    registerField([...path], fs as any, false);
+    return fs;
+  }
+
   const entries = document.createElement('div'); fs.appendChild(entries);
   const draw = (idx: number) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';

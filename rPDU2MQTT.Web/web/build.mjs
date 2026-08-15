@@ -23,6 +23,7 @@ const MODULES = [
   'theme.ts',
   'realtime.ts',
   'dirty.ts',
+  'tags.ts',
   'flow-vocabulary.ts',
   'energy.ts',
   'history-control.ts',

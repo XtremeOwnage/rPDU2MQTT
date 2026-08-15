@@ -19,9 +19,11 @@ namespace rPDU2MQTT.Models.Config;
 /// </summary>
 public class NodeTagFilter
 {
+    [TagChoices]
     [Description("Only send nodes carrying at least one of these tags. Empty sends every node.")]
     public List<string> Include { get; set; } = new();
 
+    [TagChoices]
     [Description("Never send nodes carrying any of these tags. Takes precedence over Include.")]
     public List<string> Exclude { get; set; } = new();
 

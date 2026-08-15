@@ -59,6 +59,14 @@ public sealed class SchemaNode
     /// <c>VisibleWhenAttribute</c>. The GUI hides it the rest of the time. Null when it always applies.
     /// </summary>
     public VisibleWhenRule? VisibleWhen { get; set; }
+    /// <summary>
+    /// This list holds tag names, so the GUI offers the tags the configuration already defines instead of a
+    /// free-text box per entry — see <c>TagChoicesAttribute</c>. A tag is free-form and typed where it is
+    /// defined; naming one here is a reference, and a typo in a reference matches nothing at all.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TagChoices { get; set; }
+
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -214,6 +222,12 @@ public static class ConfigSchema
             {
                 vs.EnumValues = BindableMetrics;
                 vs.Type = "enum";
+            }
+            else if (prop.GetCustomAttribute<TagChoicesAttribute>() is not null)
+            {
+                // Not an enum: the choices come from the document being edited, which the server has no
+                // opinion on. The flag says "these are tags"; the GUI reads the tags it already holds.
+                node.TagChoices = true;
             }
         }
         return node;
