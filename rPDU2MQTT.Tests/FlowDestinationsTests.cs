@@ -141,4 +141,94 @@ public class FlowDestinationsTests
         Assert.True(FlowTiers.Any(new PduData(), Configured()));
         Assert.False(FlowTiers.Any(new PduData(), new Config()));
     }
+
+    // --- What EmonCMS is actually sent -----------------------------------------------------------------
+    // Everything above tests the graph. The graph was never the problem: the flow half of the EmonCMS
+    // payload did not exist, and no graph test could notice. These hold the payload itself, so deleting the
+    // flow lines from the export fails here rather than in someone's dashboard six weeks later.
+
+    private static PduData OneOutlet(double watts)
+    {
+        var outlet = new Outlet { Key = 0, Entity_Name = "o0", Entity_DisplayName = "Server A" };
+        outlet.Measurements.Add(new Measurement { Type = "realpower", Value = watts.ToString(), Units = "W" });
+        var device = new Device { Key = "pdu1", Entity_Name = "rack_pdu_1", Entity_DisplayName = "Rack PDU 1" };
+        device.Outlets.Add(outlet);
+        var data = new PduData();
+        data.Devices.Add(device);
+        return data;
+    }
+
+    private static Dictionary<string, double> Sent(Config cfg, params PduData[] snapshots)
+        => EmonCmsPayload.Build(snapshots, cfg, Live())[EmonCmsPayload.Combined];
+
+    [Fact]
+    public void TheEmonCmsPayload_CarriesEveryFlowNode_AlongsideThePduReadings()
+    {
+        var sent = Sent(Configured(), OneOutlet(60));
+
+        // The PDU half, which always worked.
+        Assert.Equal(60, sent["rack_pdu_1_o0_realpower"]);
+        // The half that never existed. Every tier, under every metric it has a value for.
+        Assert.Equal(4200, sent["solar_realpower"]);
+        Assert.Equal(812.5, sent["solar_energy"]);
+        Assert.Equal(31.5, sent["solar_energytoday"]);
+        Assert.Equal(4200, sent["inverter_realpower"]);
+    }
+
+    [Fact]
+    public void AFlowNodeLeavesThePayload_OnlyWhenItsTagIsExcluded()
+    {
+        var cfg = Configured();
+        Assert.Contains("solar_realpower", Sent(cfg).Keys);
+
+        // 'solar' carries 'roof'; 'inverter' carries nothing and is unaffected by an exclusion.
+        cfg.EmonCMS.NodeTags.Exclude = ["roof"];
+        var filtered = Sent(cfg);
+        Assert.DoesNotContain("solar_realpower", filtered.Keys);
+        Assert.Contains("inverter_realpower", filtered.Keys);
+
+        // And an include list narrows to exactly what it names.
+        cfg.EmonCMS.NodeTags.Exclude = [];
+        cfg.EmonCMS.NodeTags.Include = ["roof"];
+        var included = Sent(cfg);
+        Assert.Contains("solar_realpower", included.Keys);
+        Assert.DoesNotContain("inverter_realpower", included.Keys);
+    }
+
+    [Fact]
+    public void ThePduReadingsAreNeverWithheld_ByAFlowTagFilter()
+    {
+        // A filter chooses which *hierarchy nodes* a destination carries. It has never had anything to say
+        // about a PDU measurement, and a filter that quietly stopped those would be a far worse bug.
+        var cfg = Configured();
+        cfg.EmonCMS.NodeTags.Include = ["nothing-carries-this"];
+
+        Assert.Equal(60, Sent(cfg, OneOutlet(60))["rack_pdu_1_o0_realpower"]);
+    }
+
+    [Fact]
+    public void TurningTheFlowExportOff_IsTheOnlyOtherWayItGoesQuiet()
+    {
+        var cfg = Configured();
+        cfg.EmonCMS.ExportFlowNodes = false;
+
+        var sent = Sent(cfg, OneOutlet(60));
+        Assert.Equal(60, sent["rack_pdu_1_o0_realpower"]);
+        Assert.DoesNotContain(sent.Keys, k => k.StartsWith("solar_"));
+    }
+
+    [Fact]
+    public void SplittingThePayloadPerPdu_StillCarriesTheHierarchy()
+    {
+        // A tier belongs to no device, so a per-device split has nowhere to file it — it must not be the
+        // thing that drops it.
+        var cfg = Configured();
+        cfg.EmonCMS.Transport = EmonCmsTransport.Mqtt;
+        cfg.EmonCMS.MqttTopicTemplate = "{base}/{node}/{device}";
+
+        var payloads = EmonCmsPayload.Build([OneOutlet(60)], cfg, Live());
+
+        Assert.Equal(60, payloads["rack_pdu_1"]["rack_pdu_1_o0_realpower"]);
+        Assert.Equal(4200, payloads[EmonCmsPayload.Combined]["solar_realpower"]);
+    }
 }

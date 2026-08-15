@@ -33,31 +33,9 @@ public class EmonCmsExportService : baseMQTTService
 
     protected override async Task Execute(CancellationToken cancellationToken)
     {
-        // Group readings into payloads. Normally one combined payload (input keys are unique per device),
-        // but when the MQTT topic template contains {device} (#165) we split per PDU so each goes to its
-        // own topic. The HTTP transport always posts one combined payload (the split is a topic concept).
-        var splitByDevice = c.Transport == EmonCmsTransport.Mqtt && MetricsHelper.EmonCmsSplitsByDevice(config);
-        var payloads = new Dictionary<string, Dictionary<string, double>>();
-        var merged = new Models.PDU.PduData();
-
-        foreach (var data in FreshSnapshots())
-        {
-            merged.Devices.AddRange(data.Devices);
-            foreach (var r in MetricsHelper.EnumerateReadings(data))
-            {
-                var key = splitByDevice ? r.Device : string.Empty;
-                if (!payloads.TryGetValue(key, out var values)) payloads[key] = values = new();
-                values[MetricsHelper.EmonCmsInputName(r, config)] = r.Value;
-            }
-        }
-
-        // The hierarchy itself — the panels, inverters, batteries and totals a PDU knows nothing about.
-        // They have no device, so they ride in the combined payload whichever way the readings are split.
-        foreach (var (name, value) in FlowInputs(merged))
-        {
-            if (!payloads.TryGetValue(string.Empty, out var values)) payloads[string.Empty] = values = new();
-            values[name] = value;
-        }
+        // What to send is worked out in Core (EmonCmsPayload) where a test can hold it to account; this
+        // service decides only how to deliver it.
+        var payloads = Core.EmonCms.EmonCmsPayload.Build(FreshSnapshots(), config, live, Log.Warning);
 
         var total = payloads.Sum(p => p.Value.Count);
         if (total == 0)
@@ -68,7 +46,7 @@ public class EmonCmsExportService : baseMQTTService
             if (c.Transport == EmonCmsTransport.Mqtt)
                 foreach (var (device, values) in payloads)
                     await SendViaMqtt(MetricsHelper.EmonCmsMqttTopic(device, config), values, cancellationToken);
-            else if (payloads.TryGetValue(string.Empty, out var combined))
+            else if (payloads.TryGetValue(Core.EmonCms.EmonCmsPayload.Combined, out var combined))
                 await SendViaHttp(combined, cancellationToken);
 
             status.RecordSuccess(total);
@@ -78,32 +56,6 @@ public class EmonCmsExportService : baseMQTTService
             status.RecordFailure(ex.Message);
             Log.Error($"EmonCMS export failed: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Every energy-flow tier's input key and value, for each exported metric (power, energy, today).
-    /// </summary>
-    private IEnumerable<(string Name, double Value)> FlowInputs(Models.PDU.PduData merged)
-    {
-        if (!c.ExportFlowNodes || !Core.Flow.FlowTiers.Any(merged, config)) yield break;
-
-        List<(string, double)> found;
-        try
-        {
-            found = Core.Flow.FlowTiers.Graphs(merged, config, live)
-                .SelectMany(g => Core.Flow.FlowTiers.Of(g.Graph, c.NodeTags))
-                .Select(t => (MetricsHelper.EmonCmsFlowInputName(t.Node.Id, t.Node.Label, t.Node.Kind, t.Metric, config), t.Value))
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            // A hierarchy that cannot be built is worth saying out loud: the PDU readings still go, and the
-            // silence about everything else is exactly what made this hard to notice.
-            Log.Warning($"EmonCMS: could not build the energy-flow hierarchy this pass, so only the PDU readings were sent ({ex.Message}).");
-            yield break;
-        }
-
-        foreach (var f in found) yield return f;
     }
 
     private async Task SendViaHttp(Dictionary<string, double> values, CancellationToken cancellationToken)
