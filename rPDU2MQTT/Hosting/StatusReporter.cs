@@ -82,42 +82,12 @@ public sealed class StatusReporter : BackgroundService
                 Detail = "Waiting for the first poll",
             });
 
-        // Only the process running the exporter has an outcome; the others report the config and leave Ok
-        // null, which the grain treats as "no news" rather than "no export".
-        var e = emon.Snapshot();
-        var attempted = emon.HasAttempted;
-        // Enabled but unusable is its own state, and it has to be visible: the exporter was skipped at
-        // startup so it will never attempt anything, which would otherwise read as a healthy "on" card
-        // that simply never counts up.
-        // An integration's own Misconfigured() is the rule now; the faults collection still carries the
-        // logging sinks, so read the integration first and fall back for anything not yet converted.
-        var emonFault = registry?.ById("emoncms")?.Misconfigured(config) is { } why
-            ? new Core.Startup.ConfigurationFault("emoncms", "EmonCMS", why)
-            : faults?.For("emoncms");
-        await grains.GetGrain<IEmonCmsStatusGrain>("emoncms").Report(new ComponentReport
-        {
-            Enabled = config.EmonCMS.Enabled,
-            Ok = emonFault is not null ? false : (attempted ? e.Ok : null),
-            Count = attempted ? e.Count : 0,
-            EventUtc = e.LastSuccessUtc,
-            Detail = emonFault is not null
-                ? emonFault.Message
-                : attempted && e.Ok == false
-                    ? e.LastError
-                    : config.EmonCMS.Transport.ToString().ToUpperInvariant(),
-        });
-
-        await grains.GetGrain<IHomeAssistantStatusGrain>("homeassistant").Report(new ComponentReport
-        {
-            Enabled = config.HASS.DiscoveryEnabled,
-            Detail = $"Topic: {(string.IsNullOrWhiteSpace(config.HASS.DiscoveryTopic) ? "—" : config.HASS.DiscoveryTopic)}",
-        });
-
-        await grains.GetGrain<IPrometheusStatusGrain>("prometheus").Report(new ComponentReport
-        {
-            Enabled = config.Prometheus.Exporter,
-            Detail = $":{config.Prometheus.Port}/metrics",
-        });
+        // The three destination cards below used to be branches here, each with its own idea of what
+        // "amber" meant. The verdict now comes from the integration itself (IStatusProvider), so the rule
+        // lives with the thing it is about and a plugin gets the same treatment as a built-in.
+        await ReportIntegration<IEmonCmsStatusGrain>("emoncms");
+        await ReportIntegration<IHomeAssistantStatusGrain>("homeassistant");
+        await ReportIntegration<IPrometheusStatusGrain>("prometheus");
 
         // Every integration that has no hand-written component grain — each loaded plugin, and any
         // built-in that never needed one. Reported from the registry rather than a branch per integration,
@@ -200,4 +170,32 @@ public sealed class StatusReporter : BackgroundService
         try { return await timer.WaitForNextTickAsync(ct); }
         catch (OperationCanceledException) { return false; }
     }
+
+    /// <summary>
+    /// Report one integration's own verdict to its component grain. The grain keeps whatever cross-process
+    /// judgement it has — EmonCMS still refuses to let an outcome-free report overwrite a known one, which
+    /// is about who is reporting rather than about what healthy means.
+    /// </summary>
+    private async Task ReportIntegration<TGrain>(string id) where TGrain : IComponentStatusGrain
+    {
+        if (registry?.ById(id) is not { } integration) return;
+
+        var last = integrationStatus?.For(id);
+        var health = Core.Integrations.IntegrationHealthDefaults.For(integration, config, last);
+        await grains.GetGrain<TGrain>(id).Report(new ComponentReport
+        {
+            Title = integration.DisplayName,
+            Enabled = health.Level != Core.Integrations.HealthLevel.Off,
+            Ok = health.Level switch
+            {
+                Core.Integrations.HealthLevel.Good => true,
+                Core.Integrations.HealthLevel.Bad => false,
+                _ => (bool?)null,
+            },
+            Count = last?.Count ?? 0,
+            EventUtc = last?.LastSuccessUtc,
+            Detail = health.Detail ?? health.Summary,
+        });
+    }
+
 }

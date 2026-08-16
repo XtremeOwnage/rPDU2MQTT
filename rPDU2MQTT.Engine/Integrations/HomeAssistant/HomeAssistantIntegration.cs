@@ -5,8 +5,9 @@ using rPDU2MQTT.Services;
 namespace rPDU2MQTT.Integrations.HomeAssistant;
 
 /// <summary>
-/// Home Assistant's Energy Dashboard: the hierarchy pushed in as grid / solar / battery / device sources
-/// over HA's WebSocket API (#128).
+/// Home Assistant: everything this bridge tells HA about itself — the MQTT discovery documents describing
+/// each device and entity, and the Energy Dashboard's own configuration pushed over HA's WebSocket API
+/// (#128).
 ///
 /// <para>
 /// Purely a configuration publisher, and the clearest case for that contract existing: this never sends a
@@ -21,26 +22,32 @@ namespace rPDU2MQTT.Integrations.HomeAssistant;
 /// figures do not add up.
 /// </para>
 /// </summary>
-public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPublisher
+public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPublisher, IStatusProvider
 {
     private readonly Config cfg;
     private readonly HaEnergyDashboardSync sync;
+    // Discovery is published by its own long-standing service; this triggers and clears it, so both halves
+    // of "what HA knows about us" answer to one integration instead of two unrelated buttons.
+    private readonly DiscoveryCoordinator? discovery;
 
-    public HomeAssistantIntegration(Config cfg, HaEnergyDashboardSync sync)
+    public HomeAssistantIntegration(Config cfg, HaEnergyDashboardSync sync, DiscoveryCoordinator? discovery = null)
     {
         this.cfg = cfg;
         this.sync = sync;
+        this.discovery = discovery;
     }
 
     public string Id => "homeassistant";
     public string DisplayName => "Home Assistant";
     public IntegrationGroup Group => IntegrationGroup.Destinations;
 
-    public bool Enabled(Config c) => c.HASS.EnergyDashboard.Enabled;
+    public bool Enabled(Config c) => c.HASS.DiscoveryEnabled || c.HASS.EnergyDashboard.Enabled;
 
     public string? Misconfigured(Config c)
     {
         var ed = c.HASS.EnergyDashboard;
+        // Discovery needs nothing but the broker this bridge already has, so only the dashboard can be
+        // misconfigured — and only when it is the part that is switched on.
         if (!ed.Enabled) return null;
         if (string.IsNullOrWhiteSpace(ed.Url)) return "The Energy Dashboard sync is enabled but HomeAssistant.EnergyDashboard.Url is not set.";
         if (string.IsNullOrWhiteSpace(ed.Token)) return "The Energy Dashboard sync is enabled but no long-lived access token is set.";
@@ -55,6 +62,21 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     public TimeSpan Interval(Config c) => TimeSpan.FromSeconds(Math.Max(30, c.Primary.PollInterval * 4));
 
     public bool PublishingEnabled(Config c) => Enabled(c) && Misconfigured(c) is null;
+
+    /// <summary>
+    /// Configured is as far as this can honestly go without calling Home Assistant, and calling it belongs
+    /// in the probe an operator triggers, not in a card refreshed on a timer.
+    /// </summary>
+    public IntegrationHealth Status(Config c)
+    {
+        if (!Enabled(c)) return new(HealthLevel.Off, "Off");
+        if (Misconfigured(c) is { } fault) return new(HealthLevel.Bad, "Misconfigured", fault);
+
+        var parts = new List<string>();
+        if (c.HASS.DiscoveryEnabled) parts.Add($"discovery → {c.HASS.DiscoveryTopic}");
+        if (c.HASS.EnergyDashboard.Enabled) parts.Add($"energy dashboard → {c.HASS.EnergyDashboard.Url}");
+        return new(HealthLevel.Good, "On", string.Join(" · ", parts));
+    }
 
     public async Task<string> PublishAsync(ExportPass pass, CancellationToken ct)
     {

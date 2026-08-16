@@ -22,6 +22,12 @@ namespace rPDU2MQTT.Core.Integrations;
 /// </para>
 /// </summary>
 /// <param name="Snapshot">Every fresh device, merged. Empty on an install with no PDU at all.</param>
+/// <param name="Snapshots">
+/// The same data unmerged, one per instance and each with the moment it was read. The merged view is what
+/// the hierarchy needs (it spans instances); this is what anything publishing per-device state needs,
+/// because a reading has to be stamped with when its OWN device was polled — merging gave every device one
+/// timestamp, which is what Home Assistant's expire_after is judged against.
+/// </param>
 /// <param name="Readings">The snapshot flattened to numeric measurements.</param>
 /// <param name="Tiers">One flow graph per exported metric — power, energy, and the daily total.</param>
 /// <param name="AtUtc">When the pass was assembled.</param>
@@ -29,7 +35,8 @@ public sealed record ExportPass(
     PduData Snapshot,
     IReadOnlyList<MeasurementReading> Readings,
     IReadOnlyList<(string Metric, FlowGraph Graph)> Tiers,
-    DateTime AtUtc)
+    DateTime AtUtc,
+    IReadOnlyList<PduSnapshot> Snapshots)
 {
     /// <summary>Is there anything at all to send this pass?</summary>
     public bool IsEmpty => Readings.Count == 0 && Tiers.All(t => t.Graph.Nodes.Count == 0);
@@ -46,11 +53,12 @@ public sealed record ExportPass(
     /// </summary>
     public static ExportPass Build(IEnumerable<PduSnapshot> snapshots, Config cfg, IFlowValueSource? live)
     {
+        var all = snapshots.ToList();
         var merged = new PduData();
         var readings = new List<MeasurementReading>();
         // Merged for the hierarchy (which spans instances), but each reading keeps the instance it came
         // from — that is the only thing the Prometheus `instance` label is built from.
-        foreach (var s in snapshots)
+        foreach (var s in all)
         {
             merged.Devices.AddRange(s.Data.Devices);
             readings.AddRange(MetricsHelper.EnumerateReadings(s.Data, s.InstanceId));
@@ -62,6 +70,6 @@ public sealed record ExportPass(
             ? FlowTiers.Graphs(merged, cfg, live)
             : Array.Empty<(string, FlowGraph)>();
 
-        return new ExportPass(merged, readings, tiers, DateTime.UtcNow);
+        return new ExportPass(merged, readings, tiers, DateTime.UtcNow, all);
     }
 }

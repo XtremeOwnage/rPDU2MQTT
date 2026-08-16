@@ -21,7 +21,7 @@ namespace rPDU2MQTT.Integrations.EmonCms;
 /// </para>
 /// </summary>
 public sealed class EmonCmsIntegration
-    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher
+    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher, IStatusProvider
 {
     private static readonly HttpClient http = new();
     private readonly Config cfg;
@@ -69,6 +69,27 @@ public sealed class EmonCmsIntegration
 
         var (ok, detail) = await history.ProbeAsync(ct);
         return (ok, detail);
+    }
+
+    /// <summary>
+    /// What "amber" means for EmonCMS, answered by the thing it is about.
+    ///
+    /// <para>
+    /// Enabled with no attempt yet is <i>waiting</i>, not failing — the export runs on the leader, so on
+    /// every other process there is genuinely nothing to report and calling that an error would light up
+    /// the board on a healthy fleet.
+    /// </para>
+    /// </summary>
+    public IntegrationHealth Status(Config c)
+    {
+        if (!Enabled(c)) return new(HealthLevel.Off, "Disabled");
+        if (Misconfigured(c) is { } fault) return new(HealthLevel.Bad, "Misconfigured", fault);
+
+        var last = status.Snapshot();
+        if (!status.HasAttempted) return new(HealthLevel.Warn, "Waiting", $"{c.EmonCMS.Transport} · no export attempted yet");
+        return last.Ok == false
+            ? new(HealthLevel.Bad, "Error", last.LastError ?? "Last export failed")
+            : new(HealthLevel.Good, "Exporting", $"{c.EmonCMS.Transport} · {last.Count} values");
     }
 
     // --- Destination ----------------------------------------------------------------------------------

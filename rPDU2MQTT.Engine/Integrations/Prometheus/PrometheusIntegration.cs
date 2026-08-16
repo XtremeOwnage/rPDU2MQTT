@@ -25,7 +25,7 @@ namespace rPDU2MQTT.Integrations.Prometheus;
 /// destination that is deliberately <b>not</b> leader-gated.
 /// </para>
 /// </summary>
-public sealed class PrometheusIntegration : IIntegration, IMeasurementDestination, IMeasurementHistory, IDisposable
+public sealed class PrometheusIntegration : IIntegration, IMeasurementDestination, IMeasurementHistory, IStatusProvider, IDisposable
 {
     private readonly Config cfg;
     private readonly Dictionary<string, Gauge> gauges = new();
@@ -62,6 +62,19 @@ public sealed class PrometheusIntegration : IIntegration, IMeasurementDestinatio
         => c.History.Enabled && string.Equals(c.History.Provider, Id, StringComparison.OrdinalIgnoreCase)
             ? history.ProbeAsync(ct)
             : Task.FromResult((true, c.Prometheus.Exporter ? $"serving :{c.Prometheus.Port}/metrics" : "push only"));
+
+    /// <summary>
+    /// Prometheus is healthy when it is serving or pushing — its own answer, because "exporting" here means
+    /// the endpoint is up on THIS process, not that anything scraped it. A scrape nobody performed is not a
+    /// fault of this bridge.
+    /// </summary>
+    public IntegrationHealth Status(Config c)
+    {
+        if (!Enabled(c)) return new(HealthLevel.Off, "Exporter off");
+        if (Misconfigured(c) is { } fault) return new(HealthLevel.Bad, "Misconfigured", fault);
+        return new(HealthLevel.Good, c.Prometheus.Exporter ? "Exporter on" : "Pushing",
+            c.Prometheus.Exporter ? $":{c.Prometheus.Port}/metrics" : c.Prometheus.Pushgateway.Url);
+    }
 
     // --- Destination ----------------------------------------------------------------------------------
 

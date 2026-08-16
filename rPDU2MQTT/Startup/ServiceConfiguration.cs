@@ -300,6 +300,8 @@ public static class ServiceConfiguration
         // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
         // Assistant discovery both need it, and neither IS the MQTT integration.
         services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
+        // The PDU object-model publisher, off the hosting base class and onto the seam.
+        services.AddSingleton<Services.MqttPduPublisher>();
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
         // Single-process ownership by default; the grain-backed lease replaces it in a real cluster.
         services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
@@ -340,7 +342,6 @@ public static class ServiceConfiguration
         // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
         if (worker)
         {
-            services.AddHostedService<MQTTPublishingService>();
 
             // v4: destinations are plugins. They are registered unconditionally and self-gate on their own
             // Enabled(cfg) every pass, so a toggle in the GUI takes effect without a restart — and the host

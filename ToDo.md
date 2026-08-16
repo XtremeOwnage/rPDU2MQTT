@@ -49,10 +49,14 @@ finishes.
     [x] Home Assistant Energy Dashboard — pure `IConfigurationPublisher`; it never sends a reading, which is
         the clearest case for that contract existing. `HaEnergyDashboardService` deleted.
     [x] `ConfigurationPublisherHost` — publishers run on their own slow cadence, always leader-gated.
-    [ ] `MQTTPublishingService` (names/states/alarms/outlet config) stays for now: it publishes the PDU's
-        whole object model through ~30 `basePublishingService` helpers, not an ExportPass. Needs its own step.
-    [ ] `HomeAssistantDiscoveryService` (native PDU discovery) — same reason; it is coupled to
-        `DiscoveryCoordinator` and the publishing helpers.
+    [x] `MQTTPublishingService` converted. Its helpers moved off `basePublishingService` onto
+        `MqttPduPublisher` (the publish seam), and `MqttPduIntegration` is a destination like any other.
+        It publishes from `ExportPass.Snapshots`, not the merged view, so each device carries its OWN poll
+        time — `expire_after` is judged against exactly that.
+    [x] Home Assistant discovery is reachable through `HomeAssistantIntegration`: publish republishes the
+        discovery documents AND syncs the dashboard, sweep clears both. Two halves of "what HA knows about
+        us" behind one integration instead of two unrelated buttons. The discovery service still owns the
+        periodic publish.
 
 4. Generic health, test and faults
     [x] `IStatusProvider` — an integration decides what its own health means, with a shared default
@@ -66,9 +70,10 @@ finishes.
     [x] `/api/integrations/{id}/{action}` replaces the per-destination test endpoints (probe is derived).
     [x] Startup banner built from the registry. Fixed while verifying: it reported a switched-OFF EmonCMS
         as "DISABLED (misconfigured)" because the fault was read without checking Enabled first.
-    [ ] The five bespoke status grains stay for now — each encodes a real verdict rule about its own
-        subject, and replacing them with the generic one would lose reasoning rather than share it. They
-        should adopt `IStatusProvider` instead, one at a time.
+    [x] EmonCMS, Prometheus and Home Assistant adopted `IStatusProvider`. The verdicts moved onto the
+        integrations that own them; the grains keep only their cross-process judgement (EmonCMS still
+        refuses to let an outcome-free report overwrite a known one, which is about WHO is reporting rather
+        than what healthy means). Three branches gone from StatusReporter.
     [x] Generic action buttons: `integrationActionBar()` renders whatever an integration says it can do,
         naming none of them. Destructive actions confirm, and say what they will remove, first. The
         hand-wired per-destination functions stay until every built-in is converted onto the contracts.
