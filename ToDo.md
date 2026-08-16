@@ -250,6 +250,18 @@ finishes.
         config model. Plugin sections are stripped from it deliberately: the fixture describes the BUILD,
         and `plugin.check.mjs` supplies its own.
 
+12. Making plugins usable where the bridge actually runs
+    [x] Dockerfile creates `/app/plugins`, so a bind mount has somewhere to land and the loader's
+        "directory does not exist" path is not the normal case.
+    [x] Helm chart mounts a plugins volume when `plugins.enabled`. Read-only on purpose: a plugin directory
+        the workload can write to is a way to change what code runs without changing the image. The volume
+        SOURCE is left to the operator (PVC, init container, ConfigMap binaryData) because how a DLL reaches
+        a cluster is not a decision this chart should make.
+    [x] CI templates both plugin combinations and greps for the mount. Plugins are off by default, so the
+        existing default render never reached the block — it would have been untested template.
+    [ ] NOT verified locally: no helm binary in this environment, so the chart edit is reviewed by eye and
+        by the CI step above rather than rendered here. First CI run on this branch is the real check.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.

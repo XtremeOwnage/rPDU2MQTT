@@ -164,11 +164,20 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- if not $.Values.kubernetesConfigSource.enabled }}
+          {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled }}
           volumeMounts:
+            {{- if not $.Values.kubernetesConfigSource.enabled }}
             - name: config
               mountPath: /config
               readOnly: true
+            {{- end }}
+            {{- if $.Values.plugins.enabled }}
+            # Plugin assemblies. Read-only: nothing in the bridge writes here, and a plugin directory the
+            # workload can write to is a way to change what code runs without changing the image.
+            - name: plugins
+              mountPath: /app/plugins
+              readOnly: true
+            {{- end }}
           {{- end }}
           {{- $res := $.Values.resources }}
           {{- if $r.component }}{{ $res = (index $.Values.split $r.component).resources | default $.Values.resources }}{{ end }}
@@ -176,11 +185,17 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if not $.Values.kubernetesConfigSource.enabled }}
+      {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled }}
       volumes:
+        {{- if not $.Values.kubernetesConfigSource.enabled }}
         - name: config
           configMap:
             name: {{ include "rpdu2mqtt.fullname" $ }}
+        {{- end }}
+        {{- if $.Values.plugins.enabled }}
+        - name: plugins
+          {{- toYaml $.Values.plugins.volume | nindent 10 }}
+        {{- end }}
       {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:

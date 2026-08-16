@@ -358,3 +358,19 @@ valkey:
       memory: 32Mi
     limits:
       memory: 128Mi
+
+# Externally loaded plugins (v4). A plugin is an ordinary .NET class library dropped into /app/plugins;
+# see Examples/Plugins. Off by default — an empty mount would only slow startup.
+#
+# The volume is yours to choose, because how a DLL reaches a cluster is a decision this chart should not
+# make: a PVC someone copies builds into, an init container that fetches a release, or a ConfigMap with
+# binaryData for something small. Whatever it is, it is mounted read-only — a plugin directory the workload
+# can write to is a way to change what code runs without changing the image.
+#
+# Note: a plugin's settings live under the `Plugins` map in the config, NOT as CRD fields. The CRD is a
+# compile-time contract and cannot describe a type that exists only on your machine.
+plugins:
+  enabled: false
+  volume:
+    persistentVolumeClaim:
+      claimName: rpdu2mqtt-plugins

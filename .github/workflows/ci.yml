@@ -39,6 +39,13 @@ jobs:
         run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
+      # Plugins are off by default, so the default render never reaches the volume/mount they add. Both
+      # combinations, because the mount block is shared with the config volume and the two gate separately.
+      - name: helm template (plugins)
+        run: |
+          helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true | grep -q 'mountPath: /app/plugins'
+          helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true --set kubernetesConfigSource.enabled=true \
+            | grep -q 'mountPath: /app/plugins' 
 
       - name: helm template (split roles)
         run: |

@@ -34,4 +34,7 @@ RUN dotnet publish "./rPDU2MQTT.csproj" -c $BUILD_CONFIGURATION -o /app/publish 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+# Where externally loaded plugins go (v4). Created empty so a bind mount or volume has somewhere to land,
+# and so the loader's "directory does not exist" path is not the normal case. Override with RPDU2MQTT_PLUGINS.
+RUN mkdir -p /app/plugins
 ENTRYPOINT ["dotnet", "rPDU2MQTT.dll"]
