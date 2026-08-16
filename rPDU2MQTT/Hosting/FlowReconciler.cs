@@ -105,7 +105,7 @@ public sealed class FlowReconciler : BackgroundService
             try { await ReconcileAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Flow reconciler: {ex.Message}"); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
     }
 
     // The provisioned shape, so a change to the graph is reported and a steady state stays quiet.
@@ -142,11 +142,5 @@ public sealed class FlowReconciler : BackgroundService
             if (p.Type == "measured" && p.StaticValue is { } v && grain is IMeasuredNodeGrain leaf)
                 await leaf.Observe(Metric.RealPower, v);
         }
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }

@@ -59,7 +59,7 @@ public sealed class StatusReporter : BackgroundService
             try { await ReportAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Status reporter: {ex.Message}"); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
     }
 
     private async Task ReportAsync()
@@ -164,13 +164,6 @@ public sealed class StatusReporter : BackgroundService
             EventUtc = self.StartedUtc,
         });
     }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
-    }
-
     /// <summary>
     /// Report one integration's own verdict to its component grain. The grain keeps whatever cross-process
     /// judgement it has — EmonCMS still refuses to let an outcome-free report overwrite a known one, which

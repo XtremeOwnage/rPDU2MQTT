@@ -38,7 +38,7 @@ public sealed class ValueSourcePluginHost : BackgroundService
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Log.Error(ex, "Value-source plugin reconcile failed."); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
     }
 
     /// <summary>One reconcile pass. Public so a test can drive it without a host.</summary>
@@ -70,16 +70,4 @@ public sealed class ValueSourcePluginHost : BackgroundService
             }
         }
     }
-
-    /// <summary>
-    /// The tick wait, with shutdown treated as an ending rather than a fault. The await used to sit in the
-    /// while-condition outside the try, so cancelling on shutdown threw past the handler and the host
-    /// reported a background service crash on every clean stop.
-    /// </summary>
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
-    }
-
 }

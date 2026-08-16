@@ -50,7 +50,7 @@ public sealed class MqttTopicIndexService : BackgroundService
             try { await PumpAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Topic index: {ex.Message}"); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
 
         if (subscribedFilter is not null) await StopListening();
     }
@@ -135,11 +135,5 @@ public sealed class MqttTopicIndexService : BackgroundService
         if (payload.Length > MaxPayloadChars) payload = payload[..MaxPayloadChars];
 
         buffer[topic] = new TopicSample { Topic = topic, Payload = payload, SeenUtc = DateTime.UtcNow };
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }

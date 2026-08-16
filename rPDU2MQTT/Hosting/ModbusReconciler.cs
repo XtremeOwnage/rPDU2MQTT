@@ -33,7 +33,7 @@ public sealed class ModbusReconciler : BackgroundService
             try { await ReconcileAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Modbus reconciler: {ex.Message}"); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
     }
 
     private async Task ReconcileAsync()
@@ -76,11 +76,5 @@ public sealed class ModbusReconciler : BackgroundService
             };
             await grains.GetGrain<IModbusGrain>(IModbusGrain.KeyFor(first.Host, first.Port, first.UnitId)).Configure(cfg);
         }
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }

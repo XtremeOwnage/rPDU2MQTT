@@ -44,12 +44,6 @@ public sealed class PduGrainActivator : BackgroundService
                 catch (Exception ex) { Serilog.Log.Debug($"PDU activator: {id} poll failed: {ex.Message}"); }
             }
         }
-        while (await SafeWait(timer, stoppingToken));
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
+        while (await Core.Ticks.Next(timer, stoppingToken));
     }
 }

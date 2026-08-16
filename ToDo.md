@@ -226,6 +226,18 @@ finishes.
     [x] Verified by sabotage: leader-gating everything and letting one failure abort the pass each fail
         the tests written for them.
 
+10. Duplication the conversions exposed
+    [x] `Core.Ticks.Next` replaces fifteen copies of the same `SafeWait` helper. Twelve predate this branch;
+        I copied the convention into three more before noticing. The subtlety is worth having in one place:
+        in `do { … } while (await timer.WaitForNextTickAsync(ct))` the await sits in the while-CONDITION,
+        outside the try, so cancelling on shutdown throws past the loop's own handler and the host reports a
+        background-service crash on every clean stop.
+    [x] Verified: a real run now stops on SIGTERM with zero unhandled/crash lines.
+    [ ] `EmonCmsStatus` still exists alongside the generic `IntegrationStatus`. Two holders for one idea, but
+        the EmonCMS one carries `HasAttempted` and a snapshot shape the status grain and the GUI both read,
+        so merging them touches the Status board and the health indicator. Worth doing; not worth rushing
+        into the tail of this branch.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.

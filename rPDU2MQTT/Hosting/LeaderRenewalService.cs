@@ -68,14 +68,8 @@ public sealed class LeaderRenewalService : BackgroundService
             }
             state.IsLeader = now;
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
 
         state.IsLeader = false;
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }
