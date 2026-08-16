@@ -16,10 +16,10 @@ public sealed class VertivDeviceReader : IDeviceReader
 
     public bool Handles(string instanceId, Config cfg) => registry.All.ContainsKey(instanceId);
 
-    public Task<PduData?> ReadAsync(string instanceId, Config cfg, CancellationToken ct)
-        => registry.All.TryGetValue(instanceId, out var pdu)
-            ? pdu.GetRootData_Public(ct)!
-            : Task.FromResult<PduData?>(null);
+    public async Task<PduData?> ReadAsync(string instanceId, Config cfg, CancellationToken ct)
+        // Awaited rather than returned, so the nullable contract is satisfied honestly instead of by a
+        // null-forgiving cast on a Task the compiler was right to object to.
+        => registry.All.TryGetValue(instanceId, out var pdu) ? await pdu.GetRootData_Public(ct) : null;
 
     public TimeSpan Interval(string instanceId, Config cfg)
         => TimeSpan.FromSeconds(Math.Max(1, cfg.Pdus.TryGetValue(instanceId, out var c) ? c.PollInterval : 5));
