@@ -278,14 +278,13 @@ public static class ServiceConfiguration
         {
             services.AddHostedService<MQTTPublishingService>();
 
-            // Energy-hierarchy MQTT export (#164) — a no-op until EnergyFlow.MqttExport is enabled, which
-            // the GUI can toggle at runtime, so register unconditionally rather than gating on the flag.
-            services.AddHostedService<EnergyFlowMqttExportService>();
-
             // v4: destinations are plugins. They are registered unconditionally and self-gate on their own
             // Enabled(cfg) every pass, so a toggle in the GUI takes effect without a restart — and the host
             // builds ONE ExportPass and offers it to all of them, so none can quietly omit the hierarchy.
             services.AddHostedService<DestinationHost>();
+            // Configuration is not a reading: it changes when the operator changes something, so each
+            // publisher runs on its own (much slower) cadence rather than once per poll.
+            services.AddHostedService<ConfigurationPublisherHost>();
 
             // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
             // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in
@@ -305,7 +304,6 @@ public static class ServiceConfiguration
 
             // Sync the energy-flow hierarchy into HA's Energy Dashboard via its WebSocket API (#128).
             // Registered unconditionally; it honors the live HomeAssistant.EnergyDashboard.Enabled toggle.
-            services.AddHostedService<HaEnergyDashboardService>();
 
             // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
             if (cfg.Primary.ActionsEnabled)

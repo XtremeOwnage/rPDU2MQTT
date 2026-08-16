@@ -44,9 +44,15 @@ finishes.
         capabilities on one vendor, one config section. `EmonCmsExportService` deleted.
     [x] `IMessagePublisher` — publishing to the broker without inheriting `baseMQTTService`'s whole hosting
         model. EmonCMS's MQTT transport needed it; HA discovery will too.
-    [ ] MQTT publish + energy-flow export.
-    [ ] Home Assistant discovery.
-    [ ] Home Assistant energy dashboard.
+    [x] MQTT energy-flow export — `IMeasurementDestination` (tier state topics) + `IConfigurationPublisher`
+        (the HA discovery documents describing those topics). `EnergyFlowMqttExportService` deleted.
+    [x] Home Assistant Energy Dashboard — pure `IConfigurationPublisher`; it never sends a reading, which is
+        the clearest case for that contract existing. `HaEnergyDashboardService` deleted.
+    [x] `ConfigurationPublisherHost` — publishers run on their own slow cadence, always leader-gated.
+    [ ] `MQTTPublishingService` (names/states/alarms/outlet config) stays for now: it publishes the PDU's
+        whole object model through ~30 `basePublishingService` helpers, not an ExportPass. Needs its own step.
+    [ ] `HomeAssistantDiscoveryService` (native PDU discovery) — same reason; it is coupled to
+        `DiscoveryCoordinator` and the publishing helpers.
 
 4. Generic health, test and faults
     [ ] One component status grain keyed by plugin id; delete the five bespoke ones.
