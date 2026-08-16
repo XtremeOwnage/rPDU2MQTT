@@ -16,16 +16,22 @@ public sealed class PduSyncService : BackgroundService
 {
     private readonly IGrainFactory grains;
     private readonly PduInstanceRegistry registry;
+    // Device instances supplied by plugins, supervised by the same grain as a configured PDU.
+    private readonly IReadOnlyList<string> pluginDevices;
     private readonly IMessageBus bus;
     private readonly HealthState health;
     private readonly Config config;
     // The freshest snapshot timestamp seen per instance — a repeat of the same one isn't a new poll.
     private readonly Dictionary<string, DateTime> seen = new(StringComparer.OrdinalIgnoreCase);
 
-    public PduSyncService(IGrainFactory grains, PduInstanceRegistry registry, IMessageBus bus, HealthState health, Config config)
+    public PduSyncService(IGrainFactory grains, PduInstanceRegistry registry, IMessageBus bus, HealthState health, Config config, IEnumerable<rPDU2MQTT.Core.Integrations.IDeviceReader>? readers = null)
     {
         this.grains = grains;
         this.registry = registry;
+        pluginDevices = (readers ?? [])
+            .OfType<rPDU2MQTT.Core.Integrations.PluginDeviceReader>()
+            .SelectMany(r => r.InstanceIds)
+            .ToList();
         this.bus = bus;
         this.health = health;
         this.config = config;
@@ -37,7 +43,10 @@ public sealed class PduSyncService : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         do
         {
-            foreach (var id in registry.All.Keys)
+            // Every device instance, not only the configured Vertiv ones: a plugin device is supervised by
+            // the same grain, so its snapshot has to be collected from the same place or it polls into
+            // nothing and every downstream consumer sees a device that is there and never reports.
+            foreach (var id in registry.All.Keys.Concat(pluginDevices))
             {
                 try
                 {

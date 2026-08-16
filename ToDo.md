@@ -131,11 +131,15 @@ finishes.
     [x] `VertivIntegration` — the hardware this bridge was written for is a first-class integration:
         registry, banner, Status board, /health/integrations, per-instance freshness judged against each
         instance's own poll interval. It is no longer the one thing that is special.
-    [ ] The POLL still lives in `PduGrain`, deliberately. That grain is the single cluster-wide activation
-        per PDU and supervises the device/outlet/group child grains outlet writes route through; moving the
-        read out would take the supervision with it and break control. The finishing move is inverting the
-        dependency instead — have `PduGrain` poll THROUGH `IDeviceSourcePlugin` — so a new vendor inherits
-        the activation and supervision rather than reimplementing them.
+    [x] The dependency is inverted. `PduGrain` polls through `IDeviceReader` — `VertivDeviceReader` for a
+        configured PDU, `PluginDeviceReader` for a plugin device — so a plugin device inherits the single
+        cluster-wide activation AND the device/outlet/group child supervision that outlet writes route
+        through, instead of reimplementing them. `DeviceSourcePluginHost` (the parallel poller) is deleted.
+    [x] `PduGrainActivator` and `PduSyncService` drive and collect plugin device instances too. Caught on
+        the rig: the grain polled the plugin device correctly and nothing downstream saw it, because the
+        sync service still iterated only the configured PDUs.
+    [x] Verified end to end: the plugin device reports 77 W per outlet through the grain path, and
+        switching outlet 0 took it to 0 while outlet 1 stayed at 77.
     [x] `IDeviceControlPlugin` — a plugin device's outlets can be switched. `OutletGrainControl` routes to
         the plugin that owns the device id, holding the single-owner lease; a device with no reboot says so
         via Supports() rather than failing the command.

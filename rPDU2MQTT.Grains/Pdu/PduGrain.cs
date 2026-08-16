@@ -23,6 +23,8 @@ namespace rPDU2MQTT.Grains.Pdu;
 public sealed class PduGrain : Grain, IPduGrain
 {
     private readonly Config config;
+    // Every reader that could own a device instance: the Vertiv client, and any plugin-supplied device.
+    private readonly IReadOnlyList<Core.Integrations.IDeviceReader> readers;
     private readonly PduInstanceRegistry registry;
     private readonly ILogger<PduGrain> log;
     private RawSnapshot? latest;
@@ -35,11 +37,13 @@ public sealed class PduGrain : Grain, IPduGrain
     private string? lastShape;
     private int failures;
 
-    public PduGrain(Config config, PduInstanceRegistry registry, ILogger<PduGrain> log)
+    public PduGrain(Config config, PduInstanceRegistry registry, ILogger<PduGrain> log,
+        IEnumerable<Core.Integrations.IDeviceReader>? readers = null)
     {
         this.config = config;
         this.registry = registry;
         this.log = log;
+        this.readers = readers?.ToList() ?? [];
     }
 
     /// <summary>This grain's own PDU: its key <i>is</i> the instance id, so there's nothing to choose.</summary>
@@ -105,16 +109,23 @@ public sealed class PduGrain : Grain, IPduGrain
     public async Task Poll()
     {
         var id = this.GetPrimaryKeyString();
-        if (Device is not { } pdu) return;
 
-        var interval = TimeSpan.FromSeconds(Math.Max(1, config.Pdus.TryGetValue(id, out var c) ? c.PollInterval : 5));
+        // Whoever owns this instance — the Vertiv client, or a plugin's device. Asking rather than calling
+        // the Vertiv client directly is what lets a plugin device inherit this grain's single cluster-wide
+        // activation and its supervision of the outlet grains that writes are routed through.
+        var reader = readers.FirstOrDefault(r => r.Handles(id, config));
+        if (reader is null) return;
+
+        var interval = reader.Interval(id, config);
         if (DateTime.UtcNow - lastPollUtc < interval) return;   // throttle
         lastPollUtc = DateTime.UtcNow;
 
         try
         {
             var started = DateTime.UtcNow;
-            var data = await pdu.GetRootData_Public(CancellationToken.None);
+            var data = await reader.ReadAsync(id, config, CancellationToken.None);
+            // Nothing to report is not "everything went to zero": leave the previous snapshot to go stale.
+            if (data is null) return;
             // Project onto the round-trippable wire form — the live PduData can't be re-serialized faithfully.
             latest = RawSnapshotMapper.ToWire(id, DateTime.UtcNow, data);
             var elapsed = DateTime.UtcNow - started;

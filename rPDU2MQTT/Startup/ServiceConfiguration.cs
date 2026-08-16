@@ -272,10 +272,12 @@ public static class ServiceConfiguration
         if (cfg.History.Enabled && cfg.History.ValueFallback)
             services.AddHostedService<Services.HistoryValueSourceService>();
 
-        // A plugin that polls hardware files its snapshots in the same cache the built-in poller feeds, so
-        // publishing, discovery, the flow graph and every destination work on it unchanged.
-        if (worker && pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().Any())
-            services.AddHostedService<Services.DeviceSourcePluginHost>();
+        // A plugin that polls hardware is a reader like the Vertiv one, so it is supervised by the same
+        // grain rather than by a parallel host — one activation cluster-wide, and its outlets get the child
+        // grains that writes route through.
+        var devicePlugins = pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().ToList();
+        if (devicePlugins.Count > 0)
+            services.AddSingleton<Core.Integrations.IDeviceReader>(new Core.Integrations.PluginDeviceReader(devicePlugins));
 
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
@@ -300,6 +302,10 @@ public static class ServiceConfiguration
         // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
         // Assistant discovery both need it, and neither IS the MQTT integration.
         services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
+        // Who can read a device instance. The grain asks these rather than calling the Vertiv client, so a
+        // plugin device gets the same single activation and child supervision the built-in poller has.
+        services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();
+
         // The PDU object-model publisher, off the hosting base class and onto the seam.
         services.AddSingleton<Services.MqttPduPublisher>();
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
