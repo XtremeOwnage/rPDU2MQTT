@@ -78,6 +78,29 @@ public class Config
     [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
     public ModbusConfig Modbus { get; set; } = new ModbusConfig();
 
+    /// <summary>
+    /// Settings for externally loaded plugins, keyed by plugin id.
+    ///
+    /// <para>
+    /// A built-in integration has a typed property above. A plugin dropped into the plugins directory
+    /// cannot — this file is compiled before it exists — so its section is stored here untyped and bound to
+    /// the plugin's own settings class on load. The GUI still renders a proper form for it, because the
+    /// schema it draws from is generated at runtime rather than compiled into the bundle.
+    /// </para>
+    /// <para>
+    /// Sections for plugins that are not currently installed are kept, never pruned: uninstalling a plugin
+    /// to try something else must not silently discard how it was set up.
+    /// </para>
+    /// </summary>
+    [YamlMember(Alias = "Plugins", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Settings for externally loaded plugins, keyed by plugin id.")]
+    /// <remarks>
+    /// Typed as plain objects, not <c>JsonNode</c>: YamlDotNet cannot construct a JsonNode, and typing it
+    /// that way meant a config carrying any Plugins section failed to parse — taking the whole bridge down
+    /// rather than one plugin. The binder converts whatever YAML produced into JSON on the way to a
+    /// plugin's own settings class.
+    /// </remarks>
+    public Dictionary<string, object?> Plugins { get; set; } = new();
+
     /// <summary>Shared Redis/Valkey cache — durable state that survives restarts and is shared by replicas.</summary>
     public CacheConfig Cache { get; set; } = new CacheConfig();
 
@@ -103,6 +126,7 @@ public class Config
         Health = other.Health;
         Api = other.Api;
         EnergyFlow = other.EnergyFlow;
+        Plugins = other.Plugins;
         Modbus = other.Modbus;
         Operator = other.Operator;
     }

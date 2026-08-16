@@ -67,6 +67,13 @@ public sealed class SchemaNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TagChoices { get; set; }
 
+    /// <summary>
+    /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
+    /// rather than as a property of its own. The GUI reads and writes it there.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPlugin { get; set; }
+
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -123,6 +130,39 @@ public static class ConfigSchema
 
     /// <summary>Build the schema for the whole configuration model.</summary>
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
+
+    /// <summary>
+    /// The schema, plus a section per externally loaded plugin.
+    ///
+    /// <para>
+    /// This is what makes a runtime-loaded plugin configurable without shipping any UI: the GUI's form is
+    /// drawn from whatever this returns, so a plugin's settings class becomes a rendered page with typed
+    /// inputs, descriptions and defaults — the same treatment a built-in section gets.
+    /// </para>
+    /// <para>
+    /// The CRD generator deliberately calls <see cref="Build()"/> instead. A CRD is a compile-time contract
+    /// published to the API server; it cannot describe a type that only exists on one operator's machine,
+    /// and generating a different CRD per install is worse than not describing those fields at all.
+    /// </para>
+    /// </summary>
+    public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType)> plugins)
+    {
+        var schema = BuildObject(typeof(Config));
+        foreach (var (id, label, type) in plugins)
+        {
+            var node = new SchemaNode
+            {
+                Key = id,
+                Label = label,
+                Type = "object",
+                Description = "Settings for the " + label + " plugin.",
+                Properties = BuildObject(type),
+                IsPlugin = true,
+            };
+            schema.Add(node);
+        }
+        return schema;
+    }
 
     private static List<SchemaNode> BuildObject(Type type)
     {

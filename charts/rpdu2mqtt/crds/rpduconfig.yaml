@@ -1209,6 +1209,14 @@ spec:
                           description: Poll this device. Turn off to disable it without deleting the connection.
                     description: Modbus TCP devices to poll. Add one per device, then reference it from a source binding's Connection.
                 description: Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).
+              Plugins:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                additionalProperties:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  properties: {}
+                description: Settings for externally loaded plugins, keyed by plugin id.
               Cache:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true

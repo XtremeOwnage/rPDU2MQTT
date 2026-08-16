@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A plugin is an ordinary class library. One project reference, no host, no Orleans, no ASP.NET.
+       Build it and copy the DLL into the bridge's plugins/ directory. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>rPDU2MQTT.Plugin.HelloWorld</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Private so the plugin ships only its own DLL: the host already has Core loaded, and a plugin
+         carrying its own copy would implement an interface the runtime considers a different type. -->
+    <ProjectReference Include="..\..\..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>

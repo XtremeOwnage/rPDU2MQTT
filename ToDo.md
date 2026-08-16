@@ -77,7 +77,27 @@ finishes.
     [ ] `IDeviceSource` + `IDeviceControl`; Vertiv rPDU moved onto them.
     [ ] Single-owner lease as a declared capability, not something a plugin author writes.
 
-8. Extend — only once everything above is converted
+8. External plugins (built — the earlier "in-tree only" call was reversed)
+    [x] `PluginLoader` — scans `plugins/` (or `RPDU2MQTT_PLUGINS`), one `AssemblyLoadContext` each, host
+        types shared. A plugin that will not load is reported and skipped.
+    [x] `IConfigurablePlugin` + `PluginConfigBinder` — a plugin declares a settings class; its section is
+        stored under `Config.Plugins[id]` and bound on load.
+    [x] `Config.Plugins` is `Dictionary<string, object?>`, NOT JsonNode: YamlDotNet cannot construct a
+        JsonNode, and typing it that way made any config with a Plugins section fail to parse — taking the
+        whole bridge down rather than one plugin. Caught on the rig, fixed, CRDs regenerated.
+    [x] YAML scalars are re-typed on the way to JSON (`"true"` -> true, `"10"` -> 10), or every bool and
+        number silently falls back to its default.
+    [x] `Examples/Plugins/HelloWorld` — a working out-of-tree destination in ~60 lines, referencing only
+        Core. Verified end to end: loaded from a DLL, bound its own YAML config, received the ExportPass
+        and wrote every reading and tier to a file.
+    [ ] Plugin config pages do not render yet. `ConfigSchema.Build(plugins)` and `PluginSchemaSections`
+        exist and are wired, but `/api/schema` is captured in Program.cs before `PluginSections` is set
+        during registration — an ordering fix, not a design problem. THIS IS THE NEXT THING TO DO.
+    [ ] Nav grouping for plugin sections (they need `IntegrationGroup` -> nav group, see item 5).
+    [ ] A plugin's actions are declared and routable but `/api/integrations/{id}/{action}` is not mounted
+        in GuiService yet (item 4).
+
+9. Extend — only once everything above is converted
     [ ] EmonCMS + Prometheus as value sources, via the `IFlowHistory` → `IFlowValueSource` adapter.
     [ ] Home Assistant as a value source (entity states).
     [ ] Home Assistant as a history provider (recorder/statistics).

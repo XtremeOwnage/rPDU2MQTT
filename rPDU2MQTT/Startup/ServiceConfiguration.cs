@@ -12,6 +12,13 @@ namespace rPDU2MQTT.Startup;
 
 public static class ServiceConfiguration
 {
+    /// <summary>
+    /// Config sections contributed by externally loaded plugins, resolved during registration so the
+    /// schema endpoint can offer them. Static because the schema is served before the container is built.
+    /// </summary>
+    public static IReadOnlyList<(string Id, string Label, Type ConfigType)> PluginSections { get; private set; }
+        = Array.Empty<(string, string, Type)>();
+
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
         // While- we can request services when building dependencies-
@@ -231,6 +238,20 @@ public static class ServiceConfiguration
                      .Where(t => t is { IsClass: true, IsAbstract: false })
                      .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t)))
             services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
+
+        // Externally loaded plugins: reference Core, implement IIntegration, drop the DLL in plugins/.
+        // A plugin that will not load is reported and skipped — a third-party DLL cannot stop the bridge.
+        var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
+        var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
+        if (pluginIntegrations.Count > 0)
+        {
+            Plugins.PluginLoader.Configure(pluginIntegrations, cfg, m => Log.Warning(m));
+            foreach (var integration in pluginIntegrations)
+                services.AddSingleton(typeof(Core.Integrations.IIntegration), integration);
+        }
+        // The GUI renders a settings page per plugin from this, with no plugin-supplied UI involved.
+        PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
+        services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
 
         services.AddSingleton<Core.Integrations.IntegrationRegistry>();
         // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home

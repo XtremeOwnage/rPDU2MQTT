@@ -18,7 +18,7 @@ if (args.Contains("--emit-crd"))
 if (args.Contains("--emit-schema"))
 {
     Console.Write(System.Text.Json.JsonSerializer.Serialize(
-        rPDU2MQTT.Services.Gui.ConfigSchema.Build(), rPDU2MQTT.Services.Gui.ConfigSchema.Json));
+        rPDU2MQTT.Services.Gui.ConfigSchema.Build(rPDU2MQTT.Startup.ServiceConfiguration.PluginSections), rPDU2MQTT.Services.Gui.ConfigSchema.Json));
     return 0;
 }
 
