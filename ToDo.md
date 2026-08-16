@@ -91,7 +91,9 @@ finishes.
     [ ] `NAV_GROUPS` / `NAV_ICONS` stay for the built-ins: they interleave schema sections with the visual
         editors (Flow, Nodes, Trends), which have no schema section to hang a group off. Inverting that is
         its own change.
-    [ ] A GUI check pinning "a new destination needs zero TypeScript".
+    [x] `plugin.check.mjs` renders a plugin the GUI has never heard of and asserts it gets a nav entry in
+        its declared group, generated fields bound under `Plugins/`, and buttons from its declared actions.
+        Runs in the build. Verified by sabotage: removing the action bar fails it.
 
 6. Sources onto the contracts
     [x] `IValueSourcePlugin` — a plugin supplies live values for bindings naming its own type, joining the

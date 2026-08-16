@@ -83,6 +83,9 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/energyshow.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/history.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/trends.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- A plugin is a drop-in DLL only for as long as no TypeScript names one. This renders a plugin the
+		     GUI has never heard of and asserts it gets a nav entry, generated fields and its buttons. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugin.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 
