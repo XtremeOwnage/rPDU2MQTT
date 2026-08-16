@@ -51,10 +51,15 @@ finishes.
         call the generic route, so a button and the API cannot do different things.
     [x] EmonCMS provisioning holds the single-owner lease. The deleted endpoint got that from a grain;
         losing it would have let two instances race and create duplicate feeds.
-    [ ] `/api/test/mqtt`, `/api/test/pdu` and `/api/test/history` still exist. They are connection tests
-        for things that are not integrations in their own right (the broker, a PDU's HTTP API, whichever
-        history backend is selected) — `vertiv/probe` and `mqtt/probe` overlap but are not equivalent, so
-        folding them in needs a decision about what each should mean rather than a rename.
+    [x] `/api/test/mqtt` and `/api/test/pdu` deleted. Resolving the overlap meant making the probes do
+        real work rather than renaming: `mqtt/probe` reports the live broker connection instead of the
+        configured address ("Publishing" while disconnected is the card that sends someone looking at the
+        wrong thing), and `vertiv/probe` actually dials each PDU instead of reporting snapshot age — a
+        probe is what an operator triggers when the board is ALREADY wrong, so "last poll was 4 minutes
+        ago" is the question, not the answer.
+    [—] `/api/test/history` stays. It asks "is the selected backend answering", which is a question about
+        the History setting rather than about any one integration — the answer changes when that setting
+        changes, not when an integration does.
 
 3. The other destinations
     [x] EmonCMS — destination + history + configuration publisher (feed provisioning + sweep). Three

@@ -18,11 +18,13 @@ public sealed class MqttPduIntegration : IIntegration, IMeasurementDestination, 
 {
     private readonly Config cfg;
     private readonly Services.MqttPduPublisher publisher;
+    private readonly HiveMQtt.Client.IHiveMQClient? mqtt;
 
-    public MqttPduIntegration(Config cfg, Services.MqttPduPublisher publisher)
+    public MqttPduIntegration(Config cfg, Services.MqttPduPublisher publisher, HiveMQtt.Client.IHiveMQClient? mqtt = null)
     {
         this.cfg = cfg;
         this.publisher = publisher;
+        this.mqtt = mqtt;
     }
 
     public string Id => "mqtt";
@@ -35,8 +37,25 @@ public sealed class MqttPduIntegration : IIntegration, IMeasurementDestination, 
     /// </summary>
     public bool Enabled(Config c) => true;
 
+    /// <summary>
+    /// The broker connection itself, not the configured address. "Publishing" while disconnected is the
+    /// card that sends someone looking at the wrong thing — everything downstream of a dead broker is
+    /// silent, and this is the one place that can say why.
+    /// </summary>
     public IntegrationHealth Status(Config c)
-        => new(HealthLevel.Good, "Publishing", $"{c.MQTT.Connection?.Host}:{c.MQTT.Connection?.Port} under '{c.MQTT.ParentTopic}'");
+    {
+        var where = $"{c.MQTT.Connection?.Host}:{c.MQTT.Connection?.Port}";
+        if (mqtt is null) return new(HealthLevel.Warn, "No client", where);
+        return mqtt.IsConnected()
+            ? new(HealthLevel.Good, "Connected", $"{where} under '{c.MQTT.ParentTopic}'")
+            : new(HealthLevel.Bad, "Disconnected", where);
+    }
+
+    public Task<(bool Ok, string Detail)> ProbeAsync(Config c, CancellationToken ct)
+    {
+        var health = Status(c);
+        return Task.FromResult((health.Level == HealthLevel.Good, health.Detail ?? health.Summary));
+    }
 
     public async Task SendAsync(ExportPass pass, CancellationToken ct)
     {

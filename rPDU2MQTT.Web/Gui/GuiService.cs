@@ -1174,40 +1174,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapPost("/api/test/mqtt", () =>
-        {
-            var connected = mqtt.IsConnected();
-            return Results.Json(new
-            {
-                ok = connected,
-                message = connected
-                    ? $"Connected to {mqtt.Options.Host}:{mqtt.Options.Port}."
-                    : $"Not connected to {mqtt.Options.Host}:{mqtt.Options.Port}.",
-            }, ConfigSchema.Json);
-        });
-
-        app.MapPost("/api/test/pdu", async (HttpContext ctx) =>
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            try
-            {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
-                var devices = data.Devices?.Count ?? 0;
-                var outlets = data.Devices?.Sum(d => d.Outlets?.Count ?? 0) ?? 0;
-                return Results.Json(new
-                {
-                    ok = true,
-                    message = $"Reached PDU: {devices} device(s), {outlets} outlet(s).",
-                }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"PDU request failed: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
-
         // Browse what's on the broker, for the Nodes editor's topic autocomplete.
         app.MapGet("/api/ha/devices/stale", async () =>
         {

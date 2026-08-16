@@ -27,11 +27,13 @@ public sealed class VertivIntegration : IIntegration, IStatusProvider
 {
     private readonly Config cfg;
     private readonly ISnapshotCache snapshots;
+    private readonly PduInstanceRegistry? registry;
 
-    public VertivIntegration(Config cfg, ISnapshotCache snapshots)
+    public VertivIntegration(Config cfg, ISnapshotCache snapshots, PduInstanceRegistry? registry = null)
     {
         this.cfg = cfg;
         this.snapshots = snapshots;
+        this.registry = registry;
     }
 
     public string Id => "vertiv";
@@ -85,10 +87,34 @@ public sealed class VertivIntegration : IIntegration, IStatusProvider
             : new(HealthLevel.Bad, "Not polling", detail);
     }
 
-    public Task<(bool Ok, string Detail)> ProbeAsync(Config c, CancellationToken ct)
+    /// <summary>
+    /// Actually reach each PDU, rather than reporting how old the last snapshot is. Freshness is what the
+    /// board watches continuously; a probe is what an operator triggers when it is already wrong, and at
+    /// that point "the last poll was 4 minutes ago" is the question, not the answer.
+    /// </summary>
+    public async Task<(bool Ok, string Detail)> ProbeAsync(Config c, CancellationToken ct)
     {
-        var health = Status(c);
-        return Task.FromResult((health.Level is HealthLevel.Good or HealthLevel.Off,
-                                health.Detail ?? health.Summary));
+        if (!Enabled(c)) return (true, "no PDUs configured");
+        if (Misconfigured(c) is { } fault) return (false, fault);
+        if (registry is null) return (false, "no PDU client in this process");
+
+        var reached = new List<string>();
+        var failed = new List<string>();
+
+        foreach (var (id, pdu) in registry.All)
+        {
+            try
+            {
+                var data = await pdu.GetRootData_Public(ct);
+                var outlets = data.Devices?.Sum(d => d.Outlets?.Count ?? 0) ?? 0;
+                reached.Add($"{id}: {data.Devices?.Count ?? 0} device(s), {outlets} outlet(s)");
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { failed.Add($"{id}: {ex.Message}"); }
+        }
+
+        return failed.Count == 0
+            ? (true, string.Join(" · ", reached))
+            : (false, string.Join(" · ", failed.Concat(reached)));
     }
 }

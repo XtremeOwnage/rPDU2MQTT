@@ -23,13 +23,22 @@ export async function testModbus() {
 /// test that is still running rather than one that failed.
 export type TestResult = { ok: boolean; message: string };
 
+/// Unwraps either shape: a bespoke endpoint's {ok,message} or the generic route's {ok,result:{ok,detail}}.
+function testOutcome(body: any): { ok: boolean, message: string } {
+  const inner = body?.result;
+  if (inner && typeof inner === 'object')
+    return { ok: inner.ok !== false, message: inner.detail ?? inner.message ?? (inner.ok !== false ? 'OK' : 'Failed') };
+  return { ok: body?.ok !== false, message: body?.message ?? '' };
+}
+
 async function runTest(what: string, path: string): Promise<TestResult> {
   let out: TestResult;
   try {
     const r = await api(path, { method: 'POST' });
+    const outcome = testOutcome(r.body);
     out = {
-      ok: !!(r.body && r.body.ok),
-      message: (r.body && r.body.message)
+      ok: outcome.ok && !!(r.body && r.body.ok),
+      message: outcome.message
         || (r.ok ? `${what}: the test answered without saying anything.` : `${what}: the bridge answered ${r.status}.`),
     };
   } catch (e: any) {
@@ -39,8 +48,8 @@ async function runTest(what: string, path: string): Promise<TestResult> {
   return out;
 }
 
-export async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
-export async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
+export async function testMqtt() { const r = await runTest('MQTT', '/api/integrations/mqtt/probe'); refreshStatus(); return r; }
+export async function testPdu() { return runTest('PDU', '/api/integrations/vertiv/probe'); }
 export async function testEmonCms() { const r = await runTest('EmonCMS', '/api/integrations/emoncms/probe'); refreshStatus(); return r; }
 export async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
 export async function provisionEmonCmsFeeds() { await runIntegrationAction('emoncms', { name: 'publish', title: 'Provision EmonCMS feeds', description: '', effect: 'write' }); }
