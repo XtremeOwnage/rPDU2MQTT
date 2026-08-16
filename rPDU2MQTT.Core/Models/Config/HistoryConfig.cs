@@ -14,6 +14,21 @@ namespace rPDU2MQTT.Models.Config;
 /// </summary>
 public class HistoryConfig
 {
+    /// <summary>
+    /// Use the history backend as a last-resort live source: a node nothing currently reports takes the
+    /// most recent value stored about it.
+    ///
+    /// <para>
+    /// Off by default, and deliberately so. A value read back from storage is older than one from an
+    /// ingest, and for a node whose publisher has genuinely stopped it turns "no data" — which is the
+    /// truth — into a figure that looks current. Worth having when the thing measuring a node writes to
+    /// EmonCMS or Prometheus directly and this bridge only reads; wrong the rest of the time.
+    /// </para>
+    /// </summary>
+    [DefaultValue(false)]
+    [Description("Let the history backend supply a value for any node nothing live is reporting. Off by default: a stored value is older than a live one, and for a node whose source has stopped it replaces an honest \"no data\" with a figure that looks current.")]
+    public bool ValueFallback { get; set; }
+
     [DefaultValue(false)]
     [Description("Let the Flow and Energy pages show a past moment, read from Prometheus or EmonCMS.")]
     [FeatureToggle]

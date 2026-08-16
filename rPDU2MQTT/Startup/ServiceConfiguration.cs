@@ -246,13 +246,31 @@ public static class ServiceConfiguration
                 // with a real energy binding uses that and the derived total only fills a gap.
                 .. pluginSources,
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
-                // with a real energy binding uses that and the derived total only fills a gap.
-                sp.GetRequiredService<Services.EnergyAggregationService>()])
+                // with a real energy binding uses that and the derived total only fills a gap. The history
+                // fallback is behind even that — a stored value is older than anything else here.
+                sp.GetRequiredService<Services.EnergyAggregationService>(),
+                .. (cfg.History.Enabled && cfg.History.ValueFallback
+                    ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
+                    : [])])
             : new Core.Flow.CompositeFlowValueSource(
-                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow, .. pluginSources]));
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow, .. pluginSources,
+                 .. (cfg.History.Enabled && cfg.History.ValueFallback
+                     ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
+                     : [])]));
 
         if (worker && pluginSources.Length > 0)
             services.AddHostedService<Services.ValueSourcePluginHost>();
+
+        if (cfg.History.Enabled && cfg.History.ValueFallback)
+            services.AddSingleton(sp => new Core.Flow.HistoryValueSource(
+                sp.GetRequiredService<Core.Flow.IMeasurementHistory>(), cfg,
+                () => cfg.EnergyFlow.Nodes.Select(n => n.Id).Where(id => !string.IsNullOrEmpty(id)).ToList()));
+
+        // The history backend read as a source (opt-in). Registered here so it can be placed LAST in the
+        // composite below — a stored value must never win over a live one, or a reading is replaced by its
+        // own echo one refresh later.
+        if (cfg.History.Enabled && cfg.History.ValueFallback)
+            services.AddHostedService<Services.HistoryValueSourceService>();
 
         // A plugin that polls hardware files its snapshots in the same cache the built-in poller feeds, so
         // publishing, discovery, the flow graph and every destination work on it unchanged.

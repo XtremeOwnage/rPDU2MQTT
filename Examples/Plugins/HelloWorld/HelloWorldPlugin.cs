@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Integrations;
+using rPDU2MQTT.Models.PDU;
 
 namespace rPDU2MQTT.Plugin.HelloWorld;
 
@@ -11,7 +12,7 @@ namespace rPDU2MQTT.Plugin.HelloWorld;
 /// it is what a CSV exporter or a "post to my own API" plugin would look like — while being something you
 /// can verify with `cat`.
 /// </summary>
-public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IConfigurablePlugin, IIntegrationApi, IValueSourcePlugin
+public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IConfigurablePlugin, IIntegrationApi, IValueSourcePlugin, IDeviceSourcePlugin, IDeviceControlPlugin
 {
     private HelloWorldSettings settings = new();
 
@@ -65,6 +66,53 @@ public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IC
     public bool TryGetValue(string nodeId, string metric, out double value)
         => values.TryGetValue(nodeId + "|" + metric, out value);
 
+    // --- Also a device: two outlets, polled by the host and switchable ---------------------------------
+    // Everything downstream — MQTT publishing, HA discovery, the flow graph, every destination — treats
+    // this exactly like a real PDU, because none of them asks what kind of device produced a reading.
+
+    private readonly Dictionary<int, string> outletState = new() { [0] = "on", [1] = "on" };
+
+    public string InstanceId => "helloworld";
+
+    public Task<PduData?> PollAsync(Config cfg, CancellationToken ct)
+    {
+        if (!settings.Device) return Task.FromResult<PduData?>(null);
+
+        var device = new Device { Key = "hw", Entity_Name = "hello_device", Entity_DisplayName = "Hello Device" };
+        foreach (var (key, state) in outletState)
+        {
+            var outlet = new Outlet
+            {
+                Key = key,
+                Entity_Name = $"outlet{key}",
+                Entity_DisplayName = $"Hello Outlet {key + 1}",
+                State = state,
+            };
+            outlet.Measurements.Add(new Measurement
+            {
+                Type = "realpower",
+                Value = (state == "on" ? settings.Watts : 0).ToString(),
+                Units = "W",
+            });
+            device.Outlets.Add(outlet);
+        }
+
+        var data = new PduData();
+        data.Devices.Add(device);
+        return Task.FromResult<PduData?>(data);
+    }
+
+    public bool Supports(string action) => action is "on" or "off";
+
+    public Task<string> ControlOutletAsync(Config cfg, string deviceId, int outletIndex, string action, CancellationToken ct)
+    {
+        if (!outletState.ContainsKey(outletIndex)) return Task.FromResult($"no outlet {outletIndex}");
+        outletState[outletIndex] = action;
+        // Report what actually happened, not what was asked: an echo that contradicts the next poll makes
+        // an outlet appear to flip back on its own.
+        return Task.FromResult(action);
+    }
+
     // --- An action of its own, reachable at /api/integrations/helloworld/peek ---------------------------
 
     public IReadOnlyList<IntegrationAction> Actions =>
@@ -83,6 +131,14 @@ public sealed class HelloWorldSettings
     [DefaultValue(false)]
     [Description("Write every reading and energy-flow tier to a file on each poll.")]
     public bool Enabled { get; set; }
+
+    [DefaultValue(false)]
+    [Description("Also present two fake outlets as a device, to see what a hardware plugin looks like.")]
+    public bool Device { get; set; }
+
+    [DefaultValue(42)]
+    [Description("Watts each fake outlet reports while it is on.")]
+    public int Watts { get; set; } = 42;
 
     [DefaultValue("/tmp/rpdu2mqtt-helloworld.txt")]
     [Description("Where to write the file. It is replaced on every pass, not appended to.")]

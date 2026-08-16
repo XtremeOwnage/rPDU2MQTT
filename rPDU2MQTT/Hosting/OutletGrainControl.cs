@@ -14,15 +14,51 @@ public sealed class OutletGrainControl : IOutletControl
 {
     private readonly IGrainFactory grains;
     private readonly PduInstanceRegistry registry;
+    // Devices supplied by plugins, which own their own writes — the outlet grain knows nothing about them.
+    private readonly Core.Integrations.IntegrationRegistry? integrations;
+    private readonly Config? cfg;
+    private readonly Core.Integrations.ISingleOwnerLease? lease;
 
-    public OutletGrainControl(IGrainFactory grains, PduInstanceRegistry registry)
+    public OutletGrainControl(IGrainFactory grains, PduInstanceRegistry registry,
+        Core.Integrations.IntegrationRegistry? integrations = null, Config? cfg = null,
+        Core.Integrations.ISingleOwnerLease? lease = null)
     {
         this.grains = grains;
         this.registry = registry;
+        this.integrations = integrations;
+        this.cfg = cfg;
+        this.lease = lease;
     }
 
-    public Task<string> Control(string deviceId, int outletIndex, string action, CancellationToken cancellationToken = default)
-        => grains.GetGrain<IOutletGrain>(IOutletGrain.KeyFor(deviceId, outletIndex)).Control(action);
+    public async Task<string> Control(string deviceId, int outletIndex, string action, CancellationToken cancellationToken = default)
+    {
+        // A plugin-supplied device owns its own writes: the outlet grain is built around the Vertiv API and
+        // has no way to reach someone else's hardware. Checked first, and only ever matching a device this
+        // build actually loaded, so nothing changes for a PDU.
+        if (PluginFor(deviceId) is var (integration, control) && control is not null && control.Supports(action))
+        {
+            var result = "";
+            await (lease ?? new Core.Integrations.SoleOwnerLease()).RunIfOwnerAsync(
+                $"device:{deviceId}",
+                async ct => result = await control.ControlOutletAsync(cfg!, deviceId, outletIndex, action, ct),
+                cancellationToken);
+            return result;
+        }
+
+        return await grains.GetGrain<IOutletGrain>(IOutletGrain.KeyFor(deviceId, outletIndex)).Control(action);
+    }
+
+    /// <summary>The plugin that owns this device id, or (null, null) when a built-in PDU does.</summary>
+    private (Core.Integrations.IIntegration? Integration, Core.Integrations.IDeviceControlPlugin? Control) PluginFor(string deviceId)
+    {
+        if (integrations is null || cfg is null) return (null, null);
+        foreach (var i in integrations.All)
+            if (i is Core.Integrations.IDeviceSourcePlugin device
+                && string.Equals(device.InstanceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                && i is Core.Integrations.IDeviceControlPlugin control)
+                return (i, control);
+        return (null, null);
+    }
 
     public Task<string> SetOutletConfig(string deviceId, int outletIndex, string field, string payload, bool isDelay, CancellationToken cancellationToken = default)
         => grains.GetGrain<IOutletGrain>(IOutletGrain.KeyFor(deviceId, outletIndex)).SetConfig(field, payload, isDelay);

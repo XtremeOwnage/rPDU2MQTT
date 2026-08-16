@@ -54,6 +54,7 @@ Implement the ones that apply. A plugin is a vendor, not a single interface — 
 | `INodeProvider` | Offer nodes the operator could adopt (discovery only; never write config). |
 | `IValueSourcePlugin` | Supply live values for nodes bound to your source type. |
 | `IDeviceSourcePlugin` | Poll hardware into a snapshot — this is how a second PDU vendor is supported. |
+| `IDeviceControlPlugin` | Switch its outlets, when the hardware can. |
 | `IIntegrationApi` | Actions beyond the standard ones. |
 | `IStatusProvider` | Decide what your own health means, when the default is not specific enough. |
 | `IConfigurablePlugin` | Carry your own settings section. |

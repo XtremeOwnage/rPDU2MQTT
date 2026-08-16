@@ -124,8 +124,15 @@ finishes.
     [ ] The Vertiv poller stays where it is. It is entangled with grains, placement, outlet control,
         OneView groups and multi-instance routing; converting it buys consistency, not capability, and it
         is the deepest change on this list. Own step, on contracts now worn in by five integrations.
-    [ ] `IDeviceControl` (switching an outlet) — `IOutletControl` already exists as a seam; a plugin
-        device is read-only until they are joined up.
+    [x] `IDeviceControlPlugin` — a plugin device's outlets can be switched. `OutletGrainControl` routes to
+        the plugin that owns the device id, holding the single-owner lease; a device with no reboot says so
+        via Supports() rather than failing the command.
+    [x] Verified end to end: the example plugin as a device publishes outlet names, state and power to
+        MQTT, appears as `rpdu2mqtt_realpower{device="hello_device"}` and as flow tiers under its own PDU
+        tier — indistinguishable from a real PDU downstream.
+    [ ] The GUI's control page calls `pdu.ControlOutletAsync` (the Vertiv class) directly rather than
+        `IOutletControl`, so plugin control works on the MQTT command path and not that page. Point the
+        endpoint at the seam.
 
 8. External plugins (built — the earlier "in-tree only" call was reversed)
     [x] `PluginLoader` — scans `plugins/` (or `RPDU2MQTT_PLUGINS`), one `AssemblyLoadContext` each, host
