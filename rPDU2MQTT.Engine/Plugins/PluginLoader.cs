@@ -98,9 +98,10 @@ public static class PluginLoader
     }
 
     /// <summary>The plugin sections the GUI should render, for <c>ConfigSchema.Build(plugins)</c>.</summary>
-    public static IEnumerable<(string Id, string Label, Type ConfigType)> Sections(IEnumerable<IIntegration> plugins)
+    public static IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> Sections(IEnumerable<IIntegration> plugins)
         => plugins.OfType<IConfigurablePlugin>()
-                  .Select(p => (((IIntegration)p).Id, ((IIntegration)p).DisplayName, p.ConfigType));
+                  .Select(p => (((IIntegration)p).Id, ((IIntegration)p).DisplayName, p.ConfigType,
+                                (string?)((IIntegration)p).Group.ToString()));
 }
 
 /// <summary>

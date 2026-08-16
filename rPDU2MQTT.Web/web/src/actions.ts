@@ -1,5 +1,5 @@
 // Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
-import { api, toast } from './helpers.js';
+import { api, toast, el, btn } from './helpers.js';
 import { state } from './state.js';
 import { refreshStatus } from './main.js';
 
@@ -63,4 +63,44 @@ export async function clearHa() {
     + 'runs again. Nothing belonging to another integration is touched.')) return;
   const r = await api('/api/discovery/clear', { method: 'POST' });
   toast(r.body.message, r.body.ok);
+}
+
+// --- Integration actions, rendered from what each integration says it can do -----------------------------
+// Nothing here names an integration. The server derives the action list from the capabilities each one
+// declares, so a plugin dropped into plugins/ gets its buttons with no TypeScript written for it — which is
+// the whole point of the plugin contracts. The hand-wired per-destination functions above are what this
+// replaces; they stay until every built-in is converted.
+
+/// Run one action and report what came back.
+export async function runIntegrationAction(id: string, action: any) {
+  // Anything that removes something at the far end is confirmed, and named, before it happens.
+  if (action.effect === 'destructive'
+    && !confirm(`${action.title}\n\n${action.description}\n\nThis cannot be undone. Continue?`)) return;
+
+  toast(`${action.title}…`, true);
+  const r = await api(`/api/integrations/${encodeURIComponent(id)}/${encodeURIComponent(action.name)}`, { method: 'POST' });
+  const body: any = r.body || {};
+  // An action returns whatever it likes; show a message if it gave one, otherwise say it finished.
+  const result = body.result ?? {};
+  const message = body.message ?? result.message ?? result.detail
+    ?? (body.ok ? `${action.title} finished.` : `${action.title} failed.`);
+  toast(message, body.ok !== false && result.ok !== false);
+  return body;
+}
+
+/// The buttons for one integration, or null when it has none to offer.
+export async function integrationActionBar(id: string): Promise<any> {
+  const r = await api('/api/integrations');
+  if (!r.body?.ok) return null;
+  const found = (r.body.integrations || []).find((i: any) => i.id === id);
+  if (!found || !(found.actions || []).length) return null;
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  found.actions.forEach((a: any) => {
+    const b = btn(a.title, a.effect === 'destructive' ? 'danger' : a.effect === 'write' ? 'primary' : undefined);
+    b.title = a.description;
+    b.onclick = () => runIntegrationAction(id, a);
+    bar.appendChild(b);
+  });
+  return bar;
 }

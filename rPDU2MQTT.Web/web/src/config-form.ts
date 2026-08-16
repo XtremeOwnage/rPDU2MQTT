@@ -6,7 +6,7 @@ import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { tagInput } from './tags.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -386,9 +386,17 @@ function renderConfigSection(node: any, nav: any, sections: any) {
         sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
-      renderObjectBody(props, state.data[node.key], sec, [node.key]);
+      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
+      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      const target = node.isPlugin
+        ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
+        : state.data[node.key];
+      const path = node.isPlugin ? ['Plugins', node.key] : [node.key];
+      renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
+    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
+    if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
@@ -411,16 +419,24 @@ export function build() {
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
   const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in System, so a new one is never lost.
+  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
+  // it belongs, and into System when it says nothing, so a new one is never lost.
+  //
+  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
+  // appended the same sections again, so saving twice put a page in the nav three times.
   const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i: any) => i.schema)));
-  const system = NAV_GROUPS.find(g => g.title === 'System')!;
-  state.schema.forEach((n: any) => { if (!knownSchema.has(n.key) && !HIDDEN.has(n.key)) system.items.push({ schema: n.key }); });
+  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [...g.items] }));
+  const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
+  state.schema.forEach((n: any) => {
+    if (knownSchema.has(n.key) || HIDDEN.has(n.key)) return;
+    groupFor(n.group || 'System').items.push({ schema: n.key });
+  });
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);
   const first: any = home.link;
 
-  for (const g of NAV_GROUPS) {
+  for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
     const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
     if (!items.length) continue;

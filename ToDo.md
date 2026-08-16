@@ -69,14 +69,23 @@ finishes.
     [ ] The five bespoke status grains stay for now — each encodes a real verdict rule about its own
         subject, and replacing them with the generic one would lose reasoning rather than share it. They
         should adopt `IStatusProvider` instead, one at a time.
-    [ ] One generic Test button; delete the wired list in `actions.ts`.
+    [x] Generic action buttons: `integrationActionBar()` renders whatever an integration says it can do,
+        naming none of them. Destructive actions confirm, and say what they will remove, first. The
+        hand-wired per-destination functions stay until every built-in is converted onto the contracts.
     [ ] Required fields from attributes on the config class; retire `ConfigurationFaults` per-integration
         methods.
 
 5. Nav and grouping from the schema
-    [ ] `group` + `icon` on `SchemaNode`.
-    [ ] Delete `NAV_GROUPS` / `NAV_ICONS` from `config-form.ts`.
-    [ ] A new destination needs zero TypeScript — pin it with a GUI check.
+    [x] `group` on `SchemaNode`, set from the integration's own `IntegrationGroup`. A plugin now lands in
+        Destinations rather than among the logging and diagnostics pages.
+    [x] Plugin sections bind to `Config.Plugins[id]` — Config was compiled before the plugin existed —
+        while rendering and change-tracking identically to a built-in.
+    [x] Fixed while here: `build()` pushed ungrouped sections into the module-level `NAV_GROUPS` constant,
+        so every rebuild of the form appended them again and saving twice listed a page three times.
+    [ ] `NAV_GROUPS` / `NAV_ICONS` stay for the built-ins: they interleave schema sections with the visual
+        editors (Flow, Nodes, Trends), which have no schema section to hang a group off. Inverting that is
+        its own change.
+    [ ] A GUI check pinning "a new destination needs zero TypeScript".
 
 6. Sources onto the contracts
     [ ] Per-type binding config nested under the source type; flat form honoured on load forever.
@@ -107,9 +116,8 @@ finishes.
     [x] `GET /api/integrations` lists every integration with its capabilities and actions.
     [x] `POST /api/integrations/{id}/{action}` invokes any of them. Verified: the plugin's own `peek`
         action and a built-in derived `probe` both round-trip, and an unknown action is refused by name.
-    [ ] Nav grouping for plugin sections (they need `IntegrationGroup` -> nav group, see item 5).
-    [ ] The GUI does not render buttons for these actions yet — the routes exist, `actions.ts` still has
-        its hand-wired list (item 4).
+    [x] Nav grouping for plugin sections — verified: helloworld lands in Destinations.
+    [x] The GUI renders a plugin's action buttons from `/api/integrations`.
 
 9. Extend — only once everything above is converted
     [ ] EmonCMS + Prometheus as value sources, via the `IFlowHistory` → `IFlowValueSource` adapter.

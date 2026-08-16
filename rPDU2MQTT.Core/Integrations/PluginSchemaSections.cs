@@ -9,8 +9,8 @@ namespace rPDU2MQTT.Services.Gui;
 /// </remarks>
 public sealed class PluginSchemaSections
 {
-    public PluginSchemaSections(IReadOnlyList<(string Id, string Label, Type ConfigType)> sections)
+    public PluginSchemaSections(IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> sections)
         => Sections = sections;
 
-    public IReadOnlyList<(string Id, string Label, Type ConfigType)> Sections { get; }
+    public IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> Sections { get; }
 }

@@ -6502,9 +6502,17 @@ function renderConfigSection(node     , nav     , sections     ) {
         sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
-      renderObjectBody(props, state.data[node.key], sec, [node.key]);
+      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
+      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      const target = node.isPlugin
+        ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
+        : state.data[node.key];
+      const path = node.isPlugin ? ['Plugins', node.key] : [node.key];
+      renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
+    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
+    if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
@@ -6527,16 +6535,24 @@ function build() {
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
   const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in System, so a new one is never lost.
+  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
+  // it belongs, and into System when it says nothing, so a new one is never lost.
+  //
+  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
+  // appended the same sections again, so saving twice put a page in the nav three times.
   const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i     ) => i.schema)));
-  const system = NAV_GROUPS.find(g => g.title === 'System') ;
-  state.schema.forEach((n     ) => { if (!knownSchema.has(n.key) && !HIDDEN.has(n.key)) system.items.push({ schema: n.key }); });
+  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [...g.items] }));
+  const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;
+  state.schema.forEach((n     ) => {
+    if (knownSchema.has(n.key) || HIDDEN.has(n.key)) return;
+    groupFor(n.group || 'System').items.push({ schema: n.key });
+  });
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);
   const first      = home.link;
 
-  for (const g of NAV_GROUPS) {
+  for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
     const items = g.items.filter(it => 'tool' in it || byKey.get((it       ).schema));
     if (!items.length) continue;
@@ -6944,6 +6960,46 @@ async function clearHa() {
     + 'runs again. Nothing belonging to another integration is touched.')) return;
   const r = await api('/api/discovery/clear', { method: 'POST' });
   toast(r.body.message, r.body.ok);
+}
+
+// --- Integration actions, rendered from what each integration says it can do -----------------------------
+// Nothing here names an integration. The server derives the action list from the capabilities each one
+// declares, so a plugin dropped into plugins/ gets its buttons with no TypeScript written for it — which is
+// the whole point of the plugin contracts. The hand-wired per-destination functions above are what this
+// replaces; they stay until every built-in is converted.
+
+/// Run one action and report what came back.
+async function runIntegrationAction(id        , action     ) {
+  // Anything that removes something at the far end is confirmed, and named, before it happens.
+  if (action.effect === 'destructive'
+    && !confirm(`${action.title}\n\n${action.description}\n\nThis cannot be undone. Continue?`)) return;
+
+  toast(`${action.title}…`, true);
+  const r = await api(`/api/integrations/${encodeURIComponent(id)}/${encodeURIComponent(action.name)}`, { method: 'POST' });
+  const body      = r.body || {};
+  // An action returns whatever it likes; show a message if it gave one, otherwise say it finished.
+  const result = body.result ?? {};
+  const message = body.message ?? result.message ?? result.detail
+    ?? (body.ok ? `${action.title} finished.` : `${action.title} failed.`);
+  toast(message, body.ok !== false && result.ok !== false);
+  return body;
+}
+
+/// The buttons for one integration, or null when it has none to offer.
+async function integrationActionBar(id        )               {
+  const r = await api('/api/integrations');
+  if (!r.body?.ok) return null;
+  const found = (r.body.integrations || []).find((i     ) => i.id === id);
+  if (!found || !(found.actions || []).length) return null;
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  found.actions.forEach((a     ) => {
+    const b = btn(a.title, a.effect === 'destructive' ? 'danger' : a.effect === 'write' ? 'primary' : undefined);
+    b.title = a.description;
+    b.onclick = () => runIntegrationAction(id, a);
+    bar.appendChild(b);
+  });
+  return bar;
 }
 
 // ── main.ts ─────────────────────────────────────────────────────

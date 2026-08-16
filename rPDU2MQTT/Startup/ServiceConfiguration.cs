@@ -16,8 +16,8 @@ public static class ServiceConfiguration
     /// Config sections contributed by externally loaded plugins, resolved during registration so the
     /// schema endpoint can offer them. Static because the schema is served before the container is built.
     /// </summary>
-    public static IReadOnlyList<(string Id, string Label, Type ConfigType)> PluginSections { get; private set; }
-        = Array.Empty<(string, string, Type)>();
+    public static IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> PluginSections { get; private set; }
+        = Array.Empty<(string, string, Type, string?)>();
 
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {

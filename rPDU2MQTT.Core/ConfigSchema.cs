@@ -74,6 +74,13 @@ public sealed class SchemaNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsPlugin { get; set; }
 
+    /// <summary>
+    /// Which nav group this section belongs in ("Sources", "Integrations", "Destinations"). Null for the
+    /// built-in sections, whose grouping the client owns because it interleaves them with its own visual
+    /// editors — pages that have no schema section to hang a group off.
+    /// </summary>
+    public string? Group { get; set; }
+
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -145,10 +152,10 @@ public static class ConfigSchema
     /// and generating a different CRD per install is worse than not describing those fields at all.
     /// </para>
     /// </summary>
-    public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType)> plugins)
+    public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> plugins)
     {
         var schema = BuildObject(typeof(Config));
-        foreach (var (id, label, type) in plugins)
+        foreach (var (id, label, type, group) in plugins)
         {
             var node = new SchemaNode
             {
@@ -158,6 +165,9 @@ public static class ConfigSchema
                 Description = "Settings for the " + label + " plugin.",
                 Properties = BuildObject(type),
                 IsPlugin = true,
+                // Where it belongs in the nav. Without this a plugin lands in System whatever it is, so a
+                // destination sits among the logging and diagnostics pages.
+                Group = group,
             };
             schema.Add(node);
         }
