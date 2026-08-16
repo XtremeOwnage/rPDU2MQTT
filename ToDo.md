@@ -26,8 +26,15 @@ finishes.
         *reads* is `IMeasurementDestination`. A third name would be a synonym.)
     [x] `FlowNodeId` — one spelling of `pdu:{device}` / `outlet:{device}:{key}`, and every reading carries
         its own `NodeId`. Eight places rebuilt those strings; two disagreed on 0- vs 1-based.
-    [ ] Grain-backed `ISingleOwnerLease` for real clusters (single-process default works today).
-    [ ] `INodeProvider` implemented by MQTT (topic index) and Modbus (register scan) when they convert.
+    [x] `GrainSingleOwnerLease` — ownership of one key held cluster-wide on a short lease, keyed by the
+        resource so one device is decided in one place. A cluster that cannot be asked returns "not owner"
+        rather than assuming: two processes on one serial gateway is the failure this exists to prevent.
+    [x] `MqttNodeProvider` — the broker's topics offered as nodes through `INodeProvider`, reading the
+        same index and the same payload analyzer the node editor uses, so a discovered node and a
+        hand-bound one agree about what a topic is. Served at `/api/discover/nodes`, which asks every
+        provider. Verified against the existing picker: same 5 results, with metric hints and suggested ids.
+    [ ] Modbus register scan as an `INodeProvider` (the scan endpoint exists; it just is not behind the
+        capability yet).
 
 2. Prometheus onto the contracts (the proving case)
     [x] `PrometheusIntegration` implements `IMeasurementDestination` + `IMeasurementHistory` — one vendor,
@@ -36,8 +43,8 @@ finishes.
     [x] `/metrics` output verified identical before and after — 9 series, exact diff, A/B against
         the pre-conversion binary on one rig. (The energy store lives beside the binary, so both stores
         have to be wiped or the comparison is against a different day's state.)
-    [ ] Its banner line and status branch deleted from the host.
-    [ ] Route `/api/integrations/{id}/{action}` in `GuiService`, replacing the bespoke test endpoint.
+    [x] Its banner line and status branch are gone — both come from the registry now.
+    [x] `/api/integrations/{id}/{action}` is mounted and replaces the bespoke test endpoint.
 
 3. The other destinations
     [x] EmonCMS — destination + history + configuration publisher (feed provisioning + sweep). Three
@@ -173,7 +180,7 @@ finishes.
     [x] The GUI renders a plugin's action buttons from `/api/integrations`.
 
 9. Extend — only once everything above is converted
-    [ ] EmonCMS + Prometheus as value sources, via the `IFlowHistory` → `IFlowValueSource` adapter.
+    [x] Done via `HistoryValueSource` (see item 8 above).
     [ ] Home Assistant as a value source (entity states).
     [ ] Home Assistant as a history provider (recorder/statistics).
 

@@ -306,11 +306,15 @@ public static class ServiceConfiguration
         // plugin device gets the same single activation and child supervision the built-in poller has.
         services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();
 
+        // The broker's topics, offered as nodes to adopt through the same capability a plugin would use.
+        services.AddSingleton<Core.Integrations.INodeProvider, Hosting.MqttNodeProvider>();
+
         // The PDU object-model publisher, off the hosting base class and onto the seam.
         services.AddSingleton<Services.MqttPduPublisher>();
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
-        // Single-process ownership by default; the grain-backed lease replaces it in a real cluster.
-        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
+        // Ownership of a shared resource, held cluster-wide on a short lease. The Core seam never names
+        // Orleans; this is the only place that does.
+        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Hosting.GrainSingleOwnerLease>();
 
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();

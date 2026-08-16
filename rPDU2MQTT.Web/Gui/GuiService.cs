@@ -55,6 +55,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.Integrations.IntegrationRegistry? integrations;
     // The write seam. Routes to the outlet grain for a PDU, and to the owning plugin for a plugin device.
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
+    // Anything that can offer nodes to adopt — the broker index today, a plugin tomorrow.
+    private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
     private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
@@ -66,12 +68,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
         this.integrations = integrations;
         this.outletControl = outletControl;
+        this.nodeProviders = nodeProviders?.ToList() ?? [];
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
@@ -1665,6 +1668,28 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         // What an integration can do is derived from the capabilities it declares (probe / publish / sweep)
         // plus whatever it adds through IIntegrationApi — so a plugin dropped into plugins/ is reachable
         // here without a line of routing written for it.
+
+        // Everything that can offer nodes to adopt, asked at once. Discovery only — this never writes a
+        // node; what is adopted and what it is called stay the operator's.
+        app.MapGet("/api/discover/nodes", async (HttpContext ctx) =>
+        {
+            var search = ctx.Request.Query["q"].ToString();
+            var found = new List<object>();
+            foreach (var provider in nodeProviders)
+            {
+                try
+                {
+                    foreach (var n in await provider.DiscoverAsync(config, search, ctx.RequestAborted))
+                        found.Add(new { key = n.Key, label = n.Label, metric = n.Metric, unit = n.Unit, sample = n.Sample, kind = n.Kind, suggestedId = n.SuggestedId });
+                }
+                catch (Exception ex)
+                {
+                    // One provider that cannot answer must not empty the picker for the others.
+                    Log.Debug($"Node discovery from {provider.GetType().Name} failed: {ex.Message}");
+                }
+            }
+            return Results.Json(new { ok = true, nodes = found }, ConfigSchema.Json);
+        });
 
         app.MapGet("/api/integrations", () =>
         {
