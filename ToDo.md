@@ -72,8 +72,14 @@ finishes.
     [x] Generic action buttons: `integrationActionBar()` renders whatever an integration says it can do,
         naming none of them. Destructive actions confirm, and say what they will remove, first. The
         hand-wired per-destination functions stay until every built-in is converted onto the contracts.
-    [ ] Required fields from attributes on the config class; retire `ConfigurationFaults` per-integration
-        methods.
+    [x] `DestinationRequirements.EmonCms` retired — the rule lives on `EmonCmsIntegration.Misconfigured`,
+        which is the only place a plugin can put one. Its test moved onto the live rule; it had been
+        passing against a static helper the production path no longer called.
+    [x] `IntegrationFaultReporter` records every enabled-but-unusable integration into the SAME
+        `ConfigurationFaults` the board and GUI read. (A DI factory would have replaced the instance
+        already holding the logging-sink faults — caught before committing.)
+    [x] Verified: EmonCMS enabled with no URL logs an error, reads Unhealthy on /health/integrations, and
+        the bridge keeps serving.
 
 5. Nav and grouping from the schema
     [x] `group` on `SchemaNode`, set from the integration's own `IntegrationGroup`. A plugin now lands in

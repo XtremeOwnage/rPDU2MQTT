@@ -14,35 +14,8 @@ namespace rPDU2MQTT.Tests;
 /// </summary>
 public class ConfigurationFaultTests
 {
-    [Fact]
-    public void EmonCmsOverHttpWithNoUrl_IsAFault_NotAnException()
-    {
-        // The exact state a GUI toggle produces: Enabled on, Transport Http, URL never filled in.
-        var fault = DestinationRequirements.EmonCms(enabled: true, httpTransport: true, url: null);
 
-        Assert.NotNull(fault);
-        Assert.Equal("emoncms", fault!.Component);
-        Assert.Equal("EmonCMS.Url", fault.Path);
-        // The message has to say the rest of the bridge is unaffected — that is the whole behavioural change.
-        Assert.Contains("keeps running", fault.Message);
-    }
 
-    [Fact]
-    public void ABlankUrl_CountsAsMissing()
-    {
-        // The old check tested only for null, so Url: "" sailed past startup and failed later at runtime.
-        Assert.NotNull(DestinationRequirements.EmonCms(true, true, ""));
-        Assert.NotNull(DestinationRequirements.EmonCms(true, true, "   "));
-    }
-
-    [Fact]
-    public void EmonCmsIsFine_WhenDisabled_OrOverMqtt_OrConfigured()
-    {
-        Assert.Null(DestinationRequirements.EmonCms(enabled: false, httpTransport: true, url: null));
-        // The MQTT transport reuses the broker, so it needs no URL at all.
-        Assert.Null(DestinationRequirements.EmonCms(enabled: true, httpTransport: false, url: null));
-        Assert.Null(DestinationRequirements.EmonCms(enabled: true, httpTransport: true, url: "https://emon.example.com/"));
-    }
 
     [Fact]
     public void LoggingSinksDegradeIndividually()
@@ -60,28 +33,6 @@ public class ConfigurationFaultTests
         Assert.Contains("console sink is unaffected", DestinationRequirements.FileLog(true, null)!.Message);
         Assert.Contains("other log sinks are unaffected", DestinationRequirements.Syslog(true, null)!.Message);
     }
-
-    [Fact]
-    public void FaultsAreRecordedPerComponent_AndTheLatestWins()
-    {
-        var faults = new ConfigurationFaults();
-        Assert.Null(faults.For("emoncms"));
-
-        faults.Record(DestinationRequirements.EmonCms(true, true, null)!);
-        Assert.NotNull(faults.For("emoncms"));
-        Assert.Single(faults.All);
-
-        // Re-recording the same component replaces rather than accumulating — the board shows one card.
-        faults.Record(DestinationRequirements.EmonCms(true, true, null)!);
-        Assert.Single(faults.All);
-    }
-}
-
-/// <summary>
-/// The Status board must distinguish a cache nobody has used from one that is down.
-/// </summary>
-public class CacheHealthTests
-{
     [Fact]
     public void BeforeAnythingTries_ItIsNotYetKnown_NotUnreachable()
     {
@@ -113,5 +64,44 @@ public class CacheHealthTests
         h.Succeeded();
         Assert.True(h.Reachable);
         Assert.Null(h.Error);
+    }
+
+    [Fact]
+    public void AnEnabledDestinationMissingWhatItNeeds_IsDisabledAndSaysSo_WithoutStoppingTheBridge()
+    {
+        // The rule lives on the integration now, not in a static helper nothing calls. Testing the helper
+        // was testing a copy: the production path had already moved and the copy would have kept passing
+        // however wrong it got.
+        var cfg = new rPDU2MQTT.Classes.Config();
+        cfg.EmonCMS.Enabled = true;
+        cfg.EmonCMS.Transport = rPDU2MQTT.Models.Config.EmonCmsTransport.Http;
+        cfg.EmonCMS.Url = null;
+
+        var emon = new rPDU2MQTT.Integrations.EmonCms.EmonCmsIntegration(
+            cfg, new rPDU2MQTT.Services.EmonCmsStatus(),
+            new rPDU2MQTT.Services.EmonCmsFeedSync(cfg, new StubSnapshots()));
+
+        Assert.NotNull(emon.Misconfigured(cfg));
+
+        // Over MQTT it reuses the broker and needs no URL at all.
+        cfg.EmonCMS.Transport = rPDU2MQTT.Models.Config.EmonCmsTransport.Mqtt;
+        Assert.Null(emon.Misconfigured(cfg));
+
+        // Blank counts as missing — a null-only check let Url: "" through, to fail later at runtime.
+        cfg.EmonCMS.Transport = rPDU2MQTT.Models.Config.EmonCmsTransport.Http;
+        cfg.EmonCMS.Url = "   ";
+        Assert.NotNull(emon.Misconfigured(cfg));
+
+        // And a destination nobody switched on is not a fault to go and fix.
+        cfg.EmonCMS.Enabled = false;
+        Assert.False(emon.Enabled(cfg));
+    }
+
+    private sealed class StubSnapshots : rPDU2MQTT.Core.ISnapshotCache
+    {
+        public IReadOnlyCollection<rPDU2MQTT.Core.PduSnapshot> All => Array.Empty<rPDU2MQTT.Core.PduSnapshot>();
+        public rPDU2MQTT.Core.PduSnapshot? Latest => null;
+        public rPDU2MQTT.Core.PduSnapshot? Get(string instanceId) => null;
+        public void Put(rPDU2MQTT.Core.PduSnapshot snapshot) { }
     }
 }

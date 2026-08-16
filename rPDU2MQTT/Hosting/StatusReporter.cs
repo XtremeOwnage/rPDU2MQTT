@@ -89,7 +89,11 @@ public sealed class StatusReporter : BackgroundService
         // Enabled but unusable is its own state, and it has to be visible: the exporter was skipped at
         // startup so it will never attempt anything, which would otherwise read as a healthy "on" card
         // that simply never counts up.
-        var emonFault = faults?.For("emoncms");
+        // An integration's own Misconfigured() is the rule now; the faults collection still carries the
+        // logging sinks, so read the integration first and fall back for anything not yet converted.
+        var emonFault = registry?.ById("emoncms")?.Misconfigured(config) is { } why
+            ? new Core.Startup.ConfigurationFault("emoncms", "EmonCMS", why)
+            : faults?.For("emoncms");
         await grains.GetGrain<IEmonCmsStatusGrain>("emoncms").Report(new ComponentReport
         {
             Enabled = config.EmonCMS.Enabled,

@@ -254,6 +254,11 @@ public static class ServiceConfiguration
         services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
 
         services.AddSingleton<Core.Integrations.IntegrationRegistry>();
+        // An integration that is switched on and cannot run is recorded into the SAME faults collection the
+        // Status board and GUI already read — registering a second one would have replaced the instance
+        // already holding the logging-sink faults. The rule itself lives on the integration, so a plugin
+        // participates without anything here knowing what it needs.
+        services.AddHostedService<Hosting.IntegrationFaultReporter>();
         // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
         // Assistant discovery both need it, and neither IS the MQTT integration.
         services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
