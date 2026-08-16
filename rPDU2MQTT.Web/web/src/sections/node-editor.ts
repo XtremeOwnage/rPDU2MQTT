@@ -3,10 +3,11 @@ import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
+import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
-  NODE_KINDS, NODE_MODES, SIGNED_METRICS, SOURCE_TYPES,
+  NODE_KINDS, NODE_MODES, SIGNED_METRICS, sourceTypes,
   isAdditiveMetric, kindMeta, metricLabel, metricMeta, sourceMetricKey,
 } from '../flow-vocabulary.js';
 
@@ -386,7 +387,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       const tr = el('tr');
 
       const typeSel = el('select', { style: { width: 'auto' } });
-      SOURCE_TYPES.forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
+      sourceTypes(state.schema).forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
       typeSel.value = src.Type || 'mqtt';
       typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
       tr.appendChild(el('td', {}, typeSel));
@@ -457,8 +458,15 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
       tr.appendChild(el('td', {}, unitSel));
 
-      // The Source + Details columns are type-specific.
-      if ((src.Type || 'mqtt') === 'modbus') {
+      // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
+      // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
+      const type = (src.Type || 'mqtt').toLowerCase();
+      if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+        const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
+        tr.appendChild(srcCell);
+        tr.appendChild(detailCell);
+      }
+      else if (type === 'modbus') {
         // Source = which configured Modbus connection; Details = the register spec.
         const connections: any[] = (state.data?.Modbus?.Connections) || [];
         const connSel = el('select', { style: { width: '160px' } });

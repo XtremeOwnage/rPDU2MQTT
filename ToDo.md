@@ -1,6 +1,6 @@
 Branch feat/v4-plugin-architecture. Plan: [PLUGINS.md](PLUGINS.md).
 
-One branch, not one PR per slice. Every numbered item leaves the tree green: `dotnet build` (0 warnings),
+One branch, not one PR per slice. `[x]` done, `[—]` a decision recorded rather than work outstanding. Every numbered item leaves the tree green: `dotnet build` (0 warnings),
 `dotnet test`, and the GUI checks that run inside the build. Commit SHAs land beside each heading as it
 finishes.
 
@@ -102,7 +102,7 @@ finishes.
         while rendering and change-tracking identically to a built-in.
     [x] Fixed while here: `build()` pushed ungrouped sections into the module-level `NAV_GROUPS` constant,
         so every rebuild of the form appended them again and saving twice listed a page three times.
-    [ ] `NAV_GROUPS` / `NAV_ICONS` stay for the built-ins: they interleave schema sections with the visual
+    [—] `NAV_GROUPS` / `NAV_ICONS` stay for the built-ins: they interleave schema sections with the visual
         editors (Flow, Nodes, Trends), which have no schema section to hang a group off. Inverting that is
         its own change.
     [x] `plugin.check.mjs` renders a plugin the GUI has never heard of and asserts it gets a nav entry in
@@ -124,11 +124,15 @@ finishes.
         takes effect without a restart and an expensive ReconcileAsync is not paid every tick.
     [x] Verified: HelloWorld as a source fed 1234 W into a node, which rolled up through the inverter and
         reached Prometheus.
-    [ ] MQTT and Modbus sources stay as they are. They work through `IFlowValueSource` already; converting
+    [—] MQTT and Modbus sources stay as they are. They work through `IFlowValueSource` already; converting
         them buys consistency, not capability, and Modbus carries the single-owner lease that stops RS485
         gateway contention. Own step.
-    [ ] Client registry for the bespoke editors (topic picker, register scanner); `SOURCE_TYPES` stays
-        until then — a plugin type is offered by the schema, but gets generic fields via Settings.
+    [x] `source-editors.ts` — a registry keyed by source type. MQTT and Modbus keep their bespoke editors
+        (a topic browser and a register scanner are not a form); anything else gets a generic editor over
+        the binding's `Settings` bag, so a plugin source is editable without shipping any TypeScript.
+    [x] `SOURCE_TYPES` is gone. The dropdown reads the schema's own enum, which the server already fills
+        with the plugin types it loaded — duplicating that list is how the dropdown ends up missing a type
+        the backend accepts.
 
 7. Devices
     [x] `IDeviceSourcePlugin` — a plugin polls hardware into a `PduData` snapshot and publishes it on the

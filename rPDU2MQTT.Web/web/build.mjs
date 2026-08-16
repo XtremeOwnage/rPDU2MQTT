@@ -25,6 +25,7 @@ const MODULES = [
   'dirty.ts',
   'tags.ts',
   'flow-vocabulary.ts',
+  'source-editors.ts',
   'energy.ts',
   'history-control.ts',
   'charts.ts',
