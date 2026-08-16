@@ -90,12 +90,15 @@ finishes.
     [x] `Examples/Plugins/HelloWorld` — a working out-of-tree destination in ~60 lines, referencing only
         Core. Verified end to end: loaded from a DLL, bound its own YAML config, received the ExportPass
         and wrote every reading and tier to a file.
-    [ ] Plugin config pages do not render yet. `ConfigSchema.Build(plugins)` and `PluginSchemaSections`
-        exist and are wired, but `/api/schema` is captured in Program.cs before `PluginSections` is set
-        during registration — an ordering fix, not a design problem. THIS IS THE NEXT THING TO DO.
+    [x] Plugin config pages render. The live `/api/schema` (GuiService, not the CLI emitter) now serves
+        `ConfigSchema.Build(pluginSections)`, so a plugin's settings class becomes a page with typed
+        inputs, defaults and descriptions — verified end to end with HelloWorld.
+    [x] `GET /api/integrations` lists every integration with its capabilities and actions.
+    [x] `POST /api/integrations/{id}/{action}` invokes any of them. Verified: the plugin's own `peek`
+        action and a built-in derived `probe` both round-trip, and an unknown action is refused by name.
     [ ] Nav grouping for plugin sections (they need `IntegrationGroup` -> nav group, see item 5).
-    [ ] A plugin's actions are declared and routable but `/api/integrations/{id}/{action}` is not mounted
-        in GuiService yet (item 4).
+    [ ] The GUI does not render buttons for these actions yet — the routes exist, `actions.ts` still has
+        its hand-wired list (item 4).
 
 9. Extend — only once everything above is converted
     [ ] EmonCMS + Prometheus as value sources, via the `IFlowHistory` → `IFlowValueSource` adapter.
