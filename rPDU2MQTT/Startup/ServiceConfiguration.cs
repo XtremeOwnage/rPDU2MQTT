@@ -233,6 +233,9 @@ public static class ServiceConfiguration
             services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
 
         services.AddSingleton<Core.Integrations.IntegrationRegistry>();
+        // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
+        // Assistant discovery both need it, and neither IS the MQTT integration.
+        services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
         // Single-process ownership by default; the grain-backed lease replaces it in a real cluster.
         services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
@@ -283,25 +286,6 @@ public static class ServiceConfiguration
             // Enabled(cfg) every pass, so a toggle in the GUI takes effect without a restart — and the host
             // builds ONE ExportPass and offers it to all of them, so none can quietly omit the hierarchy.
             services.AddHostedService<DestinationHost>();
-
-            if (cfg.EmonCMS.Enabled)
-            {
-                // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
-                // A missing one used to throw here, so enabling EmonCMS in the GUI before filling in the
-                // URL left the process unable to start — taking the PDU poll, MQTT, HA and the flow with
-                // it. Skip just this exporter and say so; nothing a toggle can do may stop the bridge.
-                var emonFault = Core.Startup.DestinationRequirements.EmonCms(
-                    cfg.EmonCMS.Enabled,
-                    cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http,
-                    cfg.EmonCMS.Url);
-                if (emonFault is not null)
-                {
-                    Log.Error(emonFault.Message);
-                    faults.Record(emonFault);
-                }
-                else
-                    services.AddHostedService<EmonCmsExportService>();
-            }
 
             // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
             // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in

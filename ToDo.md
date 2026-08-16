@@ -40,7 +40,10 @@ finishes.
     [ ] Route `/api/integrations/{id}/{action}` in `GuiService`, replacing the bespoke test endpoint.
 
 3. The other destinations
-    [ ] EmonCMS (destination + history + reconcile).
+    [x] EmonCMS — destination + history + configuration publisher (feed provisioning + sweep). Three
+        capabilities on one vendor, one config section. `EmonCmsExportService` deleted.
+    [x] `IMessagePublisher` — publishing to the broker without inheriting `baseMQTTService`'s whole hosting
+        model. EmonCMS's MQTT transport needed it; HA discovery will too.
     [ ] MQTT publish + energy-flow export.
     [ ] Home Assistant discovery.
     [ ] Home Assistant energy dashboard.

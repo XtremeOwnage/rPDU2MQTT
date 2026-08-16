@@ -1,6 +1,8 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.EmonCms;
+using rPDU2MQTT.Core;
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
@@ -191,8 +193,13 @@ public class FlowDestinationsTests
         return data;
     }
 
+    /// The pass the destination host would assemble, so a test exercises the real path rather than a
+    /// parallel one — the mistake that let the flow half go missing in the first place.
+    private static ExportPass Pass(Config cfg, params PduData[] snapshots)
+        => ExportPass.Build(snapshots.Select(d => new PduSnapshot("default", DateTime.UtcNow, d)), cfg, Live());
+
     private static Dictionary<string, double> Sent(Config cfg, params PduData[] snapshots)
-        => EmonCmsPayload.Build(snapshots, cfg, Live())[EmonCmsPayload.Combined];
+        => EmonCmsPayload.Build(Pass(cfg, snapshots), cfg)[EmonCmsPayload.Combined];
 
     [Fact]
     public void TheEmonCmsPayload_CarriesEveryFlowNode_AlongsideThePduReadings()
@@ -259,7 +266,7 @@ public class FlowDestinationsTests
         cfg.EmonCMS.Transport = EmonCmsTransport.Mqtt;
         cfg.EmonCMS.MqttTopicTemplate = "{base}/{node}/{device}";
 
-        var payloads = EmonCmsPayload.Build([OneOutlet(60)], cfg, Live());
+        var payloads = EmonCmsPayload.Build(Pass(cfg, OneOutlet(60)), cfg);
 
         Assert.Equal(60, payloads["rack_pdu_1"]["rack_pdu_1_o0_realpower"]);
         Assert.Equal(4200, payloads[EmonCmsPayload.Combined]["solar_realpower"]);
