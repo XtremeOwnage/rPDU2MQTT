@@ -55,12 +55,23 @@ finishes.
         `DiscoveryCoordinator` and the publishing helpers.
 
 4. Generic health, test and faults
-    [ ] One component status grain keyed by plugin id; delete the five bespoke ones.
-    [ ] One `/api/test/{id}` endpoint; delete the per-destination endpoints.
+    [x] `IStatusProvider` — an integration decides what its own health means, with a shared default
+        (off / misconfigured / whatever it last did). The verdict used to be a branch per integration in
+        StatusReporter, which a plugin could not participate in at all.
+    [x] `IntegrationStatusGrain` — the board card for anything without a bespoke grain, so a plugin is no
+        longer simply absent (indistinguishable from one that failed to load).
+    [x] Microsoft.Extensions health checks: every integration becomes a standard `IHealthCheck`, served at
+        `/health/integrations`, tagged so a readiness probe is NOT failed by a degraded optional exporter.
+        The adapter lives in Engine so a plugin author never sees the health-check package.
+    [x] `/api/integrations/{id}/{action}` replaces the per-destination test endpoints (probe is derived).
+    [x] Startup banner built from the registry. Fixed while verifying: it reported a switched-OFF EmonCMS
+        as "DISABLED (misconfigured)" because the fault was read without checking Enabled first.
+    [ ] The five bespoke status grains stay for now — each encodes a real verdict rule about its own
+        subject, and replacing them with the generic one would lose reasoning rather than share it. They
+        should adopt `IStatusProvider` instead, one at a time.
     [ ] One generic Test button; delete the wired list in `actions.ts`.
     [ ] Required fields from attributes on the config class; retire `ConfigurationFaults` per-integration
         methods.
-    [ ] Startup banner built from the registry.
 
 5. Nav and grouping from the schema
     [ ] `group` + `icon` on `SchemaNode`.

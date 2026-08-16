@@ -21,6 +21,9 @@ public sealed class StatusReporter : BackgroundService
 {
     private readonly IGrainFactory grains;
     private readonly Config config;
+    // Every integration this build carries, and what each last did — so the board needs no per-integration branch.
+    private readonly Core.Integrations.IntegrationRegistry? registry;
+    private readonly Core.Integrations.IntegrationStatus? integrationStatus;
     private readonly IHiveMQClient mqtt;
     private readonly ISnapshotCache snapshots;
     private readonly EmonCmsStatus emon;
@@ -30,10 +33,12 @@ public sealed class StatusReporter : BackgroundService
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null)
     {
         this.grains = grains;
         this.config = config;
+        this.registry = registry;
+        this.integrationStatus = integrationStatus;
         this.mqtt = mqtt;
         this.snapshots = snapshots;
         this.emon = emon;
@@ -109,6 +114,34 @@ public sealed class StatusReporter : BackgroundService
             Enabled = config.Prometheus.Exporter,
             Detail = $":{config.Prometheus.Port}/metrics",
         });
+
+        // Every integration that has no hand-written component grain — each loaded plugin, and any
+        // built-in that never needed one. Reported from the registry rather than a branch per integration,
+        // so an integration cannot be running and yet absent from the board.
+        var bespoke = new HashSet<string>(["mqtt", "emoncms", "homeassistant", "prometheus"], StringComparer.OrdinalIgnoreCase);
+        foreach (var integration in registry?.All ?? [])
+        {
+            if (bespoke.Contains(integration.Id)) continue;
+
+            // The integration's own verdict where it has one (IStatusProvider), the shared derivation
+            // otherwise — never a rule invented here, which is where a per-integration branch used to live.
+            var last = integrationStatus?.For(integration.Id);
+            var health = Core.Integrations.IntegrationHealthDefaults.For(integration, config, last);
+            await grains.GetGrain<IIntegrationStatusGrain>(integration.Id).Report(new ComponentReport
+            {
+                Title = integration.DisplayName,
+                Enabled = health.Level != Core.Integrations.HealthLevel.Off,
+                Ok = health.Level switch
+                {
+                    Core.Integrations.HealthLevel.Good => true,
+                    Core.Integrations.HealthLevel.Bad => false,
+                    _ => (bool?)null,
+                },
+                Count = last?.Count ?? 0,
+                EventUtc = last?.LastSuccessUtc,
+                Detail = health.Detail ?? health.Summary,
+            });
+        }
 
         // The shared cache. Ok comes from a real round-trip via the store, not from the config claiming it
         // should work — "configured but unreachable" is precisely the state worth surfacing, because the

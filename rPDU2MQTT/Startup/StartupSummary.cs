@@ -16,7 +16,7 @@ namespace rPDU2MQTT.Startup;
 /// </summary>
 public static class StartupSummary
 {
-    public static void Log(Config cfg, HostRole roles, IConfigSource source, Core.Startup.ConfigurationFaults? faults = null)
+    public static void Log(Config cfg, HostRole roles, IConfigSource source, Core.Startup.ConfigurationFaults? faults = null, Core.Integrations.IntegrationRegistry? registry = null)
     {
         var roleNames = new[] { HostRole.Worker, HostRole.Api, HostRole.Ui, HostRole.Operator }
             .Where(r => roles.HasFlag(r))
@@ -42,21 +42,30 @@ public static class StartupSummary
         if (nodes > 0)
             Serilog.Log.Information("  Energy flow: {Nodes} node(s), {Links} link(s), {Bindings} live binding(s).", nodes, links, bindings);
 
-        // Destinations — each one is a thing someone will wonder why isn't updating.
+        // Destinations — each one is a thing someone will wonder why isn't updating. Read from the
+        // registry rather than a list here: a line per integration used to be added by hand, so a new one
+        // was simply absent from the banner and looked like it had not loaded.
         Serilog.Log.Information("  MQTT → {Host}:{Port} under '{Topic}'.",
             cfg.MQTT.Connection?.Host ?? "?", cfg.MQTT.Connection?.Port ?? 0, cfg.MQTT.ParentTopic);
         Serilog.Log.Information("  Home Assistant discovery: {State}{Topic}",
             cfg.HASS.DiscoveryEnabled ? "on" : "off", cfg.HASS.DiscoveryEnabled ? $" → '{cfg.HASS.DiscoveryTopic}'" : "");
-        Serilog.Log.Information("  Energy dashboard sync: {State}.", cfg.HASS.EnergyDashboard?.Enabled == true ? "on" : "off");
-        Serilog.Log.Information("  Prometheus exporter: {State}{Port}",
-            cfg.Prometheus.Exporter ? "on" : "off", cfg.Prometheus.Exporter ? $" → :{cfg.Prometheus.Port}/metrics" : "");
-        // "on" has to mean it is actually running. A destination switched on but skipped for a missing
-        // setting reported "on" here while exporting nothing, which is the least helpful line in the log.
-        var emonFault = faults?.For("emoncms");
-        Serilog.Log.Information("  EmonCMS: {State}{Detail}",
-            emonFault is not null ? "DISABLED (misconfigured)" : cfg.EmonCMS.Enabled ? "on" : "off",
-            emonFault is not null ? $" — {emonFault.Path} is not set"
-                : cfg.EmonCMS.Enabled ? $" via {cfg.EmonCMS.Transport} (feeds auto-configure {(cfg.EmonCMS.Feeds.AutoConfigure ? "on" : "off")})" : "");
+
+        foreach (var integration in registry?.All ?? [])
+        {
+            // "on" has to mean it is actually running. A destination switched on but skipped for a missing
+            // setting reported "on" here while exporting nothing, which is the least helpful line in a log.
+            var enabled = integration.Enabled(cfg);
+            // Only an integration someone switched ON can be misconfigured. Checking the reason regardless
+            // reported a switched-off EmonCMS as "DISABLED (misconfigured)", which reads as a fault to fix
+            // rather than a feature nobody turned on.
+            var fault = enabled ? integration.Misconfigured(cfg) : null;
+            var caps = string.Join(", ", Core.Integrations.IntegrationRegistry.Capabilities(integration));
+            Serilog.Log.Information("  {Name}: {State}{Detail}",
+                integration.DisplayName,
+                fault is not null ? "DISABLED (misconfigured)" : enabled ? "on" : "off",
+                fault is not null ? $" — {fault}" : enabled && caps.Length > 0 ? $" ({caps})" : "");
+        }
+
         Serilog.Log.Information("  GUI: {State}.", cfg.Gui.Enabled ? $"on :{cfg.Gui.Port}" : "off");
 
         // How to see more, said once, where someone reading the log will find it.

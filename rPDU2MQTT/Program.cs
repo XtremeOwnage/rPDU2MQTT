@@ -45,7 +45,8 @@ StartupSummary.Log(
     host.Services.GetRequiredService<Config>(),
     host.Services.GetRequiredService<rPDU2MQTT.Core.HostRole>(),
     host.Services.GetRequiredService<rPDU2MQTT.Startup.ConfigSources.IConfigSource>(),
-    host.Services.GetService<rPDU2MQTT.Core.Startup.ConfigurationFaults>());
+    host.Services.GetService<rPDU2MQTT.Core.Startup.ConfigurationFaults>(),
+    host.Services.GetService<rPDU2MQTT.Core.Integrations.IntegrationRegistry>());
 
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();
