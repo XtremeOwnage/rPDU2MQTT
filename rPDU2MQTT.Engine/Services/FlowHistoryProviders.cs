@@ -52,7 +52,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         // The step Prometheus is asked for has to be the one the caller wants back.
         var stride = steps.Count > 1 ? Math.Max(1, unix[1] - unix[0]) : 1;
 
-        var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
+        var name = MetricsHelper.PrometheusFlowMetricName(metric, cfg);
         var query = HistoryParsing.NodeQuery(name, nodeIds);
         var url = $"{baseUrl}/api/v1/query_range?query={Uri.EscapeDataString(query)}"
                 + $"&start={unix[0]}&end={unix[^1]}&step={stride}s";
@@ -82,7 +82,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
         if (baseUrl.Length == 0 || nodeIds.Count == 0) return new Dictionary<string, double>();
 
         // The same name the exporter writes, so the query cannot drift from what is stored.
-        var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", "", cfg);
+        var name = MetricsHelper.PrometheusFlowMetricName(metric, cfg);
         var query = HistoryParsing.NodeQuery(name, nodeIds);
         var at = new DateTimeOffset(DateTime.SpecifyKind(atUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
         var url = $"{baseUrl}/api/v1/query?query={Uri.EscapeDataString(query)}&time={at}";
@@ -147,8 +147,11 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
 
         foreach (var node in nodeIds)
         {
-            // Feed naming mirrors the export's input naming: "<node>_<metric>", then the bare node.
-            if (!list.TryGetValue($"{node}_{metric}", out var id) && !list.TryGetValue(node, out id)) continue;
+            // The same key the export writes its feed under, then the older bare-node fallback.
+            var wanted = MetricsHelper.EmonCmsFlowInputName(node, node, "", metric, cfg);
+            if (!list.TryGetValue(wanted, out var id)
+                && !list.TryGetValue($"{node}_{metric}", out id)
+                && !list.TryGetValue(node, out id)) continue;
             var url = $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(id)}&start={at - window}&end={at + window}"
                     + $"&interval={Math.Max(1, cfg.History.ToleranceSeconds)}&apikey={Uri.EscapeDataString(key)}";
             try

@@ -20,11 +20,13 @@ public sealed class EmonCmsFeedSync
     private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Config config;
     private readonly ISnapshotCache snapshots;
+    private readonly Core.Flow.IFlowValueSource? live;
 
-    public EmonCmsFeedSync(Config config, ISnapshotCache snapshots)
+    public EmonCmsFeedSync(Config config, ISnapshotCache snapshots, Core.Flow.IFlowValueSource? live = null)
     {
         this.config = config;
         this.snapshots = snapshots;
+        this.live = live;
     }
 
     /// <summary>Reconcile using the snapshot cache as the data source (the periodic Worker path).</summary>
@@ -44,12 +46,15 @@ public sealed class EmonCmsFeedSync
             return new(false, "EmonCMS Url and a read/write ApiKey are required for feed provisioning.");
         if (e.Feeds.Types is null || e.Feeds.Types.Count == 0)
             return new(false, "No feed Types configured — add at least one measurement type.");
-        if (merged.Devices.Count == 0)
+        // A hierarchy of virtual nodes is provisionable on its own — an install can have inverters and
+        // batteries modelled and no PDU at all.
+        if (!Core.Flow.FlowTiers.Any(merged, config))
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
         var p = e.Feeds.Processes;
         var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "log" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
-        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config);
+        var flow = config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
 
         var inputList = await GetInputs(ct);
         var inputs = inputList.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);

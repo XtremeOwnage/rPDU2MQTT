@@ -168,7 +168,11 @@ public static class FlowGraphBuilder
                     // A live reading is authoritative even at 0: solar at night generates nothing.
                     leaf[n.Id] = Math.Max(0, liveValue);
                 }
-                else if (n.Value is > 0) leaf[n.Id] = n.Value.Value;
+                // The static Value is a power figure (watts) — the field is offered and labelled as one.
+                // Applying it to every graph published a 5000 W node as 5000 kWh of energy, and 5000 kWh
+                // used today, which then flowed into the exports and the history behind them.
+                else if (n.Value is > 0 && string.Equals(metric, DefaultMetric, StringComparison.OrdinalIgnoreCase))
+                    leaf[n.Id] = n.Value.Value;
             }
 
         // Custom directed links (From feeds To) plus legacy Parents (parent feeds child).

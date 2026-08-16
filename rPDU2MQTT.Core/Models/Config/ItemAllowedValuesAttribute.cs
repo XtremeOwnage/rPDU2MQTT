@@ -18,3 +18,18 @@ public sealed class ItemAllowedValuesAttribute : Attribute
 public sealed class MetricItemChoicesAttribute : Attribute
 {
 }
+
+/// <summary>
+/// The items of this collection are energy-flow tag names, so the GUI offers the tags the configuration
+/// already defines rather than a free-text box per entry.
+///
+/// <para>
+/// Not an <c>[AllowedValues]</c> and deliberately not a validated set: the vocabulary is whatever the
+/// operator invented, it lives in the same document, and the server has no say in it. This only marks the
+/// field as naming tags — a reference to something defined elsewhere, where a typo silently matches nothing.
+/// </para>
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class TagChoicesAttribute : Attribute
+{
+}

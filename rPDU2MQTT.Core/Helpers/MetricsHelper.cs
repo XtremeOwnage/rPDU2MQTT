@@ -99,6 +99,40 @@ public static class MetricsHelper
         => PrometheusMetricName(r.Type, r.Device, r.Source, r.Units, config);
 
     /// <summary>
+    /// The Prometheus metric name an energy-flow tier's series lives under. The exporter writes it and the
+    /// history reads it back, so both must call this rather than each filling the template themselves —
+    /// they had drifted on the {units} placeholder, which made every history lookup miss.
+    /// </summary>
+    public static string PrometheusFlowMetricName(string metric, Config config)
+        => PrometheusMetricName($"flow_{metric}", "", "", "", config);
+
+    /// <summary>
+    /// The EmonCMS input key (and idempotent storage-feed name) for an energy-flow tier. Same rule as
+    /// above: the export writes it and <c>EmonCmsFlowHistory</c> looks the feed up by it.
+    /// </summary>
+    public static string EmonCmsFlowInputName(string nodeId, string label, string kind, string metric, Config config)
+    {
+        var template = config.EmonCMS.FlowInputNameTemplate;
+        if (string.IsNullOrWhiteSpace(template)) template = "{node}_{metric}";
+
+        var effectiveMetric = config.Overrides.Measurements.TryGetValue(metric, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
+            ? ov!.ID!
+            : metric;
+
+        return Sanitize(template
+            .Replace("{node}", nodeId)
+            .Replace("{label}", label)
+            .Replace("{kind}", kind)
+            .Replace("{metric}", effectiveMetric)
+            .Replace("{type}", effectiveMetric)
+            .Replace("{units}", rPDU2MQTT.Core.Flow.FlowUnits.Canonical(metric)));
+    }
+
+    /// <summary>The friendly (display-name) EmonCMS feed name for a flow tier's virtual feed.</summary>
+    public static string EmonCmsFlowFeedName(string label, string metric, Config config)
+        => $"{label} {FriendlyTypeName(metric)}".Trim();
+
+    /// <summary>
     /// The EmonCMS input key for a reading, applying <c>EmonCMS.InputNameTemplate</c>. Placeholders:
     /// <c>{type}</c> (honoring its Overrides.Measurements ID), <c>{device}</c>, <c>{source}</c> /
     /// <c>{outlet}</c>, <c>{units}</c>. A blank template falls back to the full raw identifier.

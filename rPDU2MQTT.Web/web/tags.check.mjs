@@ -95,5 +95,39 @@ if (!/1 node\(s\)/.test(covered)) fail(`a rule does not say what it covers: ${co
 // A rule that looks configured and matches nothing is exactly what this column exists to expose.
 if (!/nothing/.test(covered)) fail(`a rule matching no node is not called out: ${covered}`);
 
+// --- Tags are typed once and chosen everywhere else ---------------------------------------------------
+// A tag is free-form where it is defined, but a destination filter only *refers* to one — and a typo in a
+// reference is a filter that silently matches nothing, which is indistinguishable from a working one.
+
+// The rule's tags render as removable chips, not as a comma-separated string to re-type.
+const ruleChips = ruleRows.flatMap(r => query(r, '.tag-chip', true)).map(c => c.textContent.replace('\u2715', '').trim());
+if (!ruleChips.includes('rack-1')) fail(`the rule's tags are not chips: ${ruleChips.join(', ') || '(none)'}`);
+
+// Every tag the document defines, listed in one place with what carries it.
+const managerRows = query(nodesSec, 'tr', true)
+  .filter(r => query(r, 'input', true).some(i => ['rack-1', 'unused'].includes((i.value || '').trim())));
+if (managerRows.length !== 2) fail(`the tag manager does not list every defined tag (${managerRows.length} row(s))`);
+
+// A free-entry box completes from the tags that already exist.
+const dl = sandbox.document.getElementById('rpdu-known-tags');
+const offered = query(dl, 'option', true).map(o => o.value || o.attrs.value);
+if (!offered.length) fail('no completion list for tag entry');
+for (const want of ['rack-1', 'unused'])
+  if (!offered.includes(want)) fail(`'${want}' is not offered for completion: ${offered.join(', ') || '(none)'}`);
+
+// The destination filters choose from that list rather than accepting free text.
+const promLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Prometheus');
+if (!promLink) fail('no Prometheus tab');
+promLink.click();
+await new Promise(r => setTimeout(r, 200));
+const promSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+const pickers = query(promSec, 'select.tag-pick', true);
+if (!pickers.length) fail('the Prometheus tag filter is still a free-text list');
+const pickable = query(pickers[0], 'option', true).map(o => o.value || o.attrs.value).filter(Boolean);
+for (const want of ['rack-1', 'unused'])
+  if (!pickable.includes(want)) fail(`the filter does not offer '${want}': ${pickable.join(', ') || '(none)'}`);
+
 console.log(`tags: ${chips.length} chips from the graph; highlighting dims without removing any node or `
-  + 'reading; a derived node is tagged by rule, and a rule that matches nothing says so');
+  + 'reading; a derived node is tagged by rule, and a rule that matches nothing says so; '
+  + `tags are chips, listed in one manager (${managerRows.length}), completed from ${offered.length} known, `
+  + 'and a destination filter picks from them rather than accepting free text');

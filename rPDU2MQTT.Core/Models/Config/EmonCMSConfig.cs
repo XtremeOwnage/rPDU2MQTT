@@ -43,6 +43,33 @@ public class EmonCMSConfig
     [TemplateVariables("device", "source", "name", "number", "type", "units")]
     public string InputNameTemplate { get; set; } = "{device}_{source}_{type}";
 
+    /// <summary>
+    /// Send the energy-flow hierarchy (panels, inverters, batteries, the grid — every node on the Flow tab)
+    /// as inputs of its own, alongside the PDU measurements.
+    ///
+    /// <para>
+    /// On by default: without it EmonCMS only ever received what a PDU reports, so a hierarchy someone
+    /// modelled had no history recorded against it and the Flow page's "show a past moment" could never
+    /// answer for those nodes — the reader has always looked for these feeds, and nothing wrote them.
+    /// </para>
+    /// </summary>
+    [DefaultValue(true)]
+    [Description("Also send each energy-flow node (panels, inverters, batteries, the grid) as its own input, not just the PDU measurements. This is what gives those nodes history to read back.")]
+    public bool ExportFlowNodes { get; set; } = true;
+
+    /// <summary>Which energy-flow nodes are sent (#342).</summary>
+    [Description("Limit the exported energy-flow nodes to particular tags. Empty sends every node. Filtering changes only what is sent — never a value, and never any other destination.")]
+    public NodeTagFilter NodeTags { get; set; } = new();
+
+    /// <summary>
+    /// Template for an energy-flow node's input key. Kept separate from <see cref="InputNameTemplate"/>
+    /// because a tier has no device or outlet to name it after.
+    /// </summary>
+    [DefaultValue("{node}_{metric}")]
+    [Description("Template for an energy-flow node's EmonCMS input key. Placeholders: {node} (its id), {label}, {kind}, {metric}, {units}. e.g. '{node}_{metric}' -> solar_realpower. The history reader looks feeds up by this name.")]
+    [TemplateVariables("node", "label", "kind", "metric", "units")]
+    public string FlowInputNameTemplate { get; set; } = "{node}_{metric}";
+
     /// <summary>Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate).</summary>
     [DefaultValue("emon")]
     [Description("Base MQTT topic for EmonCMS's MQTT input (the {base} placeholder of MqttTopicTemplate). (Mqtt transport.)")]
@@ -79,7 +106,12 @@ public class EmonCmsFeedsConfig
     {
         new() { Type = "realpower" },
         new() { Type = "energy" },
+        // Only the energy-flow nodes carry a daily total; no PDU reports one, so this adds no outlet feeds.
+        new() { Type = EnergyPeriodMetric },
     };
+
+    /// <summary>The daily-total metric name, spelled once (see <c>Core.Flow.EnergyPeriod.Metric</c>).</summary>
+    internal const string EnergyPeriodMetric = "energytoday";
 
     [DefaultValue(EmonCmsFeedEngine.PHPFina)]
     [Description("Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).")]
@@ -116,8 +148,8 @@ public class EmonCmsFeedsConfig
 [System.Text.Json.Serialization.JsonConverter(typeof(EmonCmsFeedTypeConfigConverter))]
 public class EmonCmsFeedTypeConfig
 {
-    [Description("The measurement type this applies to (raw PDU type name).")]
-    [AllowedValues("realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor")]
+    [Description("The measurement type this applies to (raw PDU type name, or 'energytoday' for the energy-flow daily totals).")]
+    [AllowedValues("realpower", "apparentpower", "energy", "energytoday", "current", "voltage", "frequency", "powerfactor")]
     public string Type { get; set; } = "realpower";
 
     [Description("Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.")]

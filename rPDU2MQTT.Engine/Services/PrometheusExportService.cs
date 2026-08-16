@@ -103,47 +103,47 @@ public class PrometheusExportService : baseMQTTService
         {
             var merged = new Models.PDU.PduData();
             foreach (var data in FreshSnapshots()) merged.Devices.AddRange(data.Devices);
-            if (merged.Devices.Count == 0 && cfg.EnergyFlow.Nodes.Count == 0) return;
+            if (!Core.Flow.FlowTiers.Any(merged, cfg)) return;
 
-            var energyMetric = string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.EnergyMeasurementType)
-                ? "energy" : cfg.HASS.EnergyDashboard.EnergyMeasurementType;
-
+            var graphs = Core.Flow.FlowTiers.Graphs(merged, cfg, live);
             // Power defines the topology (and therefore the tier labels).
-            var power = Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
+            var power = graphs[0].Graph;
             var labels = power.Nodes.ToDictionary(n => n.Id, n => n, StringComparer.OrdinalIgnoreCase);
 
-            foreach (var (metric, graph) in new[]
+            foreach (var (metric, graph) in graphs)
             {
-                (Core.Flow.FlowGraphBuilder.DefaultMetric, power),
-                (energyMetric, Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, energyMetric, live)),
-                (Core.Flow.EnergyPeriod.Metric, Core.Flow.FlowGraphBuilder.Build(merged, cfg.EnergyFlow, Core.Flow.EnergyPeriod.Metric, live)),
-            })
-            {
-                var name = MetricsHelper.PrometheusMetricName($"flow_{metric}", "", "", graph.Units, cfg);
+                var name = MetricsHelper.PrometheusFlowMetricName(metric, cfg);
                 var gauge = FlowGauge(name, metric, graph.Units);
                 var written = new HashSet<string>(StringComparer.Ordinal);
 
-                foreach (var node in graph.Nodes)
+                foreach (var t in Core.Flow.FlowTiers.Of(graph, cfg.Prometheus.NodeTags))
                 {
-                    // The unmetered remainder is arithmetic about a hierarchy, not a device.
-                    if (!Core.Flow.FlowExport.ToMetricsStore(node)) continue;
-                    // Tag filter (#342): which nodes this scrape carries. Never changes a value.
-                    if (!cfg.Prometheus.NodeTags.Allows(node.Tags)) continue;
-                    // Unknown is not zero.
-                    if (node.Value is not { } v) continue;
-
-                    var tier = Core.Flow.FlowExport.Parents(power, node.Id).FirstOrDefault() ?? "";
-                    var set = new[] { node.Id, node.Label, node.Kind, labels.TryGetValue(tier, out var p) ? p.Label : tier };
-                    gauge.WithLabels(set).Set(v);
+                    var tier = Core.Flow.FlowExport.Parents(power, t.Node.Id).FirstOrDefault() ?? "";
+                    var set = new[] { t.Node.Id, t.Node.Label, t.Node.Kind, labels.TryGetValue(tier, out var p) ? p.Label : tier };
+                    gauge.WithLabels(set).Set(t.Value);
                     written.Add(LabelKey(set));
                 }
 
                 // Drop every label set we did NOT write this pass.
                 Prune(gauge, written);
             }
+            flowExportFailure = null;
         }
-        catch (Exception ex) { Log.Debug($"Prometheus flow-tier export skipped: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // Said once per spell rather than every poll, but said at Warning: this used to be a Debug line,
+            // so the entire hierarchy could be absent from every dashboard with nothing in the log to say so.
+            if (flowExportFailure != ex.Message)
+            {
+                flowExportFailure = ex.Message;
+                Log.Warning($"Prometheus: the energy-flow tiers were not exported this pass — {ex.Message}. "
+                          + "The PDU measurements are unaffected; every panel/inverter/battery series is missing until this clears.");
+            }
+        }
     }
+
+    // The failure currently being reported, so a permanent one doesn't log every poll.
+    private string? flowExportFailure;
 
     private static readonly string[] FlowLabelNames = ["node", "name", "kind", "tier"];
 
