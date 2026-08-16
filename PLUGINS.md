@@ -218,11 +218,12 @@ Built and verified on this branch:
 
 Deliberately not done, each for a stated reason rather than for time:
 
-- **The Vertiv poller** stays where it is — entangled with grains, placement, outlet control, OneView
-  groups and multi-instance routing. Converting it buys consistency, not capability.
+- **The Vertiv poll** stays in `PduGrain`. That grain is the single cluster-wide activation per PDU and
+  supervises the child grains outlet writes route through; moving the read out would take the supervision
+  with it and break control. Vertiv *is* an integration now (registry, banner, board, health) — the
+  finishing move is to invert the dependency so `PduGrain` polls through `IDeviceSourcePlugin`, and a new
+  vendor inherits the activation and supervision instead of reimplementing them.
 - **MQTT and Modbus sources** stay as they are: they already work through `IFlowValueSource`.
-- **`MQTTPublishingService` and HA discovery** publish the PDU's whole object model through ~30 helpers,
-  not an `ExportPass`. That is the bridge's core function and wants its own step.
 - **The per-type binding migration** was dropped. Rewriting every node's wiring buys nothing for anyone
   already using mqtt/modbus and is the one change here that could lose an operator's configuration; a
   plugin gets an open `Settings` bag instead.

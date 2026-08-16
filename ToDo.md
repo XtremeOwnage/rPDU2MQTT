@@ -128,9 +128,14 @@ finishes.
     [x] `DeviceSourcePluginHost` owns the timer, the failure reporting and the single-owner lease, so a
         plugin author never writes any of them. A failed poll leaves the previous snapshot to go stale
         rather than publishing an empty one, which downstream would read as every outlet going to zero.
-    [ ] The Vertiv poller stays where it is. It is entangled with grains, placement, outlet control,
-        OneView groups and multi-instance routing; converting it buys consistency, not capability, and it
-        is the deepest change on this list. Own step, on contracts now worn in by five integrations.
+    [x] `VertivIntegration` — the hardware this bridge was written for is a first-class integration:
+        registry, banner, Status board, /health/integrations, per-instance freshness judged against each
+        instance's own poll interval. It is no longer the one thing that is special.
+    [ ] The POLL still lives in `PduGrain`, deliberately. That grain is the single cluster-wide activation
+        per PDU and supervises the device/outlet/group child grains outlet writes route through; moving the
+        read out would take the supervision with it and break control. The finishing move is inverting the
+        dependency instead — have `PduGrain` poll THROUGH `IDeviceSourcePlugin` — so a new vendor inherits
+        the activation and supervision rather than reimplementing them.
     [x] `IDeviceControlPlugin` — a plugin device's outlets can be switched. `OutletGrainControl` routes to
         the plugin that owns the device id, holding the single-owner lease; a device with no reboot says so
         via Supports() rather than failing the command.
