@@ -223,6 +223,20 @@ public static class ServiceConfiguration
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
 
+        // ---- v4: integrations as plugins -------------------------------------------------------------
+        // Discovered by reflection over the Engine assembly, never listed by hand: a registration list is
+        // exactly what this replaces — the same integration used to be named in five places, any one of
+        // which could be forgotten with no failure to show for it.
+        foreach (var type in typeof(Services.DestinationHost).Assembly.GetTypes()
+                     .Where(t => t is { IsClass: true, IsAbstract: false })
+                     .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t)))
+            services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
+
+        services.AddSingleton<Core.Integrations.IntegrationRegistry>();
+        services.AddSingleton<Core.Integrations.IntegrationStatus>();
+        // Single-process ownership by default; the grain-backed lease replaces it in a real cluster.
+        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
+
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();
 
@@ -265,9 +279,10 @@ public static class ServiceConfiguration
             // the GUI can toggle at runtime, so register unconditionally rather than gating on the flag.
             services.AddHostedService<EnergyFlowMqttExportService>();
 
-            // Optional metric exporters.
-            if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
-                services.AddHostedService<PrometheusExportService>();
+            // v4: destinations are plugins. They are registered unconditionally and self-gate on their own
+            // Enabled(cfg) every pass, so a toggle in the GUI takes effect without a restart — and the host
+            // builds ONE ExportPass and offers it to all of them, so none can quietly omit the hierarchy.
+            services.AddHostedService<DestinationHost>();
 
             if (cfg.EmonCMS.Enabled)
             {
@@ -352,7 +367,7 @@ public static class ServiceConfiguration
         // Registered unconditionally, and the router reads Enabled and Provider per call — turning history
         // on, or switching backend, takes effect on the next request rather than at the next restart.
         // A dashboard read must not hang the page when the backend is down or slow.
-        services.AddSingleton<Core.Flow.IFlowHistory>(_ =>
+        services.AddSingleton<Core.Flow.IMeasurementHistory>(_ =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg));
 
         // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.

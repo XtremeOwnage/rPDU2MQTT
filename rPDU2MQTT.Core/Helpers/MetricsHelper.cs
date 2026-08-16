@@ -9,7 +9,12 @@ namespace rPDU2MQTT.Helpers;
 /// <param name="SourceName">The source's formatted display name (vs <paramref name="Source"/>'s object-id form).</param>
 /// <param name="Number">The 1-based outlet number, or null for non-outlet entities (circuits/phase/total).</param>
 /// <param name="DeviceName">The device's display name (vs <paramref name="Device"/>'s object-id form) (#206).</param>
-public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number, string DeviceName = "");
+/// <param name="InstanceId">
+/// Which configured PDU instance this was read from. Carried on the reading itself so a flattened list is
+/// still complete: an export that merges every instance's snapshot would otherwise lose the one thing the
+/// Prometheus <c>instance</c> label is built from.
+/// </param>
+public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number, string DeviceName = "", string InstanceId = "");
 
 public static class MetricsHelper
 {
@@ -17,25 +22,28 @@ public static class MetricsHelper
     /// Flatten all numeric outlet and entity measurements from a poll into export-friendly readings.
     /// Non-numeric values are skipped.
     /// </summary>
-    public static IEnumerable<MeasurementReading> EnumerateReadings(PduData data)
+    public static IEnumerable<MeasurementReading> EnumerateReadings(PduData data) => EnumerateReadings(data, "");
+
+    /// <summary>As above, stamping each reading with the instance it was polled from.</summary>
+    public static IEnumerable<MeasurementReading> EnumerateReadings(PduData data, string instanceId)
     {
         foreach (var device in data.Devices)
         {
             foreach (var outlet in device.Outlets)
-                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements, instanceId))
                     yield return reading;
 
             foreach (var entity in device.Entity)
-                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements, instanceId))
                     yield return reading;
         }
     }
 
-    private static IEnumerable<MeasurementReading> ToReadings(string device, string deviceName, string source, string sourceName, int? number, IEnumerable<Measurement> measurements)
+    private static IEnumerable<MeasurementReading> ToReadings(string device, string deviceName, string source, string sourceName, int? number, IEnumerable<Measurement> measurements, string instanceId = "")
     {
         foreach (var m in measurements)
             if (double.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number, deviceName);
+                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number, deviceName, instanceId);
     }
 
     /// <summary>

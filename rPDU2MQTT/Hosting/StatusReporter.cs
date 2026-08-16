@@ -28,9 +28,9 @@ public sealed class StatusReporter : BackgroundService
     private readonly Core.Flow.CacheHealth? cacheHealth;
     private readonly Core.Startup.ConfigurationFaults? faults;
     private readonly Services.ICacheClient? cacheProbe;
-    private readonly Core.Flow.IFlowHistory? history;
+    private readonly Core.Flow.IMeasurementHistory? history;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IFlowHistory? history = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null)
     {
         this.grains = grains;
         this.config = config;

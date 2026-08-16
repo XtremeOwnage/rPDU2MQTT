@@ -1,5 +1,5 @@
 using Prometheus;
-using rPDU2MQTT.Services;
+using rPDU2MQTT.Integrations.Prometheus;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
@@ -26,9 +26,9 @@ public class StaleSeriesTests
 
         var written = new HashSet<string>(System.StringComparer.Ordinal)
         {
-            PrometheusExportService.LabelKey(new[] { "inv", "Inverter", "inverter", "MPPT_1" }),
+            PrometheusIntegration.LabelKey(new[] { "inv", "Inverter", "inverter", "MPPT_1" }),
         };
-        PrometheusExportService.Prune(g, written);
+        PrometheusIntegration.Prune(g, written);
 
         var left = g.GetAllLabelValues().ToList();
         Assert.Single(left);
@@ -44,10 +44,10 @@ public class StaleSeriesTests
 
         var written = new HashSet<string>(System.StringComparer.Ordinal)
         {
-            PrometheusExportService.LabelKey(new[] { "a", "A", "node", "" }),
-            PrometheusExportService.LabelKey(new[] { "b", "B", "node", "" }),
+            PrometheusIntegration.LabelKey(new[] { "a", "A", "node", "" }),
+            PrometheusIntegration.LabelKey(new[] { "b", "B", "node", "" }),
         };
-        PrometheusExportService.Prune(g, written);
+        PrometheusIntegration.Prune(g, written);
 
         Assert.Equal(2, g.GetAllLabelValues().Count());
     }
@@ -60,7 +60,7 @@ public class StaleSeriesTests
         var g = NewGauge("test_flow_c");
         g.WithLabels("a", "A", "node", "").Set(1);
 
-        PrometheusExportService.Prune(g, new HashSet<string>(System.StringComparer.Ordinal));
+        PrometheusIntegration.Prune(g, new HashSet<string>(System.StringComparer.Ordinal));
 
         Assert.Empty(g.GetAllLabelValues());
     }
@@ -69,8 +69,8 @@ public class StaleSeriesTests
     public void LabelSetsThatDifferOnlyByBoundary_DoNotCollide()
     {
         // The key is a join, so a naive separator could make {"a|b","c"} and {"a","b|c"} the same string.
-        var one = PrometheusExportService.LabelKey(new[] { "a|b", "c" });
-        var two = PrometheusExportService.LabelKey(new[] { "a", "b|c" });
+        var one = PrometheusIntegration.LabelKey(new[] { "a|b", "c" });
+        var two = PrometheusIntegration.LabelKey(new[] { "a", "b|c" });
         Assert.NotEqual(one, two);
     }
 }

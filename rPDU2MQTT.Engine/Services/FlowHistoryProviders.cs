@@ -9,7 +9,7 @@ namespace rPDU2MQTT.Services;
 /// <summary>
 /// Past flow values from the Prometheus that scrapes this bridge.
 /// </summary>
-public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHistory
+public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasurementHistory
 {
     public string Id => "prometheus";
 
@@ -109,7 +109,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
 /// <summary>
 /// Past flow values from EmonCMS feeds.
 /// </summary>
-public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHistory
+public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasurementHistory
 {
     private IReadOnlyDictionary<string, string>? feeds;
     private DateTime feedsAt;
@@ -195,12 +195,12 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
 /// <summary>
 /// Chooses the backend per call from the live configuration.
 /// </summary>
-public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IFlowHistory
+public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IMeasurementHistory
 {
     private readonly PrometheusFlowHistory prometheus = new(http, cfg);
     private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
 
-    private IFlowHistory Current =>
+    private IMeasurementHistory Current =>
         string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase) ? emoncms : prometheus;
 
     public string Id => Current.Id;

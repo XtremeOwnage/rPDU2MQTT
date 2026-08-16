@@ -1,9 +1,15 @@
 namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
-/// Reads what a set of flow nodes read at a past instant (#372).
+/// Reads what a set of nodes read at a past instant (#372) — the third capability an integration can carry,
+/// paired with <c>IMeasurementSource</c> and <c>IMeasurementDestination</c>.
+///
+/// <para>
+/// Node-addressed, so it answers for a PDU outlet (<c>outlet:rack_pdu_1:3</c>) exactly as it does for a
+/// virtual tier: whatever a destination stored, this reads back.
+/// </para>
 /// </summary>
-public interface IFlowHistory
+public interface IMeasurementHistory
 {
     /// <summary>Which backend this is, as named in config ("prometheus", "emoncms").</summary>
     string Id { get; }
