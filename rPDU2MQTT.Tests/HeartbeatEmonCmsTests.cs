@@ -15,7 +15,7 @@ public class HeartbeatEmonCmsTests
     [Fact]
     public void EmonCmsStatus_Snapshot_UsesTheFieldNamesTheBoardReads()
     {
-        var status = new EmonCmsStatus();
+        var status = new EmonCmsStatus(new rPDU2MQTT.Core.Integrations.IntegrationStatus());
         status.RecordSuccess(5);
 
         using var doc = JsonSerializer.SerializeToDocument(status.Snapshot(), Web);
@@ -28,5 +28,5 @@ public class HeartbeatEmonCmsTests
     }
 
     [Fact]
-    public void EmonCmsStatus_HasNotAttempted_BeforeAnyExport() => Assert.False(new EmonCmsStatus().HasAttempted);
+    public void EmonCmsStatus_HasNotAttempted_BeforeAnyExport() => Assert.False(new EmonCmsStatus(new rPDU2MQTT.Core.Integrations.IntegrationStatus()).HasAttempted);
 }

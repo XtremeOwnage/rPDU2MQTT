@@ -1,49 +1,52 @@
+using rPDU2MQTT.Core.Integrations;
+
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// Tracks the outcome of the most recent EmonCMS export so the GUI can show a health indicator.
-/// Thread-safe; a singleton shared by <see cref="EmonCmsExportService"/> (writer) and the GUI (reader).
+/// The outcome of the most recent EmonCMS export, for the GUI's health indicator and the heartbeat.
+///
+/// <para>
+/// A view over the shared <see cref="IntegrationStatus"/> rather than a store of its own. Two holders for
+/// one idea is how a card and an endpoint end up disagreeing about whether the last export worked — one
+/// gets updated and the other does not, and neither looks wrong on its own. The name and shape are kept
+/// because the Status grain, the heartbeat and the GUI all read them.
+/// </para>
 /// </summary>
 public sealed class EmonCmsStatus
 {
-    private readonly object gate = new();
+    /// <summary>The id everything generic keys EmonCMS by — the integration's own.</summary>
+    private const string Id = "emoncms";
 
-    public DateTime? LastAttemptUtc { get; private set; }
-    public DateTime? LastSuccessUtc { get; private set; }
-    public bool? LastOk { get; private set; }
-    public string? LastError { get; private set; }
-    public int LastCount { get; private set; }
+    private readonly IntegrationStatus status;
 
-    public void RecordSuccess(int count)
-    {
-        lock (gate)
-        {
-            var now = DateTime.UtcNow;
-            LastAttemptUtc = now;
-            LastSuccessUtc = now;
-            LastOk = true;
-            LastError = null;
-            LastCount = count;
-        }
-    }
+    public EmonCmsStatus(IntegrationStatus status) => this.status = status;
 
-    public void RecordFailure(string error)
-    {
-        lock (gate)
-        {
-            LastAttemptUtc = DateTime.UtcNow;
-            LastOk = false;
-            LastError = error;
-        }
-    }
+    private IntegrationStatus.Entry? Entry => status.For(Id);
 
-    /// <summary>True once this process has actually tried an export — i.e. it runs the exporter (the worker).</summary>
-    public bool HasAttempted { get { lock (gate) return LastAttemptUtc is not null; } }
+    public DateTime? LastAttemptUtc => Entry?.LastAttemptUtc;
+    public DateTime? LastSuccessUtc => Entry?.LastSuccessUtc;
+    public bool? LastOk => Entry?.LastOk;
+    public string? LastError => Entry?.LastError;
+    public int LastCount => Entry?.Count ?? 0;
 
-    /// <summary>A snapshot for serialization (e.g. the diagnostics endpoint) and for the heartbeat.</summary>
+    public void RecordSuccess(int count) => status.RecordSuccess(Id, count);
+
+    public void RecordFailure(string error) => status.RecordFailure(Id, error);
+
+    /// <summary>
+    /// True once this process has actually tried an export — i.e. it is the one running the exporter.
+    /// </summary>
+    /// <remarks>
+    /// The distinction matters on a fleet: "I have not attempted an export" is not evidence there was no
+    /// export, and the status grain uses exactly this to refuse letting an outcome-free report from a
+    /// non-exporting process overwrite a known one.
+    /// </remarks>
+    public bool HasAttempted => Entry?.LastAttemptUtc is not null;
+
+    /// <summary>A snapshot for serialization (the diagnostics endpoint) and for the heartbeat.</summary>
     public Core.EmonCmsHealth Snapshot()
     {
-        lock (gate)
-            return new Core.EmonCmsHealth(LastOk, LastAttemptUtc, LastSuccessUtc, LastError, LastCount);
+        var e = Entry;
+        return new Core.EmonCmsHealth(e?.LastOk, e?.LastAttemptUtc, e?.LastSuccessUtc, e?.LastError, e?.Count ?? 0);
     }
 }

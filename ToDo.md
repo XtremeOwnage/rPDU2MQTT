@@ -233,10 +233,11 @@ finishes.
         outside the try, so cancelling on shutdown throws past the loop's own handler and the host reports a
         background-service crash on every clean stop.
     [x] Verified: a real run now stops on SIGTERM with zero unhandled/crash lines.
-    [ ] `EmonCmsStatus` still exists alongside the generic `IntegrationStatus`. Two holders for one idea, but
-        the EmonCMS one carries `HasAttempted` and a snapshot shape the status grain and the GUI both read,
-        so merging them touches the Status board and the health indicator. Worth doing; not worth rushing
-        into the tail of this branch.
+    [x] `EmonCmsStatus` is now a VIEW over `IntegrationStatus`, not a second store. Its name and shape are
+        kept because the status grain, the heartbeat and the GUI all read them; only the storage merged.
+        Two holders for one idea is how a card and an endpoint end up disagreeing about the same export,
+        with neither looking wrong on its own. Existing EmonCMS status tests pass unchanged, and health,
+        probe, /api/integrations and /api/diagnostics were checked against one running bridge.
 
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
