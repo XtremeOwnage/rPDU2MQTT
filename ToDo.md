@@ -46,7 +46,15 @@ finishes.
         the pre-conversion binary on one rig. (The energy store lives beside the binary, so both stores
         have to be wiped or the comparison is against a different day's state.)
     [x] Its banner line and status branch are gone — both come from the registry now.
-    [x] `/api/integrations/{id}/{action}` is mounted and replaces the bespoke test endpoint.
+    [x] `/api/integrations/{id}/{action}` is mounted, and the bespoke endpoints it replaced are DELETED:
+        `/api/test/emoncms`, `/api/emoncms/provision-feeds`, `/api/emoncms/delete-feeds`. The GUI buttons
+        call the generic route, so a button and the API cannot do different things.
+    [x] EmonCMS provisioning holds the single-owner lease. The deleted endpoint got that from a grain;
+        losing it would have let two instances race and create duplicate feeds.
+    [ ] `/api/test/mqtt`, `/api/test/pdu` and `/api/test/history` still exist. They are connection tests
+        for things that are not integrations in their own right (the broker, a PDU's HTTP API, whichever
+        history backend is selected) — `vertiv/probe` and `mqtt/probe` overlap but are not equivalent, so
+        folding them in needs a decision about what each should mean rather than a rename.
 
 3. The other destinations
     [x] EmonCMS — destination + history + configuration publisher (feed provisioning + sweep). Three

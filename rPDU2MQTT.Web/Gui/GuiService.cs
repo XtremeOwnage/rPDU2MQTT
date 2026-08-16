@@ -1574,45 +1574,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Validate the EmonCMS configuration (HTTP: reach the server + check the API key; MQTT: broker up).
-        app.MapPost("/api/test/emoncms", async (HttpContext ctx) =>
-        {
-            var e = config.EmonCMS;
-            if (!e.Enabled)
-                return Results.Json(new { ok = false, message = "EmonCMS is disabled (EmonCMS.Enabled is false)." }, ConfigSchema.Json);
-
-            if (e.Transport == EmonCmsTransport.Mqtt)
-            {
-                var topic = $"{(e.MqttBaseTopic ?? "emon").TrimEnd('/')}/{e.Node}";
-                return mqtt.IsConnected()
-                    ? Results.Json(new { ok = true, message = $"MQTT broker connected; publishing to '{topic}'. (EmonCMS receipt can't be confirmed from here.)" }, ConfigSchema.Json)
-                    : Results.Json(new { ok = false, message = "MQTT broker is not connected — check the MQTT settings." }, ConfigSchema.Json);
-            }
-
-            if (string.IsNullOrWhiteSpace(e.Url))
-                return Results.Json(new { ok = false, message = "EmonCMS.Url is required for the HTTP transport." }, ConfigSchema.Json);
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
-            try
-            {
-                var url = $"{e.Url.TrimEnd('/')}/feed/list.json?apikey={Uri.EscapeDataString(e.ApiKey ?? string.Empty)}";
-                using var resp = await testHttp.GetAsync(url, cts.Token);
-                var body = (await resp.Content.ReadAsStringAsync(cts.Token)).TrimStart();
-                if (!resp.IsSuccessStatusCode)
-                    return Results.Json(new { ok = false, message = $"EmonCMS returned HTTP {(int)resp.StatusCode}." }, ConfigSchema.Json);
-                if (body.StartsWith("["))
-                    return Results.Json(new { ok = true, message = "Reached EmonCMS and the API key was accepted." }, ConfigSchema.Json);
-                if (body.Contains("\"success\":false", StringComparison.OrdinalIgnoreCase) || body.Equals("false", StringComparison.OrdinalIgnoreCase) || body.Contains("invalid", StringComparison.OrdinalIgnoreCase))
-                    return Results.Json(new { ok = false, message = "Reached EmonCMS but the API key was rejected (a read/write key is required)." }, ConfigSchema.Json);
-                return Results.Json(new { ok = true, message = "Reached EmonCMS." }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Could not reach EmonCMS: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
-
         // HA Energy Mapping (#128): push the current hierarchy into HA's Energy Dashboard now, or clear it.
         app.MapPost("/api/ha-energy/sync", async (HttpContext ctx) =>
         {
@@ -1647,20 +1608,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"Clear failed: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
-
-        // Manually run EmonCMS feed provisioning now (#163) and report what it did.
-        app.MapPost("/api/emoncms/provision-feeds", async () =>
-        {
-            try
-            {
-                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).Reconcile(force: true);
-                return Results.Json(new { ok = r.Ok, message = r.Message, feeds = r.FeedsCreated, processes = r.ProcessesSet, virtualFeeds = r.VirtualFeeds }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Feed provisioning failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 
@@ -1734,20 +1681,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = $"{integration.DisplayName} · {found.Title} failed: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
-
-        // Delete every EmonCMS feed rPDU2MQTT created (under its tag/node) — the "clean up" button.
-        app.MapPost("/api/emoncms/delete-feeds", async () =>
-        {
-            try
-            {
-                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).DeleteAll();
-                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Delete feeds failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 

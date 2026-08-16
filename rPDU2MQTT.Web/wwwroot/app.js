@@ -7053,9 +7053,9 @@ async function runTest(what        , path        )                      {
 
 async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
 async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
-async function testEmonCms() { const r = await runTest('EmonCMS', '/api/test/emoncms'); refreshStatus(); return r; }
+async function testEmonCms() { const r = await runTest('EmonCMS', '/api/integrations/emoncms/probe'); refreshStatus(); return r; }
 async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
-async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function provisionEmonCmsFeeds() { await runIntegrationAction('emoncms', { name: 'publish', title: 'Provision EmonCMS feeds', description: '', effect: 'write' }); }
 async function deleteEmonCmsFeeds() {
   if (!confirm('⚠️ DELETE ALL EmonCMS feeds created by rPDU2MQTT?\n\n'
     + 'This PERMANENTLY deletes every feed under rPDU2MQTT’s tag/node — and ALL of their stored history in EmonCMS.\n\n'
@@ -7065,8 +7065,11 @@ async function deleteEmonCmsFeeds() {
   const typed = prompt('Final confirmation — type  DELETE  (all caps) to permanently delete all rPDU2MQTT feeds:');
   if (typed !== 'DELETE') { toast('Cancelled — nothing was deleted.', false); return; }
   toast('Deleting EmonCMS feeds…', true);
-  const r = await api('/api/emoncms/delete-feeds', { method: 'POST' });
-  toast(r.body.message, r.body.ok);
+  // Through the generic route: the integration owns the rule and the single-owner lease, so the button and
+  // the API cannot do different things.
+  const r = await api('/api/integrations/emoncms/sweep', { method: 'POST' });
+  const inner = (r.body || {}).result || {};
+  toast(inner.message ?? r.body?.message ?? 'Done.', r.body?.ok !== false);
 }
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function clearHa() {

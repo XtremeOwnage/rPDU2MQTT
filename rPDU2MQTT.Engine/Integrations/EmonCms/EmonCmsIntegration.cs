@@ -30,11 +30,16 @@ public sealed class EmonCmsIntegration
     private readonly EmonCmsFlowHistory history;
     private readonly Core.Flow.IFlowValueSource? live;
     private readonly IMessagePublisher? publisher;
+    // Provisioning writes to EmonCMS, so exactly one process may do it — two racing each other create
+    // duplicate feeds. The bespoke GUI endpoint got this from a grain; the contract gets it from the lease.
+    private readonly ISingleOwnerLease lease;
 
     public EmonCmsIntegration(
         Config cfg, EmonCmsStatus status, EmonCmsFeedSync feeds,
-        Core.Flow.IFlowValueSource? live = null, IMessagePublisher? publisher = null)
+        Core.Flow.IFlowValueSource? live = null, IMessagePublisher? publisher = null,
+        ISingleOwnerLease? lease = null)
     {
+        this.lease = lease ?? new SoleOwnerLease();
         this.cfg = cfg;
         this.status = status;
         this.feeds = feeds;
@@ -159,10 +164,20 @@ public sealed class EmonCmsIntegration
     public bool PublishingEnabled(Config c) => c.EmonCMS.Enabled && c.EmonCMS.Feeds.AutoConfigure;
 
     public async Task<string> PublishAsync(ExportPass pass, CancellationToken ct)
-        => (await feeds.ReconcileAsync(pass.Snapshot, ct)).Message;
+    {
+        var message = "Another instance is provisioning EmonCMS feeds.";
+        await lease.RunIfOwnerAsync("emoncms:feeds",
+            async token => message = (await feeds.ReconcileAsync(pass.Snapshot, token)).Message, ct);
+        return message;
+    }
 
     public async Task<string> SweepAsync(ExportPass pass, CancellationToken ct)
-        => (await feeds.DeleteAllAsync(ct)).Message;
+    {
+        var message = "Another instance is managing EmonCMS feeds.";
+        await lease.RunIfOwnerAsync("emoncms:feeds",
+            async token => message = (await feeds.DeleteAllAsync(token)).Message, ct);
+        return message;
+    }
 
     // --- History --------------------------------------------------------------------------------------
 
