@@ -53,6 +53,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly PluginSchemaSections? pluginSections;
     // Every integration this build carries, built-in or loaded from plugins/.
     private readonly Core.Integrations.IntegrationRegistry? integrations;
+    // The write seam. Routes to the outlet grain for a PDU, and to the owning plugin for a plugin device.
+    private readonly Abstractions.Pdu.IOutletControl? outletControl;
     private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
@@ -64,11 +66,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
         this.integrations = integrations;
+        this.outletControl = outletControl;
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
@@ -2013,6 +2016,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 if (action == "resetstats")
                     await pdu.ResetOutletStatsAsync(req.DeviceId, req.Index, cts.Token);
+                // Through the write seam, not the Vertiv client directly: the seam is what routes a
+                // plugin-supplied device's outlet to the plugin that owns it. Calling the client meant this
+                // page could only ever switch a Vertiv PDU, however the device got here.
+                else if (outletControl is not null)
+                    await outletControl.Control(req.DeviceId, req.Index, action, cts.Token);
                 else
                     await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
                 return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} → {action}." }, ConfigSchema.Json);

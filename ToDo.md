@@ -130,9 +130,9 @@ finishes.
     [x] Verified end to end: the example plugin as a device publishes outlet names, state and power to
         MQTT, appears as `rpdu2mqtt_realpower{device="hello_device"}` and as flow tiers under its own PDU
         tier — indistinguishable from a real PDU downstream.
-    [ ] The GUI's control page calls `pdu.ControlOutletAsync` (the Vertiv class) directly rather than
-        `IOutletControl`, so plugin control works on the MQTT command path and not that page. Point the
-        endpoint at the seam.
+    [x] The GUI's control endpoint goes through `IOutletControl` now, not the Vertiv client, so it can
+        switch a plugin device too. Verified: outlet 0 of the example plugin device went 77 W -> 0 through
+        `/api/control/outlet` while outlet 1 was untouched.
 
 8. External plugins (built — the earlier "in-tree only" call was reversed)
     [x] `PluginLoader` — scans `plugins/` (or `RPDU2MQTT_PLUGINS`), one `AssemblyLoadContext` each, host
