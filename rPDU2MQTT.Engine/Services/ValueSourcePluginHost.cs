@@ -5,7 +5,8 @@ using rPDU2MQTT.Core.Integrations;
 namespace rPDU2MQTT.Services;
 
 /// <summary>
-/// Keeps each plugin-supplied value source in step with the bindings that name it.
+/// Keeps each contributed value source in step with the bindings that name it — a plugin's, or a built-in
+/// that speaks the same contract (Home Assistant entities).
 ///
 /// <para>
 /// The same arrangement the MQTT ingest has always had: reconcile on a timer rather than wiring once at
@@ -37,7 +38,7 @@ public sealed class ValueSourcePluginHost : BackgroundService
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Log.Error(ex, "Value-source plugin reconcile failed."); }
         }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
+        while (await SafeWait(timer, stoppingToken));
     }
 
     /// <summary>One reconcile pass. Public so a test can drive it without a host.</summary>
@@ -69,4 +70,16 @@ public sealed class ValueSourcePluginHost : BackgroundService
             }
         }
     }
+
+    /// <summary>
+    /// The tick wait, with shutdown treated as an ending rather than a fault. The await used to sit in the
+    /// while-condition outside the try, so cancelling on shutdown threw past the handler and the host
+    /// reported a background service crash on every clean stop.
+    /// </summary>
+    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
+    {
+        try { return await timer.WaitForNextTickAsync(ct); }
+        catch (OperationCanceledException) { return false; }
+    }
+
 }

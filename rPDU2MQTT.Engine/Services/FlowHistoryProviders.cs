@@ -199,9 +199,16 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IMeasuremen
 {
     private readonly PrometheusFlowHistory prometheus = new(http, cfg);
     private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
+    private readonly Integrations.HomeAssistant.HomeAssistantHistory homeAssistant = new(http, cfg);
 
-    private IMeasurementHistory Current =>
-        string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase) ? emoncms : prometheus;
+    // Chosen by id from live config, so adding a backend is one more line here and nothing else — the
+    // property that made IMeasurementHistory the template the rest of the contracts were copied from.
+    private IMeasurementHistory Current => cfg.History.Provider?.ToLowerInvariant() switch
+    {
+        "emoncms" => emoncms,
+        "homeassistant" => homeAssistant,
+        _ => prometheus,
+    };
 
     public string Id => Current.Id;
 

@@ -236,12 +236,22 @@ public static class ServiceConfiguration
 
         // Plugin-supplied sources join the same composite as the built-in ingests, so the flow graph cannot
         // tell where a value came from — which it never could, and is the whole point of the seam.
-        var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>().Cast<Core.Flow.IFlowValueSource>().ToArray();
+        // Built-in sources that speak the plugin contract are constructed ONCE, here, and registered as
+        // that same instance. Two registrations gave the health-check registry a duplicate name; resolving
+        // them from inside the IFlowValueSource factory instead was worse — several integrations take an
+        // IFlowValueSource, so building it built them, which needed it, and startup simply hung.
+        var haSource = new Integrations.HomeAssistant.HomeAssistantValueSource(cfg);
+        services.AddSingleton<Core.Integrations.IIntegration>(haSource);
+
+        var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>()
+            .Cast<Core.Flow.IFlowValueSource>()
+            .ToArray();
 
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 grainSyncedFlow,
+                haSource,
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
                 // with a real energy binding uses that and the derived total only fills a gap.
                 .. pluginSources,
@@ -253,12 +263,13 @@ public static class ServiceConfiguration
                     ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
                     : [])])
             : new Core.Flow.CompositeFlowValueSource(
-                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow, .. pluginSources,
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow,
+                 haSource, .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
                      : [])]));
 
-        if (worker && pluginSources.Length > 0)
+        if (worker)
             services.AddHostedService<Services.ValueSourcePluginHost>();
 
         if (cfg.History.Enabled && cfg.History.ValueFallback)
@@ -288,7 +299,10 @@ public static class ServiceConfiguration
         // which could be forgotten with no failure to show for it.
         foreach (var type in typeof(Services.DestinationHost).Assembly.GetTypes()
                      .Where(t => t is { IsClass: true, IsAbstract: false })
-                     .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t)))
+                     .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t))
+                     // A built-in that is also a value source is wired explicitly below, as one instance
+                     // the flow composite can also hold. Letting the scan add it too made two.
+                     .Where(t => !typeof(Core.Flow.IFlowValueSource).IsAssignableFrom(t)))
             services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
 
         services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
@@ -308,6 +322,7 @@ public static class ServiceConfiguration
 
         // The broker's topics, offered as nodes to adopt through the same capability a plugin would use.
         services.AddSingleton<Core.Integrations.INodeProvider, Hosting.MqttNodeProvider>();
+        services.AddSingleton<Core.Integrations.INodeProvider, Hosting.ModbusNodeProvider>();
 
         // The PDU object-model publisher, off the hosting base class and onto the seam.
         services.AddSingleton<Services.MqttPduPublisher>();

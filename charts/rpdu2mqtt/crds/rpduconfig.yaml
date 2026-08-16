@@ -502,6 +502,7 @@ spec:
                     - ''
                     - prometheus
                     - emoncms
+                    - homeassistant
                     description: "Which backend to read from: 'prometheus' or 'emoncms'."
                   PrometheusUrl:
                     type: string

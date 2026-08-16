@@ -33,8 +33,10 @@ finishes.
         same index and the same payload analyzer the node editor uses, so a discovered node and a
         hand-bound one agree about what a topic is. Served at `/api/discover/nodes`, which asks every
         provider. Verified against the existing picker: same 5 results, with metric hints and suggested ids.
-    [ ] Modbus register scan as an `INodeProvider` (the scan endpoint exists; it just is not behind the
-        capability yet).
+    [x] `ModbusNodeProvider` offers the configured devices. Deliberately does NOT scan registers on every
+        keystroke: `DiscoverAsync` backs a picker, and a scan is a real round-trip to a shared gateway —
+        the constraint that gave devices a lease in the first place. The deep browse stays in the register
+        explorer, opened against one device on purpose.
 
 2. Prometheus onto the contracts (the proving case)
     [x] `PrometheusIntegration` implements `IMeasurementDestination` + `IMeasurementHistory` — one vendor,
@@ -181,8 +183,12 @@ finishes.
 
 9. Extend — only once everything above is converted
     [x] Done via `HistoryValueSource` (see item 8 above).
-    [ ] Home Assistant as a value source (entity states).
-    [ ] Home Assistant as a history provider (recorder/statistics).
+    [x] `HomeAssistantValueSource` — a node valued from an HA entity, for the meter or inverter that is
+        already in HA through some other integration. Unavailable/non-numeric is nothing, never zero, and
+        values convert to canonical units on the way in so a W and a kW entity roll up together.
+    [x] `HomeAssistantHistory` — the recorder as a third history backend. Matched by the unique_id this
+        bridge publishes discovery under, so the lookup is exact rather than a guess at a display name.
+        One request for the whole node set, not one per node.
 
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase

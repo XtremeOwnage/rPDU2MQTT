@@ -36,7 +36,7 @@ public class HistoryConfig
 
     [DefaultValue("prometheus")]
     [Description("Which backend to read from: 'prometheus' or 'emoncms'.")]
-    [AllowedValues("prometheus", "emoncms")]
+    [AllowedValues("prometheus", "emoncms", "homeassistant")]
     public string Provider { get; set; } = "prometheus";
 
     /// <summary>
