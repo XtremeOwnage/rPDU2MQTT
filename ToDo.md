@@ -211,6 +211,21 @@ finishes.
         bridge publishes discovery under, so the lookup is exact rather than a guess at a display name.
         One request for the whole node set, not one per node.
 
+9. Tests for the contracts themselves
+    [x] `IntegrationHostTests` (10) — one pass shared by every destination, a failing destination recorded
+        against itself without stopping the others, per-process destinations running on a non-leader, stale
+        snapshots not exported, instance identity surviving the merge, configuration published on its own
+        cadence and never from a non-leader, and an integration's own verdict beating the shared one.
+    [x] `ValueSourceContractTests` (6) — a source handed only its own bindings, the storage key accounting
+        for direction and accumulation, unchanged config not re-applied, a changed binding applied without
+        a restart, stored values refusing to answer before a fetch or after going stale, and an unreadable
+        backend leaving what it had rather than blanking every node.
+    [x] `DeviceContractTests` (8) — a reader owning exactly its instance, null meaning "nothing to report"
+        rather than zero, a failed poll throwing so the host attributes it, control reporting what happened
+        rather than what was asked, and each device keeping its own interval.
+    [x] Verified by sabotage: leader-gating everything and letting one failure abort the pass each fail
+        the tests written for them.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.
