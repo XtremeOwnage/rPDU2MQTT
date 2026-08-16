@@ -359,4 +359,20 @@ public class EnergyFlowSource
     [Description("For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).")]
     [AllowedValues("big", "little")]
     public string WordOrder { get; set; } = "big";
+
+    // --- Plugin-supplied source types --------------------------------------------------------------
+
+    /// <summary>
+    /// Whatever a plugin-supplied source type needs that has no field of its own here — an HTTP path, an
+    /// SNMP OID, a vendor's device id.
+    ///
+    /// <para>
+    /// The built-in types keep their typed fields above. Moving those in here would migrate every existing
+    /// binding for no benefit to anyone already using them, and rewriting every node's wiring is not a
+    /// change to make casually. A plugin cannot add a property to this class, so it gets an open bag —
+    /// the same arrangement as <c>Config.Plugins</c>, for the same reason.
+    /// </para>
+    /// </summary>
+    [Description("Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.")]
+    public Dictionary<string, object?> Settings { get; set; } = new();
 }

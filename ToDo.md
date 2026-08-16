@@ -94,10 +94,25 @@ finishes.
     [ ] A GUI check pinning "a new destination needs zero TypeScript".
 
 6. Sources onto the contracts
-    [ ] Per-type binding config nested under the source type; flat form honoured on load forever.
-    [ ] Client registry for the bespoke editors (topic picker, register scanner); delete `SOURCE_TYPES`.
-    [ ] MQTT source.
-    [ ] Modbus source, keeping the single-owner lease that stops RS485 gateway contention.
+    [x] `IValueSourcePlugin` — a plugin supplies live values for bindings naming its own type, joining the
+        same `CompositeFlowValueSource` the built-in ingests feed. The graph cannot tell where a value came
+        from, which it never could.
+    [x] `EnergyFlowSource.Settings` — an open bag for a plugin type's fields. NOT the nested per-type
+        migration this item originally called for: the built-ins keep their typed fields, because
+        rewriting every existing node's wiring buys nothing for anyone already using them and is the one
+        change on this branch that could lose an operator's configuration.
+    [x] Plugin source types are offered in the node editor's dropdown, appended to the declared set and
+        marked dynamic so the CRD keeps the plain one — it cannot validate a type that exists only on one
+        machine, and an unknown type is not rejected at runtime, it simply has nothing supplying it.
+    [x] `ValueSourcePluginHost` reconciles on a timer with change detection, so a binding added in the GUI
+        takes effect without a restart and an expensive ReconcileAsync is not paid every tick.
+    [x] Verified: HelloWorld as a source fed 1234 W into a node, which rolled up through the inverter and
+        reached Prometheus.
+    [ ] MQTT and Modbus sources stay as they are. They work through `IFlowValueSource` already; converting
+        them buys consistency, not capability, and Modbus carries the single-owner lease that stops RS485
+        gateway contention. Own step.
+    [ ] Client registry for the bespoke editors (topic picker, register scanner); `SOURCE_TYPES` stays
+        until then — a plugin type is offered by the schema, but gets generic fields via Settings.
 
 7. Devices
     [ ] `IDeviceSource` + `IDeviceControl`; Vertiv rPDU moved onto them.

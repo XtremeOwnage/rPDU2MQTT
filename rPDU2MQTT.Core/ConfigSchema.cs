@@ -135,6 +135,17 @@ public static class ConfigSchema
             .GetCustomAttribute<AllowedValuesAttribute>()!.Values
             .Select(v => v?.ToString() ?? "").ToArray();
 
+    /// <summary>
+    /// Source types a plugin has contributed, offered alongside the built-in mqtt/modbus in the node
+    /// editor. Set at startup from the registry; empty when nothing contributes one.
+    /// </summary>
+    /// <remarks>
+    /// A GUI convenience, never a constraint — the same rule as the host's time zones. The CRD keeps the
+    /// declared set, because it cannot validate against types that exist only on one operator's machine,
+    /// and a binding naming an unknown type is not rejected at runtime: it simply has nothing supplying it.
+    /// </remarks>
+    public static IReadOnlyList<(string Type, string Label)> PluginSourceTypes { get; set; } = [];
+
     /// <summary>Build the schema for the whole configuration model.</summary>
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
 
@@ -242,6 +253,22 @@ public static class ConfigSchema
         {
             var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
             node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
+            node.Type = "enum";
+            return node;
+        }
+
+        // A plugin-supplied source type is offered alongside the declared ones. Appended rather than
+        // replacing them, and marked dynamic so the CRD generator keeps the plain declared set — it cannot
+        // validate against a type that exists only on one operator's machine.
+        if (type == typeof(string) && prop.DeclaringType == typeof(EnergyFlowSource)
+            && prop.Name == nameof(EnergyFlowSource.Type) && PluginSourceTypes.Count > 0
+            && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } declared)
+        {
+            node.EnumValues = declared.Values.Select(v => v?.ToString() ?? "")
+                .Concat(PluginSourceTypes.Select(p => p.Type))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            node.DynamicChoices = true;
             node.Type = "enum";
             return node;
         }

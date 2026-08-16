@@ -11,7 +11,7 @@ namespace rPDU2MQTT.Plugin.HelloWorld;
 /// it is what a CSV exporter or a "post to my own API" plugin would look like — while being something you
 /// can verify with `cat`.
 /// </summary>
-public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IConfigurablePlugin, IIntegrationApi
+public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IConfigurablePlugin, IIntegrationApi, IValueSourcePlugin
 {
     private HelloWorldSettings settings = new();
 
@@ -45,6 +45,25 @@ public sealed class HelloWorldPlugin : IIntegration, IMeasurementDestination, IC
 
         await File.WriteAllLinesAsync(settings.Path, lines, ct);
     }
+
+    // --- Also a value source: nodes can bind to it, and its values roll up like any other -------------
+    // A binding looks like: { Type: helloworld, Metric: realpower, Settings: { Watts: "1234" } }
+
+    public string SourceType => "helloworld";
+    public string SourceTypeLabel => "Hello World (fixed value)";
+
+    private readonly Dictionary<string, double> values = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task ReconcileAsync(Config cfg, IReadOnlyList<SourceBinding> bindings, CancellationToken ct)
+    {
+        values.Clear();
+        foreach (var b in bindings)
+            values[b.NodeId + "|" + b.Key()] = b.Int("Watts");
+        return Task.CompletedTask;
+    }
+
+    public bool TryGetValue(string nodeId, string metric, out double value)
+        => values.TryGetValue(nodeId + "|" + metric, out value);
 
     // --- An action of its own, reachable at /api/integrations/helloworld/peek ---------------------------
 

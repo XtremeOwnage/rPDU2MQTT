@@ -216,16 +216,43 @@ public static class ServiceConfiguration
                     cfg, sp.GetRequiredService<Services.EnergyAggregationService>()));
         }
 
+        // Externally loaded plugins: reference Core, implement IIntegration, drop the DLL in plugins/.
+        // A plugin that will not load is reported and skipped — a third-party DLL cannot stop the bridge.
+        var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
+        var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
+        if (pluginIntegrations.Count > 0)
+        {
+            Plugins.PluginLoader.Configure(pluginIntegrations, cfg, m => Log.Warning(m));
+            foreach (var integration in pluginIntegrations)
+                services.AddSingleton(typeof(Core.Integrations.IIntegration), integration);
+        }
+        // The GUI renders a settings page per plugin from this, with no plugin-supplied UI involved.
+        PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
+        // Source types a plugin contributes, so the node editor offers them beside mqtt and modbus.
+        Services.Gui.ConfigSchema.PluginSourceTypes = pluginIntegrations
+            .OfType<Core.Integrations.IValueSourcePlugin>()
+            .Select(p => (p.SourceType, p.SourceTypeLabel))
+            .ToList();
+
+        // Plugin-supplied sources join the same composite as the built-in ingests, so the flow graph cannot
+        // tell where a value came from — which it never could, and is the whole point of the seam.
+        var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>().Cast<Core.Flow.IFlowValueSource>().ToArray();
+
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
-                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 grainSyncedFlow,
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
                 // with a real energy binding uses that and the derived total only fills a gap.
-                sp.GetRequiredService<Services.EnergyAggregationService>())
+                .. pluginSources,
+                // LAST on purpose: the composite takes the first source with a fresh reading, so a node
+                // with a real energy binding uses that and the derived total only fills a gap.
+                sp.GetRequiredService<Services.EnergyAggregationService>()])
             : new Core.Flow.CompositeFlowValueSource(
-                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-                grainSyncedFlow));
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow, .. pluginSources]));
+
+        if (worker && pluginSources.Length > 0)
+            services.AddHostedService<Services.ValueSourcePluginHost>();
 
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
@@ -239,18 +266,6 @@ public static class ServiceConfiguration
                      .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t)))
             services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
 
-        // Externally loaded plugins: reference Core, implement IIntegration, drop the DLL in plugins/.
-        // A plugin that will not load is reported and skipped — a third-party DLL cannot stop the bridge.
-        var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
-        var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
-        if (pluginIntegrations.Count > 0)
-        {
-            Plugins.PluginLoader.Configure(pluginIntegrations, cfg, m => Log.Warning(m));
-            foreach (var integration in pluginIntegrations)
-                services.AddSingleton(typeof(Core.Integrations.IIntegration), integration);
-        }
-        // The GUI renders a settings page per plugin from this, with no plugin-supplied UI involved.
-        PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
         services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
 
         services.AddSingleton<Core.Integrations.IntegrationRegistry>();
