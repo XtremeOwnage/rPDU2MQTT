@@ -64,6 +64,7 @@ implements whichever capability interfaces it supports. The codebase already thi
 | `IMeasurementDestination` | receives readings + flow tiers | 5 hand-registered services |
 | `IMeasurementHistory` | reads stored values back, by node | **done** — the template (was `IFlowHistory`) |
 | `IConfigurationPublisher` | pushes *structure* to the far end, and sweeps what it no longer owns | HA discovery, HA energy, EmonCMS feeds |
+| `INodeProvider` | offers nodes it knows about, for the operator to adopt | topic index, Modbus scan, node templates |
 | `IIntegrationApi` | bespoke actions, exposed over the API and the GUI | ~20 hand-written endpoints |
 | `IFlowValueSource` | supplies `(node, metric) → value` | mqtt, modbus — unchanged, already a seam |
 
@@ -74,6 +75,24 @@ they were written — even though the energy hierarchy is the part that motivate
 `HistoricalFlowValueSource` already adapts an `IMeasurementHistory` answer into an `IFlowValueSource`, so
 "EmonCMS as a source" and "Prometheus as a source" are the existing history providers plus a generalised
 adapter — not new implementations.
+
+### Nodes: discovering them, and addressing them
+
+`INodeProvider` answers "what have you got that I could model?" — the broker topic index, a Modbus register
+scan, a device template, and eventually Home Assistant enumerating entities. It is **discovery only**:
+offering a node is not creating one, and it must never write configuration. What gets adopted, what it is
+called and where it hangs are the operator's; discovery that quietly added nodes would rewrite a hand-built
+diagram every poll.
+
+There is no separate `INodeExporter`. Publishing what a node *is* to a far end is
+`IConfigurationPublisher` — that is exactly what HA discovery and EmonCMS feed provisioning do — and
+publishing what a node *reads* is `IMeasurementDestination`. A third name for one of those two would be a
+synonym, not a capability.
+
+Every reading now carries the node it belongs to. `FlowNodeId` is the one spelling of a derived node's id
+(`pdu:{device}`, `outlet:{device}:{key}`), and `MeasurementReading.NodeId` is stamped where the device and
+outlet key are both in hand. Eight places used to rebuild those strings, and two disagreed about whether the
+outlet index was 0- or 1-based — a mismatch that produces no error, just a lookup that silently misses.
 
 ### Configuration is its own direction of travel
 

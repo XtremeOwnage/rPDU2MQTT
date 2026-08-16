@@ -142,6 +142,39 @@ public class FlowDestinationsTests
         Assert.False(FlowTiers.Any(new PduData(), new Config()));
     }
 
+    // --- Node identity ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void AReadingKnowsItsNode_AndAgreesWithTheGraph()
+    {
+        // Eight places built these ids by hand and two disagreed about the outlet index: the graph keys on
+        // the 0-based outlet.Key, a reading carries the 1-based Number. Nothing errors when they diverge —
+        // the lookup misses and a hierarchy label silently comes back empty.
+        var data = OneOutlet(60);
+        var reading = MetricsHelper.EnumerateReadings(data).Single(r => r.Type == "realpower");
+
+        Assert.Equal("outlet:rack_pdu_1:0", reading.NodeId);
+        Assert.Equal(1, reading.Number);            // 1-based on the reading...
+        Assert.Equal(FlowNodeId.ForOutletNumber("rack_pdu_1", reading.Number!.Value), reading.NodeId);
+
+        // ...and the graph names the same node the same way.
+        var graph = FlowGraphBuilder.Build(data, new EnergyFlowConfig(), "realpower");
+        Assert.Contains(graph.Nodes, n => n.Id == reading.NodeId);
+    }
+
+    [Fact]
+    public void ADeviceLevelReading_BelongsToThePduTier_NotAnOutlet()
+    {
+        var data = OneOutlet(60);
+        data.Devices[0].Entity.Add(new Entity { Entity_Name = "total", Entity_DisplayName = "Total" });
+        data.Devices[0].Entity[0].Measurements.Add(new Measurement { Type = "realpower", Value = "60", Units = "W" });
+
+        var reading = MetricsHelper.EnumerateReadings(data).Single(r => r.Source == "total");
+
+        Assert.Equal("pdu:rack_pdu_1", reading.NodeId);
+        Assert.Null(reading.Number);
+    }
+
     // --- What EmonCMS is actually sent -----------------------------------------------------------------
     // Everything above tests the graph. The graph was never the problem: the flow half of the EmonCMS
     // payload did not exist, and no graph test could notice. These hold the payload itself, so deleting the

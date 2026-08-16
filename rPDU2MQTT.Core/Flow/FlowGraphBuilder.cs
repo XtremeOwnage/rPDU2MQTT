@@ -114,10 +114,10 @@ public static class FlowGraphBuilder
         // Auto-derived base flow: each PDU feeds its outlets, weighted by the chosen measurement.
         foreach (var device in data.Devices)
         {
-            var pduId = $"pdu:{device.Entity_Name}";
+            var pduId = FlowNodeId.ForPdu(device.Entity_Name);
             foreach (var outlet in device.Outlets)
             {
-                var outletId = $"outlet:{device.Entity_Name}:{outlet.Key}";
+                var outletId = FlowNodeId.ForOutlet(device.Entity_Name, outlet.Key);
                 var m = outlet.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
 
                 double value;

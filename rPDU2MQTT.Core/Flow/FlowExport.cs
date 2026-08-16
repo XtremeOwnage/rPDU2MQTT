@@ -176,10 +176,10 @@ public static class FlowExport
         foreach (var device in data.Devices)
         {
             if (UniqueId(device.Entity.SelectMany(e => e.Measurements)) is { } pduUid)
-                map[$"pdu:{device.Entity_Name}"] = pduUid;
+                map[FlowNodeId.ForPdu(device.Entity_Name)] = pduUid;
             foreach (var outlet in device.Outlets)
                 if (UniqueId(outlet.Measurements) is { } outletUid)
-                    map[$"outlet:{device.Entity_Name}:{outlet.Key}"] = outletUid;
+                    map[FlowNodeId.ForOutlet(device.Entity_Name, outlet.Key)] = outletUid;
         }
         return map;
     }

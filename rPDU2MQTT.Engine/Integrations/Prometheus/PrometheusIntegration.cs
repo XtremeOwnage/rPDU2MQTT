@@ -263,9 +263,7 @@ public sealed class PrometheusIntegration : IIntegration, IMeasurementDestinatio
     }
 
     private static string HierarchyFor(Dictionary<string, string> map, MeasurementReading r)
-    {
-        // Readings come from outlets (outlet:{device}:{key}) or device-level entities (pdu:{device}).
-        if (r.Number is { } n && map.TryGetValue($"outlet:{r.Device}:{n - 1}", out var outletTier)) return outletTier;
-        return map.TryGetValue($"pdu:{r.Device}", out var pduTier) ? pduTier : string.Empty;
-    }
+        // The reading knows which node it is; it used to be rebuilt here from Device + Number, one of the
+        // two places that had to remember Number is 1-based and the graph's key is 0-based.
+        => map.TryGetValue(r.NodeId, out var tier) ? tier : string.Empty;
 }

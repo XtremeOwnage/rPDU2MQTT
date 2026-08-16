@@ -238,7 +238,7 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
                         continue;
 
                     // Same id the flow graph builds for this outlet, so the value lands on the right node.
-                    var id = $"outlet:{device.Entity_Name}:{outlet.Key}";
+                    var id = Core.Flow.FlowNodeId.ForOutlet(device.Entity_Name, outlet.Key);
                     next[id] = EnergyIntegrator.Observe(
                         next.TryGetValue(id, out var prev) ? prev : EnergyState.Empty, counter, now, periodKey);
                     sampled++;

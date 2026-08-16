@@ -9,12 +9,17 @@ namespace rPDU2MQTT.Helpers;
 /// <param name="SourceName">The source's formatted display name (vs <paramref name="Source"/>'s object-id form).</param>
 /// <param name="Number">The 1-based outlet number, or null for non-outlet entities (circuits/phase/total).</param>
 /// <param name="DeviceName">The device's display name (vs <paramref name="Device"/>'s object-id form) (#206).</param>
+/// <param name="NodeId">
+/// Which flow node this reading belongs to (<c>pdu:rack_1</c>, <c>outlet:rack_1:3</c>). Stamped where the
+/// device and outlet key are both in hand, so nothing downstream has to rebuild it from Device + Number and
+/// remember which of the two is 0-based.
+/// </param>
 /// <param name="InstanceId">
 /// Which configured PDU instance this was read from. Carried on the reading itself so a flattened list is
 /// still complete: an export that merges every instance's snapshot would otherwise lose the one thing the
 /// Prometheus <c>instance</c> label is built from.
 /// </param>
-public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number, string DeviceName = "", string InstanceId = "");
+public readonly record struct MeasurementReading(string Device, string Source, string Type, double Value, string Units, string Identifier, string Topic, string SourceName, int? Number, string DeviceName = "", string InstanceId = "", string NodeId = "");
 
 public static class MetricsHelper
 {
@@ -30,20 +35,23 @@ public static class MetricsHelper
         foreach (var device in data.Devices)
         {
             foreach (var outlet in device.Outlets)
-                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements, instanceId))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, outlet.Entity_Name, outlet.Entity_DisplayName, outlet.Key + 1, outlet.Measurements, instanceId,
+                                                   Core.Flow.FlowNodeId.ForOutlet(device.Entity_Name, outlet.Key)))
                     yield return reading;
 
+            // A device-level entity (phase, circuit, the unit total) belongs to the PDU tier itself.
             foreach (var entity in device.Entity)
-                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements, instanceId))
+                foreach (var reading in ToReadings(device.Entity_Name, device.Entity_DisplayName, entity.Entity_Name, entity.Entity_DisplayName, null, entity.Measurements, instanceId,
+                                                   Core.Flow.FlowNodeId.ForPdu(device.Entity_Name)))
                     yield return reading;
         }
     }
 
-    private static IEnumerable<MeasurementReading> ToReadings(string device, string deviceName, string source, string sourceName, int? number, IEnumerable<Measurement> measurements, string instanceId = "")
+    private static IEnumerable<MeasurementReading> ToReadings(string device, string deviceName, string source, string sourceName, int? number, IEnumerable<Measurement> measurements, string instanceId = "", string nodeId = "")
     {
         foreach (var m in measurements)
             if (double.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number, deviceName, instanceId);
+                yield return new MeasurementReading(device, source, m.Type, value, m.Units, m.Entity_Identifier, m.GetTopicPath(), sourceName, number, deviceName, instanceId, nodeId);
     }
 
     /// <summary>

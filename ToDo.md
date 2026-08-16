@@ -21,7 +21,13 @@ finishes.
     [x] `IntegrationStatus` — one status per id, replacing the bespoke holders.
     [x] `ISingleOwnerLease` — the one coordination hook, `SoleOwnerLease` for single-process.
     [x] `DestinationHost` — builds the pass once, fans it out, records status per integration.
+    [x] `INodeProvider` — "what have you got that I could model?" Discovery only; never writes config.
+        (No `INodeExporter`: publishing what a node *is* is `IConfigurationPublisher`, publishing what it
+        *reads* is `IMeasurementDestination`. A third name would be a synonym.)
+    [x] `FlowNodeId` — one spelling of `pdu:{device}` / `outlet:{device}:{key}`, and every reading carries
+        its own `NodeId`. Eight places rebuilt those strings; two disagreed on 0- vs 1-based.
     [ ] Grain-backed `ISingleOwnerLease` for real clusters (single-process default works today).
+    [ ] `INodeProvider` implemented by MQTT (topic index) and Modbus (register scan) when they convert.
 
 2. Prometheus onto the contracts (the proving case)
     [x] `PrometheusIntegration` implements `IMeasurementDestination` + `IMeasurementHistory` — one vendor,
