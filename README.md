@@ -87,6 +87,7 @@ Should you use it? That's up to you. I built it for me, but made it public and t
 - **Home Assistant auto-discovery** — devices, sensors, and `problem` alarm binary-sensors created automatically; proper device hierarchy (`via_device`), MAC/IP connection info, and availability/`expire_after`.
 - **Outlet control** (opt-in) — on/off **switches**, **reboot** buttons, configurable **on/off/reboot delays** (`number`), **power-on action** (`select`), and a **reset-statistics** button.
 - **OneView clusters** — aggregates multiple PDUs; per-group **Sum/Avg/Min/Max** rollup sensors, plus **group actions** (All On / All Off / Reboot All) fanned out to member outlets, and the member switches mirrored onto the group device.
+- **Plugins** — every integration (sources, destinations, history backends, devices) implements one set of contracts, and an external plugin is an ordinary .NET class library dropped into `plugins/`. It gets a generated settings page, API actions, health and a nav entry without shipping any UI. See [Examples/Plugins](Examples/Plugins).
 - **Configuration & control GUI** — a built-in web UI to view/edit/test the config, control outlets, rename PDU labels, browse live data, and see the generated MQTT/Prometheus/EmonCMS paths.
 - **GUI authentication** — HTTP Basic, **OpenID Connect (SSO)** against any OIDC provider (Keycloak, Authentik, Authelia, Entra ID, Google, …), or none.
 - **Prometheus** — scrape (`/metrics`) and/or Pushgateway, with a **customizable metric-name template**.

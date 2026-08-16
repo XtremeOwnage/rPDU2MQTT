@@ -11,6 +11,7 @@
     "description": "MQTT Configuration",
     "type": "object",
     "required": false,
+    "group": "Integrations",
     "properties": [
       {
         "key": "Credentials",
@@ -221,6 +222,7 @@
     "description": "PDU instances to bridge, keyed by instance name.",
     "type": "dictionary",
     "required": false,
+    "group": "Sources",
     "valueSchema": {
       "key": "",
       "label": "",
@@ -348,6 +350,7 @@
     "description": "Home Assistant Configuration",
     "type": "object",
     "required": false,
+    "group": "Destinations",
     "properties": [
       {
         "key": "DiscoveryEnabled",
@@ -510,6 +513,7 @@
     "description": "Overrides",
     "type": "object",
     "required": false,
+    "group": "Sources",
     "properties": [
       {
         "key": "PDU",
@@ -852,6 +856,7 @@
     "description": "Prometheus metrics exporter",
     "type": "object",
     "required": false,
+    "group": "Destinations",
     "properties": [
       {
         "key": "Exporter",
@@ -995,6 +1000,14 @@
     "required": false,
     "properties": [
       {
+        "key": "ValueFallback",
+        "label": "ValueFallback",
+        "description": "Let the history backend supply a value for any node nothing live is reporting. Off by default: a stored value is older than a live one, and for a node whose source has stopped it replaces an honest \"no data\" with a figure that looks current.",
+        "type": "bool",
+        "required": false,
+        "default": false
+      },
+      {
         "key": "Enabled",
         "label": "Enabled",
         "description": "Let the Flow and Energy pages show a past moment, read from Prometheus or EmonCMS.",
@@ -1013,7 +1026,8 @@
         "enumValues": [
           "",
           "prometheus",
-          "emoncms"
+          "emoncms",
+          "homeassistant"
         ]
       },
       {
@@ -1047,6 +1061,7 @@
     "description": "EmonCMS exporter",
     "type": "object",
     "required": false,
+    "group": "Destinations",
     "properties": [
       {
         "key": "Enabled",
@@ -2500,6 +2515,21 @@
                       "big",
                       "little"
                     ]
+                  },
+                  {
+                    "key": "Settings",
+                    "label": "Settings",
+                    "description": "Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.",
+                    "type": "dictionary",
+                    "required": false,
+                    "valueSchema": {
+                      "key": "",
+                      "label": "",
+                      "type": "object",
+                      "required": false,
+                      "properties": []
+                    },
+                    "keyType": "string"
                   }
                 ]
               }
@@ -2669,6 +2699,21 @@
                       "big",
                       "little"
                     ]
+                  },
+                  {
+                    "key": "Settings",
+                    "label": "Settings",
+                    "description": "Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.",
+                    "type": "dictionary",
+                    "required": false,
+                    "valueSchema": {
+                      "key": "",
+                      "label": "",
+                      "type": "object",
+                      "required": false,
+                      "properties": []
+                    },
+                    "keyType": "string"
                   }
                 ]
               }
@@ -2891,6 +2936,7 @@
     "description": "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).",
     "type": "object",
     "required": false,
+    "group": "Integrations",
     "properties": [
       {
         "key": "Connections",
@@ -2987,6 +3033,21 @@
         }
       }
     ]
+  },
+  {
+    "key": "Plugins",
+    "label": "Plugins",
+    "description": "Settings for externally loaded plugins, keyed by plugin id.",
+    "type": "dictionary",
+    "required": false,
+    "valueSchema": {
+      "key": "",
+      "label": "",
+      "type": "object",
+      "required": false,
+      "properties": []
+    },
+    "keyType": "string"
   },
   {
     "key": "Cache",

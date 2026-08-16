@@ -140,6 +140,48 @@ page. `ActionEffect.Destructive` makes the GUI confirm, and say what will be rem
 
 You never see an `HttpContext`: query and form values arrive flattened on the context you are given.
 
+## Supplying values, or being a device
+
+A plugin does not have to be a destination. Two capabilities read *into* the bridge:
+
+```csharp
+// A node binds { Type: "mything", Metric: "realpower", Settings: { … } } and you supply the value.
+public string SourceType => "mything";
+public string SourceTypeLabel => "My Thing";
+
+public Task ReconcileAsync(Config cfg, IReadOnlyList<SourceBinding> bindings, CancellationToken ct)
+{
+    // You are handed exactly your own bindings — never another type's — and called again whenever the
+    // configuration changes, so a binding added in the GUI takes effect without a restart.
+    foreach (var b in bindings) values[b.NodeId + "|" + b.Key()] = Read(b.Setting("Address"));
+    return Task.CompletedTask;
+}
+
+public bool TryGetValue(string nodeId, string metric, out double value) => values.TryGetValue(…);
+```
+
+```csharp
+// Or poll hardware. The snapshot goes where the built-in poller's does, so MQTT publishing, HA discovery,
+// the flow graph and every destination work on it unchanged — none of them asks what kind of device it is.
+public string InstanceId => "mydevice";
+public Task<PduData?> PollAsync(Config cfg, CancellationToken ct) => …;
+
+// Optional: switching its outlets.
+public bool Supports(string action) => action is "on" or "off";
+public Task<string> ControlOutletAsync(Config cfg, string deviceId, int outlet, string action, CancellationToken ct) => …;
+```
+
+Two rules that are not negotiable, because the whole hierarchy depends on them:
+
+- **Return null, never an empty snapshot.** Null means "nothing to report" and the previous reading is left
+  to go stale. An empty one reads downstream as every outlet having gone to zero — a reading nobody took.
+- **Report what happened, not what was asked.** A control that echoes "on" for a command the hardware
+  rejected produces an echo that contradicts the next poll, and the operator watches the outlet flip back
+  with no explanation.
+
+You never write a poll timer, a leader gate, or a lock around a shared device. The host owns all three —
+including the single-owner lease that stops two replicas hammering one serial gateway.
+
 ## Installing it
 
 ```

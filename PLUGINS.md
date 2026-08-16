@@ -4,8 +4,9 @@ Sources, destinations and devices are already plugins in everything but registra
 it: history backends have had a clean contract since #372. This is the plan for extending that pattern to
 the rest, and deleting the hand-maintained lists that stand in for it today.
 
-Tracked in [ToDo.md](ToDo.md). Prior architecture notes: [v2](docs/v2-architecture.md),
-[v3](docs/v3-orleans-migration.md).
+Tracked in [ToDo.md](ToDo.md). What shipped and why: [docs/v4-plugins.md](docs/v4-plugins.md).
+Author guide: [Examples/Plugins/README.md](Examples/Plugins/README.md). Prior notes:
+[v2](docs/v2-architecture.md), [v3](docs/v3-orleans-migration.md).
 
 ## The precedent
 

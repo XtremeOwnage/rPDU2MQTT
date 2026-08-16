@@ -1534,6 +1534,17 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "No history backend is wired in this process." }, ConfigSchema.Json);
             try
             {
+                // Asks a question no single integration can: "is the backend the History setting SELECTED
+                // answering?" — the answer changes when that setting changes, not when an integration does.
+                // But it is not a second implementation: the selected provider is an integration, so its own
+                // probe is what runs, and this endpoint only resolves which one that is.
+                var selected = integrations?.ById(config.History.Provider);
+                if (selected is not null)
+                {
+                    var (sok, sdetail) = await selected.ProbeAsync(config, ctx.RequestAborted);
+                    return Results.Json(new { ok = sok, message = $"{selected.DisplayName}: {sdetail}" }, ConfigSchema.Json);
+                }
+
                 var (ok, detail) = await history.ProbeAsync(ctx.RequestAborted);
                 return Results.Json(new { ok, message = ok ? $"{history.Id}: reachable — {detail}" : $"{history.Id}: {detail}" }, ConfigSchema.Json);
             }

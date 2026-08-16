@@ -57,9 +57,10 @@ finishes.
         wrong thing), and `vertiv/probe` actually dials each PDU instead of reporting snapshot age — a
         probe is what an operator triggers when the board is ALREADY wrong, so "last poll was 4 minutes
         ago" is the question, not the answer.
-    [—] `/api/test/history` stays. It asks "is the selected backend answering", which is a question about
-        the History setting rather than about any one integration — the answer changes when that setting
-        changes, not when an integration does.
+    [x] `/api/test/history` kept but no longer a second implementation: it resolves which integration the
+        History setting selected and runs THAT integration's own probe. The question is still its own (the
+        answer changes when the setting changes, not when an integration does); only the duplicate probe
+        went.
 
 3. The other destinations
     [x] EmonCMS — destination + history + configuration publisher (feed provisioning + sweep). Three
@@ -238,6 +239,16 @@ finishes.
         Two holders for one idea is how a card and an endpoint end up disagreeing about the same export,
         with neither looking wrong on its own. Existing EmonCMS status tests pass unchanged, and health,
         probe, /api/integrations and /api/diagnostics were checked against one running bridge.
+
+11. Documentation
+    [x] `docs/v4-plugins.md` — what shipped and why, following the v2/v3 convention.
+    [x] `Examples/Plugins/README.md` covers supplying values and being a device, including the two rules
+        that are not negotiable: return null rather than an empty snapshot, and report what happened rather
+        than what was asked.
+    [x] Root `README.md` mentions plugins, so someone finds this without reading the source.
+    [x] `web/schema.fixture.json` regenerated — it drives the smoke tests and had drifted well behind the
+        config model. Plugin sections are stripped from it deliberately: the fixture describes the BUILD,
+        and `plugin.check.mjs` supplies its own.
 
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
