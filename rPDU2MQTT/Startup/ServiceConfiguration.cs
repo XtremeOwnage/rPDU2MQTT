@@ -254,6 +254,11 @@ public static class ServiceConfiguration
         if (worker && pluginSources.Length > 0)
             services.AddHostedService<Services.ValueSourcePluginHost>();
 
+        // A plugin that polls hardware files its snapshots in the same cache the built-in poller feeds, so
+        // publishing, discovery, the flow graph and every destination work on it unchanged.
+        if (worker && pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().Any())
+            services.AddHostedService<Services.DeviceSourcePluginHost>();
+
         // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
         // PduSyncService's job now (grains, not MQTT mirroring).
 

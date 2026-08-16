@@ -115,8 +115,17 @@ finishes.
         until then — a plugin type is offered by the schema, but gets generic fields via Settings.
 
 7. Devices
-    [ ] `IDeviceSource` + `IDeviceControl`; Vertiv rPDU moved onto them.
-    [ ] Single-owner lease as a declared capability, not something a plugin author writes.
+    [x] `IDeviceSourcePlugin` — a plugin polls hardware into a `PduData` snapshot and publishes it on the
+        same bus the built-in poller uses, so publishing, discovery, the flow graph and every destination
+        work on it unchanged. This is what makes a second PDU vendor a contribution rather than a fork.
+    [x] `DeviceSourcePluginHost` owns the timer, the failure reporting and the single-owner lease, so a
+        plugin author never writes any of them. A failed poll leaves the previous snapshot to go stale
+        rather than publishing an empty one, which downstream would read as every outlet going to zero.
+    [ ] The Vertiv poller stays where it is. It is entangled with grains, placement, outlet control,
+        OneView groups and multi-instance routing; converting it buys consistency, not capability, and it
+        is the deepest change on this list. Own step, on contracts now worn in by five integrations.
+    [ ] `IDeviceControl` (switching an outlet) — `IOutletControl` already exists as a seam; a plugin
+        device is read-only until they are joined up.
 
 8. External plugins (built — the earlier "in-tree only" call was reversed)
     [x] `PluginLoader` — scans `plugins/` (or `RPDU2MQTT_PLUGINS`), one `AssemblyLoadContext` each, host
