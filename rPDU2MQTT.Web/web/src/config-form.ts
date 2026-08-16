@@ -270,11 +270,11 @@ function renderList(node: any, arr: any[], path: string[]) {
 type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections: any) => any, child?: boolean };
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
-  { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
-  { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'System', items: [{ tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -424,13 +424,21 @@ export function build() {
   //
   // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
   // appended the same sections again, so saving twice put a page in the nav three times.
-  const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i: any) => i.schema)));
-  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [...g.items] }));
+  // Every schema section is placed by what the SCHEMA says, built-in or plugin. NAV_GROUPS now carries
+  // only the visual editors (Flow, Nodes, Trends…), which have no schema section to declare a group on.
+  // Holding the grouping in two places is how a section ends up registered, rendered and reachable while
+  // sitting in the wrong group, with nothing to say it was forgotten.
+  //
+  // Schema sections lead each group and the tools follow, because a tool marked `child` indents under
+  // whatever precedes it — the PDU tabs belong under the PDU page, not above it.
+  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
+
   state.schema.forEach((n: any) => {
-    if (knownSchema.has(n.key) || HIDDEN.has(n.key)) return;
+    if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
+  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);

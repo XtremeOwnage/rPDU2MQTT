@@ -10,6 +10,7 @@ namespace rPDU2MQTT.Classes;
 public class Config
 {
     [YamlMember(Alias = "MQTT", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "MQTT Configuration")]
+    [NavGroup("Integrations")]
     public MQTTConfig MQTT { get; set; } = new MQTTConfig();
 
     /// <summary>
@@ -17,6 +18,7 @@ public class Config
     /// published to MQTT/exporters. (v2 replaced the single <c>PDU</c> section with this map.)
     /// </summary>
     [YamlMember(Alias = "Pdus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "PDU instances to bridge, keyed by instance name.")]
+    [NavGroup("Sources")]
     public Dictionary<string, PduConfig> Pdus { get; set; } = new();
 
     /// <summary>Instance key used for a single/primary PDU.</summary>
@@ -43,21 +45,25 @@ public class Config
 
     [YamlMember(Alias = "HomeAssistant", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Home Assistant Configuration")]
     [JsonPropertyName("HomeAssistant")]
+    [NavGroup("Destinations")]
     public HomeAssistantConfig HASS { get; set; } = new HomeAssistantConfig();
 
     [YamlMember(Alias = "Overrides", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Overrides")]
+    [NavGroup("Sources")]
     public Overrides Overrides { get; set; } = new Overrides();
 
     [YamlMember(Alias = "Debug", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Settings for debugging and diagnostics.")]
     public DebugConfig Debug { get; set; } = new DebugConfig();
 
     [YamlMember(Alias = "Prometheus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Prometheus metrics exporter")]
+    [NavGroup("Destinations")]
     public PrometheusConfig Prometheus { get; set; } = new PrometheusConfig();
 
     /// <summary>Where the Flow and Energy pages read past values from (#372).</summary>
     public HistoryConfig History { get; set; } = new HistoryConfig();
 
     [YamlMember(Alias = "EmonCMS", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "EmonCMS exporter")]
+    [NavGroup("Destinations")]
     public EmonCMSConfig EmonCMS { get; set; } = new EmonCMSConfig();
 
     [YamlMember(Alias = "Logging")]
@@ -76,6 +82,7 @@ public class Config
     public EnergyFlowConfig EnergyFlow { get; set; } = new EnergyFlowConfig();
 
     [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
+    [NavGroup("Integrations")]
     public ModbusConfig Modbus { get; set; } = new ModbusConfig();
 
     /// <summary>

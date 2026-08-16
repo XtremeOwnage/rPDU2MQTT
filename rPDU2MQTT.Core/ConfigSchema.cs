@@ -284,6 +284,9 @@ public static class ConfigSchema
             return node;
         }
 
+        // Where this section sits in the nav, declared on the model rather than kept in a second list.
+        if (prop.GetCustomAttribute<NavGroupAttribute>() is { } nav) node.Group = nav.Group;
+
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
 
         // A closed set of answers for a collection's items. The element of a list and the value of a

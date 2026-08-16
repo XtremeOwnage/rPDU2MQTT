@@ -102,9 +102,10 @@ finishes.
         while rendering and change-tracking identically to a built-in.
     [x] Fixed while here: `build()` pushed ungrouped sections into the module-level `NAV_GROUPS` constant,
         so every rebuild of the form appended them again and saving twice listed a page three times.
-    [—] `NAV_GROUPS` / `NAV_ICONS` stay for the built-ins: they interleave schema sections with the visual
-        editors (Flow, Nodes, Trends), which have no schema section to hang a group off. Inverting that is
-        its own change.
+    [x] `[NavGroup]` on the config model, emitted on the schema, so EVERY section is placed by what the
+        schema says — built-in and plugin alike. `NAV_GROUPS` keeps only the visual editors (Flow, Nodes,
+        Trends), which have no schema section to declare a group on. Schema sections lead each group so a
+        `child` tool still indents under the page it belongs to.
     [x] `plugin.check.mjs` renders a plugin the GUI has never heard of and asserts it gets a nav entry in
         its declared group, generated fields bound under `Plugins/`, and buttons from its declared actions.
         Runs in the build. Verified by sabotage: removing the action bar fails it.
@@ -124,9 +125,12 @@ finishes.
         takes effect without a restart and an expensive ReconcileAsync is not paid every tick.
     [x] Verified: HelloWorld as a source fed 1234 W into a node, which rolled up through the inverter and
         reached Prometheus.
-    [—] MQTT and Modbus sources stay as they are. They work through `IFlowValueSource` already; converting
-        them buys consistency, not capability, and Modbus carries the single-owner lease that stops RS485
-        gateway contention. Own step.
+    [x] MQTT and Modbus ingests declare `IIntegration` + `IStatusProvider` — the SAME instances the flow
+        already reads, registered as integrations so the registry, banner and health board describe what is
+        actually running. Their hosting stays their own: one is a subscriber with no cadence to share, the
+        other polls per connection with framing probes and gateway-contention rules the shared host knows
+        nothing about. "Withheld" is surfaced as its own amber state — the binding is right, the publisher
+        stopped, and the node reads no-data rather than a stale number.
     [x] `source-editors.ts` — a registry keyed by source type. MQTT and Modbus keep their bespoke editors
         (a topic browser and a register scanner are not a form); anything else gets a generic editor over
         the binding's `Settings` bag, so a plugin source is editable without shipping any TypeScript.

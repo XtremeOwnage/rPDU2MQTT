@@ -22,8 +22,32 @@ namespace rPDU2MQTT.Services;
 /// Subscriptions are reconciled on a timer rather than only at startup, so binding a topic in the GUI
 /// takes effect without a restart (matching the rest of the app's live-reload behaviour).
 /// </summary>
-public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics, IWithheldSources
+public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics, IWithheldSources, Core.Integrations.IIntegration, Core.Integrations.IStatusProvider
 {
+    // --- The integration contract ----------------------------------------------------------------------
+    // Declared rather than converted: this already was a value source, and it keeps its own hosting because
+    // it is a subscriber, not a poller — there is no cadence for the shared host to own.
+
+    public string Id => "mqtt-source";
+    public string DisplayName => "MQTT sources";
+    public Core.Integrations.IntegrationGroup Group => Core.Integrations.IntegrationGroup.Integrations;
+
+    /// <summary>On when something is bound to it — a broker connection alone is not a reason to subscribe.</summary>
+    public bool Enabled(Config c) => Core.Integrations.SourceBindings.For(c, "mqtt").Count > 0;
+
+    public Core.Integrations.IntegrationHealth Status(Config c)
+    {
+        var bound = Core.Integrations.SourceBindings.For(c, "mqtt").Count;
+        if (bound == 0) return new(Core.Integrations.HealthLevel.Off, "No topics bound");
+
+        // Withheld is its own state and the one worth seeing: the binding is right, the publisher has
+        // stopped, and the node reads "no data" rather than a stale number.
+        var withheld = ((IWithheldSources)this).Withheld.Count;
+        return withheld > 0
+            ? new(Core.Integrations.HealthLevel.Warn, "Some sources stale", $"{withheld} of {bound} binding(s) withheld")
+            : new(Core.Integrations.HealthLevel.Good, "Subscribed", $"{bound} binding(s)");
+    }
+
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     // The staleness rules live in the cache (Core) so they're testable without a broker.

@@ -242,6 +242,10 @@ public static class ServiceConfiguration
         // IFlowValueSource, so building it built them, which needed it, and startup simply hung.
         var haSource = new Integrations.HomeAssistant.HomeAssistantValueSource(cfg);
         services.AddSingleton<Core.Integrations.IIntegration>(haSource);
+        // The two built-in ingests are integrations too — the SAME instances the flow already reads, so the
+        // registry, the banner and the health board describe the thing that is actually running.
+        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
 
         var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>()
             .Cast<Core.Flow.IFlowValueSource>()
