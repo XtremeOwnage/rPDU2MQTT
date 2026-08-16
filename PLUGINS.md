@@ -64,6 +64,9 @@ implements whichever capability interfaces it supports. The codebase already thi
 | `IMeasurementDestination` | receives readings + flow tiers | 5 hand-registered services |
 | `IMeasurementHistory` | reads stored values back, by node | **done** — the template (was `IFlowHistory`) |
 | `IConfigurationPublisher` | pushes *structure* to the far end, and sweeps what it no longer owns | HA discovery, HA energy, EmonCMS feeds |
+| `IValueSourcePlugin` | supplies live values for bindings naming its type | plugin-only; mqtt/modbus unchanged |
+| `IDeviceSourcePlugin` | polls hardware into a snapshot | plugin-only; the Vertiv poller unchanged |
+| `IStatusProvider` | says what its own health means | default derivation covers the rest |
 | `INodeProvider` | offers nodes it knows about, for the operator to adopt | topic index, Modbus scan, node templates |
 | `IIntegrationApi` | bespoke actions, exposed over the API and the GUI | ~20 hand-written endpoints |
 | `IFlowValueSource` | supplies `(node, metric) → value` | mqtt, modbus — unchanged, already a seam |
@@ -200,6 +203,31 @@ Home Assistant as a *config provider* is a different axis and probably not what 
 is "where the YAML lives and can we write it". "HA tells us what entities exist so we can build nodes from
 them" is an import/discovery capability, and there is already a shape for it (`/api/mqtt/importable`, node
 templates).
+
+## Where this got to
+
+Built and verified on this branch:
+
+- Five integrations on the contracts — Prometheus, EmonCMS, MQTT energy flow, Home Assistant, and an
+  out-of-tree example plugin. Four hosted services deleted.
+- External plugins load from `plugins/` at runtime, with their own config page, actions, health and nav
+  placement, and no TypeScript shipped by the plugin.
+- A plugin can be a destination, a history provider, a configuration publisher, a value source, a device,
+  a node provider, and expose its own API actions.
+- Every integration appears in the .NET health model at `/health/integrations`.
+
+Deliberately not done, each for a stated reason rather than for time:
+
+- **The Vertiv poller** stays where it is — entangled with grains, placement, outlet control, OneView
+  groups and multi-instance routing. Converting it buys consistency, not capability.
+- **MQTT and Modbus sources** stay as they are: they already work through `IFlowValueSource`.
+- **`MQTTPublishingService` and HA discovery** publish the PDU's whole object model through ~30 helpers,
+  not an `ExportPass`. That is the bridge's core function and wants its own step.
+- **The per-type binding migration** was dropped. Rewriting every node's wiring buys nothing for anyone
+  already using mqtt/modbus and is the one change here that could lose an operator's configuration; a
+  plugin gets an open `Settings` bag instead.
+- **`NAV_GROUPS`** stays for the built-ins: it interleaves schema sections with the visual editors, which
+  have no schema section to hang a group off.
 
 ## Order
 
