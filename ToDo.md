@@ -443,3 +443,16 @@ Notes
         reports 0 correctly; only the flow view differs. Absent and zero are different facts: a consumer
         cannot tell "switched off" from "no longer reported". Leaving it alone because changing it moves
         every Sankey ribbon and every flow series, which is a bigger decision than this branch.
+    [x] A plugin device got no Home Assistant entities at all. Discovery was built from the Vertiv rPDU
+        document alone (`data.PDUs`), which a plugin has none of, so the device that published a full topic
+        tree and full Prometheus series was invisible to Home Assistant. It is discovered from the snapshot
+        cache now, through the same entity builders and the same identifiers a PDU's outlets use, under a
+        parent device keyed by the plugin's instance id.
+    [x] And an unreachable PDU no longer costs everyone their discovery: the fetch was the first statement
+        in the pass, so one timeout meant nothing at all was published. Its own entities are skipped; the
+        rest still go out.
+    [x] Verified on the rig, reading the retained documents: `homeassistant/device/rPDU2MQTT_hw_outlets_0`
+        carries `state_topic rPDU2MQTT/hw/outlets/0/state`, `command_topic .../set` and `.../reboot`, the
+        delay/config topics, `availability_topic rPDU2MQTT/Status`, stable unique_ids, and
+        `via_device rPDU2MQTT_hw` -> `rPDU2MQTT_helloworld`. Every topic in the document is one the bridge
+        actually publishes, and the command topic round-trips back to the plugin.
