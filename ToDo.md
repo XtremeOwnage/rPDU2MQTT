@@ -324,7 +324,14 @@ finishes.
     claim of the move. Now 819 = 813 + 6 new.
     Lesson: `cat > file` and `Write` silently clobber. Check the path exists first, ALWAYS, and treat a
     falling test count as a defect to explain rather than noise.
-    [ ] B. Ownership in memory: PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
+    [~] B. Ownership in memory.
+        [x] Flow values. `FlowValueSink` writes straight into the `FlowValueCache` the graph reads. The old
+            path was: sink -> flow grain -> the grain's OWN FlowValueCache -> a service polling that grain
+            every 2s -> this process's cache. In one process that is a write, a read, and up to a two-second
+            delay before a reading is visible, for data that was already local. `FlowGrainSink` and
+            `FlowGrainSyncService` deleted; the source-ordering rule (stale by BOTH version and time, so a
+            restarted source is not locked out) came with it.
+        [ ] PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
     [ ] C. Leader + flow mirror: always-leader in one process; the flow cache is already Core.
     [ ] D. Delete the Grains projects, the silo config, and the five Orleans packages.
     [ ] E. Measure: startup time and RSS before/after, so "lower resource usage and faster" is a number

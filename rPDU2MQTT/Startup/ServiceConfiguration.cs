@@ -145,9 +145,14 @@ public static class ServiceConfiguration
         // worker and its values are pushed to the flow grain by MqttToFlowBridge; every other process reads
         // them back through the grain sync (no per-process subscription duplication). The singleton stays
         // registered everywhere so the bridge can resolve it on the worker.
-        // v3: in-process sources emit into the flow grain through this sink (event-driven). The MQTT
-        // subscription manager pushes each received value straight to the FlowGrain — no polling bridge.
-        services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>, Hosting.FlowGrainSink>();
+        // Live values from every in-process source, read through the IFlowValueSource seam. It used to be a
+        // mirror of a grain's copy, polled every two seconds; the sources write straight into it now, so a
+        // reading is visible the moment it arrives rather than up to two seconds later.
+        var liveValues = new Core.Flow.FlowValueCache();
+
+        // In-process sources emit measurement snapshots into this sink, which writes them into that cache.
+        services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>>(sp =>
+            new Core.Flow.FlowValueSink(liveValues, sp.GetService<Microsoft.Extensions.Logging.ILogger<Core.Flow.FlowValueSink>>()));
         // v3: outlet writes route to the per-outlet grain (single cluster-wide owner) — the "grains for
         // writing to PDUs". The command subscriber depends only on IOutletControl, not Orleans.
         services.AddSingleton<Abstractions.Pdu.IOutletControl, Hosting.OutletGrainControl>();
@@ -172,11 +177,6 @@ public static class ServiceConfiguration
         if (worker)
             services.AddHostedService<Hosting.FlowReconciler>();
 
-        // v3: a local mirror of the flow grain's live values (Modbus via the DeviceGrain, and later every
-        // grain-fed source), synced by FlowGrainSyncService and read through the same IFlowValueSource seam.
-        var grainSyncedFlow = new Core.Flow.FlowValueCache();
-        if (worker || api || ui)
-            services.AddHostedService(sp => new Hosting.FlowGrainSyncService(sp.GetRequiredService<Orleans.IGrainFactory>(), grainSyncedFlow));
 
         // Reads prefer the in-process MQTT source cache, then fall back to the grain-synced mirror. In a
         // single-binary (All-role) deployment the MQTT ingest runs in THIS process, so the GUI/exporters read
@@ -201,7 +201,7 @@ public static class ServiceConfiguration
             services.AddSingleton(sp => new Services.EnergyAggregationService(
                 cfg,
                 new Core.Flow.CompositeFlowValueSource(
-                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow),
+                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues),
                 sp.GetRequiredService<Core.Flow.IEnergyStore>(),
                 sp.GetRequiredService<Core.ISnapshotCache>()));
             // Accumulating is data production, so only the worker does it — otherwise every replica would
@@ -254,7 +254,7 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-                grainSyncedFlow,
+                liveValues,
                 haSource,
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
                 // with a real energy binding uses that and the derived total only fills a gap.
@@ -267,7 +267,7 @@ public static class ServiceConfiguration
                     ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
                     : [])])
             : new Core.Flow.CompositeFlowValueSource(
-                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow,
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues,
                  haSource, .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
