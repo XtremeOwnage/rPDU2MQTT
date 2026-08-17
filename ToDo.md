@@ -405,3 +405,27 @@ Notes
       `--onto origin/main` once that squash-merges.
     - Docs to update before this branch opens a PR: `docs/v2-architecture.md` pointer, `README.md`
       integration list, and a `docs/v4-plugins.md` written from `PLUGINS.md` if it outgrows the root file.
+
+16. Found by running it, not by the tests
+    [x] A plugin device's outlet could not be switched. The write path matched a plugin by its INSTANCE id
+        (`helloworld`), but a write addresses a DEVICE id (`hello_device`) — so it fell through to the PDU
+        path, was refused as "not configured", and the GUI reported success anyway. Both halves were wrong
+        and each hid the other: the plugin route now resolves the instance that reported the device (the
+        same fact the poll already established), and it accepts either spelling.
+    [x] `IOutletControl` returns `OutletWriteResult(Ok, Message)` instead of a bare string. Every caller had
+        to decide something on it and none could: the GUI answered ok to a refusal, and the MQTT subscriber
+        echoed the new state to Home Assistant for a write that never reached a device — which is the same
+        fabrication as publishing a reading nobody took, and it shows up as a switch flipping back by itself
+        a few seconds later with nothing to explain it.
+    [x] Verified on the rig: switching outlet 0 of the plugin device takes it to 0 W and leaves outlet 1 at
+        77 W; the PDU total follows 154 -> 77. Two tests cover it (either spelling reaches the plugin; an
+        unsupported action is refused without calling it).
+    Lesson: 812 tests were green while the one button that writes to a plugin device did nothing. The tests
+    all asked "does the refusal say the right thing", none asked "does a write that should work, work".
+
+    [ ] SEPARATE, PRE-EXISTING, needs your call: `FlowGraphBuilder` drops any outlet reading `<= 0` from the
+        graph (`if (value <= 0) continue;`, there since #156). So a switched-OFF outlet does not read 0 W on
+        the flow tiers — its series disappears entirely, and Prometheus prunes it. The PDU object model
+        reports 0 correctly; only the flow view differs. Absent and zero are different facts: a consumer
+        cannot tell "switched off" from "no longer reported". Leaving it alone because changing it moves
+        every Sankey ribbon and every flow series, which is a bigger decision than this branch.

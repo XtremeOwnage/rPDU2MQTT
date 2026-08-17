@@ -1,4 +1,6 @@
+using rPDU2MQTT.Abstractions.Pdu;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
@@ -56,7 +58,9 @@ public class DeviceOutletControlTests
         // of them — not to guess at the primary, which is how an outlet on rack-b gets switched via rack-a.
         var control = Control(new Cache().Add("rack-a", deviceId: "pdu-a"), "rack-a");
 
-        Assert.Contains("No PDU has reported device 'pdu-unknown'", await control.Control("pdu-unknown", 1, "off"));
+        var refused = await control.Control("pdu-unknown", 1, "off");
+        Assert.False(refused.Ok);
+        Assert.Contains("No PDU has reported device 'pdu-unknown'", refused.Message);
         Assert.Equal("", await control.SetOutletConfig("pdu-unknown", 1, "onDelay", "5", isDelay: true));
     }
 
@@ -70,7 +74,9 @@ public class DeviceOutletControlTests
 
         Assert.Equal("rack-a", control.InstanceFor("pdu-a"));
         Assert.Equal("rack-b", control.InstanceFor("pdu-b"));
-        Assert.Contains("'rack-b' is not configured", await control.Control("pdu-b", 1, "on"));
+        var refused = await control.Control("pdu-b", 1, "on");
+        Assert.False(refused.Ok);
+        Assert.Contains("'rack-b' is not configured", refused.Message);
         Assert.Equal("", await control.SetOutletConfig("pdu-b", 1, "onDelay", "5", isDelay: true));
     }
 
@@ -80,15 +86,21 @@ public class DeviceOutletControlTests
         var control = Control(new Cache().Add("rack-a", deviceId: "pdu-a", groupKey: "Rack 1"), "rack-a");
 
         // Rejected before anything is resolved, so a typo on a command topic can't reach the hardware.
-        Assert.Contains("Unknown outlet action 'frobnicate'", await control.Control("pdu-a", 1, "frobnicate"));
-        Assert.Contains("Unknown group action 'frobnicate'", await control.ControlGroup("Rack 1", "frobnicate"));
+        var outlet = await control.Control("pdu-a", 1, "frobnicate");
+        var group = await control.ControlGroup("Rack 1", "frobnicate");
+        Assert.False(outlet.Ok);
+        Assert.False(group.Ok);
+        Assert.Contains("Unknown outlet action 'frobnicate'", outlet.Message);
+        Assert.Contains("Unknown group action 'frobnicate'", group.Message);
     }
 
     [Fact]
     public async Task GroupNobodyReports_IsRefused_NotGuessedAt()
     {
         var control = Control(new Cache().Add("rack-a", deviceId: "pdu-a"), "rack-a");
-        Assert.Contains("No PDU reports a group 'rack-1'", await control.ControlGroup("rack-1", "on"));
+        var refused = await control.ControlGroup("rack-1", "on");
+        Assert.False(refused.Ok);
+        Assert.Contains("No PDU reports a group 'rack-1'", refused.Message);
     }
 
     [Fact]
@@ -101,5 +113,63 @@ public class DeviceOutletControlTests
 
         Assert.Equal(new[] { "rack-a", "rack-b" }, control.InstancesWithGroup("Rack 1"));
         Assert.Empty(control.InstancesWithGroup("Rack 2"));
+    }
+
+    /// <summary>A plugin that supplies one device and can switch its outlets.</summary>
+    private sealed class HelloPlugin : IIntegration, IDeviceSourcePlugin, IDeviceControlPlugin
+    {
+        public readonly List<string> Wrote = [];
+
+        public string Id => "hello";
+        public string DisplayName => "Hello";
+        public IntegrationGroup Group => IntegrationGroup.Sources;
+        public bool Enabled(Config c) => true;
+
+        // The plugin names its INSTANCE; the device it reports carries a different id, which is what a
+        // write addresses.
+        public string InstanceId => "hello";
+        public Task<rPDU2MQTT.Models.PDU.PduData?> PollAsync(Config cfg, CancellationToken ct)
+            => Task.FromResult<rPDU2MQTT.Models.PDU.PduData?>(null);
+
+        public bool Supports(string action) => action is "on" or "off";
+        public Task<string> ControlOutletAsync(Config cfg, string deviceId, int outletIndex, string action, CancellationToken ct)
+        {
+            Wrote.Add($"{deviceId}|{outletIndex}|{action}");
+            return Task.FromResult(action);
+        }
+    }
+
+    [Fact]
+    public async Task APluginsDevice_IsWrittenByThePlugin_HoweverItIsAddressed()
+    {
+        // The plugin files its snapshots under "hello"; the device in them is "hello_device". A write may
+        // name either, and both have to reach the plugin — matching only the instance id let a write to the
+        // device id fall through to the PDU path, where it was refused and reported as success.
+        var plugin = new HelloPlugin();
+        var cfg = new Config();
+        var cache = new Cache().Add("hello", deviceId: "hello_device");
+        var control = new DeviceOutletControl(
+            Registry("rack-a"), cache, log: null, integrations: new IntegrationRegistry([plugin]), cfg: cfg);
+
+        var byDevice = await control.Control("hello_device", 0, "off");
+        var byInstance = await control.Control("hello", 1, "on");
+
+        Assert.True(byDevice.Ok);
+        Assert.True(byInstance.Ok);
+        Assert.Equal(["hello_device|0|off", "hello|1|on"], plugin.Wrote);
+    }
+
+    [Fact]
+    public async Task AnActionThePluginDoesNotSupport_IsRefused_NotSentOn()
+    {
+        var plugin = new HelloPlugin();
+        var control = new DeviceOutletControl(
+            Registry("rack-a"), new Cache().Add("hello", deviceId: "hello_device"), log: null,
+            integrations: new IntegrationRegistry([plugin]), cfg: new Config());
+
+        var result = await control.Control("hello_device", 0, "reboot");
+
+        Assert.False(result.Ok);
+        Assert.Empty(plugin.Wrote);
     }
 }

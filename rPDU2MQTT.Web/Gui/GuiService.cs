@@ -1939,7 +1939,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // plugin-supplied device's outlet to the plugin that owns it. Calling the client meant this
                 // page could only ever switch a Vertiv PDU, however the device got here.
                 else if (outletControl is not null)
-                    await outletControl.Control(req.DeviceId, req.Index, action, cts.Token);
+                {
+                    // Report what the write DID. Answering ok to a refusal is how a button that does
+                    // nothing looks like it worked, and the outlet is still on when the page refreshes.
+                    var wrote = await outletControl.Control(req.DeviceId, req.Index, action, cts.Token);
+                    return Results.Json(
+                        new { ok = wrote.Ok, message = wrote.Ok ? $"Outlet {req.Index + 1} → {action}." : wrote.Message },
+                        ConfigSchema.Json);
+                }
                 else
                     await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
                 return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} → {action}." }, ConfigSchema.Json);

@@ -61,30 +61,33 @@ public sealed class DeviceOutletControl : IOutletControl
             .Select(s => s.InstanceId)
             .ToList();
 
-    public async Task<string> Control(string deviceId, int outletIndex, string action, CancellationToken cancellationToken = default)
+    public async Task<OutletWriteResult> Control(string deviceId, int outletIndex, string action, CancellationToken cancellationToken = default)
     {
         var act = action.Trim().ToLowerInvariant();
         if (act is not ("on" or "off" or "reboot" or "resetstats"))
         {
             log?.LogWarning("Unknown outlet action '{Action}' for {Device} outlet {Outlet}.", action, deviceId, outletIndex);
-            return $"Unknown outlet action '{action}'.";
+            return OutletWriteResult.Refused($"Unknown outlet action '{action}'.");
         }
 
         // A plugin-supplied device owns its own writes. Checked first, and only ever matching a device this
         // build actually loaded, so nothing changes for a PDU.
-        if (PluginFor(deviceId) is { } control && control.Supports(act))
+        if (PluginFor(deviceId) is { } control)
         {
-            var result = "";
-            await lease.RunIfOwnerAsync($"device:{deviceId}",
-                async ct => result = await control.ControlOutletAsync(cfg!, deviceId, outletIndex, act, ct),
+            if (!control.Supports(act))
+                return OutletWriteResult.Refused($"'{deviceId}' does not support '{act}'.");
+
+            var message = $"Another instance owns '{deviceId}'.";
+            var applied = await lease.RunIfOwnerAsync($"device:{deviceId}",
+                async ct => message = await control.ControlOutletAsync(cfg!, deviceId, outletIndex, act, ct),
                 cancellationToken);
-            return result;
+            return new OutletWriteResult(applied, message);
         }
 
-        if (!Resolve(deviceId, out var instanceId, out var pdu, out var refusal)) return refusal;
+        if (!Resolve(deviceId, out var instanceId, out var pdu, out var refusal))
+            return OutletWriteResult.Refused(refusal);
 
-        var applied = $"{deviceId} outlet {outletIndex}: {act}.";
-        await lease.RunIfOwnerAsync($"outlet:{deviceId}|{outletIndex}", async ct =>
+        var wrote = await lease.RunIfOwnerAsync($"outlet:{deviceId}|{outletIndex}", async ct =>
         {
             // Writes change the physical world, so they're worth an Information line whatever the log level.
             log?.LogInformation("PDU '{Id}': {Device} outlet {Outlet} → {Action}.", instanceId, deviceId, outletIndex, act);
@@ -96,7 +99,10 @@ public sealed class DeviceOutletControl : IOutletControl
                 case "resetstats": await pdu!.ResetOutletStatsAsync(deviceId, outletIndex, ct); break;
             }
         }, cancellationToken);
-        return applied;
+
+        return wrote
+            ? OutletWriteResult.Applied($"{deviceId} outlet {outletIndex}: {act}.")
+            : OutletWriteResult.Refused($"Another instance owns '{deviceId}' outlet {outletIndex}.");
     }
 
     public async Task<string> SetOutletConfig(string deviceId, int outletIndex, string field, string payload, bool isDelay, CancellationToken cancellationToken = default)
@@ -120,11 +126,12 @@ public sealed class DeviceOutletControl : IOutletControl
         return value.ToString() ?? "";
     }
 
-    public async Task<string> ControlGroup(string groupKey, string action, CancellationToken cancellationToken = default)
+    public async Task<OutletWriteResult> ControlGroup(string groupKey, string action, CancellationToken cancellationToken = default)
     {
         var act = action.Trim().ToLowerInvariant();
-        if (act is not ("on" or "off" or "reboot")) return $"Unknown group action '{action}'.";
+        if (act is not ("on" or "off" or "reboot")) return OutletWriteResult.Refused($"Unknown group action '{action}'.");
 
+        var applied = 0;
         var results = new List<string>();
         foreach (var instanceId in InstancesWithGroup(groupKey))
         {
@@ -142,14 +149,15 @@ public sealed class DeviceOutletControl : IOutletControl
                     var count = await pdu.ControlGroupAsync(groupKey, act, ct);
                     log?.LogInformation("PDU '{Id}': group '{Group}' {Action} applied to {Count} outlet(s).", instanceId, groupKey, act, count);
                     results.Add($"Group '{groupKey}' {act}: applied to {count} outlet(s).");
+                    applied++;
                 }, cancellationToken);
             }
             catch (Exception ex) { results.Add($"{instanceId}: {ex.Message}"); }
         }
 
         return results.Count == 0
-            ? $"No PDU reports a group '{groupKey}' (nothing polled yet, or the name doesn't exist)."
-            : string.Join(" ", results);
+            ? OutletWriteResult.Refused($"No PDU reports a group '{groupKey}' (nothing polled yet, or the name doesn't exist).")
+            : new OutletWriteResult(applied > 0, string.Join(" ", results));
     }
 
     /// <summary>Which PDU this device is on, and whether it can be written to at all.</summary>
@@ -173,14 +181,21 @@ public sealed class DeviceOutletControl : IOutletControl
         return true;
     }
 
-    /// <summary>The plugin that owns this device id, or null when a built-in PDU does.</summary>
+    /// <summary>
+    /// The plugin that owns this device id, or null when a built-in PDU does. A plugin names its own
+    /// instance, but the devices it reports carry whatever ids the plugin chose for them — so a write may
+    /// address either. Matching only the instance id is how a write to a plugin's device fell through to
+    /// the PDU path and was silently refused.
+    /// </summary>
     private IDeviceControlPlugin? PluginFor(string deviceId)
     {
         if (integrations is null || cfg is null) return null;
+
+        var instanceId = InstanceFor(deviceId);
         foreach (var i in integrations.All)
-            if (i is IDeviceSourcePlugin device
-                && string.Equals(device.InstanceId, deviceId, StringComparison.OrdinalIgnoreCase)
-                && i is IDeviceControlPlugin control)
+            if (i is IDeviceSourcePlugin device && i is IDeviceControlPlugin control
+                && (string.Equals(device.InstanceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(device.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase)))
                 return control;
         return null;
     }
