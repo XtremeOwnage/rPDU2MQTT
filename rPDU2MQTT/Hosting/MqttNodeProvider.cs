@@ -1,7 +1,7 @@
 using Orleans;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Integrations;
-using rPDU2MQTT.Grains.Abstractions.Discovery;
+using rPDU2MQTT.Core.Discovery;
 
 namespace rPDU2MQTT.Hosting;
 
@@ -23,18 +23,16 @@ namespace rPDU2MQTT.Hosting;
 /// </summary>
 public sealed class MqttNodeProvider : INodeProvider
 {
-    private readonly IGrainFactory grains;
+    private readonly TopicIndex index;
 
-    public MqttNodeProvider(IGrainFactory grains) => this.grains = grains;
+    public MqttNodeProvider(TopicIndex index) => this.index = index;
 
-    public async Task<IReadOnlyList<DiscoveredNode>> DiscoverAsync(Config cfg, string? search, CancellationToken ct)
+    public Task<IReadOnlyList<DiscoveredNode>> DiscoverAsync(Config cfg, string? search, CancellationToken ct)
     {
-        var index = grains.GetGrain<ITopicIndexGrain>(0);
         // Renewing is what keeps the subscription open: asking is browsing.
-        await index.Renew(null);
-
-        var samples = await index.Search(search, 100);
-        return samples.Select(s =>
+        index.Renew(null);
+        var samples = index.Search(search, 100);
+        var nodes = samples.Select(s =>
         {
             // What it looks like, read from the payload by the same analyzer the node editor uses — so a
             // discovered node and a hand-bound one agree about what a topic is. Nulls stay null: a wrong
@@ -49,6 +47,7 @@ public sealed class MqttNodeProvider : INodeProvider
                 Kind: null,
                 SuggestedId: Suggest(s.Topic));
         }).ToList();
+        return Task.FromResult<IReadOnlyList<DiscoveredNode>>(nodes);
     }
 
     /// <summary>A node id someone might reasonably accept — the last meaningful topic segment.</summary>

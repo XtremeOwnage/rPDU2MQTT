@@ -59,6 +59,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
     // The Status board, held in this process rather than projected by a grain.
     private readonly Core.Status.StatusBoard? statusBoard;
+    private readonly Core.Diagnostics.ProcessRegistry? processes;
+    private readonly Core.Discovery.TopicIndex? topicIndex;
     private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
@@ -70,7 +72,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -78,6 +80,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.outletControl = outletControl;
         this.nodeProviders = nodeProviders?.ToList() ?? [];
         this.statusBoard = statusBoard;
+        this.processes = processes;
+        this.topicIndex = topicIndex;
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
@@ -355,9 +359,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var prefix = config.HASS.DiscoveryTopic;
         if (string.IsNullOrWhiteSpace(prefix)) return Array.Empty<string>();
 
-        var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-        await index.Renew(prefix.Trim().Trim('/') + "/#");
-        var retained = (await index.Search(null, 5000)).Select(t => t.Topic).ToList();
+        var index = topicIndex;
+        index.Renew(prefix.Trim().Trim('/') + "/#");
+        var retained = (index.Search(null, 5000)).Select(t => t.Topic).ToList();
 
         // What the exporter would publish right now: every non-synthetic tier not already covered by native PDU discovery.
         var merged = new Models.PDU.PduData();
@@ -901,7 +905,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
             // The cluster-wide process list (v3: the ProcessRegistryGrain, replacing the MQTT heartbeat).
-            var processList = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            var processList = processes?.Active() ?? [];
 
             // EmonCMS export health. The exporter runs only on the worker.
             object? emonStatus = null;
@@ -1117,7 +1121,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
 
             // Non-Kubernetes: offer whole roles seen in the cluster (split deployment), else just this process.
-            var procs = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            var procs = processes?.Active() ?? [];
             var roles = procs.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
             if (procs.Count > 1 && roles.Count > 0)
             {
@@ -1224,12 +1228,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Retained Home Assistant discovery configs this build would no longer publish — and, on POST.
-        async Task<IReadOnlyList<Grains.Abstractions.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
+        async Task<IReadOnlyList<Core.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
         {
-            var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-            return await Core.Flow.TopicIndexScan.SettleAsync<Grains.Abstractions.Discovery.TopicSample>(
-                renew: () => index.Renew(filter),
-                search: async () => await index.Search(null, 5000),
+            var index = topicIndex;
+            return await Core.Flow.TopicIndexScan.SettleAsync<Core.Discovery.TopicSample>(
+                // The index is synchronous now, so these adapt it to the helper's async shape rather than
+                // the helper pretending an in-memory dictionary needs awaiting.
+                renew: () => { index.Renew(filter); return Task.CompletedTask; },
+                search: () => Task.FromResult<IReadOnlyList<Core.Discovery.TopicSample>>(index.Search(null, 5000)),
                 delay: d => Task.Delay(d, ct),
                 pollEvery: TimeSpan.FromMilliseconds(750),
                 deadline: DateTime.UtcNow.AddSeconds(12),
@@ -1368,14 +1374,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             try
             {
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var index = topicIndex;
                 // The filter to browse (default '#'); a restricted broker can narrow it, e.g. 'solar_assistant/#'.
                 var filter = ctx.Request.Query["filter"].FirstOrDefault();
-                var state = await index.Renew(filter);
+                var state = index.Renew(filter);
                 var q = ctx.Request.Query["q"].FirstOrDefault();
                 var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
 
-                var topics = (await index.Search(q, limit)).Select(t =>
+                var topics = (index.Search(q, limit)).Select(t =>
                 {
                     var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
                     return new
@@ -1403,9 +1409,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                await index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
-                var sample = await index.Get(topic);
+                var index = topicIndex;
+                index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
+                var sample = index.Get(topic);
                 if (sample is null)
                     return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);
 
@@ -2086,14 +2092,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 var prefix = config.HASS.DiscoveryTopic;
                 var root = (prefix ?? "").Trim().Trim('/');
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var index = topicIndex;
 
                 // The index only fills while someone is reading it.
-                var state = await index.Renew(root + "/#");
+                var state = index.Renew(root + "/#");
                 for (var i = 0; i < 30 && !(state.Listening && state.Granted != false); i++)
                 {
                     await Task.Delay(500);
-                    state = await index.Renew(root + "/#");
+                    state = index.Renew(root + "/#");
                 }
                 if (state.Granted == false)
                     throw new InvalidOperationException($"the broker refused a subscription to '{root}/#', so what is retained there cannot be read");
@@ -2102,7 +2108,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 await Task.Delay(2000);   // retained messages arrive in a burst; let it finish
 
                 // Uncapped on purpose: Search caps at 200 and orders by topic length.
-                var retained = await index.TopicsUnder(root + "/");
+                var retained = index.TopicsUnder(root + "/");
 
                 foreach (var topic in Core.HomeAssistant.HaDiscoveryTopics.Owned(retained, prefix))
                 {

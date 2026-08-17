@@ -336,6 +336,9 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
         // The Status board, in this process. Evaluated when read, so an age is never stale.
         services.AddSingleton<Core.Status.StatusBoard>();
+        // The browsable topic index and the process list: in this process, leased and pruned on read.
+        services.AddSingleton<Core.Discovery.TopicIndex>();
+        services.AddSingleton<Core.Diagnostics.ProcessRegistry>();
         // Ownership of a shared resource, held cluster-wide on a short lease. The Core seam never names
         // Orleans; this is the only place that does.
         services.AddSingleton<Core.Integrations.ISingleOwnerLease, Hosting.GrainSingleOwnerLease>();

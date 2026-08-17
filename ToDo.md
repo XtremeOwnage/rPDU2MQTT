@@ -310,8 +310,20 @@ finishes.
             existed to paper over — an "…ago" is computed when someone looks, so it cannot be out of date.
             The verdict rules moved to Core as pure functions, 8 tests. 15 cards verified identical on a
             running bridge.
-        [ ] Process registry.
-        [ ] Topic index.
+        [x] Topic index. `Core.Discovery.TopicIndex` — both bounds survive (a lease in time, a cap in
+            size) and both are checked on READ now, so a leased index has nothing running in the
+            background, which is what "leased" was always supposed to mean.
+        [x] Process registry. `Core.Diagnostics.ProcessRegistry`. In one process this is a list of one and
+            that is the honest shape; the type stays so the board and diagnostics page are unchanged.
+
+    INCIDENT: I wrote `rPDU2MQTT.Tests/TopicIndexTests.cs` with a heredoc without checking whether the file
+    existed. It did — 13 tests (`TopicSampleAnalyzerTests`, `TopicIndexGrainTests`) — and I destroyed all of
+    them. Caught only because the suite total dropped from 813 to 806 and I chased the seven I could not
+    account for. Restored from HEAD, and the 8 grain tests retargeted at the in-memory index rather than
+    deleted: the behaviour and the assertions are identical, only where it lives changed, which is the whole
+    claim of the move. Now 819 = 813 + 6 new.
+    Lesson: `cat > file` and `Write` silently clobber. Check the path exists first, ALWAYS, and treat a
+    falling test count as a defect to explain rather than noise.
     [ ] B. Ownership in memory: PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
     [ ] C. Leader + flow mirror: always-leader in one process; the flow cache is already Core.
     [ ] D. Delete the Grains projects, the silo config, and the five Orleans packages.
