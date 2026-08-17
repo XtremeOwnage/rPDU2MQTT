@@ -1,10 +1,10 @@
-namespace rPDU2MQTT.Grains.Abstractions.Operator;
+namespace rPDU2MQTT.Core.Operator;
 
 /// <summary>
-/// How a report should read at a glance. The grain knows its state exactly when it writes the message, so it
-/// says so here rather than leaving the GUI to guess a colour by keyword-matching the prose (which drifts the
-/// moment a message is reworded). <see cref="Info"/> is first so a blank/initial report is neutral, not falsely
-/// green. Serialized as its name via <c>JsonStringEnumConverter</c>, e.g. <c>"updateAvailable"</c>.
+/// How a report should read at a glance. The operator knows its state exactly when it writes the message, so
+/// it says so here rather than leaving the GUI to guess a colour by keyword-matching the prose (which drifts
+/// the moment a message is reworded). <see cref="Info"/> is first so a blank/initial report is neutral, not
+/// falsely green. Serialized as its name via <c>JsonStringEnumConverter</c>, e.g. <c>"updateAvailable"</c>.
 /// </summary>
 public enum OperatorSeverity
 {
@@ -19,21 +19,20 @@ public enum OperatorSeverity
 }
 
 /// <summary>
-/// The operator's update report — held in the grain and returned to callers, replacing the round-trip
-/// through the CR <c>status</c> the GUI used to poll. Property names are the camelCase the GUI already reads.
+/// The operator's update report — held in memory and returned to callers, replacing the round-trip through
+/// the CR <c>status</c> the GUI used to poll. Property names are the camelCase the GUI already reads.
 /// </summary>
-[GenerateSerializer]
 public sealed record OperatorReport
 {
-    [Id(0)] public bool Available { get; init; }
-    [Id(1)] public string? Current { get; init; }
-    [Id(2)] public string? Latest { get; init; }
-    [Id(3)] public string? Policy { get; init; }
-    [Id(4)] public bool AutoUpdate { get; init; }
-    [Id(5)] public string? Applied { get; init; }
-    [Id(6)] public string? CheckedAt { get; init; }
-    [Id(7)] public string? Message { get; init; }
-    [Id(8)] public OperatorSeverity Severity { get; init; }
+    public bool Available { get; init; }
+    public string? Current { get; init; }
+    public string? Latest { get; init; }
+    public string? Policy { get; init; }
+    public bool AutoUpdate { get; init; }
+    public string? Applied { get; init; }
+    public string? CheckedAt { get; init; }
+    public string? Message { get; init; }
+    public OperatorSeverity Severity { get; init; }
 
     /// <summary>
     /// When the operator last actually rolled the deployment, ISO-8601. Null when it never has.
@@ -51,15 +50,15 @@ public sealed record OperatorReport
     /// an hour whether or not anything happened.
     /// </para>
     /// </summary>
-    [Id(9)] public string? AppliedAt { get; init; }
+    public string? AppliedAt { get; init; }
 }
 
 /// <summary>
-/// The Kubernetes operator as a single-activation grain (key 0), replacing the OperatorService hosted loop +
-/// the MQTT command topics + CR-status polling (#210). Update checks and deploy actions are now grain calls
-/// that return results directly. Only does real work with the Kubernetes config source.
+/// The deployment operator: update checks and deploy actions, returning their results directly. The GUI
+/// depends on this seam rather than on Kubernetes — outside Kubernetes there is no implementation at all,
+/// and the pages that use it say so instead of failing.
 /// </summary>
-public interface IOperatorGrain : IGrainWithIntegerKey
+public interface IOperatorControl
 {
     /// <summary>Run an update check. <paramref name="force"/> bypasses the interval throttle (the GUI "check now").</summary>
     Task<OperatorReport> CheckNow(bool force);

@@ -1,30 +1,37 @@
-using rPDU2MQTT.Grains.Abstractions.Operator;
+using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core.Operator;
+using rPDU2MQTT.Hosting;
+using rPDU2MQTT.Services.Operator;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// The operator as a grain: activates, and its actions return results directly (no MQTT command topic, no
-/// CR-status polling). Without the Kubernetes config source it reports unavailable — and exercises shipping
-/// the OperatorReport across the grain boundary.
+/// The operator's actions return their results directly (no MQTT command topic, no CR-status polling).
+/// Without the Kubernetes config source there is nothing it can roll, and it says so rather than failing.
 /// </summary>
-public class OperatorGrainTests
+public class KubernetesOperatorTests
 {
     [Fact]
-    public async Task OperatorGrain_WithoutKubernetes_ReportsUnavailable()
+    public async Task WithoutKubernetes_ReportsUnavailable()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var op = cluster.GrainFactory.GetGrain<IOperatorGrain>(0);
+        var op = new KubernetesOperator(new Config(), new NoRegistry(), NullLogger<KubernetesOperator>.Instance);
 
-            var report = await op.CheckNow(force: true);
-            Assert.Contains("Kubernetes", report.Message);
+        var report = await op.CheckNow(force: true);
+        Assert.Contains("Kubernetes", report.Message);
 
-            Assert.Contains("Kubernetes", await op.SetTag("edge"));
-            Assert.Contains("Kubernetes", await op.Redeploy());
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        Assert.Contains("Kubernetes", await op.SetTag("edge"));
+        Assert.Contains("Kubernetes", await op.Redeploy());
+    }
+
+    /// <summary>Never reached without the Kubernetes source — which is the point of the test above.</summary>
+    private sealed class NoRegistry : IContainerRegistry
+    {
+        public Task<IReadOnlyList<string>> ListTagsAsync(string registry, string repository, CancellationToken ct)
+            => throw new NotSupportedException();
+        public Task<string?> ResolveDigestAsync(string registry, string repository, string tag, CancellationToken ct)
+            => throw new NotSupportedException();
     }
 
     [Fact]
@@ -32,7 +39,7 @@ public class OperatorGrainTests
     {
         // Regression: a switch that patched only the container image rolled the pod but left RPDU2MQTT_IMAGE
         // (what the GUI/diagnostics report) on the old tag, so it looked like the switch didn't stick.
-        var json = rPDU2MQTT.Grains.Operator.OperatorGrain.BuildImagePatch(
+        var json = KubernetesOperator.BuildImagePatch(
             new[] { "rpdu2mqtt" }, "ghcr.io/xtremeownage/rpdu2mqtt:unstable", "ghcr.io/xtremeownage/rpdu2mqtt:unstable");
 
         using var doc = System.Text.Json.JsonDocument.Parse(json);
@@ -55,14 +62,14 @@ public class OperatorGrainTests
     [InlineData("", "sha256:abc", false)]
     [InlineData("ghcr.io/xtremeownage/rpdu2mqtt:unstable", "sha256:abc", false)]
     public void ImageDigest_EqualsWhenSameBuild_RegardlessOfReferenceShape(string a, string b, bool expected)
-        => Assert.Equal(expected, rPDU2MQTT.Grains.Operator.ImageDigest.Equal(a, b));
+        => Assert.Equal(expected, rPDU2MQTT.Hosting.ImageDigest.Equal(a, b));
 
     [Fact]
     public void ImageDigest_Normalize_ExtractsShaFromAnyReference()
     {
-        Assert.Equal("sha256:abc", rPDU2MQTT.Grains.Operator.ImageDigest.Normalize("repo@SHA256:ABC"));
-        Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize("repo:unstable"));
-        Assert.Null(rPDU2MQTT.Grains.Operator.ImageDigest.Normalize(null));
+        Assert.Equal("sha256:abc", rPDU2MQTT.Hosting.ImageDigest.Normalize("repo@SHA256:ABC"));
+        Assert.Null(rPDU2MQTT.Hosting.ImageDigest.Normalize("repo:unstable"));
+        Assert.Null(rPDU2MQTT.Hosting.ImageDigest.Normalize(null));
     }
 [Fact]
     public void ADeploymentNotRunningTheApp_IsLeftAlone()
@@ -73,7 +80,7 @@ public class OperatorGrainTests
         // the operator injected a whole crash-looping bridge container into the cache's pod.
         var valkey = new[] { new k8s.Models.V1Container { Name = "valkey", Image = "valkey/valkey:8-alpine" } };
 
-        var targets = rPDU2MQTT.Grains.Operator.OperatorGrain.TargetContainers(valkey, "xtremeownage/rpdu2mqtt");
+        var targets = KubernetesOperator.TargetContainers(valkey, "xtremeownage/rpdu2mqtt");
 
         Assert.Empty(targets);   // empty means "skip this Deployment", never "invent a container"
     }
@@ -89,7 +96,7 @@ public class OperatorGrainTests
             new k8s.Models.V1Container { Name = "sidecar", Image = "busybox:latest" },
         };
 
-        var targets = rPDU2MQTT.Grains.Operator.OperatorGrain.TargetContainers(pod, "xtremeownage/rpdu2mqtt");
+        var targets = KubernetesOperator.TargetContainers(pod, "xtremeownage/rpdu2mqtt");
 
         Assert.Equal(new[] { "rpdu2mqtt" }, targets);
     }

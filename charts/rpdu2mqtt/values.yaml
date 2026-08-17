@@ -10,10 +10,9 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# v3: a homogeneous Orleans fleet — raise this to run N identical all-in-one replicas. They form one silo
-# cluster (Kubernetes membership turns on automatically when >1), single-owner work (the PDU session) is a
-# single-activation grain, and the publishers/exporters are leader-gated, so replicas never duplicate output.
-# Scale for HA/throughput by replica count; no roles to juggle.
+# Keep this at 1. v4 coordinates within one process: each replica would poll the PDUs and run the
+# publishers/exporters itself, so a second replica means duplicate device sessions and duplicate output —
+# not more throughput. (The seams for a coordinated fleet are still in the code; nothing implements them.)
 replicaCount: 1
 
 # Legacy tiering (#179): split the app's roles into separate Deployments — worker (polls the PDUs,

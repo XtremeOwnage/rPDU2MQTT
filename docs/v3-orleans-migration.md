@@ -1,6 +1,8 @@
 # v3 — Orleans migration plan (RFC)
 
-Status: **landed** (#225). This was written as a proposal — a plan, not a commitment, to make the trade-offs
+Status: **landed (#225), then removed in v4.** Orleans is gone — the coordination it provided is done in
+one process now (see [v4-plugins.md](v4-plugins.md)); what it enabled and what that cost is recorded there.
+This file is kept as the record of why v3 looked the way it did. It was written as a proposal — a plan, not a commitment, to make the trade-offs
 concrete before any code moved. It is kept as the record of *why* v3 looks the way it does; the sections
 below are the reasoning at the time of writing, not a description of the current code.
 

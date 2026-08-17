@@ -77,20 +77,14 @@ credentials:
 
 ## Notes
 
-- **Where the device work runs (`split.enabled`):** roles decide which *background services* start in each
-  pod — they don't decide where grains live. The grains that hold a device open (the PDU session, a Modbus
-  device) now use a placement strategy that **prefers a silo running the `worker` role**, so in a split
-  deployment that work lands in the worker pod rather than wherever Orleans happened to put it. It's a
-  preference, not a requirement: with no worker silo available it falls back to any silo and logs a warning,
-  because a grain that can't be placed is worse than one placed in the wrong pod. In the default
-  single-Deployment fleet every silo runs every role, so nothing changes.
+- **Where the device work runs (`split.enabled`):** roles decide which background services start in each
+  pod, and in v4 that is the whole story — the device work (the PDU session, a Modbus device, the exporters)
+  runs in the process that starts those services, which is the `worker`. The api/ui pods read what the
+  worker produced and never open a device.
 
-- **Orleans membership CRDs:** the chart ships `crds/orleans-membership.yaml`
-  (`clusterversions.orleans.dot.net`, `silos.orleans.dot.net`). The silos store cluster membership in those
-  resources instead of an external database, and without them **every pod crash-loops** on *"Failure reading
-  all silo entries"*. Helm applies `crds/` on **install only, never on upgrade** — so a release that predates
-  them needs a one-off `kubectl apply -f charts/rpdu2mqtt/crds/orleans-membership.yaml`. Argo CD renders with
-  `--include-crds` and applies them on every sync, so it needs nothing extra.
+- **One replica:** v4 coordinates within one process. Two replicas would each poll the PDUs and each run the
+  publishers — duplicate device sessions, duplicate output. Keep `replicaCount: 1`, and prefer a
+  `Recreate` rollout so two of them never overlap.
 
 - **Scheduled restarts:** `autoRestart.enabled=true` adds a CronJob that runs
   `kubectl rollout restart` against the Deployments *this release* renders — matched by label, so it can

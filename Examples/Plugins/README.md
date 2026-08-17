@@ -23,7 +23,7 @@ every reading and every energy-flow tier to a file. Copy it and change the middl
 ```
 
 `rPDU2MQTT.Core` is the whole SDK: the contracts, the config model, the flow engine and the helpers. It
-references no Orleans, no ASP.NET and no MQTT client, so you inherit none of them.
+references no ASP.NET and no MQTT client, so you inherit none of them.
 
 ## The identity
 

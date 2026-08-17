@@ -1,6 +1,5 @@
 using HiveMQtt.Client;
 using Microsoft.Extensions.Hosting;
-using Orleans;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Core.Status;
@@ -10,17 +9,12 @@ using rPDU2MQTT.Services;
 namespace rPDU2MQTT.Hosting;
 
 /// <summary>
-/// Reports what this process can see of each Status-board component to that component's grain (v3). It states
-/// facts only — connected or not, when the last poll landed, what the last export returned, what's configured
-/// — and never decides what they mean; the component grains own that, so every replica and every reader agree.
-/// <para>
-/// Registered in every process: several may report the same component (they're all talking to the same
-/// broker), and the component grain reconciles.
-/// </para>
+/// Reports what this process can see of each Status-board component: connected or not, when the last poll
+/// landed, what the last export returned, what is configured. It states facts only and never decides what
+/// they mean — <see cref="StatusBoard"/> owns that, so every card is judged by one rule.
 /// </summary>
 public sealed class StatusReporter : BackgroundService
 {
-    private readonly IGrainFactory grains;
     private readonly Config config;
     // Every integration this build carries, and what each last did — so the board needs no per-integration branch.
     private readonly Core.Status.StatusBoard board;
@@ -35,9 +29,8 @@ public sealed class StatusReporter : BackgroundService
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null)
+    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null)
     {
-        this.grains = grains;
         this.config = config;
         board = statusBoard ?? new Core.Status.StatusBoard();
         this.registry = registry;

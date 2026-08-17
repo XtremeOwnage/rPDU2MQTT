@@ -36,8 +36,6 @@ The edit list for adding a destination — say InfluxDB — before this work:
 | `ConfigurationFaults.cs` | required-field check |
 | `StartupSummary.cs` | banner line |
 | `StatusReporter.cs` | component report |
-| `Grains.Abstractions` | status grain interface |
-| `Grains/Status/*.cs` | status grain implementation |
 | `GuiService.cs` | test endpoint |
 | `web/src/actions.ts` | test button |
 | `config-form.ts` | nav group + icon |
@@ -135,25 +133,21 @@ One immutable object, built once per poll and handed to every destination. This 
 itself immediately: `FlowTiers` already computes the tier set, so making it the *argument* means a new
 destination cannot forget the hierarchy and an existing one cannot quietly drift from the others.
 
-## Orleans stays out of the contracts
+## Coordination stays out of the contracts
 
-Plugin authors never see Orleans, and that is a property to preserve rather than a goal to engineer
-toward — `Core`, `Abstractions`, `Engine` and `Api` reference it zero times today. It reaches only the host
-(`rPDU2MQTT`, 17 files), `Grains` (4) and `GuiService` (1).
+A plugin never learns how the host coordinates anything. That was true when coordination was Orleans, and
+it stayed true when Orleans was removed — which is the test that mattered: the contracts did not move.
 
-Three hooks get Orleans backing, each behind a `Core` interface:
+Two hooks exist for it, both plain interfaces in `Core`:
 
 | Hook | For | Backed by |
 | --- | --- | --- |
-| `ISingleOwnerLease` | "one owner of this key, cluster-wide" — the RS485 gateway-contention fix | `IModbusGrain` / placement |
-| status reporting | the Status board | one generic component grain |
-| cross-process values | split deployments | `IFlowGrain` + mirror |
+| `ISingleOwnerLease` | "one owner of this key" — the RS485 gateway-contention fix | `SoleOwnerLease` (this process owns what it can see) |
+| `LeaderState` | run-once work: publishers, exporters, discovery | set true at startup; one process, one leader |
 
-`LeaderState` is the precedent: a plain bool in `Core`, kept fresh by one Orleans-aware hosting service,
-read by Engine services that know nothing about grains. Repeat that.
-
-This also keeps the option open. Orleans stores nothing here — zero `IPersistentState`, zero reminders,
-zero streams — so it is a coordination swap, not a state migration, if it is ever dropped.
+Both are the same arrangement: a plain type in `Core`, whatever keeps it true supplied by the host, and
+Engine services that read it without knowing what does. A clustered build would replace those two files and
+nothing else — no integration, no contract, no config.
 
 ## Constraints
 
@@ -165,7 +159,7 @@ actions reach the API the same way, because routes are derived from the capabili
 
 Writing one: reference `rPDU2MQTT.Core`, implement `IIntegration` plus whichever capabilities apply, drop
 the DLL in `plugins/`. Core is the whole SDK — contracts, config model, flow engine, helpers — and it
-references no Orleans, no ASP.NET and no MQTT client, so a plugin inherits none of them. A worked example
+references no ASP.NET and no MQTT client, so a plugin inherits none of them. A worked example
 lives in [Examples/Plugins/HelloWorld](Examples/Plugins/HelloWorld); it is a real destination in about
 sixty lines.
 
@@ -235,7 +229,7 @@ Each step leaves the tree green and releasable.
    destination *and* history, so one slice exercises multi-capability registration — and `/metrics` makes
    the before/after verifiable against a running binary.
 2. **The other destinations.** EmonCMS, MQTT export, HA discovery, HA energy.
-3. **Generic health, test and faults.** One status grain keyed by plugin id; one `/api/test/{id}`; one
+3. **Generic health, test and faults.** One status card keyed by plugin id; one `/api/test/{id}`; one
    generic Test button; required fields from attributes.
 4. **Nav and grouping from the schema.** Delete `NAV_GROUPS`/`NAV_ICONS`.
 5. **Sources.** Needs a config migration: the flattened per-type fields on `EnergyFlowSource` become a

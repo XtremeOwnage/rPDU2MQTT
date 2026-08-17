@@ -4,36 +4,36 @@ using k8s.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Grains.Abstractions.Operator;
+using rPDU2MQTT.Core.Operator;
 using rPDU2MQTT.Startup.ConfigSources;
 using rPDU2MQTT.Services.Operator;
 using rPDU2MQTT.Updates;
 
-namespace rPDU2MQTT.Grains.Operator;
+namespace rPDU2MQTT.Hosting;
 
 /// <summary>
-/// The Kubernetes operator as a single-activation grain (#210). Ports the OperatorService logic; holds the
-/// report in-grain (returned to callers, no CR-status polling) while still patching the CR status for
-/// <c>kubectl</c>. Deploy actions are grain calls that return results. A no-op without the Kubernetes source.
+/// The Kubernetes operator (#210): holds the update report in memory (returned to callers, no CR-status
+/// polling) while still patching the CR status for <c>kubectl</c>. Deploy actions return their results. A
+/// no-op without the Kubernetes source.
 /// </summary>
-public sealed class OperatorGrain : Grain, IOperatorGrain
+public sealed class KubernetesOperator : IOperatorControl
 {
     private const string ContainerName = "rpdu2mqtt";
 
     private readonly Config cfg;
     private readonly IContainerRegistry registry;
     private readonly KubernetesConfigSource? source;
-    private readonly ILogger<OperatorGrain> log;
+    private readonly ILogger<KubernetesOperator> log;
 
     private OperatorReport report = new() { Message = "No check yet." };
     private DateTime lastCheckUtc = DateTime.MinValue;
 
     /// <param name="source">
     /// The Kubernetes config source, when this deployment has one — declared as an optional dependency
-    /// rather than fished out of the container, so the grain's requirements are visible in its signature.
-    /// Null outside Kubernetes, where the operator is a no-op.
+    /// rather than fished out of the container, so the requirements are visible in the signature. Null
+    /// outside Kubernetes, where the operator is a no-op.
     /// </param>
-    public OperatorGrain(Config cfg, IContainerRegistry registry, ILogger<OperatorGrain> log, KubernetesConfigSource? source = null)
+    public KubernetesOperator(Config cfg, IContainerRegistry registry, ILogger<KubernetesOperator> log, KubernetesConfigSource? source = null)
     {
         this.cfg = cfg;
         this.registry = registry;
@@ -225,7 +225,7 @@ public sealed class OperatorGrain : Grain, IOperatorGrain
         catch (Exception ex) { log.LogDebug("Operator: could not read running digest: {Msg}", ex.Message); return null; }
     }
 
-    /// <summary>Store the report in-grain and mirror it to the CR status for kubectl visibility.</summary>
+    /// <summary>Hold the report and mirror it to the CR status for kubectl visibility.</summary>
     private async Task Report(OperatorReport r)
     {
         report = r;

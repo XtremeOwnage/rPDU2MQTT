@@ -70,9 +70,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private GuiEventHub? events;
     private readonly object eventsGate = new();
 
-    private readonly Orleans.IGrainFactory grains;
+    // The deployment operator, when this build runs somewhere it can roll itself (Kubernetes).
+    private readonly Core.Operator.IOperatorControl? deployOperator;
+    // What each Modbus device last did, for the diagnostics page.
+    private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -84,7 +87,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.topicIndex = topicIndex;
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
-        this.grains = grains;
+        this.deployOperator = deployOperator;
+        this.modbusDevices = modbusDevices;
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
@@ -779,7 +783,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Update checks are only available with the Kubernetes config source." }, ConfigSchema.Json);
             try
             {
-                var report = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).CheckNow(force: true);
+                var report = await Operator(op => op.CheckNow(force: true), new Core.Operator.OperatorReport { Message = "The operator is not available in this deployment." });
                 return Results.Json(new { ok = true, message = report.Message ?? "Checked.", update = report }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
@@ -817,7 +821,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "A tag is required." }, ConfigSchema.Json);
             try
             {
-                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).SetTag(tag);
+                var msg = await Operator(op => op.SetTag(tag), "The operator is not available in this deployment.");
                 return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
@@ -830,7 +834,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Force update needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
             try
             {
-                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Redeploy();
+                var msg = await Operator(op => op.Redeploy(), "The operator is not available in this deployment.");
                 return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
@@ -915,7 +919,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     emonStatus = emonCmsStatus.Snapshot();
                 else
                     emonStatus = processList
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds)
+                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Diagnostics.ProcessRegistry.StaleAfterSeconds)
                         .OrderByDescending(p => p.TimestampUtc)
                         .Select(p => (object?)p.EmonCms)
                         .FirstOrDefault() ?? emonCmsStatus.Snapshot();
@@ -926,10 +930,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             foreach (var conn in config.Modbus.Connections)
             {
                 if (!conn.Enabled || string.IsNullOrWhiteSpace(conn.Host)) continue;
-                try
                 {
-                    var h = await grains.GetGrain<Grains.Abstractions.Modbus.IModbusGrain>(
-                        Grains.Abstractions.Modbus.IModbusGrain.KeyFor(conn.Host, conn.Port, conn.UnitId)).Health();
+                    if (modbusDevices?.For(conn.Host, conn.Port, conn.UnitId) is not { } h) continue;
                     long? okAge = h.LastOkUtc is { } okAt ? (long)Math.Max(0, (DateTime.UtcNow - okAt).TotalSeconds) : null;
                     var stale = h.LastOkUtc is null || (h.PollIntervalSeconds > 0 && okAge > Math.Max(30, h.PollIntervalSeconds * 3));
                     modbus.Add(new
@@ -938,7 +940,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         bindings = h.Bindings, values = h.LastValueCount, lastOkAgeSeconds = okAge, error = h.LastError, stale,
                     });
                 }
-                catch { /* device grain unreachable from here — leave it off rather than guess */ }
             }
 
             return Results.Json(new
@@ -986,7 +987,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             roles = p.Roles,
                             host = p.Host,
                             ageSeconds = age,
-                            stale = age > Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds,
+                            stale = age > Core.Diagnostics.ProcessRegistry.StaleAfterSeconds,
                         };
                     })
                     .ToArray(),
@@ -997,47 +998,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonStatus }
                     : new { enabled = false, transport = (string?)null, status = (object?)null },
             }, ConfigSchema.Json);
-        });
-
-        // Grain diagnostics (v3): the live grain tree — every silo (pod), the grain types active on each.
-        app.MapGet("/api/grains", async (HttpContext ctx) =>
-        {
-            try
-            {
-                var mgmt = grains.GetGrain<Orleans.Runtime.IManagementGrain>(0);
-                var stats = await mgmt.GetSimpleGrainStatistics();
-                var hosts = await mgmt.GetHosts(onlyActive: true);
-                var leader = await grains.GetGrain<Grains.Abstractions.Cluster.ILeaderGrain>(0).CurrentLeader();
-
-                var silos = hosts
-                    .OrderBy(h => h.Key.ToParsableString())
-                    .Select(h => new { silo = h.Key.ToParsableString(), status = h.Value.ToString() })
-                    .ToArray();
-
-                // Grain types → total activations + per-silo placement (the tree the Diagnostics page renders).
-                var grainTypes = stats
-                    .Where(s => !s.GrainType.StartsWith("Orleans.", StringComparison.Ordinal))
-                    .GroupBy(s => s.GrainType)
-                    .Select(g => new
-                    {
-                        type = FriendlyGrainType(g.Key),
-                        fullType = g.Key,
-                        activations = g.Sum(x => x.ActivationCount),
-                        silos = g.GroupBy(x => x.SiloAddress.ToParsableString())
-                                 .Select(sg => new { silo = sg.Key, count = sg.Sum(x => x.ActivationCount) })
-                                 .OrderBy(x => x.silo)
-                                 .ToArray(),
-                    })
-                    .Where(t => t.activations > 0)
-                    .OrderByDescending(t => t.activations).ThenBy(t => t.type)
-                    .ToArray();
-
-                return Results.Json(new { ok = true, leader, silos, grains = grainTypes }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
-            }
         });
 
         // Each configured node's rolled-up value, per metric.
@@ -2195,23 +2155,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
-    /// <summary>
-    /// Short, readable grain name from Orleans' grain-type string. That string is the assembly-qualified CLR
-    /// name (e.g. "rPDU2MQTT.Grains.Modbus.ModbusGrain, rPDU2MQTT.Grains"), so strip the ", Assembly" tail and
-    /// any generic/nested markers first, then take the class name and drop the "Grain" suffix.
-    /// </summary>
-    private static string FriendlyGrainType(string grainType)
-    {
-        if (string.IsNullOrWhiteSpace(grainType)) return grainType;
-        var s = grainType;
-        var comma = s.IndexOf(',');   if (comma >= 0) s = s[..comma];        // drop ", AssemblyName"
-        var bracket = s.IndexOf('[');  if (bracket >= 0) s = s[..bracket];    // drop generic args
-        var last = s.Split('.', '+', '/').Last().Trim();                       // class name (+ = nested type)
-        if (last.EndsWith("grain", StringComparison.OrdinalIgnoreCase))
-            last = last[..^"grain".Length];                                    // "ModbusGrain" -> "Modbus"
-        return last.Length == 0 ? grainType : char.ToUpperInvariant(last[0]) + last[1..];
-    }
-
     /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
     private static string BuildManifest(Config config)
     {
@@ -2250,9 +2193,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
         if (k8s is null) return null;   // operator only runs with the Kubernetes config source
-        try { return await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Status(); }
-        catch (Exception ex) { Log.Debug($"Could not read operator status from grain: {ex.Message}"); return null; }
+        try { return await Operator(op => op.Status(), new Core.Operator.OperatorReport { Message = "No check yet." }); }
+        catch (Exception ex) { Log.Debug($"Could not read the operator's status: {ex.Message}"); return null; }
     }
+
+    /// <summary>
+    /// Ask the operator, or answer for it. There is no operator outside Kubernetes, so every caller needs
+    /// the same "it isn't here" answer — stated once, rather than each endpoint inventing its own.
+    /// </summary>
+    private Task<T> Operator<T>(Func<Core.Operator.IOperatorControl, Task<T>> ask, T absent)
+        => deployOperator is null ? Task.FromResult(absent) : ask(deployOperator);
 
     // --- Kubernetes rollout restart ------------------------------------------------------------
 

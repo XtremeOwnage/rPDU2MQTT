@@ -41,15 +41,9 @@ public static class ServiceConfiguration
         bool api = roles.HasFlag(HostRole.Api);
         bool ui = roles.HasFlag(HostRole.Ui);
 
-        // v3: cluster-leadership, the enabler for a homogeneous fleet — scale by running N identical All-role
-        // instances instead of separate worker/api/ui deployments. The "run once cluster-wide" work
-        // (publishers/exporters) self-gates on holding the lease, so N instances don't duplicate output and
-        // leadership fails over automatically. Only worker-capable instances contest leadership (the leader
-        // must be able to run the exporters) — so a split deployment's single worker is always the leader,
-        // while a homogeneous All-role fleet elects one of the replicas.
-        services.AddSingleton<LeaderState>();
-        if (worker)
-            services.AddHostedService<Hosting.LeaderRenewalService>();
+        // One process, so it is always the leader. The flag stays because the gate is real — it is what
+        // keeps run-once work run-once — and because a clustered implementation would set it from outside.
+        services.AddSingleton(new LeaderState { IsLeader = true });
 
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
@@ -60,12 +54,12 @@ public static class ServiceConfiguration
             services.AddHostedService<KubernetesStatusService>();
             services.AddHostedService<KubernetesConfigWatcher>();
 
-            // ---- Operator (#210): now an OperatorGrain (single-activation, cluster-wide). ----
-            // The registry client is a grain dependency; the activator drives the grain's periodic check.
-            // GUI check/switch/redeploy are direct grain calls — no more MQTT command topics or CR polling.
+            // ---- Operator (#210) ----
+            // GUI check/switch/redeploy call it directly — no MQTT command topics, no CR-status polling.
             services.AddSingleton<Services.Operator.IContainerRegistry, Services.Operator.ContainerRegistryClient>();
+            services.AddSingleton<Core.Operator.IOperatorControl, Hosting.KubernetesOperator>();
             if (worker)
-                services.AddHostedService<Hosting.OperatorActivator>();
+                services.AddHostedService<Hosting.OperatorUpdateCheck>();
         }
 
         // Configure Logging.
@@ -107,11 +101,6 @@ public static class ServiceConfiguration
         {
             services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
         }
-        // v3: PDU polling is a single-activation grain per instance; this activator drives it (worker),
-        // replacing InstanceManager's per-process poller. InstanceManager stays a singleton for the GUI
-        // (primary repoint / reconcile) but no longer runs the pollers.
-        if (worker)
-
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
         // What a save could not apply to this process — read by the status payload and the header badge.
@@ -162,10 +151,11 @@ public static class ServiceConfiguration
         // contention — the reads time out. So the poller runs only in the Worker role (data production);
         // the API/UI read the values through the same bus/exports as any other producer.
         services.AddSingleton<Services.EnergyFlowModbusSourceService>();
-        // v3: one ModbusGrain per physical device (host:port:unitId), one owner cluster-wide. The reconciler
-        // reads config and pushes each device its bindings; the grains self-poll. Removes gateway contention.
+        // One poll per physical device (host:port:unitId), whatever the config says — two connections to
+        // the same gateway are one reader, which is what keeps its single TCP slot free.
+        services.AddSingleton<Core.Modbus.ModbusDevices>();
         if (worker)
-            services.AddHostedService<Hosting.ModbusReconciler>();
+            services.AddHostedService<Services.ModbusPollService>();
 
 
 
@@ -335,9 +325,9 @@ public static class ServiceConfiguration
         // The browsable topic index and the process list: in this process, leased and pruned on read.
         services.AddSingleton<Core.Discovery.TopicIndex>();
         services.AddSingleton<Core.Diagnostics.ProcessRegistry>();
-        // Ownership of a shared resource, held cluster-wide on a short lease. The Core seam never names
-        // Orleans; this is the only place that does.
-        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Hosting.GrainSingleOwnerLease>();
+        // Ownership of a shared resource. One process owns everything it can see; the seam stays so a
+        // clustered implementation can be dropped in without an integration noticing.
+        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
 
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();
@@ -354,18 +344,17 @@ public static class ServiceConfiguration
         else
             services.AddSingleton<Core.IProcessRestarter>(sp => sp.GetRequiredService<Hosting.StopProcessRestarter>());
 
-        // v3: each process registers itself with the cluster-wide ProcessRegistryGrain so the GUI can list
-        // every role process in a split deployment — replaces the MQTT HeartbeatService beacons.
+        // Each process registers itself so the GUI can list every role process in a split deployment.
         if (roles != HostRole.All)
             services.AddHostedService<Hosting.ProcessRegistrar>();
 
-        // v3: the Status board is grains too — each process reports the facts it can see (broker connection,
-        // last poll, export outcome, itself) to the owning component grain, which decides what they mean.
+        // The Status board: this process reports the facts it can see (broker connection, last poll, export
+        // outcome, itself) and the board decides what they mean.
         services.AddHostedService<Hosting.StatusReporter>();
 
         // Topic autocomplete for the Nodes editor. Registered everywhere with a broker connection, but it
-        // only subscribes while someone is actually browsing (the index grain hands out short leases), so
-        // there is no standing background indexer.
+        // only subscribes while someone is actually browsing (the index hands out short leases), so there
+        // is no standing background indexer.
         services.AddHostedService<Hosting.MqttTopicIndexService>();
 
         // Listens for GUI-issued restart requests over the bus (#210), so a tier can be restarted remotely.
@@ -383,12 +372,6 @@ public static class ServiceConfiguration
             // Configuration is not a reading: it changes when the operator changes something, so each
             // publisher runs on its own (much slower) cadence rather than once per poll.
             services.AddHostedService<ConfigurationPublisherHost>();
-
-            // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
-            // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in
-            // the GUI takes effect without a restart. v3: the writes to EmonCMS are owned by a single-
-            // activation grain, so this only pokes it; "once cluster-wide" is the grain, not a leader check.
-            services.AddHostedService<Hosting.EmonCmsReconciler>();
 
             // Registered unconditionally and self-gating on the live HomeAssistant.DiscoveryEnabled, the same
             // way EmonCmsReconciler above honours its own toggle. Registering only when the flag happened to
@@ -450,8 +433,9 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Flow.IMeasurementHistory>(_ =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg));
 
-        // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.
-        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp => new Hosting.GrainPeriodAuditor(sp.GetRequiredService<IGrainFactory>()));
+        // The audit's verdicts have one owner; the ingests see only the port.
+        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp =>
+            new Core.Flow.PeriodAuditor(sp.GetRequiredService<Core.Flow.IPeriodAuditStore>()));
 
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)

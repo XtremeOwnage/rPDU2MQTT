@@ -8,7 +8,7 @@ deliberately not done, is [PLUGINS.md](../PLUGINS.md); the author's guide is
 ## The problem
 
 Adding a destination edited thirteen files — the config class, the service, DI registration, a fault check,
-the startup banner, the status reporter, a status grain interface and its implementation, a GUI endpoint, a
+the startup banner, the status reporter, a GUI endpoint, a
 test button, the nav list, and two CRDs. Sixteen files named `modbus`, seven of them TypeScript.
 
 Nothing there was badly written. There was no seam, so every integration was filed by hand into fourteen
@@ -56,12 +56,12 @@ discovery carries all of them.
 nothing leaves its previous snapshot to go stale rather than publishing an empty one, which downstream would
 read as every outlet having gone to zero.
 
-**Orleans never appears in a contract.** `Core`, `Abstractions`, `Engine` and `Api` reference it zero times.
-The one piece of coordination an integration may need is `ISingleOwnerLease` — "one owner of this key,
-cluster-wide" — which is grain-backed today and swappable by replacing one file.
+**Coordination never appears in a contract.** The one piece an integration may need is
+`ISingleOwnerLease` — "one owner of this key" — a plain interface in `Core` whose implementation the host
+supplies. It was grain-backed; it is `SoleOwnerLease` now; no integration noticed either time.
 
-**The device poll is inverted, not moved.** `PduGrain` reads through `IDeviceReader`, so a plugin device
-inherits the single cluster-wide activation *and* the child-grain supervision that outlet writes route
+**The device poll is inverted, not moved.** `DevicePollService` reads through `IDeviceReader`, so a plugin
+device inherits the poll cadence, the ownership lease and the write path that outlet control routes
 through, rather than reimplementing them under a parallel poller.
 
 ## External plugins

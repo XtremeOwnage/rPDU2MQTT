@@ -47,34 +47,3 @@ subjects:
     name: {{ include "rpdu2mqtt.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
-{{- if (include "rpdu2mqtt.clustered" .) }}
----
-# v3: Orleans Kubernetes clustering. Split roles are separate silos that form one cluster; membership is
-# stored in orleans.dot.net custom resources (no external DB) — the CRDs themselves ship in this chart's
-# crds/ directory, so the app never needs cluster-scoped CRD permissions. Namespaced CRUD on the resources:
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: {{ include "rpdu2mqtt.fullname" . }}-orleans
-  labels:
-    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
-rules:
-  - apiGroups: ["orleans.dot.net"]
-    resources: ["clusterversions", "silos"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "rpdu2mqtt.fullname" . }}-orleans
-  labels:
-    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: {{ include "rpdu2mqtt.fullname" . }}-orleans
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "rpdu2mqtt.serviceAccountName" . }}
-    namespace: {{ .Release.Namespace }}
-{{- end }}

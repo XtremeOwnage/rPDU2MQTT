@@ -30,7 +30,6 @@ Log.Logger = new LoggerConfiguration()
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration(o => { o.AddEnvironmentVariables(); })
-    .UseOrleans(rPDU2MQTT.Startup.SiloConfiguration.Configure)
     .ConfigureServices(ServiceConfiguration.Configure)
     .ConfigureLogging(logging =>
     {

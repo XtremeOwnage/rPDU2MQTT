@@ -1,4 +1,4 @@
-namespace rPDU2MQTT.Grains.Operator;
+namespace rPDU2MQTT.Hosting;
 
 /// <summary>
 /// Normalising and comparing OCI image digests, which reach us in several shapes.

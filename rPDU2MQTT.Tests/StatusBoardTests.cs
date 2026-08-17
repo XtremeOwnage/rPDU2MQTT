@@ -107,4 +107,43 @@ public class StatusBoardTests
         Assert.Null(board.For("gone"));
         Assert.Empty(board.Board());
     }
+
+    [Fact]
+    public void AChangeOfFact_ChangesTheVerdict_WithoutAnythingRepublishing()
+    {
+        // The board is a projection, not a cache of verdicts: the reporter states facts and the reader gets
+        // the current answer. A card can never be a verdict nobody has re-evaluated.
+        var board = new StatusBoard();
+        board.Report("mqtt", StatusBoard.ComponentKind.Broker, new ComponentReport(Ok: true, Detail: "broker:1883"));
+        Assert.Equal("Connected", board.For("mqtt")!.State);
+
+        board.Report("mqtt", StatusBoard.ComponentKind.Broker, new ComponentReport(Ok: false, Detail: "broker:1883"));
+        var card = board.For("mqtt")!;
+        Assert.Equal(StatusLevel.Bad, card.Level);
+        Assert.Equal("Disconnected", card.State);
+    }
+
+    [Fact]
+    public void ADeviceThatHasNeverPolled_IsWaiting_NotBroken()
+    {
+        // A PDU configured a moment ago has nothing wrong with it — reporting it red is how a fresh install
+        // looks broken.
+        var board = new StatusBoard();
+        board.Report("pdu:new", StatusBoard.ComponentKind.Device, new ComponentReport(IntervalSeconds: 30));
+
+        var card = board.For("pdu:new")!;
+        Assert.Equal(StatusLevel.Warn, card.Level);
+        Assert.Equal("No data yet", card.State);
+    }
+
+    [Fact]
+    public void AComponentNobodyHasReported_HasNoCardAtAll()
+    {
+        // Not green, not grey — absent. Inventing a card for something never reported is claiming knowledge
+        // the board does not have.
+        var board = new StatusBoard();
+
+        Assert.Null(board.For("mqtt"));
+        Assert.Empty(board.Board());
+    }
 }

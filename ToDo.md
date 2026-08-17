@@ -324,16 +324,55 @@ finishes.
     claim of the move. Now 819 = 813 + 6 new.
     Lesson: `cat > file` and `Write` silently clobber. Check the path exists first, ALWAYS, and treat a
     falling test count as a defect to explain rather than noise.
-    [~] B. Ownership in memory.
+    [x] B. Ownership in memory.
         [x] Flow values. `FlowValueSink` writes straight into the `FlowValueCache` the graph reads. The old
             path was: sink -> flow grain -> the grain's OWN FlowValueCache -> a service polling that grain
             every 2s -> this process's cache. In one process that is a write, a read, and up to a two-second
             delay before a reading is visible, for data that was already local. `FlowGrainSink` and
             `FlowGrainSyncService` deleted; the source-ordering rule (stale by BOTH version and time, so a
             restarted source is not locked out) came with it.
-        [ ] PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
-    [ ] C. Leader + flow mirror: always-leader in one process; the flow cache is already Core.
-    [ ] D. Delete the Grains projects, the silo config, and the five Orleans packages.
+        [x] PDU supervision + outlet/group control. `DevicePollService` replaces an activator driving a PDU
+            grain that handed each device its own document, each device grain each outlet its own, each
+            outlet a measured node, and a sync service polling the PDU grain every second to publish the
+            snapshot onto the local bus. In one process all of that is: read the device, publish the
+            snapshot. The roll-up the node grains computed was never lost — `FlowGraphBuilder` computes it
+            from the same snapshot and always did; the grain tree was a second implementation whose only
+            reader was a diagnostics panel.
+            Writes are `DeviceOutletControl`, and the ownership rule is kept exactly: a write goes to the
+            PDU that REPORTED the device (resolved from the same poll the grains learned it from), never to
+            whichever is primary, and nothing polled means the write goes nowhere rather than guessing. The
+            four ownership tests were retargeted, not deleted — 5 now, including "the same group name on two
+            PDUs is two groups".
+        [x] Modbus. `ModbusPollService` folds the reconciler and the per-device grain into one loop. The
+            part that matters is unchanged: two config connections to the same host:port:unitId are ONE
+            reader, because a single-client RS485 gateway can only answer one. Health moved to
+            `Core.Modbus.ModbusDevices`, which is what the diagnostics page reads.
+        [x] EmonCMS feeds. Deleted outright rather than ported: `IConfigurationPublisher` + the lease
+            already do this, on the publisher's own cadence, gated by `PublishingEnabled`. The grain and its
+            poker were a second path to the same `EmonCmsFeedSync`. Its gating tests were retargeted at the
+            integration (3), so "disabled/unconfigured/auto-configure-off provisions nothing" still holds.
+        [x] Operator. `KubernetesOperator` behind `Core.Operator.IOperatorControl`; the GUI depends on the
+            seam, so outside Kubernetes there is simply no implementation and every endpoint says so once,
+            in one place, instead of each inventing an answer.
+    [x] C. Leader + period audit. `LeaderState.IsLeader` is set true at startup — one process is always the
+        leader — and the gate stays because it is real and because a clustered build would set it from
+        outside. `Core.Flow.PeriodAuditor` replaces the audit grain the ingests blocked on with
+        `GetAwaiter().GetResult()`; it is synchronous because withholding is a correctness decision that has
+        to be made before the reading goes anywhere.
+    [x] D. Deleted: both Grains projects, the silo config, the placement director, the test cluster, and the
+        five Orleans packages. Also out of the chart: the membership CRDs, the silo/gateway ports and their
+        NetworkPolicy rules, the orleans RBAC Role, `RPDU2MQTT_ORLEANS_CLUSTERING`, and the CI step that
+        checked the CRDs ship. `/api/grains` and the Diagnostics "Grains" panel are gone — there are no
+        grains to count, and the Components panel already lists the processes.
+        Tests: 813 -> 804. Removed 15 (6 status-grain, 6 placement, 1 leader-election, 1 Orleans smoke,
+        1 process-registry-grain), added 6 (3 board rules the grain tests covered and the board's did not,
+        3 process registry). The suite runs in ~1s rather than ~3s: no in-memory cluster to stand up.
+
+    WHAT THIS COSTS, restated now that it is done: multi-replica coordination. There is no leader election
+    and no cross-process lease, so `replicaCount: 1` is not a default any more, it is the supported shape —
+    two replicas would each poll the PDUs and each publish. The chart says so, and `split.enabled` still
+    works because roles gate services and only the worker produces data. The seams (`ISingleOwnerLease`,
+    `LeaderState`) are untouched, so a Redis/Valkey-backed implementation is two files, not a redesign.
     [ ] E. Measure: startup time and RSS before/after, so "lower resource usage and faster" is a number
         rather than a claim.
 

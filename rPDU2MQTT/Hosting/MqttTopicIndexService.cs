@@ -4,7 +4,6 @@ using HiveMQtt.Client;
 using HiveMQtt.Client.Events;
 using HiveMQtt.MQTT5.Types;
 using Microsoft.Extensions.Hosting;
-using Orleans;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Discovery;
 
@@ -13,7 +12,7 @@ namespace rPDU2MQTT.Hosting;
 /// <summary>
 /// Feeds the browsable topic index — but only while someone is browsing.
 /// <para>
-/// It polls <see cref="ITopicIndexGrain.Wanted"/>, and only then opens a wildcard subscription, forwarding
+/// It polls what the index says is wanted, and only then opens a wildcard subscription, forwarding
 /// what arrives in batches. The moment the lease lapses it unsubscribes and drops its buffer. So the cost of
 /// topic autocomplete is a subscription for as long as the Nodes editor is open, and zero after that — never
 /// a background process quietly indexing the whole broker for the life of the deployment.
@@ -29,16 +28,14 @@ public sealed class MqttTopicIndexService : BackgroundService
     private const int MaxBuffered = 1000;
 
     private readonly HiveMQClient mqtt;
-    private readonly IGrainFactory grains;
     private readonly TopicIndex index;
     private readonly ConcurrentDictionary<string, TopicSample> buffer = new(StringComparer.Ordinal);
     private string? subscribedFilter;   // the filter currently subscribed on the broker, or null
 
-    public MqttTopicIndexService(MQTTServiceDependencies deps, IGrainFactory grains, TopicIndex? topicIndex = null)
+    public MqttTopicIndexService(MQTTServiceDependencies deps, TopicIndex? topicIndex = null)
     {
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for topic indexing.");
-        this.grains = grains;
         index = topicIndex ?? new TopicIndex();
     }
 
