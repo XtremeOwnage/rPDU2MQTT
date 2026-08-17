@@ -334,6 +334,8 @@ public static class ServiceConfiguration
         // The PDU object-model publisher, off the hosting base class and onto the seam.
         services.AddSingleton<Services.MqttPduPublisher>();
         services.AddSingleton<Core.Integrations.IntegrationStatus>();
+        // The Status board, in this process. Evaluated when read, so an age is never stale.
+        services.AddSingleton<Core.Status.StatusBoard>();
         // Ownership of a shared resource, held cluster-wide on a short lease. The Core seam never names
         // Orleans; this is the only place that does.
         services.AddSingleton<Core.Integrations.ISingleOwnerLease, Hosting.GrainSingleOwnerLease>();

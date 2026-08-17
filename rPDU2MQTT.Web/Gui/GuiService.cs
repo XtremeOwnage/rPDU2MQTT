@@ -57,6 +57,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
     // Anything that can offer nodes to adopt — the broker index today, a plugin tomorrow.
     private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
+    // The Status board, held in this process rather than projected by a grain.
+    private readonly Core.Status.StatusBoard? statusBoard;
     private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
@@ -68,13 +70,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private readonly Orleans.IGrainFactory grains;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
         this.integrations = integrations;
         this.outletControl = outletControl;
         this.nodeProviders = nodeProviders?.ToList() ?? [];
+        this.statusBoard = statusBoard;
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
         this.grains = grains;
@@ -385,7 +388,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     {
         try
         {
-            var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
+            // In-memory board: evaluated when someone looks, so an "…ago" cannot be stale.
+            var board = statusBoard?.Board() ?? [];
             var cards = board.Select(c => new
             {
                 id = c.Id,

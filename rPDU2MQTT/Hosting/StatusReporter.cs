@@ -3,7 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Orleans;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
-using rPDU2MQTT.Grains.Abstractions.Status;
+using rPDU2MQTT.Core.Status;
+using Kind = rPDU2MQTT.Core.Status.StatusBoard.ComponentKind;
 using rPDU2MQTT.Services;
 
 namespace rPDU2MQTT.Hosting;
@@ -22,6 +23,7 @@ public sealed class StatusReporter : BackgroundService
     private readonly IGrainFactory grains;
     private readonly Config config;
     // Every integration this build carries, and what each last did — so the board needs no per-integration branch.
+    private readonly Core.Status.StatusBoard board;
     private readonly Core.Integrations.IntegrationRegistry? registry;
     private readonly Core.Integrations.IntegrationStatus? integrationStatus;
     private readonly IHiveMQClient mqtt;
@@ -33,10 +35,11 @@ public sealed class StatusReporter : BackgroundService
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
 
-    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null)
+    public StatusReporter(IGrainFactory grains, Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null)
     {
         this.grains = grains;
         this.config = config;
+        board = statusBoard ?? new Core.Status.StatusBoard();
         this.registry = registry;
         this.integrationStatus = integrationStatus;
         this.mqtt = mqtt;
@@ -64,7 +67,7 @@ public sealed class StatusReporter : BackgroundService
 
     private async Task ReportAsync()
     {
-        await grains.GetGrain<IMqttStatusGrain>("mqtt").Report(new ComponentReport
+        board.Report("mqtt", Kind.Broker, new ComponentReport
         {
             Ok = mqtt.IsConnected(),
             Detail = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
@@ -74,8 +77,8 @@ public sealed class StatusReporter : BackgroundService
         // just by what has arrived — a configured PDU that has never polled has to show up as waiting.
         var latest = snapshots.All.ToDictionary(s => s.InstanceId, StringComparer.OrdinalIgnoreCase);
         foreach (var id in config.Pdus.Keys.Union(latest.Keys, StringComparer.OrdinalIgnoreCase))
-            await grains.GetGrain<IPduStatusGrain>($"pdu:{id}").Report(new ComponentReport
-            {
+            board.Report($"pdu:{id}", Kind.Device, new ComponentReport
+        {
                 Title = $"PDU · {id}",
                 EventUtc = latest.TryGetValue(id, out var s) ? s.TimestampUtc : null,
                 IntervalSeconds = config.Pdus.TryGetValue(id, out var pc) ? pc.PollInterval : 30,
@@ -85,9 +88,9 @@ public sealed class StatusReporter : BackgroundService
         // The three destination cards below used to be branches here, each with its own idea of what
         // "amber" meant. The verdict now comes from the integration itself (IStatusProvider), so the rule
         // lives with the thing it is about and a plugin gets the same treatment as a built-in.
-        await ReportIntegration<IEmonCmsStatusGrain>("emoncms");
-        await ReportIntegration<IHomeAssistantStatusGrain>("homeassistant");
-        await ReportIntegration<IPrometheusStatusGrain>("prometheus");
+        ReportIntegration("emoncms");
+        ReportIntegration("homeassistant");
+        ReportIntegration("prometheus");
 
         // Every integration that has no hand-written component grain — each loaded plugin, and any
         // built-in that never needed one. Reported from the registry rather than a branch per integration,
@@ -101,8 +104,8 @@ public sealed class StatusReporter : BackgroundService
             // otherwise — never a rule invented here, which is where a per-integration branch used to live.
             var last = integrationStatus?.For(integration.Id);
             var health = Core.Integrations.IntegrationHealthDefaults.For(integration, config, last);
-            await grains.GetGrain<IIntegrationStatusGrain>(integration.Id).Report(new ComponentReport
-            {
+            board.Report(integration.Id, Kind.Integration, new ComponentReport
+        {
                 Title = integration.DisplayName,
                 Enabled = health.Level != Core.Integrations.HealthLevel.Off,
                 Ok = health.Level switch
@@ -124,7 +127,7 @@ public sealed class StatusReporter : BackgroundService
         // touches the cache — the card previously reported "unreachable" for a perfectly healthy instance
         // simply because nothing had used it yet.
         if (config.Cache.Enabled) cacheProbe?.Ping();
-        await grains.GetGrain<ICacheStatusGrain>("cache").Report(new ComponentReport
+        board.Report("cache", Kind.Cache, new ComponentReport
         {
             Enabled = config.Cache.Enabled,
             Ok = config.Cache.Enabled ? (cacheHealth?.Attempted == true ? cacheHealth.Reachable : null) : null,
@@ -147,48 +150,39 @@ public sealed class StatusReporter : BackgroundService
             }
             catch (Exception ex) { historyOk = false; historyDetail = ex.Message; }
         }
-        await grains.GetGrain<IHistoryStatusGrain>("history").Report(new ComponentReport
+        board.Report("history", Kind.History, new ComponentReport
         {
             Enabled = config.History.Enabled,
             Ok = config.History.Enabled ? historyOk : null,
-            State = history?.Id,
+            Title = history?.Id is { Length: > 0 } h ? $"History · {h}" : "History",
             Detail = historyDetail,
         });
 
         // This process. Its silence is what tells the board a replica has gone.
-        await grains.GetGrain<INodeStatusGrain>($"node:{self.Id}").Report(new ComponentReport
+        board.Report($"node:{self.Id}", Kind.Process, new ComponentReport
         {
             Title = $"Node · {self.Host}",
-            State = self.RoleLabel,
-            Detail = $"v{self.Version} ·",
+            // The role and version are what someone reads a node card FOR; the board derives the state.
+            Detail = $"{self.RoleLabel} · v{self.Version}",
             EventUtc = self.StartedUtc,
         });
     }
     /// <summary>
-    /// Report one integration's own verdict to its component grain. The grain keeps whatever cross-process
-    /// judgement it has — EmonCMS still refuses to let an outcome-free report overwrite a known one, which
-    /// is about who is reporting rather than about what healthy means.
+    /// Report one integration's own verdict. Its rule lives on the integration (IStatusProvider) or in the
+    /// shared derivation — never here, which is where a branch per integration used to live.
     /// </summary>
-    private async Task ReportIntegration<TGrain>(string id) where TGrain : IComponentStatusGrain
+    /// <summary>
+    /// Report one integration's own verdict. Its rule lives on the integration (IStatusProvider) or in the
+    /// shared derivation — never here, which is where a branch per integration used to live.
+    /// </summary>
+    private void ReportIntegration(string id)
     {
         if (registry?.ById(id) is not { } integration) return;
 
         var last = integrationStatus?.For(id);
         var health = Core.Integrations.IntegrationHealthDefaults.For(integration, config, last);
-        await grains.GetGrain<TGrain>(id).Report(new ComponentReport
-        {
-            Title = integration.DisplayName,
-            Enabled = health.Level != Core.Integrations.HealthLevel.Off,
-            Ok = health.Level switch
-            {
-                Core.Integrations.HealthLevel.Good => true,
-                Core.Integrations.HealthLevel.Bad => false,
-                _ => (bool?)null,
-            },
-            Count = last?.Count ?? 0,
-            EventUtc = last?.LastSuccessUtc,
-            Detail = health.Detail ?? health.Summary,
-        });
+        board.Report(id, Kind.Integration,
+            StatusBoard.From(health, integration.DisplayName, last?.Count ?? 0, last?.LastSuccessUtc));
     }
 
 }

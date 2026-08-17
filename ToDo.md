@@ -303,7 +303,15 @@ finishes.
         discovery coordinator, the MQTT publisher, Vertiv's client) — the thing that speaks that protocol,
         which is the one dependency an integration is supposed to have.
 
-    [ ] A. Projections in memory: status board, process registry, topic index.
+    [~] A. Projections in memory.
+        [x] Status board. `Core.Status.StatusBoard` replaces a grain per component plus a projection grain:
+            each held one report and ran its own 10s timer purely to re-evaluate and push a card that had
+            probably not changed. Evaluated ON READ now, which also removes the staleness those timers
+            existed to paper over — an "…ago" is computed when someone looks, so it cannot be out of date.
+            The verdict rules moved to Core as pure functions, 8 tests. 15 cards verified identical on a
+            running bridge.
+        [ ] Process registry.
+        [ ] Topic index.
     [ ] B. Ownership in memory: PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
     [ ] C. Leader + flow mirror: always-leader in one process; the flow cache is already Core.
     [ ] D. Delete the Grains projects, the silo config, and the five Orleans packages.
