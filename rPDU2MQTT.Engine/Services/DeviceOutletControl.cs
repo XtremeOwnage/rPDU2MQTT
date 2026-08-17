@@ -41,12 +41,17 @@ public sealed class DeviceOutletControl : IOutletControl
         this.lease = lease ?? new SoleOwnerLease();
     }
 
-    /// <summary>The PDU instance that reported this device, or null when nothing has polled it.</summary>
+    /// <summary>
+    /// The PDU instance that reported this device, or null when nothing has polled it. A device answers to
+    /// either of its names: the entity name it is published under and the key its topic path is built from
+    /// are not always the same string, and a command arrives carrying whichever one the sender saw.
+    /// </summary>
     public string? InstanceFor(string deviceId)
     {
         foreach (var snapshot in snapshots.All)
             foreach (var device in snapshot.Data.Devices)
-                if (string.Equals(device.Entity_Name ?? device.Key, deviceId, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(device.Entity_Name, deviceId, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(device.Key, deviceId, StringComparison.OrdinalIgnoreCase))
                     return snapshot.InstanceId;
         return null;
     }

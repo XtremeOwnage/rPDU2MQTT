@@ -420,8 +420,22 @@ Notes
     [x] Verified on the rig: switching outlet 0 of the plugin device takes it to 0 W and leaves outlet 1 at
         77 W; the PDU total follows 154 -> 77. Two tests cover it (either spelling reaches the plugin; an
         unsupported action is refused without calling it).
-    Lesson: 812 tests were green while the one button that writes to a plugin device did nothing. The tests
-    all asked "does the refusal say the right thing", none asked "does a write that should work, work".
+    [x] A plugin device published every value to a BARE topic at the broker root — `state`, `name`,
+        `alarm`, `onDelay` — instead of `<parent>/<device>/outlets/<n>/…`. A plugin declares a device, not a
+        topic tree, and the wiring that gives each entity its path and its Home Assistant unique_id was only
+        ever applied by the Vertiv poller and by the wire form a grain shipped. `PluginDeviceReader` applies
+        it now (`RawSnapshotMapper.Rewire`, which had no production caller left).
+        Nothing subscribed to those leaves, so nothing looked broken: Prometheus and the flow tiers were
+        right the whole time, and only MQTT/Home Assistant were wrong.
+    [x] A device answers to either of its names — the entity name its readings are published under, and the
+        key its topic path is built from. A command arrives carrying whichever one the sender saw, and for
+        the example plugin those differ (`hello_device` vs `hw`), so the MQTT command topic resolved to
+        nothing.
+    [x] Verified on the rig: `rPDU2MQTT/hw/outlets/0/set` = "off" takes outlet 0 to 0 W and echoes
+        `state = off`; a command for a device nobody reported is logged as not applied and echoes NOTHING.
+    Lesson: 812 tests were green while the one button that writes to a plugin device did nothing, and while
+    that device's whole MQTT tree was landing at the broker root. The tests all asked "does the refusal say
+    the right thing", none asked "does a write that should work, work" — and none looked at the topics.
 
     [ ] SEPARATE, PRE-EXISTING, needs your call: `FlowGraphBuilder` drops any outlet reading `<= 0` from the
         graph (`if (value <= 0) continue;`, there since #156). So a switched-OFF outlet does not read 0 W on

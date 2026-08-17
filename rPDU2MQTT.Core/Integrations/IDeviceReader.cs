@@ -1,4 +1,5 @@
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core.Transport;
 using rPDU2MQTT.Models.PDU;
 
 namespace rPDU2MQTT.Core.Integrations;
@@ -49,8 +50,22 @@ public sealed class PluginDeviceReader : IDeviceReader
 
     public bool Handles(string instanceId, Config cfg) => Find(instanceId) is not null;
 
-    public Task<PduData?> ReadAsync(string instanceId, Config cfg, CancellationToken ct)
-        => Find(instanceId) is { } plugin ? plugin.PollAsync(cfg, ct) : Task.FromResult<PduData?>(null);
+    public async Task<PduData?> ReadAsync(string instanceId, Config cfg, CancellationToken ct)
+    {
+        if (Find(instanceId) is not { } plugin) return null;
+        var data = await plugin.PollAsync(cfg, ct);
+        if (data is null) return null;
+
+        // A plugin declares a device, not a topic tree. Wiring each entity to its parent is what gives an
+        // outlet the path `<parent>/<device>/outlets/<n>/state` and the unique_id Home Assistant keys on —
+        // and without it every value publishes to a bare leaf topic (`state`, `name`) at the broker root,
+        // where nothing is subscribed and the command topics never match.
+        if (data.Devices.Count > 0 && data.Devices[0].Record_Parent is null)
+            RawSnapshotMapper.Rewire(data, cfg.MQTT.ParentTopic,
+                cfg.Overrides?.rPDU2MQTT?.ID is { Length: > 0 } id ? id : "rPDU2MQTT");
+
+        return data;
+    }
 
     public TimeSpan Interval(string instanceId, Config cfg)
         => Find(instanceId)?.PollInterval(cfg) ?? TimeSpan.FromSeconds(Math.Max(1, cfg.Primary.PollInterval));

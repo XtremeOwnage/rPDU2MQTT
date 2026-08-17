@@ -26,10 +26,10 @@ public class DeviceOutletControlTests
         public PduSnapshot? Get(string instanceId) => all.FirstOrDefault(s => s.InstanceId == instanceId);
         public IReadOnlyCollection<PduSnapshot> All => all;
 
-        public Cache Add(string instanceId, string? deviceId = null, string? groupKey = null)
+        public Cache Add(string instanceId, string? deviceId = null, string? groupKey = null, string? key = null)
         {
             var data = new PduData();
-            if (deviceId is not null) data.Devices.Add(new Device { Key = deviceId, Entity_Name = deviceId });
+            if (deviceId is not null) data.Devices.Add(new Device { Key = key ?? deviceId, Entity_Name = deviceId });
             if (groupKey is not null) data.Groups.Add(new OneViewGroup { Key = groupKey });
             all.Add(new PduSnapshot(instanceId, DateTime.UtcNow, data));
             return this;
@@ -171,5 +171,21 @@ public class DeviceOutletControlTests
 
         Assert.False(result.Ok);
         Assert.Empty(plugin.Wrote);
+    }
+
+    [Fact]
+    public async Task ADeviceAnswersToEitherOfItsNames()
+    {
+        // Its topic path is built from the key, its readings are published under the entity name, and a
+        // command arrives carrying whichever one the sender saw. Both have to reach the same device.
+        var plugin = new HelloPlugin();
+        var control = new DeviceOutletControl(
+            Registry("rack-a"), new Cache().Add("hello", deviceId: "hello_device", key: "hw"), log: null,
+            integrations: new IntegrationRegistry([plugin]), cfg: new Config());
+
+        Assert.Equal("hello", control.InstanceFor("hello_device"));
+        Assert.Equal("hello", control.InstanceFor("hw"));
+        Assert.True((await control.Control("hw", 0, "off")).Ok);
+        Assert.Equal(["hw|0|off"], plugin.Wrote);
     }
 }
