@@ -271,6 +271,17 @@ finishes.
     Lesson: every check I wrote asserted a plugin's page IS rendered. None asserted the storage behind it
     is NOT. "The right thing appears" and "nothing else appears" are different assertions.
 
+14. The shutdown exception (reported from the debugger)
+    [x] `ChannelMessageBus.Read` enumerated with `ReadAllAsync(token)`, which THROWS on cancellation. An
+        iterator cannot catch around a `yield return` — only try/finally is legal — so the exception escaped
+        into whatever was enumerating: `SnapshotCache`, a BackgroundService, and the host reported a crashed
+        background service on every clean stop. Rewritten as a manual read loop: await inside the try, yield
+        outside it.
+    [x] `SnapshotCache.ExecuteAsync` guards too — an already-cancelled token can throw before the first read.
+    [x] `MessageBusShutdownTests` (3). Verified against the original code: two of the three fail on it.
+    Pre-existing (v2), not introduced by this branch — but the same family as the `Ticks.Next` bug, which
+    is three occurrences of "cancellation is an ending, not a fault" in one codebase.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.
