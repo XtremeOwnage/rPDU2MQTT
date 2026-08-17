@@ -6641,7 +6641,10 @@ function build() {
 
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
-  const HIDDEN = new Set(['EnergyFlow']);
+  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
+  // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
+  // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //

@@ -80,6 +80,12 @@ const labels = query(sec, 'button', true).map(b => b.textContent);
 for (const want of ['Test', 'Flush now'])
   if (!labels.includes(want)) fail(`no '${want}' button; saw ${labels.join(', ') || '(none)'}`);
 
+// 5. And the raw Plugins map is NOT offered as well. It is the storage behind the per-plugin pages;
+//    rendering it too gives two editors for one thing, and the raw one is a free-text box over a
+//    dictionary of objects that nobody can usefully type into.
+if (query(getEl('nav'), 'a', true).some(a => a.dataset.label === 'Plugins'))
+  fail('the raw Plugins map is rendered as its own page as well as the plugin sections');
+
 console.log(`plugin: a plugin the GUI has never heard of gets a nav entry in its declared group, `
   + `${fields.length} generated field(s) bound under Plugins/, and ${labels.length} button(s) from its `
   + 'declared actions — with no TypeScript naming it');

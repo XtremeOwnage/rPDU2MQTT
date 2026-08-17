@@ -262,6 +262,15 @@ finishes.
     [ ] NOT verified locally: no helm binary in this environment, so the chart edit is reviewed by eye and
         by the CI step above rather than rendered here. First CI run on this branch is the real check.
 
+13. Found in the GUI, not in the tests
+    [x] The raw `Plugins` dictionary rendered as its own page with a free-text key box — while every loaded
+        plugin ALSO rendered its own typed section. Two editors for one thing, and the raw one is a text
+        input over a dictionary of objects nobody can usefully type into. Hidden like `EnergyFlow`, which
+        has the same relationship to the Flow/Nodes editors.
+    [x] `plugin.check.mjs` fails if it comes back. Sabotage-verified.
+    Lesson: every check I wrote asserted a plugin's page IS rendered. None asserted the storage behind it
+    is NOT. "The right thing appears" and "nothing else appears" are different assertions.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.
