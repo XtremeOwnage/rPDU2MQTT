@@ -106,15 +106,11 @@ public static class ServiceConfiguration
         if (worker || api || ui)
         {
             services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
-            // v3: PDU snapshots reach every process from the single-activation PduGrain via this sync
-            // (publishes onto the local bus → snapshot cache), replacing the MqttBusBridge mirroring.
-            services.AddHostedService<Hosting.PduSyncService>();
         }
         // v3: PDU polling is a single-activation grain per instance; this activator drives it (worker),
         // replacing InstanceManager's per-process poller. InstanceManager stays a singleton for the GUI
         // (primary repoint / reconcile) but no longer runs the pollers.
         if (worker)
-            services.AddHostedService<Hosting.PduGrainActivator>();
 
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
@@ -153,9 +149,8 @@ public static class ServiceConfiguration
         // In-process sources emit measurement snapshots into this sink, which writes them into that cache.
         services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>>(sp =>
             new Core.Flow.FlowValueSink(liveValues, sp.GetService<Microsoft.Extensions.Logging.ILogger<Core.Flow.FlowValueSink>>()));
-        // v3: outlet writes route to the per-outlet grain (single cluster-wide owner) — the "grains for
-        // writing to PDUs". The command subscriber depends only on IOutletControl, not Orleans.
-        services.AddSingleton<Abstractions.Pdu.IOutletControl, Hosting.OutletGrainControl>();
+        // A write goes to the PDU that reported the device, once across replicas (the lease).
+        services.AddSingleton<Abstractions.Pdu.IOutletControl, Services.DeviceOutletControl>();
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
         if (worker)
             services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
@@ -172,10 +167,6 @@ public static class ServiceConfiguration
         if (worker)
             services.AddHostedService<Hosting.ModbusReconciler>();
 
-        // v3: provision the polymorphic node-grain tree from the energy-flow config — each node becomes the
-        // right grain type (measured leaf / aggregate / residual) owning exactly its configured children.
-        if (worker)
-            services.AddHostedService<Hosting.FlowReconciler>();
 
 
         // Reads prefer the in-process MQTT source cache, then fall back to the grain-synced mirror. In a
@@ -330,6 +321,11 @@ public static class ServiceConfiguration
         // The broker's topics, offered as nodes to adopt through the same capability a plugin would use.
         services.AddSingleton<Core.Integrations.INodeProvider, Hosting.MqttNodeProvider>();
         services.AddSingleton<Core.Integrations.INodeProvider, Hosting.ModbusNodeProvider>();
+
+        // One poller for every device — a configured PDU or one a plugin supplies — publishing snapshots
+        // onto the bus that everything downstream already listens to.
+        if (worker)
+            services.AddHostedService<Services.DevicePollService>();
 
         // The PDU object-model publisher, off the hosting base class and onto the seam.
         services.AddSingleton<Services.MqttPduPublisher>();

@@ -1040,20 +1040,34 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // The energy-flow tree computed by the distributed node grains (v3): each node computes its own value.
-        app.MapGet("/api/flow/tree", async (HttpContext ctx) =>
+        // Each configured node's rolled-up value, per metric.
+        //
+        // This used to be served by a parallel roll-up: a tree of node grains recomputing the same
+        // hierarchy the graph builder computes, whose ONLY consumer was this endpoint. Two implementations
+        // of one calculation, and the one nobody else read was the one shown on the diagnostics panel — so
+        // a disagreement between them would have surfaced here as the truth.
+        app.MapGet("/api/flow/tree", (HttpContext ctx) =>
         {
             try
             {
-                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).Current();
-                var nodes = snap.Values
-                    .GroupBy(v => v.NodeId)
+                var merged = new Models.PDU.PduData();
+                foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
+
+                var nodes = Core.Flow.FlowTiers.Graphs(merged, config, live)
+                    .SelectMany(g => g.Graph.Nodes
+                        .Where(n => !n.Synthetic && n.Value is not null)
+                        .Select(n => new { node = n.Id, metric = g.Metric, value = n.Value!.Value }))
+                    .GroupBy(x => x.node)
                     .OrderBy(g => g.Key)
-                    .Select(g => new { node = g.Key, metrics = g.Select(v => new { metric = v.Metric.ToString(), value = v.Value }).ToArray() })
+                    .Select(g => new { node = g.Key, metrics = g.Select(x => new { metric = x.metric, value = (double?)x.value }).ToArray() })
                     .ToArray();
-                return Results.Json(new { ok = true, version = snap.Version, nodes }, ConfigSchema.Json);
+
+                return Results.Json(new { ok = true, version = nodes.Length, nodes }, ConfigSchema.Json);
             }
-            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
+            }
         });
 
         // Restart a tier — or everything.
