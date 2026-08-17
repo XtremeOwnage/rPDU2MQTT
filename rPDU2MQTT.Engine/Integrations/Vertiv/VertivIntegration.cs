@@ -27,13 +27,16 @@ public sealed class VertivIntegration : IIntegration, IStatusProvider
 {
     private readonly Config cfg;
     private readonly ISnapshotCache snapshots;
-    private readonly PduInstanceRegistry? registry;
+    // The reader that speaks this protocol. Asked to read, never reached into — the client registry itself
+    // stays behind it, so this class knows about "a Vertiv device it can read" and not about how the host
+    // keeps its HTTP clients.
+    private readonly Core.Integrations.IDeviceReader? reader;
 
-    public VertivIntegration(Config cfg, ISnapshotCache snapshots, PduInstanceRegistry? registry = null)
+    public VertivIntegration(Config cfg, ISnapshotCache snapshots, Core.Integrations.IDeviceReader? reader = null)
     {
         this.cfg = cfg;
         this.snapshots = snapshots;
-        this.registry = registry;
+        this.reader = reader;
     }
 
     public string Id => "vertiv";
@@ -96,16 +99,17 @@ public sealed class VertivIntegration : IIntegration, IStatusProvider
     {
         if (!Enabled(c)) return (true, "no PDUs configured");
         if (Misconfigured(c) is { } fault) return (false, fault);
-        if (registry is null) return (false, "no PDU client in this process");
+        if (reader is null) return (false, "no PDU reader in this process");
 
         var reached = new List<string>();
         var failed = new List<string>();
 
-        foreach (var (id, pdu) in registry.All)
+        foreach (var id in c.Pdus.Keys)
         {
             try
             {
-                var data = await pdu.GetRootData_Public(ct);
+                var data = await reader.ReadAsync(id, c, ct);
+                if (data is null) { failed.Add($"{id}: nothing returned"); continue; }
                 var outlets = data.Devices?.Sum(d => d.Outlets?.Count ?? 0) ?? 0;
                 reached.Add($"{id}: {data.Devices?.Count ?? 0} device(s), {outlets} outlet(s)");
             }

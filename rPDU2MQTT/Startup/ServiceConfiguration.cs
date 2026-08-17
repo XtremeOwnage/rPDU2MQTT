@@ -320,6 +320,9 @@ public static class ServiceConfiguration
         // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
         // Assistant discovery both need it, and neither IS the MQTT integration.
         services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
+        // …and the connection state behind a seam too, so no integration can tell which MQTT client this
+        // build uses.
+        services.AddSingleton<Core.Integrations.IBrokerConnection, Services.HiveMqBrokerConnection>();
         // Who can read a device instance. The grain asks these rather than calling the Vertiv client, so a
         // plugin device gets the same single activation and child supervision the built-in poller has.
         services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();

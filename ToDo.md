@@ -282,6 +282,34 @@ finishes.
     Pre-existing (v2), not introduced by this branch — but the same family as the `Ticks.Next` bug, which
     is three occurrences of "cancellation is an ending, not a fault" in one codebase.
 
+15. Remove Orleans (v4 continued)
+    Why it is tractable: Orleans persists NOTHING here — zero IPersistentState, zero reminders, zero
+    streams — so this is a coordination swap, not a state migration. And Core/Abstractions/Engine/Api
+    reference it zero times already; it reaches only the host (17 files), Grains (2,818 lines) and
+    GuiService.
+
+    What it costs, stated plainly: split-role multi-process deployment and multi-replica single-owner
+    guarantees. In ONE process every grain is an in-process singleton. The chart already defaults to
+    `split.enabled: false` + `replicaCount: 1`, which is the target. The seams stay (`ISingleOwnerLease`,
+    `LeaderState`), so a Redis-backed implementation could bring clustering back without touching an
+    integration.
+
+    [x] Decoupling first (asked for mid-flight, and the right order — removing a framework is exactly when
+        coupling sneaks in). `IBrokerConnection` replaces a concrete `IHiveMQClient` inside the MQTT
+        integration: an integration should no more be able to tell which MQTT library this build uses than
+        it can tell that coordination happens to be Orleans. `VertivIntegration` asks its `IDeviceReader`
+        to read rather than reaching into `PduInstanceRegistry` for the HTTP clients.
+        Remaining Engine references are each an integration's OWN machinery (EmonCMS's feed sync, HA's
+        discovery coordinator, the MQTT publisher, Vertiv's client) — the thing that speaks that protocol,
+        which is the one dependency an integration is supposed to have.
+
+    [ ] A. Projections in memory: status board, process registry, topic index.
+    [ ] B. Ownership in memory: PDU supervision, outlet/group control, Modbus, EmonCMS feeds, node grains.
+    [ ] C. Leader + flow mirror: always-leader in one process; the flow cache is already Core.
+    [ ] D. Delete the Grains projects, the silo config, and the five Orleans packages.
+    [ ] E. Measure: startup time and RSS before/after, so "lower resource usage and faster" is a number
+        rather than a claim.
+
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase
       `--onto origin/main` once that squash-merges.

@@ -18,13 +18,13 @@ public sealed class MqttPduIntegration : IIntegration, IMeasurementDestination, 
 {
     private readonly Config cfg;
     private readonly Services.MqttPduPublisher publisher;
-    private readonly HiveMQtt.Client.IHiveMQClient? mqtt;
+    private readonly IBrokerConnection? broker;
 
-    public MqttPduIntegration(Config cfg, Services.MqttPduPublisher publisher, HiveMQtt.Client.IHiveMQClient? mqtt = null)
+    public MqttPduIntegration(Config cfg, Services.MqttPduPublisher publisher, IBrokerConnection? broker = null)
     {
         this.cfg = cfg;
         this.publisher = publisher;
-        this.mqtt = mqtt;
+        this.broker = broker;
     }
 
     public string Id => "mqtt";
@@ -44,9 +44,9 @@ public sealed class MqttPduIntegration : IIntegration, IMeasurementDestination, 
     /// </summary>
     public IntegrationHealth Status(Config c)
     {
-        var where = $"{c.MQTT.Connection?.Host}:{c.MQTT.Connection?.Port}";
-        if (mqtt is null) return new(HealthLevel.Warn, "No client", where);
-        return mqtt.IsConnected()
+        var where = broker?.Endpoint ?? $"{c.MQTT.Connection?.Host}:{c.MQTT.Connection?.Port}";
+        if (broker is null) return new(HealthLevel.Warn, "No connection to report", where);
+        return broker.Connected
             ? new(HealthLevel.Good, "Connected", $"{where} under '{c.MQTT.ParentTopic}'")
             : new(HealthLevel.Bad, "Disconnected", where);
     }
