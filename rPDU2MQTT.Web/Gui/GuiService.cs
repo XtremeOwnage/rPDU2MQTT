@@ -60,7 +60,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     // The Status board, held in this process.
     private readonly Core.Status.StatusBoard? statusBoard;
     private readonly Core.Diagnostics.ProcessRegistry? processes;
-    private readonly Core.Discovery.TopicIndex? topicIndex;
+    private readonly Core.Discovery.TopicIndex topicIndex;
     private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
@@ -84,7 +84,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.nodeProviders = nodeProviders?.ToList() ?? [];
         this.statusBoard = statusBoard;
         this.processes = processes;
-        this.topicIndex = topicIndex;
+        this.topicIndex = topicIndex ?? new Core.Discovery.TopicIndex();
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
         this.deployOperator = deployOperator;

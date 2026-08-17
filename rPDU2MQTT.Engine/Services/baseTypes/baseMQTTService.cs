@@ -215,7 +215,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
         // distinction is the whole point.
         var seconds = cfg.MQTT.PublishTimeoutSeconds is > 0 and <= 600 ? cfg.MQTT.PublishTimeoutSeconds : 15;
         return Core.PublishTimeout.RunAsync(
-            () => mqtt.PublishAsync(msg, cancellationToken), TimeSpan.FromSeconds(seconds), msg.Topic, cancellationToken);
+            () => mqtt.PublishAsync(msg, cancellationToken), TimeSpan.FromSeconds(seconds), msg.Topic ?? "(no topic)", cancellationToken);
     }
 
     /// <summary>
