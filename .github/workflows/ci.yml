@@ -61,6 +61,20 @@ jobs:
             echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }
           done
 
+      - name: helm template (no cluster coordination)
+        run: |
+          # v4 coordinates in one process: nothing in this chart should still be wiring a cluster together.
+          # Checked across every combination, because these blocks used to be gated by a helper that turned
+          # them on for split roles, the operator, or replicaCount > 1 — three ways to reach dead template.
+          for args in "" "--set split.enabled=true" "--set operator.enabled=true" "--set replicaCount=3" \
+                      "--set networkPolicy.enabled=true --set networkPolicy.restrictEgress=true"; do
+            out=$(helm template rpdu2mqtt charts/rpdu2mqtt $args --include-crds)
+            echo "$out" | grep -iq 'orleans' && { echo "clustering config came back with [$args]"; exit 1; }
+            echo "$out" | grep -Eq 'containerPort: (11111|30000)|port: (11111|30000)' \
+              && { echo "silo ports came back with [$args]"; exit 1; }
+          done
+          exit 0
+
       - name: helm template (scheduled restart)
         run: |
           # Off by default: no CronJob, and no RBAC granted for one.

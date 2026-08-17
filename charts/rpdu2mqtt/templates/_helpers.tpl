@@ -115,5 +115,3 @@ Usage: include "rpdu2mqtt.backendService" (dict "root" $ "service" "api")
 true
 {{- end -}}
 {{- end -}}
-
-{{- end -}}

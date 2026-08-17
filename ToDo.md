@@ -26,9 +26,10 @@ finishes.
         *reads* is `IMeasurementDestination`. A third name would be a synonym.)
     [x] `FlowNodeId` — one spelling of `pdu:{device}` / `outlet:{device}:{key}`, and every reading carries
         its own `NodeId`. Eight places rebuilt those strings; two disagreed on 0- vs 1-based.
-    [x] `GrainSingleOwnerLease` — ownership of one key held cluster-wide on a short lease, keyed by the
-        resource so one device is decided in one place. A cluster that cannot be asked returns "not owner"
-        rather than assuming: two processes on one serial gateway is the failure this exists to prevent.
+    [x] The lease is keyed by the resource, so one device is decided in one place. An owner that cannot be
+        determined returns "not owner" rather than assuming: two readers on one serial gateway is the
+        failure this exists to prevent. (Item 15 replaced the grain-backed implementation with
+        `SoleOwnerLease`; the seam and the rule are unchanged.)
     [x] `MqttNodeProvider` — the broker's topics offered as nodes through `INodeProvider`, reading the
         same index and the same payload analyzer the node editor uses, so a discovered node and a
         hand-bound one agree about what a topic is. Served at `/api/discover/nodes`, which asks every
@@ -162,17 +163,17 @@ finishes.
     [x] `VertivIntegration` — the hardware this bridge was written for is a first-class integration:
         registry, banner, Status board, /health/integrations, per-instance freshness judged against each
         instance's own poll interval. It is no longer the one thing that is special.
-    [x] The dependency is inverted. `PduGrain` polls through `IDeviceReader` — `VertivDeviceReader` for a
-        configured PDU, `PluginDeviceReader` for a plugin device — so a plugin device inherits the single
-        cluster-wide activation AND the device/outlet/group child supervision that outlet writes route
-        through, instead of reimplementing them. `DeviceSourcePluginHost` (the parallel poller) is deleted.
-    [x] `PduGrainActivator` and `PduSyncService` drive and collect plugin device instances too. Caught on
-        the rig: the grain polled the plugin device correctly and nothing downstream saw it, because the
-        sync service still iterated only the configured PDUs.
-    [x] Verified end to end: the plugin device reports 77 W per outlet through the grain path, and
-        switching outlet 0 took it to 0 while outlet 1 stayed at 77.
-    [x] `IDeviceControlPlugin` — a plugin device's outlets can be switched. `OutletGrainControl` routes to
-        the plugin that owns the device id, holding the single-owner lease; a device with no reboot says so
+    [x] The dependency is inverted. The poller reads through `IDeviceReader` — `VertivDeviceReader` for a
+        configured PDU, `PluginDeviceReader` for a plugin device — so a plugin device inherits the cadence,
+        the ownership lease and the write path instead of reimplementing them. `DeviceSourcePluginHost`
+        (the parallel poller) is deleted.
+    [x] The poll drives and collects plugin device instances too. Caught on the rig: the plugin device was
+        polled correctly and nothing downstream saw it, because the collecting side still iterated only the
+        configured PDUs.
+    [x] Verified end to end: the plugin device reports 77 W per outlet, and switching outlet 0 took it to 0
+        while outlet 1 stayed at 77.
+    [x] `IDeviceControlPlugin` — a plugin device's outlets can be switched. The write path routes to the
+        plugin that owns the device id, holding the single-owner lease; a device with no reboot says so
         via Supports() rather than failing the command.
     [x] Verified end to end: the example plugin as a device publishes outlet names, state and power to
         MQTT, appears as `rpdu2mqtt_realpower{device="hello_device"}` and as flow tiers under its own PDU
@@ -235,7 +236,7 @@ finishes.
         background-service crash on every clean stop.
     [x] Verified: a real run now stops on SIGTERM with zero unhandled/crash lines.
     [x] `EmonCmsStatus` is now a VIEW over `IntegrationStatus`, not a second store. Its name and shape are
-        kept because the status grain, the heartbeat and the GUI all read them; only the storage merged.
+        kept because the Status board, the heartbeat and the GUI all read them; only the storage merged.
         Two holders for one idea is how a card and an endpoint end up disagreeing about the same export,
         with neither looking wrong on its own. Existing EmonCMS status tests pass unchanged, and health,
         probe, /api/integrations and /api/diagnostics were checked against one running bridge.
@@ -259,8 +260,15 @@ finishes.
         a cluster is not a decision this chart should make.
     [x] CI templates both plugin combinations and greps for the mount. Plugins are off by default, so the
         existing default render never reached the block — it would have been untested template.
-    [ ] NOT verified locally: no helm binary in this environment, so the chart edit is reviewed by eye and
-        by the CI step above rather than rendered here. First CI run on this branch is the real check.
+    [x] Verified locally after all: helm downloads and runs here (it just wasn't installed). All ten
+        combinations render — default, split, operator, replicaCount=3, NetworkPolicy with egress, plugins,
+        autoRestart, the CRD config source, everything at once, and --include-crds.
+        This caught a real break: removing the `rpdu2mqtt.clustered` helper left a dangling `{{- end -}}`
+        in `_helpers.tpl`, so EVERY render failed with a parse error and I had reported the chart edits as
+        fine. `helm lint` says so in one second. A CI step now renders each combination and fails if
+        orleans/silo ports reappear.
+        Lesson: "reviewed by eye" is not a verification, and the tool I assumed was missing was one curl
+        away.
 
 13. Found in the GUI, not in the tests
     [x] The raw `Plugins` dictionary rendered as its own page with a free-text key box — while every loaded
@@ -335,9 +343,8 @@ finishes.
             grain that handed each device its own document, each device grain each outlet its own, each
             outlet a measured node, and a sync service polling the PDU grain every second to publish the
             snapshot onto the local bus. In one process all of that is: read the device, publish the
-            snapshot. The roll-up the node grains computed was never lost — `FlowGraphBuilder` computes it
-            from the same snapshot and always did; the grain tree was a second implementation whose only
-            reader was a diagnostics panel.
+            snapshot. The roll-up was never lost — `FlowGraphBuilder` computes it from the same snapshot
+            and always did; the tree was a second implementation whose only reader was a diagnostics panel.
             Writes are `DeviceOutletControl`, and the ownership rule is kept exactly: a write goes to the
             PDU that REPORTED the device (resolved from the same poll the grains learned it from), never to
             whichever is primary, and nothing polled means the write goes nowhere rather than guessing. The

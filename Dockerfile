@@ -17,6 +17,7 @@ ARG APP_VERSION=0.0.0-dev
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 WORKDIR /src
 COPY ["rPDU2MQTT/rPDU2MQTT.csproj", "rPDU2MQTT/"]
+COPY ["rPDU2MQTT.Abstractions/rPDU2MQTT.Abstractions.csproj", "rPDU2MQTT.Abstractions/"]
 COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
 COPY ["rPDU2MQTT.Engine/rPDU2MQTT.Engine.csproj", "rPDU2MQTT.Engine/"]
 COPY ["rPDU2MQTT.Api/rPDU2MQTT.Api.csproj", "rPDU2MQTT.Api/"]
