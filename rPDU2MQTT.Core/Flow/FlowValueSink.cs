@@ -9,13 +9,6 @@ namespace rPDU2MQTT.Core.Flow;
 /// the value cache the graph builder reads.
 ///
 /// <para>
-/// This replaces a round trip that existed only because the cache lived in a grain: a sink pushed each
-/// snapshot into the flow grain, the grain wrote it into a <see cref="FlowValueCache"/>, and a service
-/// polled that grain every two seconds to copy the values back into <i>this</i> process's cache. In one
-/// process that is a write, a read, and a two-second delay between a reading arriving and anything being
-/// able to see it — for data that was already local.
-/// </para>
-/// <para>
 /// The ordering rule is kept, because it is real: a source that restarted has a reset (low) version but a
 /// newer timestamp, so a snapshot is only ignored when it is stale by BOTH. Comparing versions alone locks
 /// out a restarted source until its counter climbs back past the old high, which for a fast-ticking source

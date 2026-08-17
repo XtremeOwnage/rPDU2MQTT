@@ -69,7 +69,7 @@ public static class StartupSummary
         Serilog.Log.Information("  GUI: {State}.", cfg.Gui.Enabled ? $"on :{cfg.Gui.Port}" : "off");
 
         // How to see more, said once, where someone reading the log will find it.
-        Serilog.Log.Information("  Console log level is {Level}; set Logging.Console.Severity to Debug or Verbose for the detail behind each poll, publish and grain call.",
+        Serilog.Log.Information("  Console log level is {Level}; set Logging.Console.Severity to Debug or Verbose for the detail behind each poll and publish.",
             cfg.Logging.Console.Severity);
     }
 }

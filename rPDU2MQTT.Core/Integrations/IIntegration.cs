@@ -28,10 +28,10 @@ public enum IntegrationGroup
 /// how an operator thinks about them nor how they are configured.
 /// </para>
 /// <para>
-/// Nothing here mentions Orleans, hosting, or the GUI, and nothing ever should. An integration declares
+/// Nothing here mentions coordination, hosting, or the GUI, and nothing ever should. An integration declares
 /// what it is and what it can do; the host decides where it runs, when it runs, and who owns it. Where a
 /// capability genuinely needs cluster coordination — one owner of a serial gateway — it asks for it through
-/// a Core interface (<see cref="ISingleOwnerLease"/>) that happens to be grain-backed today.
+/// a Core interface (<see cref="ISingleOwnerLease"/>) whose implementation the host supplies.
 /// </para>
 /// </summary>
 public interface IIntegration

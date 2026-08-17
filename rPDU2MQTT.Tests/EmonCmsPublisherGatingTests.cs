@@ -11,8 +11,7 @@ namespace rPDU2MQTT.Tests;
 /// question. These are the gates: switched off, unconfigured, or auto-configure not asked for means no pass
 /// runs at all — and a refusal is not a silent one.
 /// <para>
-/// (The gating used to live in a feed grain and be poked by a timer. It is the publisher contract's now, so
-/// a plugin publishing configuration gets the same treatment.)
+/// The gate is the publisher contract's, so a plugin publishing configuration gets the same treatment.
 /// </para>
 /// </summary>
 public class EmonCmsPublisherGatingTests

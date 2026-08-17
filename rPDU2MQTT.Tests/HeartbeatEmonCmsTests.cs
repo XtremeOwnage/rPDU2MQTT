@@ -5,7 +5,7 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// EmonCMS export health is carried on a process's registration (v3: the ProcessRegistryGrain) so a split
+/// EmonCMS export health is carried on a process's registration so a split
 /// API/UI node shows the worker's true export state. These lock the status shape the board reads.
 /// </summary>
 public class HeartbeatEmonCmsTests

@@ -10,10 +10,10 @@ namespace rPDU2MQTT.Core.Integrations;
 /// the EmonCMS feed writer have the same shape — one owner, cluster-wide.
 /// </para>
 /// <para>
-/// Orleans provides this today through single-activation grains, and an integration must never know that.
-/// <c>LeaderState</c> is the precedent: a plain flag in Core, kept fresh by one Orleans-aware hosting
-/// service, read by Engine code that has no idea grains exist. Keeping the seam here is also what keeps the
-/// framework decision open — Orleans persists nothing in this codebase, so replacing it would be a
+/// One process owns everything it can see (<see cref="SoleOwnerLease"/>), and an integration must never
+/// know that. <c>LeaderState</c> is the same arrangement: a plain flag in Core, kept true by the host, read
+/// by Engine code that has no idea what supplies it. Keeping the seam here is what keeps the
+/// coordination decision open — nothing is persisted behind it, so replacing it would be a
 /// coordination swap rather than a state migration.
 /// </para>
 /// </summary>

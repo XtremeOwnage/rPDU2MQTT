@@ -85,8 +85,8 @@ public sealed class StatusReporter : BackgroundService
         ReportIntegration("homeassistant");
         ReportIntegration("prometheus");
 
-        // Every integration that has no hand-written component grain — each loaded plugin, and any
-        // built-in that never needed one. Reported from the registry rather than a branch per integration,
+        // Every integration that has no card reported above — each loaded plugin, and any built-in that
+        // never needed one. Reported from the registry rather than a branch per integration,
         // so an integration cannot be running and yet absent from the board.
         var bespoke = new HashSet<string>(["mqtt", "emoncms", "homeassistant", "prometheus"], StringComparer.OrdinalIgnoreCase);
         foreach (var integration in registry?.All ?? [])

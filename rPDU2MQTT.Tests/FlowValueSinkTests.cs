@@ -5,10 +5,10 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// The ordering rule for measurement snapshots, which moved with the ingest when the flow grain went.
+/// The ordering rule for measurement snapshots.
 ///
 /// <para>
-/// These were written against the grain. The rule is the same and so are the assertions — it is the rule
+/// The rule and the assertions are the ones this has always had — it is the rule
 /// that matters, not where it runs — so they were retargeted rather than deleted.
 /// </para>
 /// </summary>

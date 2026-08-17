@@ -7,7 +7,7 @@ namespace rPDU2MQTT.Core.Integrations;
 /// The MQTT integration needs to answer "are we connected?" for its health card, and was reaching straight
 /// for the HiveMQ client to do it — a concrete third-party client sitting in an integration, which is
 /// exactly the coupling these contracts exist to prevent. An integration should not be able to tell which
-/// MQTT library this build uses, any more than it can tell that coordination happens to be Orleans.
+/// MQTT library this build uses, any more than it can tell how the host coordinates ownership.
 /// </para>
 /// </summary>
 public interface IBrokerConnection

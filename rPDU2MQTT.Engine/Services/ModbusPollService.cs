@@ -14,12 +14,10 @@ namespace rPDU2MQTT.Services;
 /// Reads every configured Modbus device and emits its readings into the flow value sink.
 ///
 /// <para>
-/// This is a reconciler and a grain per device folded into one loop: config is re-read each pass (so
-/// enabling a connection in the GUI takes effect without a restart), connections are grouped by physical
-/// address, and each device is polled on its own cadence. The grouping is the part that matters and is
-/// unchanged — two config connections to the same <c>host:port:unitId</c> are one device, because a
-/// single-client RS485 gateway can only answer one reader at a time. The lease keeps that true across
-/// replicas.
+/// Config is re-read each pass (so enabling a connection in the GUI takes effect without a restart),
+/// connections are grouped by physical address, and each device is polled on its own cadence. The grouping
+/// is the part that matters: two config connections to the same <c>host:port:unitId</c> are one device,
+/// because a single-client RS485 gateway can only answer one reader at a time.
 /// </para>
 /// </summary>
 public sealed class ModbusPollService : BackgroundService

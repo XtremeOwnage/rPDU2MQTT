@@ -30,7 +30,7 @@ public class OutletCommandService : IHostedService
         cfg = deps.Cfg;
         pdu = deps.PDU;
         leader = deps.Leader;
-        // When wired, outlet writes route to the per-outlet grain (single owner); else call the PDU directly.
+        // When wired, outlet writes route through the single-owner write path; else call the PDU directly.
         this.outletControl = outletControl;
 
         // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
@@ -158,8 +158,8 @@ public class OutletCommandService : IHostedService
     }
 
     /// <summary>
-    /// Action an outlet through the grain (single cluster-wide owner) when wired, else straight to the PDU.
-    /// Same underlying PDU calls either way — the grain just makes the write actor-owned.
+    /// Action an outlet through the owned write path when wired, else straight to the PDU. Same underlying
+    /// PDU calls either way; the seam is what makes the write single-owner.
     /// </summary>
     private async Task Exec(string deviceId, int outletIndex, string action)
     {
@@ -181,7 +181,7 @@ public class OutletCommandService : IHostedService
 
         var isDelay = DelayFields.Contains(field);
 
-        // Route the write through the per-outlet grain (single owner) when wired; else straight to the PDU.
+        // Route the write through the single-owner path when wired; else straight to the PDU.
         // Both return the applied value string so we can echo it back.
         string applied;
         if (outletControl is not null)

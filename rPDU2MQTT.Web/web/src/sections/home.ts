@@ -1,5 +1,5 @@
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
-// v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
+// The verdicts come from the Status board via /api/status — this file only renders them. Deciding
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
 import { api, btn, el, activate, navLink } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
@@ -32,7 +32,7 @@ export function addHomeSection(nav: any, sections: any) {
   const ago = (s: number) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
   const uptime = (s: number) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return 'up ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
 
-  // A card's detail is the static part plus, where the grain asked for it, the aged instant it carries.
+  // A card's detail is the static part plus, where the board asked for it, the aged instant it carries.
   const detailOf = (c: any) => {
     const parts: string[] = [];
     if (c.detail) parts.push(c.detail);

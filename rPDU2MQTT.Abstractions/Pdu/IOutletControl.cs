@@ -2,8 +2,7 @@ namespace rPDU2MQTT.Abstractions.Pdu;
 
 /// <summary>
 /// The write seam for outlet control (framework-free): a command source (the MQTT command subscriber) calls
-/// this to action an outlet, and the host routes it to the single-owner OutletGrain. Keeps the Engine
-/// services Orleans-free while making every write actor-owned.
+/// this to action an outlet, and the host routes it to whatever owns that device's writes.
 /// </summary>
 public interface IOutletControl
 {

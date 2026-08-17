@@ -26,7 +26,7 @@ public interface ISnapshotFeed<out T> where T : ISnapshot
 }
 
 /// <summary>
-/// A full snapshot stream — both ends. The transport (in-process channel today; an Orleans stream tomorrow)
+/// A full snapshot stream — both ends. The transport (an in-process channel today)
 /// implements this; producers and consumers only ever see the one-sided interfaces above.
 /// </summary>
 public interface ISnapshotStream<T> : ISnapshotSink<T>, ISnapshotFeed<T> where T : ISnapshot;

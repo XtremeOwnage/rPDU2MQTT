@@ -13,9 +13,6 @@ namespace rPDU2MQTT.Tests;
 /// PDU must never be actioned through the first. Nothing resolves a PDU by convenience: the instance that
 /// polled the device is the instance the write goes to, and when nothing has polled it the write goes
 /// nowhere rather than to whichever PDU happens to be primary.
-/// <para>
-/// (These assertions came from the grain tree's ownership tests. The tree is gone; the rule isn't.)
-/// </para>
 /// </summary>
 public class DeviceOutletControlTests
 {

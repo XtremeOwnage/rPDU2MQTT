@@ -311,7 +311,7 @@ public class EnergyFlowMqttSourceTests
         Assert.Single(owner.Warnings);
     }
 
-    /// <summary>Stands in for the audit's owner — the grain in production.</summary>
+    /// <summary>Stands in for the audit's owner.</summary>
     private sealed class FakeAuditor
     {
         private readonly Dictionary<string, PeriodCounterAudit.State> audit = new(StringComparer.Ordinal);

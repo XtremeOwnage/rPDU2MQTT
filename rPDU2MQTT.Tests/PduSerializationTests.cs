@@ -5,7 +5,7 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// PduData ships across grains in v3, which serializes it — so DictionaryToListConverter's Write (long a
+/// PduData is serialized on the wire — so DictionaryToListConverter's Write (long a
 /// NotSupportedException stub) must round-trip. These lock that: the keyed collections survive
 /// serialize → deserialize with their keys intact.
 /// </summary>

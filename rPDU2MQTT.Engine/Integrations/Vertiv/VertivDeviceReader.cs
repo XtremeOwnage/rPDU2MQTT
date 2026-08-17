@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Integrations.Vertiv;
 
 /// <summary>
 /// Reads a configured Vertiv rPDU — the built-in reader, and now one implementation among others rather
-/// than the hardcoded call inside the supervising grain.
+/// than a hardcoded call inside the poller.
 /// </summary>
 public sealed class VertivDeviceReader : IDeviceReader
 {

@@ -17,7 +17,7 @@ public sealed record LoadedPlugin(string File, IReadOnlyList<IIntegration> Integ
 /// <para>
 /// Writing one is: reference <c>rPDU2MQTT.Core</c>, implement <see cref="IIntegration"/> and whichever
 /// capabilities apply, drop the DLL in <c>plugins/</c>. Core is the whole SDK — it carries the contracts,
-/// the config model, the flow engine and the helpers, and it references no Orleans, no ASP.NET and no MQTT
+/// the config model, the flow engine and the helpers, and it references no ASP.NET and no MQTT
 /// client, so a plugin inherits none of those either.
 /// </para>
 /// <para>

@@ -10,11 +10,9 @@ namespace rPDU2MQTT.Services;
 /// Every write to a device — an outlet action, an outlet config field, a OneView group action.
 ///
 /// <para>
-/// Ownership is the whole point of this class, and it is kept exactly as the grain tree had it: a write goes
-/// to the PDU the device was actually polled from, never to whichever PDU happens to be primary, and it runs
-/// once across replicas (the lease) rather than once per process. What the grains did structurally — a child
-/// held the instance its parent stamped on it — is done here by asking the snapshot cache which instance
-/// reported the device, which is the same fact from the same poll.
+/// Ownership is the whole point of this class: a write goes to the PDU the device was actually polled from,
+/// never to whichever PDU happens to be primary, and it runs once (the lease) rather than once per caller.
+/// Which PDU that is comes from the snapshot cache — the same poll that reported the device.
 /// </para>
 /// <para>
 /// When nothing has polled the device, the honest answer is that the write goes nowhere. Guessing at the

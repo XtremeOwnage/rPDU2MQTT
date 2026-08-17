@@ -126,13 +126,8 @@ public static class ServiceConfiguration
         // now" button, so register the singleton regardless of role.
         services.AddSingleton<Services.EmonCmsFeedSync>();
 
-        // Energy-flow values from the broker (#205, e.g. Solar Assistant). v3: the MQTT ingest runs on the
-        // worker and its values are pushed to the flow grain by MqttToFlowBridge; every other process reads
-        // them back through the grain sync (no per-process subscription duplication). The singleton stays
-        // registered everywhere so the bridge can resolve it on the worker.
-        // Live values from every in-process source, read through the IFlowValueSource seam. It used to be a
-        // mirror of a grain's copy, polled every two seconds; the sources write straight into it now, so a
-        // reading is visible the moment it arrives rather than up to two seconds later.
+        // Live values from every in-process source, read through the IFlowValueSource seam. Sources write
+        // straight into it, so a reading is visible the moment it arrives.
         var liveValues = new Core.Flow.FlowValueCache();
 
         // In-process sources emit measurement snapshots into this sink, which writes them into that cache.
@@ -159,16 +154,11 @@ public static class ServiceConfiguration
 
 
 
-        // Reads prefer the in-process MQTT source cache, then fall back to the grain-synced mirror. In a
-        // single-binary (All-role) deployment the MQTT ingest runs in THIS process, so the GUI/exporters read
-        // the exact value the broker callback just wrote — no cross-process grain round-trip to delay it, and
-        // crucially it carries the direction-qualified (e.g. realpower#in — battery charge / grid export),
-        // state-of-charge (soc) and energy-in keys that the flow-grain sink strips out because they aren't
-        // canonical Metric names (Metrics.TryParse fails, so they never reach the grain or its mirror). Without
-        // this the battery SoC and every in-direction reading show "—" even though the ingest has them.
-        // In a UI-only split process the MQTT cache is never fed (the ingest isn't hosted there), so its reads
-        // return false and everything falls through to the mirror — this is strictly additive, never a
-        // regression. It is the single-binary deployment that makes it whole.
+        // Reads prefer the in-process MQTT source cache: the GUI/exporters get the exact value the broker
+        // callback just wrote, and crucially it carries the direction-qualified (e.g. realpower#in — battery
+        // charge / grid export), state-of-charge (soc) and energy-in keys that the flow sink drops because
+        // they are not canonical Metric names (Metrics.TryParse fails). Without this the battery SoC and
+        // every in-direction reading show "—" even though the ingest has them.
         // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
         // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
         // integrate real readings rather than its own output.
@@ -268,15 +258,11 @@ public static class ServiceConfiguration
         if (cfg.History.Enabled && cfg.History.ValueFallback)
             services.AddHostedService<Services.HistoryValueSourceService>();
 
-        // A plugin that polls hardware is a reader like the Vertiv one, so it is supervised by the same
-        // grain rather than by a parallel host — one activation cluster-wide, and its outlets get the child
-        // grains that writes route through.
+        // A plugin that polls hardware is a reader like the Vertiv one, so the same poller drives it rather
+        // than a parallel host — one cadence, one ownership lease, one write path.
         var devicePlugins = pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().ToList();
         if (devicePlugins.Count > 0)
             services.AddSingleton<Core.Integrations.IDeviceReader>(new Core.Integrations.PluginDeviceReader(devicePlugins));
-
-        // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
-        // PduSyncService's job now (grains, not MQTT mirroring).
 
         // ---- v4: integrations as plugins -------------------------------------------------------------
         // Discovered by reflection over the Engine assembly, never listed by hand: a registration list is
@@ -304,8 +290,8 @@ public static class ServiceConfiguration
         // …and the connection state behind a seam too, so no integration can tell which MQTT client this
         // build uses.
         services.AddSingleton<Core.Integrations.IBrokerConnection, Services.HiveMqBrokerConnection>();
-        // Who can read a device instance. The grain asks these rather than calling the Vertiv client, so a
-        // plugin device gets the same single activation and child supervision the built-in poller has.
+        // Who can read a device instance. The poller asks these rather than calling the Vertiv client, so a
+        // plugin device gets the same cadence, lease and write path the built-in one has.
         services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();
 
         // The broker's topics, offered as nodes to adopt through the same capability a plugin would use.

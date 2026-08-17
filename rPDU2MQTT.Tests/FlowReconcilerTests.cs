@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Tests;
 /// The node classifier: is a node a measured leaf, an aggregate, or the designated residual?
 ///
 /// <para>
-/// Its consumers — the flow reconciler and the node grains — went with Orleans, and FlowGraphBuilder makes
+/// Its consumers — the flow reconciler and the node tree — are gone, and FlowGraphBuilder makes
 /// the same decision inline rather than calling this. It is kept because it is the one place that rule is
 /// written down and tested; the builder should adopt it, which is a change worth making deliberately
 /// rather than in the middle of removing a framework.

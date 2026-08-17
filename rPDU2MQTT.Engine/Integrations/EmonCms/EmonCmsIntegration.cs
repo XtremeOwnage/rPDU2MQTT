@@ -31,7 +31,7 @@ public sealed class EmonCmsIntegration
     private readonly Core.Flow.IFlowValueSource? live;
     private readonly IMessagePublisher? publisher;
     // Provisioning writes to EmonCMS, so exactly one process may do it — two racing each other create
-    // duplicate feeds. The bespoke GUI endpoint got this from a grain; the contract gets it from the lease.
+    // duplicate feeds. The lease is what makes it once.
     private readonly ISingleOwnerLease lease;
 
     public EmonCmsIntegration(

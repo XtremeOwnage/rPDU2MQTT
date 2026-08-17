@@ -4,8 +4,8 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// The Status board's rules, which used to live one per grain. Evaluated on read rather than on a timer,
-/// so an age can never be stale and a component going quiet turns amber without anything noticing.
+/// The Status board's rules. Evaluated on read rather than on a timer, so an age can never be stale and a
+/// component going quiet turns amber without anything noticing.
 /// </summary>
 public class StatusBoardTests
 {

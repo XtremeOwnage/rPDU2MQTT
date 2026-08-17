@@ -9,16 +9,9 @@ namespace rPDU2MQTT.Services;
 /// Polls every device — a configured PDU, or one a plugin supplies — and publishes each snapshot on the bus.
 ///
 /// <para>
-/// This replaces a chain that existed to spread one poll across processes: an activator drove a PDU grain,
-/// the grain polled and held the result, handed each device its own document, each device grain handed each
-/// outlet its own, each outlet fed a measured node grain, a tree of node grains rolled the values up, and a
-/// sync service polled the PDU grain every second to publish its snapshot onto the local bus. In one process
-/// all of that is: read the device, publish the snapshot. Everything downstream already listens to the bus.
-/// </para>
-/// <para>
-/// The roll-up the node grains computed is not lost — <c>FlowGraphBuilder</c> computes it from the same
-/// snapshot and config, and always did. The grain tree was a second implementation of it whose only reader
-/// was a diagnostics panel.
+/// One loop for every device: read it, publish the snapshot. Everything downstream — the snapshot cache, the
+/// destinations, the flow roll-up — already listens to the bus, and the roll-up is computed by
+/// <c>FlowGraphBuilder</c> from that same snapshot.
 /// </para>
 /// </summary>
 public sealed class DevicePollService : BackgroundService

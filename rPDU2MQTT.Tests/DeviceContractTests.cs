@@ -6,7 +6,7 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// A device supplied by a plugin, and the reader seam that lets the supervising grain poll it exactly as it
+/// A device supplied by a plugin, and the reader seam that lets the poller read it exactly as it
 /// polls the built-in one — the inversion that makes a second make of hardware equal to the first.
 /// </summary>
 public class DeviceContractTests
@@ -54,7 +54,7 @@ public class DeviceContractTests
     [Fact]
     public async Task ThePluginReaderOwnsExactlyItsOwnInstance()
     {
-        // The grain asks who handles its key. A reader claiming an instance it does not own would poll
+        // The poller asks who handles the key. A reader claiming an instance it does not own would poll
         // someone else's hardware through someone else's client.
         var device = new FakeDevice();
         var reader = new PluginDeviceReader([device]);

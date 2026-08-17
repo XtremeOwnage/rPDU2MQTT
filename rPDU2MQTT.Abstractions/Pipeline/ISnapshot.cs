@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Abstractions.Pipeline;
 /// layers, so nothing has to hold a reference to another layer's concrete types.
 /// <para>
 /// <see cref="Version"/> is monotonic <b>per <see cref="SourceId"/></b>. Because delivery across processes
-/// (grains/silos) is not ordered, a consumer keeps the highest version it has seen per source and discards
+/// is not ordered, a consumer keeps the highest version it has seen per source and discards
 /// anything older or equal — making fan-out safe and idempotent. Two identical snapshots are
 /// indistinguishable, so a source may re-emit freely.
 /// </para>

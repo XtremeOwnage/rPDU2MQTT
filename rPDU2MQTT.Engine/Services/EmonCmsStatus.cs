@@ -9,7 +9,7 @@ namespace rPDU2MQTT.Services;
 /// A view over the shared <see cref="IntegrationStatus"/> rather than a store of its own. Two holders for
 /// one idea is how a card and an endpoint end up disagreeing about whether the last export worked — one
 /// gets updated and the other does not, and neither looks wrong on its own. The name and shape are kept
-/// because the Status grain, the heartbeat and the GUI all read them.
+/// because the Status board, the heartbeat and the GUI all read them.
 /// </para>
 /// </summary>
 public sealed class EmonCmsStatus
@@ -38,7 +38,7 @@ public sealed class EmonCmsStatus
     /// </summary>
     /// <remarks>
     /// The distinction matters on a fleet: "I have not attempted an export" is not evidence there was no
-    /// export, and the status grain uses exactly this to refuse letting an outcome-free report from a
+    /// export, and the Status board uses exactly this to refuse letting an outcome-free report from a
     /// non-exporting process overwrite a known one.
     /// </remarks>
     public bool HasAttempted => Entry?.LastAttemptUtc is not null;

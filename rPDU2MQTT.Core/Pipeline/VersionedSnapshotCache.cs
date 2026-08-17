@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Core.Pipeline;
 /// <summary>
 /// Thread-safe <see cref="ISnapshotCache{T}"/> keeping the latest snapshot per source, rejecting anything
 /// not strictly newer by <see cref="ISnapshot.Version"/>. This is the "current state" shield: readers query
-/// it instead of the device, and out-of-order delivery (across grains/silos) can't regress the value.
+/// it instead of the device, and out-of-order delivery can't regress the value.
 /// </summary>
 public sealed class VersionedSnapshotCache<T> : ISnapshotCache<T> where T : ISnapshot
 {

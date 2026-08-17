@@ -10,14 +10,14 @@ namespace rPDU2MQTT.Integrations.Vertiv;
 /// else, instead of being the one thing that is special.
 ///
 /// <para>
-/// The poll deliberately stays in <c>PduGrain</c>. That grain is not just a timer: it is the single
-/// cluster-wide activation per PDU, and it supervises the device, outlet and group child grains that
+/// The poll deliberately stays in <c>DevicePollService</c>, which is not just a timer: it holds the
+/// ownership lease per PDU, and it feeds the snapshot the write path resolves devices from, which
 /// outlet writes are routed through. Moving the read out here would take the supervision with it and break
 /// control — the opposite of an improvement, for the sake of symmetry.
 /// </para>
 /// <para>
 /// The follow-up that would finish this properly is inverting the dependency rather than moving it: have
-/// <c>PduGrain</c> poll <i>through</i> <see cref="IDeviceSourcePlugin"/> instead of the Vertiv client
+/// the poller read <i>through</i> <see cref="IDeviceSourcePlugin"/> instead of the Vertiv client
 /// directly. A new vendor would then inherit the single activation and the child supervision rather than
 /// having to reimplement them, which is the thing that actually makes a second make of hardware equal to
 /// the first.

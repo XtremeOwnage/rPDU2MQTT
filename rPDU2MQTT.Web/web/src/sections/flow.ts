@@ -121,7 +121,7 @@ export function addFlowSection(nav: any, sections: any) {
   };
 
   const treePage = subPage('Roll-up', '∑',
-    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+    'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
     'How the nodes are wired together. Energy flows left → right.');
@@ -135,7 +135,7 @@ export function addFlowSection(nav: any, sections: any) {
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
-  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain.
+  // Each configured node's rolled-up value.
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -147,7 +147,7 @@ export function addFlowSection(nav: any, sections: any) {
     const nodes = r.body.nodes || [];
     if (!nodes.length) {
       const dd = document.createElement('div'); dd.className = 'desc';
-      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; they are rolled up here.';
       treePanel.appendChild(dd); return;
     }
 

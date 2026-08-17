@@ -38,7 +38,7 @@ public sealed class DictionaryToListConverter<TObject, TKey> : JsonConverter<Lis
     public override void Write(Utf8JsonWriter writer, List<TObject>? value, JsonSerializerOptions options)
     {
         // The PDU API only ever sends this shape (dict → list), so historically Write was never hit. v3 ships
-        // PduData across grains, which serializes it — so round-trip back to the dictionary form Read expects
+        // PduData is serialized on the wire — so round-trip back to the dictionary form Read expects
         // (each item re-keyed by its own Key), instead of throwing.
         if (value is null)
         {

@@ -9,7 +9,7 @@ namespace rPDU2MQTT.Core.Pipeline;
 /// <see cref="ChannelMessageBus"/> to any <see cref="ISnapshot"/>. Each subscriber gets its own bounded
 /// channel; emitting fans out with a non-blocking write, so one slow consumer never stalls the producer or
 /// other consumers — its buffer drops the oldest snapshot instead. This is the transport a single-process
-/// (or single-silo) deployment uses; a distributed transport (an Orleans stream) would implement the same
+/// deployment uses; a distributed transport would implement the same
 /// interface, and nothing that publishes or consumes has to change.
 /// </summary>
 public sealed class ChannelSnapshotStream<T> : ISnapshotStream<T> where T : ISnapshot

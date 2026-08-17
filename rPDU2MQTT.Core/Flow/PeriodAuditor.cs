@@ -6,9 +6,8 @@ namespace rPDU2MQTT.Core.Flow;
 ///
 /// <para>
 /// Withholding is a correctness decision — it is what keeps a counter that has been contradicted from being
-/// published as the day's total — so the answer has to be given before the reading goes anywhere. That is
-/// why this is synchronous: it used to be a grain call blocked on with <c>GetAwaiter().GetResult()</c>,
-/// which is the same thing with a round trip in the middle.
+/// published as the day's total — so it is synchronous: the answer has to be in hand before the reading
+/// goes anywhere.
 /// </para>
 /// </summary>
 public sealed class PeriodAuditor : IPeriodAuditor

@@ -373,8 +373,25 @@ finishes.
     two replicas would each poll the PDUs and each publish. The chart says so, and `split.enabled` still
     works because roles gate services and only the worker produces data. The seams (`ISingleOwnerLease`,
     `LeaderState`) are untouched, so a Redis/Valkey-backed implementation is two files, not a redesign.
-    [ ] E. Measure: startup time and RSS before/after, so "lower resource usage and faster" is a number
-        rather than a claim.
+    [x] E. Measured, same rig, same config, same 60s sample point (stub broker + stub EmonCMS, no PDU):
+
+        |                        | with Orleans | without | change |
+        | ---------------------- | ------------ | ------- | ------ |
+        | start -> /metrics answers | 1.29s / 1.28s | 0.64s / 0.75s | ~2x faster |
+        | RSS at 60s             | 166 MB / 170 MB | 133 MB / 135 MB | -20% |
+        | threads                | 25-26        | 23      | -3 |
+        | Prometheus series      | 6            | 6       | same |
+        | MQTT topics published  | 3            | 3       | identical set |
+        | test suite             | ~3s          | ~1s     | no cluster to stand up |
+
+        Output equivalence is only over the flow path and status here — the rig has no PDU stub, so the PDU
+        object model is not in that comparison. It is covered by DevicePollServiceTests instead (read,
+        publish, cadence, and "nothing to report publishes nothing"), sabotage-verified.
+
+    [x] F. Nothing in the tree says "grain" any more. The prose went with the code — including five
+        abstractions nothing implemented once the grains were gone (`IFlowMiddleware`, `NodeSpec`,
+        `PduChildren`, `DeviceState`, `OutletState`) and `RawValue`, which existed only to sync a grain's
+        values out to each process.
 
 Notes
     - Branched off `fix/export-flow-nodes-and-tag-picker` (#386), which carries `FlowTiers`. Rebase

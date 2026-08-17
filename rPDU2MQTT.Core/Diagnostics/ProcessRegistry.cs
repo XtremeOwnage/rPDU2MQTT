@@ -25,10 +25,9 @@ public sealed record ProcessInfo
 /// Each process's latest self-report.
 ///
 /// <para>
-/// In one process this is a list of one, and that is the honest shape of it — the grain existed so a split
-/// deployment's GUI could list every role process. The registry stays because the Status board and the
-/// diagnostics page read it, and because keeping the shape means a multi-process build could repopulate it
-/// from elsewhere without either of those changing.
+/// In one process this is a list of one, and that is the honest shape of it. The registry keeps the shape
+/// so a split deployment's GUI can list every role process, and so a multi-process build could repopulate
+/// it from elsewhere without the Status board or the diagnostics page changing.
 /// </para>
 /// </summary>
 public sealed class ProcessRegistry

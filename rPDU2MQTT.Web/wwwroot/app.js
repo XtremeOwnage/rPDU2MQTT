@@ -2667,7 +2667,7 @@ function addFlowSection(nav     , sections     ) {
   };
 
   const treePage = subPage('Roll-up', '∑',
-    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+    'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
     'How the nodes are wired together. Energy flows left → right.');
@@ -2681,7 +2681,7 @@ function addFlowSection(nav     , sections     ) {
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
-  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain.
+  // Each configured node's rolled-up value.
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r     ; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -2693,7 +2693,7 @@ function addFlowSection(nav     , sections     ) {
     const nodes = r.body.nodes || [];
     if (!nodes.length) {
       const dd = document.createElement('div'); dd.className = 'desc';
-      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; they are rolled up here.';
       treePanel.appendChild(dd); return;
     }
 
@@ -6030,7 +6030,7 @@ function addDiscoveryCleanup(sec     ) {
 
 // ── sections/home.ts ────────────────────────────────────────────
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
-// v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
+// The verdicts come from the Status board via /api/status — this file only renders them. Deciding
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
 
 function addHomeSection(nav     , sections     ) {
@@ -6061,7 +6061,7 @@ function addHomeSection(nav     , sections     ) {
   const ago = (s        ) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
   const uptime = (s        ) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return 'up ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
 
-  // A card's detail is the static part plus, where the grain asked for it, the aged instant it carries.
+  // A card's detail is the static part plus, where the board asked for it, the aged instant it carries.
   const detailOf = (c     ) => {
     const parts           = [];
     if (c.detail) parts.push(c.detail);

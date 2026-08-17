@@ -36,11 +36,9 @@ public sealed record ComponentStatus(
 /// The Status board, in memory.
 ///
 /// <para>
-/// Replaces a grain per component plus a projection grain. Each of those held one report and ran its own
-/// ten-second timer purely to re-evaluate and push a card that had probably not changed; in one process
-/// that is a dictionary and a function. Evaluating <b>on read</b> rather than on a tick also removes the
-/// staleness the timers existed to paper over — an "…ago" is computed when someone looks, so it can never
-/// be out of date, and a component going quiet turns amber without anything having to notice.
+/// A dictionary of reports and one function that judges them. Evaluating <b>on read</b> rather than on a
+/// tick is what makes an "…ago" impossible to show stale — it is computed when someone looks — and what
+/// lets a component going quiet turn amber without anything having to notice.
 /// </para>
 /// <para>
 /// Silence is handled here, once, so no component has to know how to say "nobody is telling us about this

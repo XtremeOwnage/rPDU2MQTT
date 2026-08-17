@@ -4,14 +4,14 @@ namespace rPDU2MQTT.Core.Discovery;
 /// The browsable topic index, in memory.
 ///
 /// <para>
-/// Two bounds keep it from becoming a standing background indexer, and both survive the move off Orleans.
+/// Two bounds keep it from becoming a standing background indexer.
 /// In <b>time</b>: the index lives on a lease that readers renew, and once the lease lapses it drops
 /// everything — asking is what starts it, and not asking is what stops it. In <b>size</b>: at most
 /// <see cref="Capacity"/> topics, evicting the least recently seen, so a chatty broker cannot grow it
 /// without limit.
 /// </para>
 /// <para>
-/// The grain version ran a ten-second timer to notice its own lease had expired. Checking on read does the
+/// Both are checked on read rather than by a timer, which does the
 /// same job with nothing running in the background — which is the whole point of a leased index.
 /// </para>
 /// </summary>
@@ -55,7 +55,7 @@ public sealed class TopicIndex
     {
         // Checked on read rather than by a timer. An expired lease frees everything it was holding here,
         // which is the whole point of leasing it: nobody browsing means nothing indexed and nothing
-        // subscribed. The grain needed a tick to notice; nothing has to notice now.
+        // subscribed. Nothing has to notice: the lease is checked when someone looks.
         if (DateTime.UtcNow >= leaseUntilUtc && topics.Count > 0)
         {
             topics.Clear();

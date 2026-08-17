@@ -8,13 +8,13 @@ namespace rPDU2MQTT.Core.Integrations;
 ///
 /// <para>
 /// This is the inversion that makes a second make of hardware genuinely equal to the first. The supervising
-/// grain used to call the Vertiv client directly, so everything valuable that grain does — being the single
+/// The poller asks whoever handles the instance, so everything valuable it does — being the single
 /// cluster-wide activation for a device, and supervising the device/outlet/group children that outlet
 /// writes are routed through — was available to Vertiv and to nothing else. A plugin had to reimplement all
 /// of it or go without.
 /// </para>
 /// <para>
-/// Now the grain asks whoever handles the instance. Vertiv is one implementation; a plugin device is
+/// Vertiv is one implementation; a plugin device is
 /// another; both inherit the activation and the supervision.
 /// </para>
 /// </summary>
@@ -34,7 +34,7 @@ public interface IDeviceReader
 }
 
 /// <summary>
-/// Adapts an <see cref="IDeviceSourcePlugin"/> to the reader the supervising grain asks. A plugin declares
+/// Adapts an <see cref="IDeviceSourcePlugin"/> to the reader the poller asks. A plugin declares
 /// only how to read its hardware; everything about being polled once cluster-wide, supervising children and
 /// reporting failure is the host's, exactly as it is for the built-in poller.
 /// </summary>

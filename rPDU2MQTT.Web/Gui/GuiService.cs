@@ -53,11 +53,11 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly PluginSchemaSections? pluginSections;
     // Every integration this build carries, built-in or loaded from plugins/.
     private readonly Core.Integrations.IntegrationRegistry? integrations;
-    // The write seam. Routes to the outlet grain for a PDU, and to the owning plugin for a plugin device.
+    // The write seam. Routes to the PDU that reported the device, or to the plugin that owns it.
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
     // Anything that can offer nodes to adopt — the broker index today, a plugin tomorrow.
     private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
-    // The Status board, held in this process rather than projected by a grain.
+    // The Status board, held in this process.
     private readonly Core.Status.StatusBoard? statusBoard;
     private readonly Core.Diagnostics.ProcessRegistry? processes;
     private readonly Core.Discovery.TopicIndex? topicIndex;
@@ -322,7 +322,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return events ??= new GuiEventHub(ConfigSchema.Json,
                 // The header: version, MQTT, config writability, operator update.
                 new GuiEventHub.Feed("status", TimeSpan.FromSeconds(5), (_, ct) => BuildStatusAsync(null, ct)),
-                // The Status board's cards, straight from the component grains.
+                // The Status board's cards.
                 new GuiEventHub.Feed("board", TimeSpan.FromSeconds(3), (_, _) => BuildBoardAsync()),
                 // Readings for one instance ("livedata:<instance>"; bare "livedata" = the primary).
                 new GuiEventHub.Feed("livedata", TimeSpan.FromSeconds(2), BuildLiveDataAsync),
@@ -897,7 +897,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
 
-        // The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
+        // The Status board: every hop's card as the board judged it. The verdicts —
         app.MapGet("/api/status/board", async () => Results.Json(await BuildBoardAsync(), ConfigSchema.Json));
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
@@ -908,7 +908,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // Operator update report (#210), if the operator has written one to the CR status.
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
-            // The cluster-wide process list (v3: the ProcessRegistryGrain, replacing the MQTT heartbeat).
+            // The process list (the registry, replacing the MQTT heartbeat).
             var processList = processes?.Active() ?? [];
 
             // EmonCMS export health. The exporter runs only on the worker.
@@ -1002,7 +1002,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         // Each configured node's rolled-up value, per metric.
         //
-        // This used to be served by a parallel roll-up: a tree of node grains recomputing the same
+        // This used to be served by a parallel roll-up recomputing the same
         // hierarchy the graph builder computes, whose ONLY consumer was this endpoint. Two implementations
         // of one calculation, and the one nobody else read was the one shown on the diagnostics panel — so
         // a disagreement between them would have surfaced here as the truth.
