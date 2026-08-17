@@ -456,3 +456,36 @@ Notes
         delay/config topics, `availability_topic rPDU2MQTT/Status`, stable unique_ids, and
         `via_device rPDU2MQTT_hw` -> `rPDU2MQTT_helloworld`. Every topic in the document is one the bridge
         actually publishes, and the command topic round-trips back to the plugin.
+
+17. What has actually been RUN, and what has not
+    A stub rig now covers the main path end to end: a Vertiv-shaped PDU (`run/pdu.mjs` — /api with four
+    outlets, the login handshake, outlet control), the stub broker, a stub EmonCMS, and the example plugin
+    loaded as a device.
+
+    [x] PDU poll -> snapshot -> 150 MQTT topics, 37 Prometheus series, Home Assistant discovery (the device
+        plus all four outlets), EmonCMS input posts. Switched-off outlet 3 reads 0 W in the object model.
+    [x] Writes both ways, for a PDU and for a plugin device: the GUI endpoint and the MQTT command topic.
+        120.5 W -> 0 on a write, the state echo published, and a write to an unknown device refused with a
+        reason and NO echo.
+    [x] EmonCMS feed provisioning: lists feeds/inputs, creates the missing ones (6), sets processlists.
+    [x] All 31 GUI GET endpoints answer 200. The five that answer `ok:false` are correct refusals for
+        features this rig has not configured (Kubernetes-only endpoints, history off, no HA token).
+    [x] Status board: 15 cards, each correct for the rig's actual state.
+    [x] Clean SIGTERM shutdown, no unhandled exceptions across any run.
+    [x] One scare investigated and dismissed: the board reported MQTT "Disconnected" late in a long run.
+        The pre-removal build reports connected on the same rig — but only because it was queried 25s in.
+        Measured in the same window, this build reports connected too, with zero publish timeouts. The stub
+        broker degrades under sustained QoS1 traffic and the bridge correctly noticed and said so.
+
+    NOT run, and worth saying plainly:
+    [ ] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
+        only — the original "looks like ass in Chrome" report can only be confirmed by the maintainer.
+    [ ] OneView (multi-PDU aggregation) and OneView group control. The stub is a single non-OneView PDU.
+    [ ] Multiple PDU instances at once, which is what the write-ownership rule exists for. Covered by tests,
+        not by a run.
+    [ ] History backends answering queries (Prometheus/EmonCMS/Influx) and the Trends/Energy pages on real
+        stored data.
+    [ ] Kubernetes: the operator, the CRD config source, the chart applied to a live cluster. The chart is
+        rendered in ten combinations; rendering is not applying.
+    [ ] Redis/Valkey cache path (energy totals shared across restarts).
+    [ ] Real hardware.
