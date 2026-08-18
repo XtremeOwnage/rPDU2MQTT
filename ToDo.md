@@ -543,34 +543,31 @@ Notes
         moment renders. (Its start/end are milliseconds while its interval is seconds — worth knowing if
         anyone writes another stub.)
 
-21. One decision for you: what the flow shows when the number is not a positive known value
-    Three behaviours, all pre-existing and all the same question. Each is reproducible on the rig now.
+21. What the flow shows when the number is not a positive known value — DONE, all three
+    The three behaviours were one question, and the answer in each case was to say what is true.
 
-    a. A reading of ZERO is dropped. `FlowGraphBuilder`: `if (value <= 0) continue;` (there since #156), so
-       a switched-OFF outlet has no flow series at all — Prometheus prunes it, and a consumer cannot tell
-       "switched off" from "stopped reporting". The PDU object model reports its 0 correctly; only the flow
-       view differs.
-    b. An UNKNOWN node is published as a known zero. Bind a node to a Home Assistant entity reading
-       `unavailable`: the value source correctly records nothing, and the node still comes out as
-       `value=0 derivation=summed`. The link into it is "known" at 0, it survives because dropping it would
-       detach the chain below, and `ValueOf` reads "a link exists" as "the value is known".
-    c. A NEGATIVE reading is clamped to zero. `leaf[n.Id] = Math.Max(0, liveValue)`. A Modbus int16 holding
-       -500 W is read correctly (the poller maps it, the diagnostics card counts it) and published as 0.
-       This one may well be intended — the reverse direction is modelled by the `#in` keys — but the clamp
-       is silent, so a mis-modelled source looks like a load drawing nothing.
+    a. [x] A measured ZERO is reported. A switched-off outlet reads 0 and that is a fact about it: it is
+       there, drawing nothing. It now appears on the flow tiers at 0 — so a consumer can tell "switched
+       off" from "stopped reporting", and an energy dashboard sees a flat zero instead of a gap — and it
+       stays wired to its PDU, because a node with no parent loses its tier label in the exports. The
+       ribbon is zero-width either way: this is about the node being placed, not drawn. A node with
+       something below it still follows the old pass-through rule, and a node NOTHING measured is still
+       absent (an absence is not a zero either).
+    b. [x] An UNKNOWN node is unknown. `Sides` read a node's value off the links that survived the DRAWING
+       filter, so "a ribbon exists" was being taken as "the value is known" — a node bound to a Home
+       Assistant entity reading `unavailable` came out as a confident 0. Values now come from the topology
+       rather than from what was drawn, and a zero edge only counts as knowledge when the node at its far
+       end is itself measured. So an inverter measured at 0 still makes its loads zero; a feeder that knows
+       nothing leaves them unknown.
+       Separating "what is true" from "what is drawn" also fixed the reverse: the return lane and the
+       unmeasured remainder are real flows and now count toward a node's balance.
+    c. [x] A NEGATIVE reading is announced. The graph still clamps it — a ribbon cannot run backwards — but
+       the clamp is no longer silent: `FlowValueCache` records it through the existing `IWithheldSources`
+       seam, so the GUI says "Reported -500, and a negative realpower cannot flow forwards — it is shown as
+       0. If this source signs the reverse direction, bind that direction as 'realpower#in'." A positive
+       reading clears it, and a value on an `#in` metric is not reported at all: that direction is supposed
+       to carry the other way.
 
-    Why I have not just changed them: each moves every Sankey ribbon and every flow series, they interact
-    (fixing b without a re-lands zeros everywhere), and "absent", "zero" and "unknown" are product decisions
-    about what an operator should read from the diagram. Tell me which of the three you want and I will do
-    it — the fourth member of this family, a past instant showing present values, was unambiguous and is
-    already fixed (item 20).
-
-22. Modbus, exercised against a stub device
-    [x] `ModbusPollService` reads a real Modbus TCP conversation: function 3 for a holding register
-        (uint16 -> 1234 W) and function 4 for an input pair (uint32 big-endian -> 5000 W), both landing on
-        their flow nodes, with the diagnostics card reporting 2 bindings / 2 values / not stale.
-    [x] The one-reader rule holds live, not just in the unit tests: two config connections pointing at the
-        same host:port:unitId produced ONE device with three bindings and exactly three register requests
-        per pass — not two conversations racing for the gateway's single TCP slot.
-    [x] A negative int16 (-500 W) is read and mapped correctly by the poller; what happens to it after that
-        is item 21c.
+    11 tests across the three. On the rig, with a Modbus register at -500, a Home Assistant entity reading
+    unavailable and a PDU outlet switched off: the off outlet reports 0 under its own tier, the unavailable
+    node reports unknown, and the negative one is listed on /api/flow/withheld with the fix to make.
