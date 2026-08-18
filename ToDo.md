@@ -516,3 +516,30 @@ Notes
     Note for the rig, not a product bug: the stub broker does not replay retained messages on subscribe, so
     a cold browse looks empty there until new traffic arrives. A real broker replays, which is what makes a
     leased index usable the moment it subscribes.
+
+19. Found by pointing the rig at a stub Home Assistant
+    [x] The Energy Dashboard sync ran when the dashboard was switched OFF. Its `PublishingEnabled` read the
+        integration's overall `Enabled`, which is also true for MQTT discovery — so a bridge doing discovery
+        only opened a WebSocket to Home Assistant on every publisher pass and wrote energy sources into a
+        dashboard nobody had turned on. With a URL and token present (left over from the value source, or
+        from trying it once) nothing but that flag stood between this and someone's configuration; with no
+        URL it instead logged "could not publish configuration" every pass forever, which is the harmless
+        symptom of the same bug and had been visible in every run.
+        Now gated on `EnergyDashboard.Enabled`, and both `PublishAsync` and `SweepAsync` refuse outright if
+        called while off. 3 tests, sabotage-verified. On the rig: WebSocket attempts 3 -> 0, the value
+        source still reads its entities, and the recurring warning is gone.
+    [x] The Home Assistant VALUE source works end to end: two nodes bound to `sensor.*` entities, fetched
+        with bearer auth, and the live one reports 412.5 W into the flow.
+
+    [ ] SEPARATE, PRE-EXISTING, needs your call — and the same family as the `<= 0` question above.
+        A node whose only source says "I don't know" is published as a known ZERO. Reproduced with the HA
+        stub: `sensor.broken_sensor` returns `unavailable`, the value source correctly refuses to record
+        anything (it says so in its own comment), and the node bound to it still comes out as
+        `attic value=0 derivation=summed` — exported to Prometheus as 0 and drawn as a real zero.
+        Mechanism: the link into it is "known" with value 0 (its feeder has no value either, so the
+        remainder share is 0), the link survives because dropping it would detach the chain below, and
+        `ValueOf` then reads `anyIn == true` and returns `max(0, 0)`. So "a link exists" is being taken as
+        "the value is known".
+        A candidate fix is to treat a node with no measurement of its own and no POSITIVE flow on any side
+        as unknown rather than zero — but that changes what every childless node reports, so it is your
+        call, not mine.

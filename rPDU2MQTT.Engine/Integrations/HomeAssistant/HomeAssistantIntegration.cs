@@ -61,7 +61,14 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     /// </summary>
     public TimeSpan Interval(Config c) => TimeSpan.FromSeconds(Math.Max(30, c.Primary.PollInterval * 4));
 
-    public bool PublishingEnabled(Config c) => Enabled(c) && Misconfigured(c) is null;
+    /// <summary>
+    /// The configuration this integration publishes is the Energy Dashboard, so it is the dashboard's own
+    /// switch that governs — not <see cref="Enabled"/>, which is also true for discovery. Reading the wrong
+    /// one meant a bridge doing discovery only still opened a WebSocket to Home Assistant every pass and
+    /// wrote energy sources into a dashboard nobody had turned on (or, with no URL configured, logged a
+    /// failure every pass forever).
+    /// </summary>
+    public bool PublishingEnabled(Config c) => c.HASS.EnergyDashboard.Enabled && Misconfigured(c) is null;
 
     /// <summary>
     /// Configured is as far as this can honestly go without calling Home Assistant, and calling it belongs
@@ -81,6 +88,8 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     public async Task<string> PublishAsync(ExportPass pass, CancellationToken ct)
     {
         var ed = cfg.HASS.EnergyDashboard;
+        // Checked here too: a caller that reaches this without asking must not write to someone's dashboard.
+        if (!ed.Enabled) return "The Home Assistant Energy Dashboard sync is off.";
         var n = await sync.SyncAsync(ed.Url!, ed.Token!, ct);
         return $"Synced {n} energy source(s) into the Home Assistant Energy Dashboard.";
     }
@@ -89,6 +98,7 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     public async Task<string> SweepAsync(ExportPass pass, CancellationToken ct)
     {
         var ed = cfg.HASS.EnergyDashboard;
+        if (!ed.Enabled) return "The Home Assistant Energy Dashboard sync is off.";
         if (Misconfigured(cfg) is { } why) return why;
         var n = await sync.ClearAsync(ed.Url!, ed.Token!, ct);
         return $"Removed {n} energy source(s) from the Home Assistant Energy Dashboard.";
