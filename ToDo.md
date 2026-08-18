@@ -480,12 +480,26 @@ Notes
     NOT run, and worth saying plainly:
     [ ] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
         only — the original "looks like ass in Chrome" report can only be confirmed by the maintainer.
-    [ ] OneView (multi-PDU aggregation) and OneView group control. The stub is a single non-OneView PDU.
-    [ ] Multiple PDU instances at once, which is what the write-ownership rule exists for. Covered by tests,
-        not by a run.
-    [ ] History backends answering queries (Prometheus/EmonCMS/Influx) and the Trends/Energy pages on real
-        stored data.
-    [ ] Kubernetes: the operator, the CRD config source, the chart applied to a live cluster. The chart is
-        rendered in ten combinations; rendering is not applying.
-    [ ] Redis/Valkey cache path (energy totals shared across restarts).
+    [x] OneView (multi-PDU aggregation) and group control. A stub cluster (`run/oneview.mjs`: a master on
+        9098 proxying two members on 9101/9102, both carrying a group called "Rack 1") shows both members
+        polled and exported through the master, both groups published with their control topics, and a
+        group action fanning out to exactly its member outlets — `Rack 1` off actioned AAA outlet 0 through
+        port 9101 and BBB outlet 0 through 9102, leaving the non-member outlets at 200 W and 400 W.
+    [x] Two independently configured PDU instances at once — the case the write-ownership rule exists for.
+        Both polled and exported under their own device names, and a write addressed to rack-b's device hit
+        ONLY rack-b's stub (port 9096); rack-a received zero writes and its outlet never moved.
+    [x] History against a stub Prometheus query API (`run/prom.mjs`). The probe reports Reachable, the
+        Flow page's past-moment read returns the stored values for the requested instant, and
+        `/api/flow/series` builds one `max by (node)` range query over all seven flow nodes and renders
+        seven series from the answer.
+    [ ] History against EmonCMS and Influx (only the Prometheus provider has been exercised).
+    [~] Kubernetes. Every rendered object validates locally — Secret, PVC, both Roles and RoleBindings,
+        Service, five Deployments, the CronJob, the RpduConfig CR and the CRD itself all pass
+        `kubectl --dry-run=client`. (The one error in the combined run is kubectl merging a patch against
+        the CRD already installed on the cluster, not a defect: the CRD validates on its own.)
+    [ ] Applying any of it to a cluster. There IS a live cluster reachable from here — it already has this
+        project's CRD installed, i.e. it is the maintainer's own — so nothing was applied and no
+        server-side dry run was run against it. That is the maintainer's call to make, not mine.
+    [ ] Redis/Valkey cache path (energy totals shared across restarts). No redis/valkey binary and no
+        container runtime in this environment, so it cannot be exercised here at all.
     [ ] Real hardware.
