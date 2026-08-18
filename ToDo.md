@@ -571,3 +571,27 @@ Notes
     11 tests across the three. On the rig, with a Modbus register at -500, a Home Assistant entity reading
     unavailable and a PDU outlet switched off: the off outlet reports 0 under its own tier, the unavailable
     node reports unknown, and the negative one is listed on /api/flow/withheld with the fix to make.
+
+23. History was returning nothing at all — my bug, live on main since 9 August
+    Reported from the running instance: every Flow/Energy read said "No history for <instant> from
+    prometheus. The backend may not reach that far back, or may not hold this metric." The backend held it
+    fine — 238 samples of `rpdu2mqtt_flow_energytoday` spanning 08-08 to now.
+
+    [x] `NodeMatcher` built the label matcher with .NET `Regex.Escape`, which escapes '#'. PromQL reads a
+        matcher as a double-quoted STRING before the pattern ever sees it, and its escapes are Go's, so
+        `\#` is not an escape: the query is rejected whole — `parse error: unknown escape sequence U+0023`,
+        HTTP 400 — and every node comes back empty. The Flow page appends a return lane for every node
+        (`grid#in`), so ONE such id in the list killed the entire read. `Regex.Escape` was also emitting
+        single backslashes, which PromQL rejects for the same reason (`\.`).
+        Escaping is now RE2's metacharacters only, each backslash doubled so exactly one survives the
+        string. Verified against the reporter's own Prometheus: the query the fixed code emits returns all
+        six nodes at 2026-08-17 04:59:59Z, the instant that was failing.
+    [x] The reason was in the response body all along and was being thrown away — the log said only
+        "Prometheus answered 400". It now carries the body, so this class of failure is one log line rather
+        than an afternoon.
+    [x] 3 tests, sabotage-verified: '#' and ':' pass through untouched, '.' and '|' are escaped doubled,
+        and no query may contain a lone backslash.
+    Lesson: the old test asserted `a\.b` — the exact string PromQL refuses. It passed for weeks while the
+    feature was dead in production, because it tested the escaping against .NET's rules rather than against
+    the grammar the string was being sent to. A test that never sent the query could not tell the
+    difference; the one-line check that would have caught it is "does this parse where it is going".

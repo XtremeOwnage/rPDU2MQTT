@@ -63,7 +63,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
             var body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
-                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} over {steps.Count} step(s).");
+                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} over {steps.Count} step(s) — {Trim(body)}");
                 return empty;
             }
             return HistoryParsing.PrometheusRange(body, unix);
@@ -93,7 +93,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
             var body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
-                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} at {atUtc:u}.");
+                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} at {atUtc:u} — {Trim(body)}");
                 return new Dictionary<string, double>();
             }
             return HistoryParsing.PrometheusInstant(body);
@@ -104,6 +104,13 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
             return new Dictionary<string, double>();
         }
     }
+    /// <summary>
+    /// What the backend said, short enough for a log line. A rejected query answers with the reason —
+    /// "unknown escape sequence", a bad metric name — and dropping it left "no data" as the only visible
+    /// symptom of a query that never had a chance.
+    /// </summary>
+    private static string Trim(string body)
+        => body.Length <= 300 ? body.Replace('\n', ' ') : body[..300].Replace('\n', ' ') + "…";
 }
 
 /// <summary>

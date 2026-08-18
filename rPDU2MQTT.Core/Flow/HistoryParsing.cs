@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace rPDU2MQTT.Core.Flow;
@@ -161,13 +162,40 @@ public static class HistoryParsing
         catch (JsonException) { return null; }
     }
 
+    /// <summary>Characters RE2 reads as pattern syntax. ':' and '#' are ordinary text and must be left alone.</summary>
+    private const string RegexMeta = @"\.+*?()|[]{}^$";
+
     /// <summary>
     /// A Prometheus label matcher for the node ids asked about, so one query covers them all.
     /// </summary>
     /// <remarks>
-    /// Ids are regex-escaped: an outlet id is <c>outlet:pdu_1:4</c> and a synthetic one carries '#', and an
-    /// unescaped '.' or '|' in an id would silently widen the match to other nodes.
+    /// <para>
+    /// This has to satisfy two grammars at once, and getting either wrong breaks the whole query rather
+    /// than one node. PromQL reads the matcher as a double-quoted STRING first, and its escapes are Go's:
+    /// <c>\.</c> and <c>\#</c> are not escapes at all, so a query carrying one is rejected outright —
+    /// <c>parse error: unknown escape sequence</c>, an HTTP 400, and every node's history comes back empty.
+    /// What survives the string is then read by RE2 as the pattern.
+    /// </para>
+    /// <para>
+    /// So: escape only what RE2 treats as syntax, and emit each backslash doubled so one reaches the
+    /// pattern. <c>.NET Regex.Escape</c> does neither — it escapes '#' (which RE2 does not need and PromQL
+    /// rejects) and emits single backslashes — which is how every history read that included a return-lane
+    /// id like <c>grid#in</c> failed silently for weeks.
+    /// </para>
     /// </remarks>
     public static string NodeMatcher(IEnumerable<string> nodeIds)
-        => string.Join('|', nodeIds.Select(System.Text.RegularExpressions.Regex.Escape));
+        => string.Join('|', nodeIds.Select(Escape));
+
+    private static string Escape(string id)
+    {
+        var sb = new StringBuilder(id.Length + 8);
+        foreach (var c in id)
+        {
+            // A quote would end the string literal; the pattern is happy with a bare one.
+            if (c == '"') { sb.Append("\\\""); continue; }
+            if (RegexMeta.Contains(c)) sb.Append(@"\\");
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
 }

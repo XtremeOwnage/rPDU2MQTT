@@ -87,12 +87,43 @@ public class FlowHistoryTests
     [Fact]
     public void NodeMatcher_EscapesIdsSoOneNodeCannotMatchAnother()
     {
-        // Outlet ids carry ':' and synthetic ones '#'; a '.' or '|' left unescaped widens the match.
+        // A '.' or '|' left unescaped widens the match to other nodes. The backslash is DOUBLED because
+        // PromQL reads this as a string first and hands what survives to the pattern.
         var matcher = HistoryParsing.NodeMatcher(["outlet:pdu_1:4", "a.b", "c|d"]);
 
-        Assert.Contains(@"a\.b", matcher);
+        Assert.Contains(@"a\\.b", matcher);
         Assert.DoesNotContain("a.b|", matcher);
-        Assert.Contains(@"c\|d", matcher);
+        Assert.Contains(@"c\\|d", matcher);
+    }
+
+    [Fact]
+    public void NodeMatcher_LeavesTheCharactersNodeIdsActuallyContain_Alone()
+    {
+        // The bug this exists for: '#' is ordinary text to RE2, and PromQL rejects "\#" as an unknown
+        // escape — so a single return-lane id in the list failed the whole query with an HTTP 400, and
+        // every node's history came back empty. ':' is the same kind of character, in every outlet id.
+        var matcher = HistoryParsing.NodeMatcher(["grid#in", "outlet:pdu_1:4", "eg4-flexboss21-battery#in"]);
+
+        Assert.Equal("grid#in|outlet:pdu_1:4|eg4-flexboss21-battery#in", matcher);
+    }
+
+    [Fact]
+    public void NodeQuery_CarriesNoEscapePromqlWillRefuse()
+    {
+        // PromQL's string escapes are Go's: a lone backslash before anything but " \ n r t etc. is a parse
+        // error. Every backslash we emit must therefore be part of a pair.
+        var query = HistoryParsing.NodeQuery("rpdu2mqtt_flow_energytoday",
+            ["grid#in", "outlet:pdu_1:4", "a.b", "solar"]);
+
+        for (var i = 0; i < query.Length; i++)
+        {
+            if (query[i] != '\\') continue;
+            Assert.True(i + 1 < query.Length && query[i + 1] == '\\',
+                $"lone backslash at {i} in: {query}");
+            i++;   // step over the pair
+        }
+
+        Assert.DoesNotContain(@"\#", query);
     }
 
     // --- EmonCMS ---------------------------------------------------------------------------------------
