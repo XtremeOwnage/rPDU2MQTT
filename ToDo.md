@@ -437,12 +437,8 @@ Notes
     that device's whole MQTT tree was landing at the broker root. The tests all asked "does the refusal say
     the right thing", none asked "does a write that should work, work" — and none looked at the topics.
 
-    [ ] SEPARATE, PRE-EXISTING, needs your call: `FlowGraphBuilder` drops any outlet reading `<= 0` from the
-        graph (`if (value <= 0) continue;`, there since #156). So a switched-OFF outlet does not read 0 W on
-        the flow tiers — its series disappears entirely, and Prometheus prunes it. The PDU object model
-        reports 0 correctly; only the flow view differs. Absent and zero are different facts: a consumer
-        cannot tell "switched off" from "no longer reported". Leaving it alone because changing it moves
-        every Sankey ribbon and every flow series, which is a bigger decision than this branch.
+    [ ] SEPARATE, PRE-EXISTING — see item 21, where this and two related findings are collected into one
+        question for you.
     [x] A plugin device got no Home Assistant entities at all. Discovery was built from the Vertiv rPDU
         document alone (`data.PDUs`), which a plugin has none of, so the device that published a full topic
         tree and full Prometheus series was invisible to Home Assistant. It is discovered from the snapshot
@@ -531,18 +527,7 @@ Notes
     [x] The Home Assistant VALUE source works end to end: two nodes bound to `sensor.*` entities, fetched
         with bearer auth, and the live one reports 412.5 W into the flow.
 
-    [ ] SEPARATE, PRE-EXISTING, needs your call — and the same family as the `<= 0` question above.
-        A node whose only source says "I don't know" is published as a known ZERO. Reproduced with the HA
-        stub: `sensor.broken_sensor` returns `unavailable`, the value source correctly refuses to record
-        anything (it says so in its own comment), and the node bound to it still comes out as
-        `attic value=0 derivation=summed` — exported to Prometheus as 0 and drawn as a real zero.
-        Mechanism: the link into it is "known" with value 0 (its feeder has no value either, so the
-        remainder share is 0), the link survives because dropping it would detach the chain below, and
-        `ValueOf` then reads `anyIn == true` and returns `max(0, 0)`. So "a link exists" is being taken as
-        "the value is known".
-        A candidate fix is to treat a node with no measurement of its own and no POSITIVE flow on any side
-        as unknown rather than zero — but that changes what every childless node reports, so it is your
-        call, not mine.
+    [ ] SEPARATE, PRE-EXISTING — see item 21.
 
 20. The history view was half then and half now
     [x] A view of a past instant showed the STORED value for every node the backend held, and the CURRENT
@@ -557,3 +542,35 @@ Notes
     [x] EmonCMS as a history backend works: 12 feeds listed, `feed/data.json` read per node, and a past
         moment renders. (Its start/end are milliseconds while its interval is seconds — worth knowing if
         anyone writes another stub.)
+
+21. One decision for you: what the flow shows when the number is not a positive known value
+    Three behaviours, all pre-existing and all the same question. Each is reproducible on the rig now.
+
+    a. A reading of ZERO is dropped. `FlowGraphBuilder`: `if (value <= 0) continue;` (there since #156), so
+       a switched-OFF outlet has no flow series at all — Prometheus prunes it, and a consumer cannot tell
+       "switched off" from "stopped reporting". The PDU object model reports its 0 correctly; only the flow
+       view differs.
+    b. An UNKNOWN node is published as a known zero. Bind a node to a Home Assistant entity reading
+       `unavailable`: the value source correctly records nothing, and the node still comes out as
+       `value=0 derivation=summed`. The link into it is "known" at 0, it survives because dropping it would
+       detach the chain below, and `ValueOf` reads "a link exists" as "the value is known".
+    c. A NEGATIVE reading is clamped to zero. `leaf[n.Id] = Math.Max(0, liveValue)`. A Modbus int16 holding
+       -500 W is read correctly (the poller maps it, the diagnostics card counts it) and published as 0.
+       This one may well be intended — the reverse direction is modelled by the `#in` keys — but the clamp
+       is silent, so a mis-modelled source looks like a load drawing nothing.
+
+    Why I have not just changed them: each moves every Sankey ribbon and every flow series, they interact
+    (fixing b without a re-lands zeros everywhere), and "absent", "zero" and "unknown" are product decisions
+    about what an operator should read from the diagram. Tell me which of the three you want and I will do
+    it — the fourth member of this family, a past instant showing present values, was unambiguous and is
+    already fixed (item 20).
+
+22. Modbus, exercised against a stub device
+    [x] `ModbusPollService` reads a real Modbus TCP conversation: function 3 for a holding register
+        (uint16 -> 1234 W) and function 4 for an input pair (uint32 big-endian -> 5000 W), both landing on
+        their flow nodes, with the diagnostics card reporting 2 bindings / 2 values / not stale.
+    [x] The one-reader rule holds live, not just in the unit tests: two config connections pointing at the
+        same host:port:unitId produced ONE device with three bindings and exactly three register requests
+        per pass — not two conversations racing for the gateway's single TCP slot.
+    [x] A negative int16 (-500 W) is read and mapped correctly by the poller; what happens to it after that
+        is item 21c.
