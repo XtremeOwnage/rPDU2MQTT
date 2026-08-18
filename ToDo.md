@@ -503,3 +503,16 @@ Notes
     [ ] Redis/Valkey cache path (energy totals shared across restarts). No redis/valkey binary and no
         container runtime in this environment, so it cannot be exercised here at all.
     [ ] Real hardware.
+
+18. Found by running the discovery capability
+    [x] `/api/discover/nodes` offered the bridge's OWN published topics — all 100 of the first hundred were
+        ours, so the third-party topics someone is actually looking for were crowded out entirely, and
+        adopting one would have fed the bridge its own readings as a source. `MqttNodeProvider` now skips
+        everything under the configured parent topic and the Home Assistant discovery prefix, matched by
+        segment (so `rPDU2MQTT_backup/…` is somebody else's tree) and read from config (so a second bridge
+        under a different parent topic can still be adopted). The Home Assistant importer already refused
+        our own devices for the same reason; this is the same rule in the other picker.
+        3 tests, sabotage-verified. Verified on the rig: 2 offered, 0 ours.
+    Note for the rig, not a product bug: the stub broker does not replay retained messages on subscribe, so
+    a cold browse looks empty there until new traffic arrives. A real broker replays, which is what makes a
+    leased index usable the moment it subscribes.

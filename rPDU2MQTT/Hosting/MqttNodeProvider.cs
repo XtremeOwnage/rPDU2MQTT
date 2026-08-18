@@ -30,7 +30,20 @@ public sealed class MqttNodeProvider : INodeProvider
     {
         // Renewing is what keeps the subscription open: asking is browsing.
         index.Renew(null);
-        var samples = index.Search(search, 100);
+
+        // Never offer this bridge's own output. Everything under the parent topic and the Home Assistant
+        // discovery prefix is what it just published; adopting one as a source feeds the bridge its own
+        // readings, and on a busy broker they crowd out the third-party topics someone is actually looking
+        // for — every one of the first hundred offered was our own. (The Home Assistant importer already
+        // skips our own devices for the same reason.)
+        // Searched wide and trimmed after filtering: the index is capped at 200 per search, and asking for
+        // 100 before dropping our own would return a page of nothing else.
+        var mine = Own(cfg);
+        var samples = index.Search(search, 200)
+            .Where(s => !IsOwn(s.Topic, mine))
+            .Take(100)
+            .ToList();
+
         var nodes = samples.Select(s =>
         {
             // What it looks like, read from the payload by the same analyzer the node editor uses — so a
@@ -48,6 +61,17 @@ public sealed class MqttNodeProvider : INodeProvider
         }).ToList();
         return Task.FromResult<IReadOnlyList<DiscoveredNode>>(nodes);
     }
+
+    /// <summary>The topic prefixes this bridge publishes under.</summary>
+    private static string[] Own(Config cfg)
+        => new[] { cfg.MQTT.ParentTopic, cfg.HASS.DiscoveryTopic }
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p!.Trim().Trim('/'))
+            .ToArray();
+
+    private static bool IsOwn(string topic, string[] mine)
+        => mine.Any(p => topic.Equals(p, StringComparison.OrdinalIgnoreCase)
+                      || topic.StartsWith(p + "/", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>A node id someone might reasonably accept — the last meaningful topic segment.</summary>
     private static string Suggest(string topic)
