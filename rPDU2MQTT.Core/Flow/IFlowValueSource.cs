@@ -15,4 +15,16 @@ public interface IFlowValueSource
     /// Values are per-metric, so a node can feed both the power and the energy roll-up from different topics.
     /// </summary>
     bool TryGetValue(string nodeId, string metric, out double value);
+
+    /// <summary>
+    /// True when this source is the only authority on a node's value, so a reading from anywhere else — the
+    /// device snapshot included — must not be used to fill a gap in it.
+    ///
+    /// <para>
+    /// A point-in-time source sets this. Without it a view of "an hour ago" showed the stored value for
+    /// every node the backend held, and the CURRENT reading for every node it did not, with nothing to tell
+    /// them apart.
+    /// </para>
+    /// </summary>
+    bool Exclusive => false;
 }

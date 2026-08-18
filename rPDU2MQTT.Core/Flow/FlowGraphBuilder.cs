@@ -121,7 +121,16 @@ public static class FlowGraphBuilder
                 var m = outlet.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
 
                 double value;
-                if (m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var reported))
+                // An exclusive source answers for every node or not at all: the snapshot is what the device
+                // reads NOW, and dropping it into a view of an hour ago is how a past instant ends up half
+                // then and half now with nothing marking which is which.
+                if (live is { Exclusive: true })
+                {
+                    if (!live.TryGetValue(outletId, metric, out var stored)) continue;
+                    value = stored;
+                    if (string.IsNullOrEmpty(units)) units = FlowUnits.Canonical(metric);
+                }
+                else if (m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var reported))
                 {
                     value = reported;
                     if (string.IsNullOrEmpty(units)) units = m.Units;

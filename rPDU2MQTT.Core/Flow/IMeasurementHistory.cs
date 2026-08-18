@@ -37,6 +37,9 @@ public interface IMeasurementHistory
 /// </summary>
 public sealed class HistoricalFlowValueSource : IFlowValueSource
 {
+    /// <summary>Nothing else may fill a gap in a past instant — least of all the present.</summary>
+    public bool Exclusive => true;
+
     private readonly IReadOnlyDictionary<string, double> values;
     private readonly string metric;
 

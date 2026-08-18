@@ -543,3 +543,17 @@ Notes
         A candidate fix is to treat a node with no measurement of its own and no POSITIVE flow on any side
         as unknown rather than zero — but that changes what every childless node reports, so it is your
         call, not mine.
+
+20. The history view was half then and half now
+    [x] A view of a past instant showed the STORED value for every node the backend held, and the CURRENT
+        reading for every node it did not, with nothing marking which was which. Reproduced with a stub
+        EmonCMS: at "ten minutes ago", the four flow nodes read 222 (stored) while the PDU outlets read
+        100/200/300 — their live values that second, because outlet leaves are seeded from the device
+        snapshot rather than from the value source.
+        `IFlowValueSource.Exclusive` (default false, true only for `HistoricalFlowValueSource`) says "I am
+        the only authority here", and the builder then refuses to fill a gap from the snapshot. A past
+        instant now shows what was stored for it and nothing else; the live view is untouched.
+        3 tests. On the rig: the outlets are absent from the past view and unchanged in the live one.
+    [x] EmonCMS as a history backend works: 12 feeds listed, `feed/data.json` read per node, and a past
+        moment renders. (Its start/end are milliseconds while its interval is seconds — worth knowing if
+        anyone writes another stub.)
