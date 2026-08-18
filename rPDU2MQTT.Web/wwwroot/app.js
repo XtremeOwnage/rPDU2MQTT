@@ -184,25 +184,91 @@ function activate(link     , sec     ) {
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
 function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false) {
-  let z = 1; const min = 0.25, max = 6;
+  let z = 1; const min = 0.15, max = 6;
+  // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
+  let chosen = false;
   const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
   apply();
+
+  const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
+
+  /// Scale the diagram down until it fits the pane's width. Never scales UP: a small diagram is not
+  /// improved by being blown up to fill the pane.
+  const fit = () => {
+    const w = width();
+    if (!w || !baseW) return;
+    const next = Math.min(1, Math.max(min, (w - 6) / baseW));
+    if (Math.abs(next - z) < 0.005) return;
+    z = next; apply(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+  };
+
+  /// Zoom about a point given in client coordinates, keeping whatever is under it still.
+  const zoomAbout = (clientX        , clientY        , factor        ) => {
+    const r = scroll.getBoundingClientRect();
+    const cx = scroll.scrollLeft + (clientX - r.left), cy = scroll.scrollTop + (clientY - r.top);
+    const prev = z;
+    z = Math.min(max, Math.max(min, z * factor));
+    if (z === prev) return;
+    chosen = true;
+    apply();
+    const k = z / prev;
+    scroll.scrollLeft = cx * k - (clientX - r.left);
+    scroll.scrollTop = cy * k - (clientY - r.top);
+  };
+
+  // A phone has no wheel and no Ctrl, so the desktop gesture leaves touch with no zoom at all — and the
+  // diagram is far wider than the screen, which is the state it opened in. Let the browser scroll (that is
+  // the pan, with its own inertia) and take the two-finger gesture for ourselves.
+  try { scroll.style.touchAction = 'pan-x pan-y'; } catch { /* older stub styles */ }
 
   const onWheel = (e     ) => {
     if (!(e.ctrlKey || e.metaKey)) return;   // plain wheel: let the container scroll normally
     e.preventDefault();
-    const r = scroll.getBoundingClientRect();
-    const cx = scroll.scrollLeft + (e.clientX - r.left), cy = scroll.scrollTop + (e.clientY - r.top);
-    const prev = z;
-    z = Math.min(max, Math.max(min, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-    if (z === prev) return;
-    apply();
-    const k = z / prev;
-    scroll.scrollLeft = cx * k - (e.clientX - r.left);
-    scroll.scrollTop = cy * k - (e.clientY - r.top);
+    zoomAbout(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
   };
   scroll.addEventListener('wheel', onWheel, { passive: false });
   const cleanups = [() => scroll.removeEventListener('wheel', onWheel)];
+
+  // --- Pinch, for touch and trackpad-as-pointer. Two live pointers own the gesture; one is a pan.
+  const pts = new Map                                  ();
+  let pinchFrom = 0;
+  const spread = () => {
+    const [a, b] = [...pts.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  const mid = () => {
+    const [a, b] = [...pts.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+
+  const onPointerDown = (e     ) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) pinchFrom = spread();
+  };
+  const onPointerMove = (e     ) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size !== 2 || !pinchFrom) return;
+    e.preventDefault?.();
+    const now = spread();
+    if (!now) return;
+    const m = mid();
+    zoomAbout(m.x, m.y, now / pinchFrom);
+    pinchFrom = now;
+  };
+  const forget = (e     ) => { pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+
+  scroll.addEventListener('pointerdown', onPointerDown);
+  scroll.addEventListener('pointermove', onPointerMove, { passive: false });
+  scroll.addEventListener('pointerup', forget);
+  scroll.addEventListener('pointercancel', forget);
+  cleanups.push(() => {
+    scroll.removeEventListener('pointerdown', onPointerDown);
+    scroll.removeEventListener('pointermove', onPointerMove);
+    scroll.removeEventListener('pointerup', forget);
+    scroll.removeEventListener('pointercancel', forget);
+  });
 
   if (pan) {
     // `armed` on press, but only actually pan once the pointer passes a small threshold. Without that, a plain
@@ -211,12 +277,13 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     let armed = false, panning = false, sx = 0, sy = 0, sl = 0, st = 0;
     scroll.style.cursor = 'grab';
     const onDown = (e     ) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || pts.size > 1) return;
       armed = true; panning = false; sx = e.clientX; sy = e.clientY; sl = scroll.scrollLeft; st = scroll.scrollTop;
     };
     // Track on window so a drag that runs past the container edge keeps panning until release.
     const onMove = (e     ) => {
-      if (!armed) return;
+      // Two fingers is a pinch, and on touch the browser is already scrolling for us.
+      if (!armed || pts.size > 1) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
       if (!panning && Math.hypot(dx, dy) < 4) return;   // still within click tolerance — leave the click alone
       panning = true; scroll.style.cursor = 'grabbing';
@@ -226,10 +293,30 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     scroll.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    cleanups.push(() => { scroll.removeEventListener('pointerdown', onDown); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); });
+    window.addEventListener('pointercancel', onUp);
+    cleanups.push(() => {
+      scroll.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    });
   }
 
-  return () => cleanups.forEach(f => f());
+  // Open fitted when the pane cannot show the diagram at its own size — which on a phone is always. Wide
+  // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
+  if (width() && width() < baseW) fit();
+
+  // Follow a rotation or a pane resize, unless the reader has since set their own zoom.
+  let ro      = null;
+  try {
+    ro = new (globalThis       ).ResizeObserver(() => { if (!chosen) fit(); });
+    ro.observe(scroll);
+    cleanups.push(() => ro.disconnect());
+  } catch { /* no ResizeObserver: the fit on open is what matters */ }
+
+  const detach = () => cleanups.forEach(f => f());
+  (detach       ).fit = () => { chosen = false; fit(); };
+  return detach;
 }
 
 // --- Multi-PDU: per-tab instance selector ---
@@ -3139,8 +3226,19 @@ function addFlowSection(nav     , sections     ) {
 
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
-    wrap.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag to pan · scroll to move · Ctrl/⌘ + scroll to zoom.' }));
-    attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
+    // and being told to use them while the diagram sits three screens wide is its own kind of broken.
+    const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+    const fitBtn = btn('Fit');
+    fitBtn.onclick = () => (zoom       ).fit();
+    fitBtn.style.padding = '1px 8px';
+    fitBtn.style.fontSize = '11px';
+    hints.appendChild(fitBtn);
+    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    wrap.appendChild(hints);
   };
 
   // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.

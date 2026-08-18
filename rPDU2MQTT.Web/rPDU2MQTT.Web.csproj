@@ -48,6 +48,7 @@
 			<GuiSource Include="web\energyshow.check.mjs" />
 			<GuiSource Include="web\history.check.mjs" />
 			<GuiSource Include="web\trends.check.mjs" />
+			<GuiSource Include="web\mobile.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -85,6 +86,9 @@
 		<!-- A plugin is a drop-in DLL only for as long as no TypeScript names one. This renders a plugin the
 		     GUI has never heard of and asserts it gets a nav entry, generated fields and its buttons. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugin.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- The chart on a phone: opened at its natural width inside a ~390px screen, with the only zoom
+		     gesture being Ctrl/⌘ + wheel — neither half of which a touch device has. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/mobile.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

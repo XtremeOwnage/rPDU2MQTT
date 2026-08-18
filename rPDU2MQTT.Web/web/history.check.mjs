@@ -73,9 +73,10 @@ await new Promise(r => setTimeout(r, 50));
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
 await new Promise(r => setTimeout(r, 300));
 
-// Both the Flow and Energy pages carry the control, so scope to the Flow section — its pan/zoom footer
-// is the marker.
-const flowSection = () => query(getEl('sections'), '.section', true).find(x => x.textContent.includes('Drag to pan'));
+// Both the Flow and Energy pages carry the control, so scope to the Flow section — its gesture footer is
+// the marker. Matched by class, not by the sentence in it: the wording is copy and changes.
+const flowSection = () => query(getEl('sections'), '.section', true)
+  .find(x => query(x, '.flow-gestures', true).length > 0);
 if (!flowSection()) fail('could not find the Flow section');
 
 const labels = () => query(flowSection(), 'text', true).map(t => t.textContent).join(' ');
