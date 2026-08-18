@@ -595,3 +595,16 @@ Notes
     feature was dead in production, because it tested the escaping against .NET's rules rather than against
     the grammar the string was being sent to. A test that never sent the query could not tell the
     difference; the one-line check that would have caught it is "does this parse where it is going".
+
+24. The remainder crossed the diagram to reach its parent
+    Reported from a live chart: Rack-PDU-1's "Unmeasured load" was drawn below Rack-PDU-2's devices, so its
+    ribbon swept across the whole of PDU-2's block to get there.
+    [x] #366 put the remainder below its measured siblings by sorting `remainder` FIRST in the column's
+        ordering key. That is only the same thing as "below its siblings" when the column has one parent:
+        with two, every remainder was pushed under every measured node of the whole column, and the ribbons
+        had to cross to reach them. The feeder barycenter now leads, which groups each parent's children
+        together, and the remainder settles at the bottom of its own group.
+    [x] The check only ever had one parent, which is why it passed. It now renders two PDUs each with a
+        remainder and asserts both properties: the families do not interleave, and each remainder is last
+        within its own. Sabotage-verified — restoring the old key order fails it with the exact complaint
+        the report made.

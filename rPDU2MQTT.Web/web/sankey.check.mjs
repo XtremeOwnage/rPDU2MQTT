@@ -169,5 +169,59 @@ for (const id of ['pdu_1', 'fridge']) {
     fail(`the unmetered remainder is drawn above ${id} — it is the last figure calculated and belongs below`);
 }
 
+// --- Two parents, each with a remainder: every child stays in its own parent's block.
+//
+// Reported from a live diagram: PDU-1's "Unmeasured load" was drawn below PDU-2's devices, so its ribbon
+// swept across the whole of PDU-2's block to reach it. The remainder was being sorted below every measured
+// node in the COLUMN rather than below its own siblings, which is only the same thing when there is one
+// parent — and the check only ever had one.
+const twoParents = await render({
+  ok: true, metric: 'energytoday', units: 'kWh',
+  nodes: [
+    { id: 'panel', label: 'Main Panel', value: 138.876 },
+    { id: 'pdu_1', label: 'Rack-PDU-1', value: 47.685 },
+    { id: 'pdu_2', label: 'Rack-PDU-2', value: 45.897 },
+    { id: 'kube01', label: 'Proxmox: Kube01', value: 1.99 },
+    { id: 'kube05', label: 'Proxmox: Kube05', value: 1.37 },
+    { id: 'nas', label: 'Synology: NAS', value: 1.075 },
+    { id: 'pdu_1#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 43.25 },
+    { id: 'r730xd', label: 'Dell: r730XD', value: 5.841 },
+    { id: 'edgerouter', label: 'Edgerouter', value: 0.321 },
+    { id: 'crs504', label: 'CRS504', value: 0.188 },
+    { id: 'pdu_2#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 39.547 },
+  ],
+  links: [
+    { source: 'panel', target: 'pdu_1', value: 47.685 },
+    { source: 'panel', target: 'pdu_2', value: 45.897 },
+    { source: 'pdu_1', target: 'kube01', value: 1.99 },
+    { source: 'pdu_1', target: 'kube05', value: 1.37 },
+    { source: 'pdu_1', target: 'nas', value: 1.075 },
+    { source: 'pdu_1', target: 'pdu_1#unmeasured', value: 43.25 },
+    { source: 'pdu_2', target: 'r730xd', value: 5.841 },
+    { source: 'pdu_2', target: 'edgerouter', value: 0.321 },
+    { source: 'pdu_2', target: 'crs504', value: 0.188 },
+    { source: 'pdu_2', target: 'pdu_2#unmeasured', value: 39.547 },
+  ],
+}, 'rect');
+
+const y2 = (id) => {
+  const r = twoParents.find(x => x.attrs['data-node'] === id);
+  if (!r) fail(`no node drawn for ${id}`);
+  return Number(r.attrs.y);
+};
+const firstFamily = ['kube01', 'kube05', 'nas', 'pdu_1#unmeasured'].map(y2);
+const secondFamily = ['r730xd', 'edgerouter', 'crs504', 'pdu_2#unmeasured'].map(y2);
+
+// Each parent's children occupy a contiguous band: the lowest of PDU-1's is above the highest of PDU-2's.
+if (Math.max(...firstFamily) > Math.min(...secondFamily))
+  fail('a child of Rack-PDU-1 is drawn below a child of Rack-PDU-2 — the two families interleave, '
+     + 'so their ribbons have to cross');
+
+// ...and each remainder is the last of ITS OWN family, not of the column.
+if (y2('pdu_1#unmeasured') < Math.max(...['kube01', 'kube05', 'nas'].map(y2)))
+  fail("Rack-PDU-1's remainder is drawn above its own measured siblings");
+if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(y2)))
+  fail("Rack-PDU-2's remainder is drawn above its own measured siblings");
+
 console.log(`sankey: night-time chain holds together (MPPTs within ${Math.round(drift)}px of Solar), `
-  + `${ribbons.length} ribbons all visible; the unmetered remainder sits below its measured siblings`);
+  + `${ribbons.length} ribbons all visible; each parent's remainder sits below its OWN siblings and the two families do not interleave`);
