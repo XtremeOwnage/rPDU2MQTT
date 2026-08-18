@@ -594,8 +594,19 @@ export function addFlowSection(nav: any, sections: any) {
 
     const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg); wrap.appendChild(scroll);
-    wrap.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag to pan · scroll to move · Ctrl/⌘ + scroll to zoom.' }));
-    attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
+    // and being told to use them while the diagram sits three screens wide is its own kind of broken.
+    const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+    const fitBtn = btn('Fit');
+    fitBtn.onclick = () => (zoom as any).fit();
+    fitBtn.style.padding = '1px 8px';
+    fitBtn.style.fontSize = '11px';
+    hints.appendChild(fitBtn);
+    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    wrap.appendChild(hints);
   };
 
   // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.

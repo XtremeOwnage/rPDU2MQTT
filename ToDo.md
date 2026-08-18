@@ -608,3 +608,24 @@ Notes
         remainder and asserts both properties: the families do not interleave, and each remainder is last
         within its own. Sabotage-verified — restoring the old key order fails it with the exact complaint
         the report made.
+
+25. The flow chart on a phone
+    Reported from a real one: it looks bad and neither panning nor zooming works well.
+    [x] It opened at the diagram's natural width — over a thousand pixels — inside a ~390px screen, so the
+        first thing a phone showed was a sliver of it. `attachZoom` now scales to the pane it is in on open,
+        and follows a rotation or a resize (unless the reader has since set their own zoom). It never scales
+        UP, and it stops at a legibility floor: past a point, shrinking further trades one unreadable
+        diagram for another and scrolling is the better answer.
+    [x] The only zoom gesture was Ctrl/⌘ + wheel — a touch device has neither half, so there was no way to
+        zoom at all. Two-finger pinch now zooms about the midpoint, sharing the same maths as the wheel.
+    [x] Panning fought the browser. The container now declares `touch-action: pan-x pan-y`, so a swipe is
+        the browser's own scroll (with its inertia) and only the two-finger gesture is ours; the drag-pan
+        stands down while a second pointer is present, and a cancelled gesture no longer leaves it armed.
+    [x] A `Fit` control, because a reader who has zoomed in needs a way back to the whole diagram, and the
+        gesture line now names what the device can actually do rather than telling a phone about Ctrl.
+    [x] `mobile.check.mjs`, in the build: the chart opens scaled to its pane, a synthesised two-finger
+        pinch zooms it in and back out, native panning is left to the browser, and Fit is one tap away.
+        Sabotage-verified on both halves.
+    Note: the history check located the Flow section by matching the sentence "Drag to pan", so changing
+    that copy broke it. It matches a class now — a check should not be the reason a sentence cannot be
+    reworded.
