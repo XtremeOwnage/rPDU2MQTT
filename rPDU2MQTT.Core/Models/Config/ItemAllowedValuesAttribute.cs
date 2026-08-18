@@ -33,3 +33,20 @@ public sealed class MetricItemChoicesAttribute : Attribute
 public sealed class TagChoicesAttribute : Attribute
 {
 }
+
+/// <summary>
+/// Which nav group a config section belongs to, declared where the section is.
+///
+/// <para>
+/// The client used to hold this list. Keeping the grouping in two places meant a new section could be
+/// registered, rendered and reachable while sitting in the wrong group — or in System, the catch-all —
+/// with nothing to say it had been forgotten.
+/// </para>
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class NavGroupAttribute : Attribute
+{
+    public NavGroupAttribute(string group) => Group = group;
+
+    public string Group { get; }
+}

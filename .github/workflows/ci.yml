@@ -39,6 +39,13 @@ jobs:
         run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
+      # Plugins are off by default, so the default render never reaches the volume/mount they add. Both
+      # combinations, because the mount block is shared with the config volume and the two gate separately.
+      - name: helm template (plugins)
+        run: |
+          helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true | grep -q 'mountPath: /app/plugins'
+          helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true --set kubernetesConfigSource.enabled=true \
+            | grep -q 'mountPath: /app/plugins' 
 
       - name: helm template (split roles)
         run: |
@@ -54,16 +61,18 @@ jobs:
             echo "$out" | grep -q "value: \"$role\"" || { echo "missing RPDU2MQTT_ROLE=$role"; exit 1; }
           done
 
-      - name: helm template (Orleans membership CRDs)
+      - name: helm template (no cluster coordination)
         run: |
-          # The silos store membership in these CRDs; without them every pod crash-loops on
-          # "Failure reading all silo entries". They must ship with the chart, not be created at runtime.
-          out=$(helm template rpdu2mqtt charts/rpdu2mqtt --include-crds --set split.enabled=true)
-          for crd in clusterversions.orleans.dot.net silos.orleans.dot.net; do
-            echo "$out" | grep -q "name: $crd" || { echo "chart must ship the $crd CRD"; exit 1; }
+          # v4 coordinates in one process: nothing in this chart should still be wiring a cluster together.
+          # Checked across every combination, because these blocks used to be gated by a helper that turned
+          # them on for split roles, the operator, or replicaCount > 1 — three ways to reach dead template.
+          for args in "" "--set split.enabled=true" "--set operator.enabled=true" "--set replicaCount=3" \
+                      "--set networkPolicy.enabled=true --set networkPolicy.restrictEgress=true"; do
+            out=$(helm template rpdu2mqtt charts/rpdu2mqtt $args --include-crds)
+            echo "$out" | grep -iq 'orleans' && { echo "clustering config came back with [$args]"; exit 1; }
+            echo "$out" | grep -Eq 'containerPort: (11111|30000)|port: (11111|30000)' \
+              && { echo "silo ports came back with [$args]"; exit 1; }
           done
-          # ...and because they ship, nothing needs cluster-scoped write access to CRDs.
-          echo "$out" | grep -q 'customresourcedefinitions' && { echo "app should not be granted CRD permissions"; exit 1; }
           exit 0
 
       - name: helm template (scheduled restart)

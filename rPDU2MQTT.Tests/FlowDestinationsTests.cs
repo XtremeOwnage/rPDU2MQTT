@@ -1,6 +1,8 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.EmonCms;
+using rPDU2MQTT.Core;
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
@@ -142,6 +144,39 @@ public class FlowDestinationsTests
         Assert.False(FlowTiers.Any(new PduData(), new Config()));
     }
 
+    // --- Node identity ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void AReadingKnowsItsNode_AndAgreesWithTheGraph()
+    {
+        // Eight places built these ids by hand and two disagreed about the outlet index: the graph keys on
+        // the 0-based outlet.Key, a reading carries the 1-based Number. Nothing errors when they diverge —
+        // the lookup misses and a hierarchy label silently comes back empty.
+        var data = OneOutlet(60);
+        var reading = MetricsHelper.EnumerateReadings(data).Single(r => r.Type == "realpower");
+
+        Assert.Equal("outlet:rack_pdu_1:0", reading.NodeId);
+        Assert.Equal(1, reading.Number);            // 1-based on the reading...
+        Assert.Equal(FlowNodeId.ForOutletNumber("rack_pdu_1", reading.Number!.Value), reading.NodeId);
+
+        // ...and the graph names the same node the same way.
+        var graph = FlowGraphBuilder.Build(data, new EnergyFlowConfig(), "realpower");
+        Assert.Contains(graph.Nodes, n => n.Id == reading.NodeId);
+    }
+
+    [Fact]
+    public void ADeviceLevelReading_BelongsToThePduTier_NotAnOutlet()
+    {
+        var data = OneOutlet(60);
+        data.Devices[0].Entity.Add(new Entity { Entity_Name = "total", Entity_DisplayName = "Total" });
+        data.Devices[0].Entity[0].Measurements.Add(new Measurement { Type = "realpower", Value = "60", Units = "W" });
+
+        var reading = MetricsHelper.EnumerateReadings(data).Single(r => r.Source == "total");
+
+        Assert.Equal("pdu:rack_pdu_1", reading.NodeId);
+        Assert.Null(reading.Number);
+    }
+
     // --- What EmonCMS is actually sent -----------------------------------------------------------------
     // Everything above tests the graph. The graph was never the problem: the flow half of the EmonCMS
     // payload did not exist, and no graph test could notice. These hold the payload itself, so deleting the
@@ -158,8 +193,13 @@ public class FlowDestinationsTests
         return data;
     }
 
+    /// The pass the destination host would assemble, so a test exercises the real path rather than a
+    /// parallel one — the mistake that let the flow half go missing in the first place.
+    private static ExportPass Pass(Config cfg, params PduData[] snapshots)
+        => ExportPass.Build(snapshots.Select(d => new PduSnapshot("default", DateTime.UtcNow, d)), cfg, Live());
+
     private static Dictionary<string, double> Sent(Config cfg, params PduData[] snapshots)
-        => EmonCmsPayload.Build(snapshots, cfg, Live())[EmonCmsPayload.Combined];
+        => EmonCmsPayload.Build(Pass(cfg, snapshots), cfg)[EmonCmsPayload.Combined];
 
     [Fact]
     public void TheEmonCmsPayload_CarriesEveryFlowNode_AlongsideThePduReadings()
@@ -226,7 +266,7 @@ public class FlowDestinationsTests
         cfg.EmonCMS.Transport = EmonCmsTransport.Mqtt;
         cfg.EmonCMS.MqttTopicTemplate = "{base}/{node}/{device}";
 
-        var payloads = EmonCmsPayload.Build([OneOutlet(60)], cfg, Live());
+        var payloads = EmonCmsPayload.Build(Pass(cfg, OneOutlet(60)), cfg);
 
         Assert.Equal(60, payloads["rack_pdu_1"]["rack_pdu_1_o0_realpower"]);
         Assert.Equal(4200, payloads[EmonCmsPayload.Combined]["solar_realpower"]);

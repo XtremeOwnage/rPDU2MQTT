@@ -10,10 +10,9 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# v3: a homogeneous Orleans fleet — raise this to run N identical all-in-one replicas. They form one silo
-# cluster (Kubernetes membership turns on automatically when >1), single-owner work (the PDU session) is a
-# single-activation grain, and the publishers/exporters are leader-gated, so replicas never duplicate output.
-# Scale for HA/throughput by replica count; no roles to juggle.
+# Keep this at 1. v4 coordinates within one process: each replica would poll the PDUs and run the
+# publishers/exporters itself, so a second replica means duplicate device sessions and duplicate output —
+# not more throughput. (The seams for a coordinated fleet are still in the code; nothing implements them.)
 replicaCount: 1
 
 # Legacy tiering (#179): split the app's roles into separate Deployments — worker (polls the PDUs,
@@ -358,3 +357,19 @@ valkey:
       memory: 32Mi
     limits:
       memory: 128Mi
+
+# Externally loaded plugins (v4). A plugin is an ordinary .NET class library dropped into /app/plugins;
+# see Examples/Plugins. Off by default — an empty mount would only slow startup.
+#
+# The volume is yours to choose, because how a DLL reaches a cluster is a decision this chart should not
+# make: a PVC someone copies builds into, an init container that fetches a release, or a ConfigMap with
+# binaryData for something small. Whatever it is, it is mounted read-only — a plugin directory the workload
+# can write to is a way to change what code runs without changing the image.
+#
+# Note: a plugin's settings live under the `Plugins` map in the config, NOT as CRD fields. The CRD is a
+# compile-time contract and cannot describe a type that exists only on your machine.
+plugins:
+  enabled: false
+  volume:
+    persistentVolumeClaim:
+      claimName: rpdu2mqtt-plugins

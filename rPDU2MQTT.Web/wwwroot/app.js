@@ -855,7 +855,33 @@ const NODE_KINDS                               = [
 const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
-const SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+// The built-in source types, and their labels. A plugin's type is appended from the schema at render
+// time (see sourceTypes()), so contributing one needs no edit here.
+const BUILTIN_SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+
+/// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
+///
+/// Read from the schema rather than kept in step by hand — the server already fills the Type field's
+/// choices with the plugin types it loaded, and duplicating that list here is how the dropdown ends up
+/// missing a type the backend accepts.
+function sourceTypes(schema       )                     {
+  const known = new Map                (BUILTIN_SOURCE_TYPES);
+  // EnergyFlow -> Nodes -> Sources -> Type carries the enum the server built.
+  const find = (nodes       )      => {
+    for (const n of nodes || []) {
+      if (n.key === 'Type' && Array.isArray(n.enumValues)) return n;
+      const deeper = find(n.properties || (n.valueSchema ? [n.valueSchema] : []));
+      if (deeper) return deeper;
+    }
+    return null;
+  };
+  const flow = (schema || []).find((n     ) => n.key === 'EnergyFlow');
+  const typeNode = flow ? find(flow.properties || []) : null;
+  (typeNode?.enumValues || []).forEach((v        ) => {
+    if (v && !known.has(v)) known.set(v, v);
+  });
+  return [...known.entries()]                      ;
+}
 
 // Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
 const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];
@@ -876,6 +902,80 @@ const NODE_MODES                             = [
   ['residual', 'Residual (untracked feeder)', 'The designated absorber on the feeder side: carries the demand still needed after every measured feeder has supplied its part. This is how you tell the diagram where unaccounted power comes from — without it, competing unmeasured feeders all read “no data”.'],
   ['untracked', 'Untracked (child of a measured parent)', 'Place under a parent that has a measured total (a bound source or fixed value): shows the slice of that total its tracked siblings don’t account for. Contributes nothing if the parent has no measured total.'],
 ];
+
+// ── source-editors.ts ───────────────────────────────────────────
+// Which editor a source binding gets, keyed by its type.
+//
+// A binding's Source and Details columns are type-specific: MQTT wants a topic picker and a JSON field,
+// Modbus wants a connection and a register spec. Those two are built into this bundle because they are
+// genuinely bespoke — a topic browser and a register scanner are not a form.
+//
+// Everything else falls back to the generic editor, which reads and writes the binding's open `Settings`
+// bag. That is what lets a plugin contribute a source type without shipping any TypeScript: it declares
+// the type on the server, the node editor offers it in the dropdown, and its settings are editable here
+// as ordinary key/value rows. A plugin that later wants a bespoke editor registers one; nothing else has
+// to change.
+
+/// Renders the Source and Details cells for one binding. Returns the two cells, in order.
+
+const editors = new Map                      ();
+
+/// Register a bespoke editor for a source type. Built-ins call this; a future plugin editor would too.
+function registerSourceEditor(type        , editor              ) {
+  editors.set(type.toLowerCase(), editor);
+}
+
+/// The editor for a type, or null when it should use the generic one.
+function sourceEditorFor(type                    )                      {
+  return editors.get((type || 'mqtt').toLowerCase()) || null;
+}
+
+/// The generic editor: the binding's own Settings, as editable rows.
+///
+/// Deliberately shows what is there rather than guessing what should be — the server knows a plugin's
+/// source type exists but nothing describes its fields, and inventing a form for fields nobody declared
+/// would be worse than an honest key/value list.
+function genericSourceEditor(src     , onChange            )             {
+  if (!src.Settings) src.Settings = {};
+
+  const rows = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '3px' } });
+
+  const draw = () => {
+    rows.innerHTML = '';
+    Object.keys(src.Settings).forEach(key => {
+      const row = el('div', { style: { display: 'flex', gap: '4px', alignItems: 'center' } });
+      const k = el('input', { type: 'text', value: key, style: { width: '110px' } })                    ;
+      const v = el('input', { type: 'text', value: String(src.Settings[key] ?? ''), style: { width: '150px' } })                    ;
+      k.onchange = () => {
+        if (!k.value.trim() || k.value === key) { k.value = key; return; }
+        src.Settings[k.value.trim()] = src.Settings[key];
+        delete src.Settings[key];
+        onChange(); draw();
+      };
+      v.onchange = () => { src.Settings[key] = v.value; onChange(); };
+      const del = btn('✕', 'danger');
+      del.title = `Remove '${key}'`;
+      del.onclick = () => { delete src.Settings[key]; onChange(); draw(); };
+      row.append(k, v, del);
+      rows.appendChild(row);
+    });
+
+    const add = btn('+ setting');
+    add.onclick = () => {
+      let name = 'setting', n = 1;
+      while (name in src.Settings) name = `setting${++n}`;
+      src.Settings[name] = '';
+      onChange(); draw();
+    };
+    rows.appendChild(add);
+  };
+  draw();
+
+  return [
+    el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'plugin source' })),
+    el('td', {}, rows),
+  ];
+}
 
 // ── energy.ts ───────────────────────────────────────────────────
 // The energy arithmetic shared by the Energy Overview and Trends: what the home took.
@@ -2000,47 +2100,7 @@ function addDiagnosticsSection(nav     , sections     ) {
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
-  const grainsWrap = document.createElement('div'); grainsWrap.style.margin = '14px 0 0'; sec.appendChild(grainsWrap);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
-
-  // The live grain tree (v3): every silo (pod), the grain types active on each, and the current leader.
-  const shortSilo = (s        ) => (s || '').split('@')[0];
-  const renderGrains = (g     ) => {
-    grainsWrap.innerHTML = '';
-    const head = document.createElement('div'); head.textContent = 'Grains'; head.style.cssText = 'font-weight:600;color:var(--accent);margin:0 0 6px;'; grainsWrap.appendChild(head);
-    if (!g || !g.ok) {
-      const d = document.createElement('div'); d.className = 'desc';
-      d.textContent = 'Grain diagnostics unavailable' + (g && g.message ? ': ' + g.message : ' (single-node cluster or management grain not ready).');
-      grainsWrap.appendChild(d); return;
-    }
-    const silos = g.silos || [];
-    const sub = document.createElement('div'); sub.className = 'desc'; sub.style.margin = '0 0 8px';
-    sub.textContent = silos.length + ' silo' + (silos.length === 1 ? '' : 's') + ' · leader: ' + (g.leader || 'none');
-    grainsWrap.appendChild(sub);
-
-    // Only show the per-silo placement column when there's more than one silo — otherwise it's the same
-    // address on every row and just noise.
-    const multiSilo = silos.length > 1;
-    const cols = multiSilo ? ['Grain', 'Active', 'Placement'] : ['Grain', 'Active'];
-    const t = document.createElement('table'); t.className = 'ld';
-    const hr = document.createElement('tr'); cols.forEach(x => { const th = document.createElement('th'); th.textContent = x; hr.appendChild(th); });
-    const thead = document.createElement('thead'); thead.appendChild(hr); t.appendChild(thead);
-    const tb = document.createElement('tbody');
-    (g.grains || []).forEach((row     ) => {
-      const tr = document.createElement('tr');
-      const c1 = document.createElement('td'); c1.textContent = row.type; c1.title = row.fullType || '';
-      const c2 = document.createElement('td'); c2.textContent = row.activations;
-      tr.appendChild(c1); tr.appendChild(c2);
-      if (multiSilo) {
-        const c3 = document.createElement('td'); c3.style.cssText = 'color:var(--muted);font-size:12px;';
-        c3.textContent = (row.silos || []).map((s     ) => shortSilo(s.silo) + ' ×' + s.count).join(', ');
-        tr.appendChild(c3);
-      }
-      tb.appendChild(tr);
-    });
-    t.appendChild(tb); grainsWrap.appendChild(t);
-    if (!(g.grains || []).length) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'No active grains.'; grainsWrap.appendChild(d); }
-  };
 
   // A "Components" panel: which roles this node runs, MQTT transport, and whether PDU data is flowing.
   const compLine = (dotClass        , label        ) => {
@@ -2137,7 +2197,6 @@ function addDiagnosticsSection(nav     , sections     ) {
     info.appendChild(row('.NET', b.dotnet));
     info.appendChild(row('OS', b.os));
     info.appendChild(row('Kubernetes', b.kubernetes ? (b.ns + ' / ' + (b.pod || '?')) : 'no'));
-    try { const gr = await api('/api/grains'); renderGrains(gr.body); } catch { renderGrains(null); }
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
@@ -2608,7 +2667,7 @@ function addFlowSection(nav     , sections     ) {
   };
 
   const treePage = subPage('Roll-up', '∑',
-    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+    'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
     'How the nodes are wired together. Energy flows left → right.');
@@ -2622,7 +2681,7 @@ function addFlowSection(nav     , sections     ) {
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
-  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain.
+  // Each configured node's rolled-up value.
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r     ; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -2634,7 +2693,7 @@ function addFlowSection(nav     , sections     ) {
     const nodes = r.body.nodes || [];
     if (!nodes.length) {
       const dd = document.createElement('div'); dd.className = 'desc';
-      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; they are rolled up here.';
       treePanel.appendChild(dd); return;
     }
 
@@ -2777,19 +2836,23 @@ function addFlowSection(nav     , sections     ) {
       return y;
     };
 
-    // The unmetered remainder sits at the bottom of its column, below every measured sibling (#366).
+    // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
+    // every measured node in the column. Sorting it below the whole column is what put PDU-1's remainder
+    // underneath PDU-2's devices, so its ribbon had to cross every one of them to get there. The feeder
+    // barycenter therefore leads: it groups each parent's children together, and the remainder settles at
+    // the bottom of its own group.
     const remainder = (id        ) => (id || '').includes('#unmeasured') ? 1 : 0;
 
     // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
     cols.forEach((cn, c) => {
       if (c === 0) cn.sort((a     , b     ) => remainder(a.id) - remainder(b.id) || nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a     , b     ) => remainder(a.id) - remainder(b.id) || (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       placeColumn(cn, c);
     });
     // Backward: right-to-left, order each column by what it feeds.
     for (let c = cols.length - 2; c >= 0; c--) {
       if (!cols[c]) continue;
-      cols[c].sort((a     , b     ) => remainder(a.id) - remainder(b.id) || (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      cols[c].sort((a     , b     ) => (obary(a.id) - obary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       placeColumn(cols[c], c);
     }
     // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.
@@ -3786,7 +3849,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
       const tr = el('tr');
 
       const typeSel = el('select', { style: { width: 'auto' } });
-      SOURCE_TYPES.forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
+      sourceTypes(state.schema).forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
       typeSel.value = src.Type || 'mqtt';
       typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
       tr.appendChild(el('td', {}, typeSel));
@@ -3857,8 +3920,15 @@ function renderNodeEditor(node     , links       , cand                  , reren
       unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
       tr.appendChild(el('td', {}, unitSel));
 
-      // The Source + Details columns are type-specific.
-      if ((src.Type || 'mqtt') === 'modbus') {
+      // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
+      // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
+      const type = (src.Type || 'mqtt').toLowerCase();
+      if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+        const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
+        tr.appendChild(srcCell);
+        tr.appendChild(detailCell);
+      }
+      else if (type === 'modbus') {
         // Source = which configured Modbus connection; Details = the register spec.
         const connections        = (state.data?.Modbus?.Connections) || [];
         const connSel = el('select', { style: { width: '160px' } });
@@ -5964,7 +6034,7 @@ function addDiscoveryCleanup(sec     ) {
 
 // ── sections/home.ts ────────────────────────────────────────────
 // Landing/status page (#186): a red / amber / green board for the bridge and everything it talks to.
-// v3: the verdicts come from the component grains via /api/status — this file only renders them. Deciding
+// The verdicts come from the Status board via /api/status — this file only renders them. Deciding
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
 
 function addHomeSection(nav     , sections     ) {
@@ -5995,7 +6065,7 @@ function addHomeSection(nav     , sections     ) {
   const ago = (s        ) => s < 90 ? s + 's ago' : Math.round(s / 60) + 'm ago';
   const uptime = (s        ) => { s = Math.floor(s || 0); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return 'up ' + (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; };
 
-  // A card's detail is the static part plus, where the grain asked for it, the aged instant it carries.
+  // A card's detail is the static part plus, where the board asked for it, the aged instant it carries.
   const detailOf = (c     ) => {
     const parts           = [];
     if (c.detail) parts.push(c.detail);
@@ -6386,11 +6456,11 @@ function renderList(node     , arr       , path          ) {
 
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
-  { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
-  { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'System', items: [{ tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -6502,9 +6572,17 @@ function renderConfigSection(node     , nav     , sections     ) {
         sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
-      renderObjectBody(props, state.data[node.key], sec, [node.key]);
+      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
+      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      const target = node.isPlugin
+        ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
+        : state.data[node.key];
+      const path = node.isPlugin ? ['Plugins', node.key] : [node.key];
+      renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
+    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
+    if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
@@ -6526,17 +6604,36 @@ function build() {
 
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
-  const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in System, so a new one is never lost.
-  const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i     ) => i.schema)));
-  const system = NAV_GROUPS.find(g => g.title === 'System') ;
-  state.schema.forEach((n     ) => { if (!knownSchema.has(n.key) && !HIDDEN.has(n.key)) system.items.push({ schema: n.key }); });
+  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
+  // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
+  // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
+  // it belongs, and into System when it says nothing, so a new one is never lost.
+  //
+  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
+  // appended the same sections again, so saving twice put a page in the nav three times.
+  // Every schema section is placed by what the SCHEMA says, built-in or plugin. NAV_GROUPS now carries
+  // only the visual editors (Flow, Nodes, Trends…), which have no schema section to declare a group on.
+  // Holding the grouping in two places is how a section ends up registered, rendered and reachable while
+  // sitting in the wrong group, with nothing to say it was forgotten.
+  //
+  // Schema sections lead each group and the tools follow, because a tool marked `child` indents under
+  // whatever precedes it — the PDU tabs belong under the PDU page, not above it.
+  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: []              }));
+  const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;
+
+  state.schema.forEach((n     ) => {
+    if (HIDDEN.has(n.key)) return;
+    groupFor(n.group || 'System').items.push({ schema: n.key });
+  });
+  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);
   const first      = home.link;
 
-  for (const g of NAV_GROUPS) {
+  for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
     const items = g.items.filter(it => 'tool' in it || byKey.get((it       ).schema));
     if (!items.length) continue;
@@ -6904,13 +7001,22 @@ async function testModbus() {
 /// reached the toast at all: the page kept the optimistic "Testing…" and nothing else, which reads as a
 /// test that is still running rather than one that failed.
 
+/// Unwraps either shape: a bespoke endpoint's {ok,message} or the generic route's {ok,result:{ok,detail}}.
+function testOutcome(body     )                                   {
+  const inner = body?.result;
+  if (inner && typeof inner === 'object')
+    return { ok: inner.ok !== false, message: inner.detail ?? inner.message ?? (inner.ok !== false ? 'OK' : 'Failed') };
+  return { ok: body?.ok !== false, message: body?.message ?? '' };
+}
+
 async function runTest(what        , path        )                      {
   let out            ;
   try {
     const r = await api(path, { method: 'POST' });
+    const outcome = testOutcome(r.body);
     out = {
-      ok: !!(r.body && r.body.ok),
-      message: (r.body && r.body.message)
+      ok: outcome.ok && !!(r.body && r.body.ok),
+      message: outcome.message
         || (r.ok ? `${what}: the test answered without saying anything.` : `${what}: the bridge answered ${r.status}.`),
     };
   } catch (e     ) {
@@ -6920,11 +7026,11 @@ async function runTest(what        , path        )                      {
   return out;
 }
 
-async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
-async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
-async function testEmonCms() { const r = await runTest('EmonCMS', '/api/test/emoncms'); refreshStatus(); return r; }
+async function testMqtt() { const r = await runTest('MQTT', '/api/integrations/mqtt/probe'); refreshStatus(); return r; }
+async function testPdu() { return runTest('PDU', '/api/integrations/vertiv/probe'); }
+async function testEmonCms() { const r = await runTest('EmonCMS', '/api/integrations/emoncms/probe'); refreshStatus(); return r; }
 async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
-async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+async function provisionEmonCmsFeeds() { await runIntegrationAction('emoncms', { name: 'publish', title: 'Provision EmonCMS feeds', description: '', effect: 'write' }); }
 async function deleteEmonCmsFeeds() {
   if (!confirm('⚠️ DELETE ALL EmonCMS feeds created by rPDU2MQTT?\n\n'
     + 'This PERMANENTLY deletes every feed under rPDU2MQTT’s tag/node — and ALL of their stored history in EmonCMS.\n\n'
@@ -6934,8 +7040,11 @@ async function deleteEmonCmsFeeds() {
   const typed = prompt('Final confirmation — type  DELETE  (all caps) to permanently delete all rPDU2MQTT feeds:');
   if (typed !== 'DELETE') { toast('Cancelled — nothing was deleted.', false); return; }
   toast('Deleting EmonCMS feeds…', true);
-  const r = await api('/api/emoncms/delete-feeds', { method: 'POST' });
-  toast(r.body.message, r.body.ok);
+  // Through the generic route: the integration owns the rule and the single-owner lease, so the button and
+  // the API cannot do different things.
+  const r = await api('/api/integrations/emoncms/sweep', { method: 'POST' });
+  const inner = (r.body || {}).result || {};
+  toast(inner.message ?? r.body?.message ?? 'Done.', r.body?.ok !== false);
 }
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function clearHa() {
@@ -6944,6 +7053,46 @@ async function clearHa() {
     + 'runs again. Nothing belonging to another integration is touched.')) return;
   const r = await api('/api/discovery/clear', { method: 'POST' });
   toast(r.body.message, r.body.ok);
+}
+
+// --- Integration actions, rendered from what each integration says it can do -----------------------------
+// Nothing here names an integration. The server derives the action list from the capabilities each one
+// declares, so a plugin dropped into plugins/ gets its buttons with no TypeScript written for it — which is
+// the whole point of the plugin contracts. The hand-wired per-destination functions above are what this
+// replaces; they stay until every built-in is converted.
+
+/// Run one action and report what came back.
+async function runIntegrationAction(id        , action     ) {
+  // Anything that removes something at the far end is confirmed, and named, before it happens.
+  if (action.effect === 'destructive'
+    && !confirm(`${action.title}\n\n${action.description}\n\nThis cannot be undone. Continue?`)) return;
+
+  toast(`${action.title}…`, true);
+  const r = await api(`/api/integrations/${encodeURIComponent(id)}/${encodeURIComponent(action.name)}`, { method: 'POST' });
+  const body      = r.body || {};
+  // An action returns whatever it likes; show a message if it gave one, otherwise say it finished.
+  const result = body.result ?? {};
+  const message = body.message ?? result.message ?? result.detail
+    ?? (body.ok ? `${action.title} finished.` : `${action.title} failed.`);
+  toast(message, body.ok !== false && result.ok !== false);
+  return body;
+}
+
+/// The buttons for one integration, or null when it has none to offer.
+async function integrationActionBar(id        )               {
+  const r = await api('/api/integrations');
+  if (!r.body?.ok) return null;
+  const found = (r.body.integrations || []).find((i     ) => i.id === id);
+  if (!found || !(found.actions || []).length) return null;
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  found.actions.forEach((a     ) => {
+    const b = btn(a.title, a.effect === 'destructive' ? 'danger' : a.effect === 'write' ? 'primary' : undefined);
+    b.title = a.description;
+    b.onclick = () => runIntegrationAction(id, a);
+    bar.appendChild(b);
+  });
+  return bar;
 }
 
 // ── main.ts ─────────────────────────────────────────────────────

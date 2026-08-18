@@ -9,7 +9,7 @@ namespace rPDU2MQTT.Services;
 /// <summary>
 /// Past flow values from the Prometheus that scrapes this bridge.
 /// </summary>
-public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHistory
+public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasurementHistory
 {
     public string Id => "prometheus";
 
@@ -63,7 +63,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
             var body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
-                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} over {steps.Count} step(s).");
+                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} over {steps.Count} step(s) — {Trim(body)}");
                 return empty;
             }
             return HistoryParsing.PrometheusRange(body, unix);
@@ -93,7 +93,7 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
             var body = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
-                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} at {atUtc:u}.");
+                Log.Warning($"Flow history: Prometheus answered {(int)response.StatusCode} for {name} at {atUtc:u} — {Trim(body)}");
                 return new Dictionary<string, double>();
             }
             return HistoryParsing.PrometheusInstant(body);
@@ -104,12 +104,19 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IFlowHi
             return new Dictionary<string, double>();
         }
     }
+    /// <summary>
+    /// What the backend said, short enough for a log line. A rejected query answers with the reason —
+    /// "unknown escape sequence", a bad metric name — and dropping it left "no data" as the only visible
+    /// symptom of a query that never had a chance.
+    /// </summary>
+    private static string Trim(string body)
+        => body.Length <= 300 ? body.Replace('\n', ' ') : body[..300].Replace('\n', ' ') + "…";
 }
 
 /// <summary>
 /// Past flow values from EmonCMS feeds.
 /// </summary>
-public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHistory
+public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasurementHistory
 {
     private IReadOnlyDictionary<string, string>? feeds;
     private DateTime feedsAt;
@@ -195,13 +202,20 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IFlowHisto
 /// <summary>
 /// Chooses the backend per call from the live configuration.
 /// </summary>
-public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IFlowHistory
+public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IMeasurementHistory
 {
     private readonly PrometheusFlowHistory prometheus = new(http, cfg);
     private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
+    private readonly Integrations.HomeAssistant.HomeAssistantHistory homeAssistant = new(http, cfg);
 
-    private IFlowHistory Current =>
-        string.Equals(cfg.History.Provider, "emoncms", StringComparison.OrdinalIgnoreCase) ? emoncms : prometheus;
+    // Chosen by id from live config, so adding a backend is one more line here and nothing else — the
+    // property that made IMeasurementHistory the template the rest of the contracts were copied from.
+    private IMeasurementHistory Current => cfg.History.Provider?.ToLowerInvariant() switch
+    {
+        "emoncms" => emoncms,
+        "homeassistant" => homeAssistant,
+        _ => prometheus,
+    };
 
     public string Id => Current.Id;
 

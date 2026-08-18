@@ -1,0 +1,222 @@
+using System.Text.Json;
+using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Core.Integrations;
+using rPDU2MQTT.Helpers;
+using rPDU2MQTT.Models.Config;
+
+namespace rPDU2MQTT.Integrations.Mqtt;
+
+/// <summary>
+/// The energy hierarchy on the broker (#164): each tier's rolled-up power and energy on its own topic, and
+/// the Home Assistant discovery document describing that topic.
+///
+/// <para>
+/// Both capabilities, because the two are genuinely one job here: the discovery document describes the very
+/// topic this integration publishes, and both need the same tier, the same parents and the same knowledge of
+/// whether today's total was determined. Splitting them would mean walking the hierarchy twice and keeping
+/// two copies of that reasoning in step.
+/// </para>
+/// <para>
+/// The raw PDU publish — names, states, alarms, outlet config — is deliberately <b>not</b> here. That is the
+/// bridge's core function rather than an export destination, and it publishes the PDU's whole object model
+/// rather than an <see cref="ExportPass"/>.
+/// </para>
+/// </summary>
+public sealed class MqttIntegration : IIntegration, IMeasurementDestination, IConfigurationPublisher
+{
+    private readonly Config cfg;
+    private readonly IMessagePublisher publisher;
+    private readonly IFlowValueSource? live;
+
+    // Discovery config topics already retired, once per process: duplicates of a native sensor, and tiers
+    // the tag filter now excludes.
+    private readonly HashSet<string> clearedDuplicates = new();
+    private readonly HashSet<string> retiredByFilter = new();
+
+    public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null)
+    {
+        this.cfg = cfg;
+        this.publisher = publisher;
+        this.live = live;
+    }
+
+    public string Id => "mqtt-energyflow";
+    public string DisplayName => "MQTT energy flow";
+    public IntegrationGroup Group => IntegrationGroup.Destinations;
+
+    public bool Enabled(Config c) => c.EnergyFlow.MqttExport;
+
+    public NodeTagFilter Tags(Config c) => c.EnergyFlow.MqttExportTags;
+
+    public Task<(bool Ok, string Detail)> ProbeAsync(Config c, CancellationToken ct)
+        => Task.FromResult((true, $"publishing to {c.MQTT.ParentTopic}"));
+
+    // Discovery documents describe what exists, so they are configuration; they ride the same walk as the
+    // state topics because both need the same tier, parents and period-readiness.
+    public bool PublishingEnabled(Config c) => c.EnergyFlow.MqttExport && c.HASS.DiscoveryEnabled;
+
+    public Task SendAsync(ExportPass pass, CancellationToken ct) => PublishTiers(pass, ct);
+
+    public async Task<string> PublishAsync(ExportPass pass, CancellationToken ct)
+    {
+        var n = await PublishTiers(pass, ct);
+        return $"Published {n} energy-flow tier(s) and their discovery documents.";
+    }
+
+    private async Task<int> PublishTiers(ExportPass pass, CancellationToken ct)
+    {
+        var flow = cfg.EnergyFlow;
+        if (!flow.MqttExport || pass.Tiers.Count == 0) return 0;
+
+        // Power defines the hierarchy and the topics; the other graphs are the same roll-up over their metric.
+        var graph = pass.Tiers[0].Graph;
+        var energyGraph = pass.Tiers.Count > 1 ? pass.Tiers[1].Graph : graph;
+        var todayGraph = pass.Tiers.Count > 2 ? pass.Tiers[2].Graph : graph;
+        var energyMetric = pass.Tiers.Count > 1 ? pass.Tiers[1].Metric : "energy";
+
+        // ...but a daily total is not reported until the carried-over totals are back.
+        var periodsReady = (live as IPeriodTotalsReady)?.PeriodTotalsReady ?? true;
+
+        var publishDiscovery = cfg.HASS.DiscoveryEnabled && !string.IsNullOrWhiteSpace(cfg.HASS.DiscoveryTopic);
+        var availability = cfg.MQTT.LastWill ? MQTTHelper.StatusTopic(cfg.MQTT.ParentTopic) : null;
+        // Outlets and PDU tiers already have native HA energy sensors from PDU discovery.
+        var native = FlowExport.NativeEnergyUniqueIds(pass.Snapshot, energyMetric);
+
+        // Nodes that declare an in-direction (charge/export) energy source get a second energy sensor.
+        var energyInNodes = flow.Nodes
+            .Where(n => n.AllSources().Any(s =>
+                string.Equals(s.Metric, energyMetric, StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(s.Direction, "in", StringComparison.OrdinalIgnoreCase) || FlowMetricKey.IsSplit(s.Direction))))
+            .Select(n => n.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Nodes with a state-of-charge source (battery %) get an extra SoC sensor HA's battery source can use.
+        var socNodes = flow.Nodes
+            .Where(n => n.AllSources().Any(s => string.Equals(s.Metric, "soc", StringComparison.OrdinalIgnoreCase)))
+            .Select(n => n.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var tagFilter = flow.MqttExportTags;
+        var published = 0;
+
+        // Synthetic nodes are for the diagram only — see FlowNode.Synthetic.
+        foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
+        {
+            // Tag filter (#342): what this destination receives.
+            if (!tagFilter.Allows(node.Tags))
+            {
+                // Retire the discovery config with it.
+                if (publishDiscovery)
+                {
+                    var excludedTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
+                    if (retiredByFilter.Add(excludedTopic))
+                        await publisher.PublishAsync(excludedTopic, string.Empty, retain: true, ct, pass.AtUtc);
+                }
+                continue;
+            }
+
+            // Nothing determines this tier's power — no measurement.
+            if (!FlowExport.TryNodeValue(graph, node.Id, out var power))
+                continue;
+
+            var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
+            var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
+            // Only feeders that are themselves being exported.
+            var parents = FlowExport.Parents(graph, node.Id)
+                .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
+                              || tagFilter.Allows(pn.Tags))
+                .ToList();
+
+            // The in-direction (charge/export) energy, when this node declares one and a fresh value exists.
+            double? energyIn = energyInNodes.Contains(node.Id) && live is not null
+                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
+
+            // Today's total. Null — not 0 — when nothing determines it.
+            double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
+
+            // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export).
+            double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
+            // Battery state of charge (%), when this node has a soc source with a fresh value.
+            double? soc = socNodes.Contains(node.Id) && live is not null && live.TryGetValue(node.Id, "soc", out var s) ? s : null;
+
+            var payload = JsonSerializer.Serialize(new
+            {
+                id = node.Id,
+                value = netPower,    // retained for #164 back-compat (== power)
+                power = netPower,
+                energy,
+                energy_in = energyIn,
+                energy_today = energyToday,
+                soc,
+                units = graph.Units,
+                energyUnits = energyGraph.Units,
+                label = node.Label,
+                kind = node.Kind,
+                parents,
+                // #205: this payload is already JSON, so the read time can just be a field — no mode needed.
+                timestamp = Core.MessageTimestamps.Format(pass.AtUtc),
+            });
+            await publisher.PublishAsync(topic, payload, retain: true, ct, pass.AtUtc);
+            published++;
+
+            if (!publishDiscovery)
+                continue;
+
+            var configTopic = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(node.Id)}/config";
+            if (native.ContainsKey(node.Id))
+            {
+                // Native sensor exists — retire any duplicate an earlier build left retained (once).
+                if (clearedDuplicates.Add(configTopic))
+                    await publisher.PublishAsync(configTopic, string.Empty, retain: true, ct, pass.AtUtc);
+            }
+            else
+            {
+                var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
+                    includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
+                    includeEnergyToday: energyToday is not null);
+                await publisher.PublishAsync(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
+            }
+        }
+
+        // Node groups (#groups): each group publishes its own summed tier alongside its members.
+        foreach (var g in flow.Groups ?? new())
+        {
+            if (string.IsNullOrWhiteSpace(g.Id)) continue;
+            // An anchor group's id is a real node that already published its own tier above, so skip it.
+            if (graph.Nodes.Any(n => string.Equals(n.Id, g.Id, StringComparison.OrdinalIgnoreCase))) continue;
+
+            var total = FlowGroups.Total(graph, g);
+            if (total.Value is not { } gpower) continue;
+
+            var genergy = FlowGroups.Total(energyGraph, g).Value ?? 0;
+            var groupNode = new FlowNode(total.Id, total.Label, total.Kind, gpower);
+            var gtopic = FlowExport.Topic(groupNode, graph, cfg.MQTT.ParentTopic, flow);
+
+            var gpayload = JsonSerializer.Serialize(new
+            {
+                id = g.Id,
+                value = gpower,
+                power = gpower,
+                energy = genergy,
+                units = graph.Units,
+                energyUnits = energyGraph.Units,
+                label = total.Label,
+                kind = total.Kind,
+                group = true,
+                members = g.Members,
+                timestamp = Core.MessageTimestamps.Format(pass.AtUtc),
+            });
+            await publisher.PublishAsync(gtopic, gpayload, retain: true, ct, pass.AtUtc);
+            published++;
+
+            if (!publishDiscovery) continue;
+
+            var gconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(g.Id)}/config";
+            var gdoc = FlowExport.DiscoveryDocument(groupNode, null, gtopic, energyGraph.Units, graph.Units, availability);
+            await publisher.PublishAsync(gconfig, gdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
+        }
+
+        return published;
+    }
+}

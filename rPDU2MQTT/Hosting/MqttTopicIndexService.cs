@@ -4,16 +4,15 @@ using HiveMQtt.Client;
 using HiveMQtt.Client.Events;
 using HiveMQtt.MQTT5.Types;
 using Microsoft.Extensions.Hosting;
-using Orleans;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Grains.Abstractions.Discovery;
+using rPDU2MQTT.Core.Discovery;
 
 namespace rPDU2MQTT.Hosting;
 
 /// <summary>
 /// Feeds the browsable topic index — but only while someone is browsing.
 /// <para>
-/// It polls <see cref="ITopicIndexGrain.Wanted"/>, and only then opens a wildcard subscription, forwarding
+/// It polls what the index says is wanted, and only then opens a wildcard subscription, forwarding
 /// what arrives in batches. The moment the lease lapses it unsubscribes and drops its buffer. So the cost of
 /// topic autocomplete is a subscription for as long as the Nodes editor is open, and zero after that — never
 /// a background process quietly indexing the whole broker for the life of the deployment.
@@ -29,15 +28,15 @@ public sealed class MqttTopicIndexService : BackgroundService
     private const int MaxBuffered = 1000;
 
     private readonly HiveMQClient mqtt;
-    private readonly IGrainFactory grains;
+    private readonly TopicIndex index;
     private readonly ConcurrentDictionary<string, TopicSample> buffer = new(StringComparer.Ordinal);
     private string? subscribedFilter;   // the filter currently subscribed on the broker, or null
 
-    public MqttTopicIndexService(MQTTServiceDependencies deps, IGrainFactory grains)
+    public MqttTopicIndexService(MQTTServiceDependencies deps, TopicIndex? topicIndex = null)
     {
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for topic indexing.");
-        this.grains = grains;
+        index = topicIndex ?? new TopicIndex();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,15 +49,14 @@ public sealed class MqttTopicIndexService : BackgroundService
             try { await PumpAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Topic index: {ex.Message}"); }
         }
-        while (await SafeWait(timer, stoppingToken));
+        while (await Core.Ticks.Next(timer, stoppingToken));
 
         if (subscribedFilter is not null) await StopListening();
     }
 
     private async Task PumpAsync()
     {
-        var index = grains.GetGrain<ITopicIndexGrain>(0);
-        var wanted = await index.DesiredFilter();   // the filter to browse, or "" when nobody is browsing
+        var wanted = index.DesiredFilter();   // the filter to browse, or "" when nobody is browsing
 
         // Re-subscribe when the wanted filter changes (the user narrowed it, e.g. to solar_assistant/#).
         if (string.IsNullOrEmpty(wanted))
@@ -69,7 +67,7 @@ public sealed class MqttTopicIndexService : BackgroundService
         if (subscribedFilter != wanted)
         {
             if (subscribedFilter is not null) await StopListening();
-            await StartListening(wanted, index);
+            await StartListening(wanted);
         }
         if (subscribedFilter is null) return;
 
@@ -79,10 +77,10 @@ public sealed class MqttTopicIndexService : BackgroundService
         foreach (var topic in batch)
             if (buffer.TryRemove(topic, out var sample)) samples.Add(sample);
 
-        await index.Observe(samples);
+        index.Observe(samples);
     }
 
-    private async Task StartListening(string filter, ITopicIndexGrain index)
+    private async Task StartListening(string filter)
     {
         try
         {
@@ -93,7 +91,7 @@ public sealed class MqttTopicIndexService : BackgroundService
             // A broker can *deny* the subscription (an ACL that forbids the wildcard) and report it in the
             // SUBACK, not as an exception. Unchecked, that's a silently-empty browser on a working broker.
             var granted = result.Subscriptions.All(sub => (int)sub.SubscribeReasonCode <= 2);
-            await index.ReportSubscription(granted);
+            index.ReportSubscription(granted);
             if (granted)
                 Serilog.Log.Information($"Topic index: subscribed to '{filter}' while the Nodes editor is browsing.");
             else
@@ -135,11 +133,5 @@ public sealed class MqttTopicIndexService : BackgroundService
         if (payload.Length > MaxPayloadChars) payload = payload[..MaxPayloadChars];
 
         buffer[topic] = new TopicSample { Topic = topic, Payload = payload, SeenUtc = DateTime.UtcNow };
-    }
-
-    private static async Task<bool> SafeWait(PeriodicTimer timer, CancellationToken ct)
-    {
-        try { return await timer.WaitForNextTickAsync(ct); }
-        catch (OperationCanceledException) { return false; }
     }
 }

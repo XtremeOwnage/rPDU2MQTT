@@ -31,8 +31,8 @@ public interface IWithheldSources
 /// The port the ingests use to consult the period-counter audit, implemented by whatever owns it.
 ///
 /// <para>
-/// Engine talks to this rather than to a grain directly, the same way it takes an
-/// <c>ISnapshotSink</c>: the host decides that the owner is a single-activation grain, and the ingest
+/// Engine talks to this rather than to the owner directly, the same way it takes an
+/// <c>ISnapshotSink</c>: the host decides who owns the verdicts, and the ingest
 /// neither knows nor needs to.
 /// </para>
 /// <para>

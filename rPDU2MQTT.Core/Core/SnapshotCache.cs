@@ -35,10 +35,17 @@ public sealed class SnapshotCache : BackgroundService, ISnapshotCache
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var snapshot in stream.WithCancellation(stoppingToken))
+        // Belt and braces alongside the bus's own handling: an already-cancelled token can still throw here
+        // before the first read, and a BackgroundService that throws on shutdown is reported to the host as
+        // a crash — which is how a clean stop ends up looking like a failure in the log.
+        try
         {
-            byInstance[snapshot.InstanceId] = snapshot;
-            latest = snapshot;
+            await foreach (var snapshot in stream.WithCancellation(stoppingToken))
+            {
+                byInstance[snapshot.InstanceId] = snapshot;
+                latest = snapshot;
+            }
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 }

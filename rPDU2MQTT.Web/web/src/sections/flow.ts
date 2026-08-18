@@ -121,7 +121,7 @@ export function addFlowSection(nav: any, sections: any) {
   };
 
   const treePage = subPage('Roll-up', '∑',
-    'What each node\'s own grain rolled up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
+    'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
     'How the nodes are wired together. Energy flows left → right.');
@@ -135,7 +135,7 @@ export function addFlowSection(nav: any, sections: any) {
   // Collapsing/expanding a group must move both graphs together (they share the collapse state).
   const redrawBoth = () => { if (lastGraph) draw(lastGraph); renderTree(); };
 
-  // The distributed node-grain roll-up (v3): each configured node's value computed by its own grain.
+  // Each configured node's rolled-up value.
   const renderTree = async () => {
     treePanel.innerHTML = '';
     let r: any; try { r = await api('/api/flow/tree'); } catch { r = { body: { ok: false } }; }
@@ -147,7 +147,7 @@ export function addFlowSection(nav: any, sections: any) {
     const nodes = r.body.nodes || [];
     if (!nodes.length) {
       const dd = document.createElement('div'); dd.className = 'desc';
-      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; the grains roll them up here.';
+      dd.textContent = 'No node values yet — add energy-flow nodes and feed a source; they are rolled up here.';
       treePanel.appendChild(dd); return;
     }
 
@@ -291,19 +291,23 @@ export function addFlowSection(nav: any, sections: any) {
       return y;
     };
 
-    // The unmetered remainder sits at the bottom of its column, below every measured sibling (#366).
+    // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
+    // every measured node in the column. Sorting it below the whole column is what put PDU-1's remainder
+    // underneath PDU-2's devices, so its ribbon had to cross every one of them to get there. The feeder
+    // barycenter therefore leads: it groups each parent's children together, and the remainder settles at
+    // the bottom of its own group.
     const remainder = (id: string) => (id || '').includes('#unmeasured') ? 1 : 0;
 
     // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
     cols.forEach((cn, c) => {
       if (c === 0) cn.sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || (bary(a.id) - bary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      else cn.sort((a: any, b: any) => (bary(a.id) - bary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       placeColumn(cn, c);
     });
     // Backward: right-to-left, order each column by what it feeds.
     for (let c = cols.length - 2; c >= 0; c--) {
       if (!cols[c]) continue;
-      cols[c].sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || (obary(a.id) - obary(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
+      cols[c].sort((a: any, b: any) => (obary(a.id) - obary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
       placeColumn(cols[c], c);
     }
     // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.

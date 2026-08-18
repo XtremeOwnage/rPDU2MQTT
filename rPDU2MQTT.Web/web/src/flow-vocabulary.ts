@@ -35,7 +35,33 @@ export const NODE_KINDS: [string, string, string[]][] = [
 export const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
-export const SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+// The built-in source types, and their labels. A plugin's type is appended from the schema at render
+// time (see sourceTypes()), so contributing one needs no edit here.
+export const BUILTIN_SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+
+/// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
+///
+/// Read from the schema rather than kept in step by hand — the server already fills the Type field's
+/// choices with the plugin types it loaded, and duplicating that list here is how the dropdown ends up
+/// missing a type the backend accepts.
+export function sourceTypes(schema: any[]): [string, string][] {
+  const known = new Map<string, string>(BUILTIN_SOURCE_TYPES);
+  // EnergyFlow -> Nodes -> Sources -> Type carries the enum the server built.
+  const find = (nodes: any[]): any => {
+    for (const n of nodes || []) {
+      if (n.key === 'Type' && Array.isArray(n.enumValues)) return n;
+      const deeper = find(n.properties || (n.valueSchema ? [n.valueSchema] : []));
+      if (deeper) return deeper;
+    }
+    return null;
+  };
+  const flow = (schema || []).find((n: any) => n.key === 'EnergyFlow');
+  const typeNode = flow ? find(flow.properties || []) : null;
+  (typeNode?.enumValues || []).forEach((v: string) => {
+    if (v && !known.has(v)) known.set(v, v);
+  });
+  return [...known.entries()] as [string, string][];
+}
 
 // Metrics whose sign carries direction, so inverting one is meaningful (export vs import, charge vs discharge).
 export const SIGNED_METRICS = ['realpower', 'apparentpower', 'current'];

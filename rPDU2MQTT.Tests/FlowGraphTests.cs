@@ -40,22 +40,41 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void Build_SkipsZeroAndNonMatchingMeasurements()
+    public void Build_KeepsAMeasuredZero_AttachedToItsPdu()
     {
+        // A switched-off outlet reads 0, and that is a fact about it: it is there and drawing nothing.
+        // Reporting it is what lets a consumer tell "switched off" from "stopped reporting", and keeping it
+        // wired to its PDU is what gives it a parent to be reported under. The ribbon is zero-width either
+        // way — this is about the node being placed, not drawn.
         var graph = FlowGraphBuilder.Build(OnePdu(
             Outlet(0, "Active", "realpower", "30"),
-            Outlet(1, "Idle", "realpower", "0"),          // no flow -> skipped
-            Outlet(2, "OtherMetric", "current", "2.5")));  // not the requested metric -> skipped
+            Outlet(1, "Idle", "realpower", "0"),
+            Outlet(2, "OtherMetric", "current", "2.5")));  // not the requested metric -> nothing to report
 
-        Assert.Single(graph.Links);
-        Assert.Equal("outlet:pdu1:0", graph.Links[0].Target);
-        Assert.DoesNotContain(graph.Nodes, n => n.Id == "outlet:pdu1:1");
+        Assert.Equal(30, graph.Links.Single(l => l.Target == "outlet:pdu1:0").Value);
+        Assert.Equal(0, graph.Links.Single(l => l.Target == "outlet:pdu1:1").Value);
+        Assert.Equal(0, graph.Nodes.Single(n => n.Id == "outlet:pdu1:1").Value);
+
+        // The one that reports a different metric entirely is still absent: nothing measured it.
+        Assert.DoesNotContain(graph.Nodes, n => n.Id == "outlet:pdu1:2");
     }
 
     [Fact]
-    public void Build_OmitsPdusWithNoMeasuredFlow()
+    public void Build_ReportsAPduWhoseOutletsAreAllOff_AsZero()
     {
         var graph = FlowGraphBuilder.Build(OnePdu(Outlet(0, "Idle", "realpower", "0")));
+
+        Assert.Equal(0, graph.Nodes.Single(n => n.Id == "pdu:pdu1").Value);
+        Assert.Equal(0, graph.Nodes.Single(n => n.Id == "outlet:pdu1:0").Value);
+    }
+
+    [Fact]
+    public void Build_OmitsAPduNothingMeasured()
+    {
+        // No reading for the metric at all — not a zero, an absence. Inventing a node for it would be
+        // claiming the PDU reported something it never did.
+        var graph = FlowGraphBuilder.Build(OnePdu(Outlet(0, "Idle", "current", "2.5")));
+
         Assert.Empty(graph.Nodes);
         Assert.Empty(graph.Links);
     }

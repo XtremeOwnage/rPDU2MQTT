@@ -6,9 +6,9 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// The v3 pipeline contracts (docs/v3-orleans-migration.md). The point of these is the *litmus*: a source,
-/// the flow middleware, and a destination wire together end-to-end using nothing but the abstractions and
-/// in-memory fakes — no Orleans, no MQTT, no Modbus. If this needs a framework to run, the layering leaked.
+/// The pipeline contracts. The point of these is the *litmus*: a source, a mapping step and a destination
+/// wire together end-to-end using nothing but the abstractions and in-memory fakes — no MQTT, no Modbus, no
+/// host. If this needs a framework to run, the layering leaked.
 /// </summary>
 public class PipelineContractsTests
 {
@@ -26,8 +26,8 @@ public class PipelineContractsTests
         }
     }
 
-    /// <summary>Trivial middleware: last-value-wins per (node, metric), echoed straight out as a FlowSnapshot.</summary>
-    private sealed class PassthroughMiddleware : IFlowMiddleware
+    /// <summary>Trivial mapping step: last-value-wins per (node, metric), echoed out as a FlowSnapshot.</summary>
+    private sealed class PassthroughMapper
     {
         private readonly Dictionary<(string, Metric), double> state = new();
         private readonly Dictionary<string, long> srcVersions = new();
@@ -41,8 +41,6 @@ public class PipelineContractsTests
         public FlowSnapshot Snapshot() => new(
             FlowSnapshot.FlowSourceId, DateTimeOffset.UtcNow, ++version,
             state.Select(kv => new FlowNodeValue(kv.Key.Item1, kv.Key.Item2, kv.Value)).ToList());
-        public IReadOnlyList<RawValue> RawValues() =>
-            state.Select(kv => new RawValue(kv.Key.Item1, kv.Key.Item2, kv.Value)).ToList();
     }
 
     private sealed class FakeDestination : IDestination<FlowSnapshot>
@@ -61,13 +59,13 @@ public class PipelineContractsTests
         return await Task.WhenAny(next, Task.Delay(ms)) == next && next.Result;
     }
 
-    // --- the litmus: source -> stream -> middleware -> destination, all fakes ---
+    // --- the litmus: source -> stream -> mapping -> destination, all fakes ---
 
     [Fact]
-    public async Task Pipeline_Flows_SourceToMiddlewareToDestination_WithFakesOnly()
+    public async Task Pipeline_Flows_SourceToMappingToDestination_WithFakesOnly()
     {
         var stream = new ChannelSnapshotStream<MeasurementSnapshot>();
-        var middleware = new PassthroughMiddleware();
+        var mapper = new PassthroughMapper();
         var destination = new FakeDestination();
         var source = new FakeSource("modbus:eg4", Meas("modbus:eg4", 1, ("grid", Metric.RealPower, 1200), ("solar", Metric.RealPower, 800)));
 
@@ -75,8 +73,8 @@ public class PipelineContractsTests
         await source.RunAsync(stream, CancellationToken.None);      // producer emits into the sink
 
         Assert.True(await MoveNextWithin(sub, 1000));               // consumer receives from the feed
-        middleware.Ingest(sub.Current);                             // middleware maps it
-        await destination.PushAsync(middleware.Snapshot());         // destination consumes the flow output
+        mapper.Ingest(sub.Current);                                 // it is mapped onto the flow
+        await destination.PushAsync(mapper.Snapshot());             // destination consumes the flow output
 
         Assert.NotNull(destination.Last);
         Assert.Equal(1200, destination.Last!.Values.Single(v => v.NodeId == "grid" && v.Metric == Metric.RealPower).Value);
@@ -145,14 +143,14 @@ public class PipelineContractsTests
     }
 
     /// <summary>
-    /// The architectural invariant, executable: the contract layer must reference no framework — no Orleans,
-    /// no transport, no config library. If a grain/transport type ever leaks into Abstractions, this fails.
+    /// The architectural invariant, executable: the contract layer must reference no framework — no
+    /// transport, no config library. If a framework type ever leaks into Abstractions, this fails.
     /// </summary>
     [Fact]
     public void Abstractions_ReferencesNoFramework()
     {
         var referenced = typeof(ISnapshot).Assembly.GetReferencedAssemblies().Select(a => a.Name ?? "").ToList();
-        string[] forbidden = { "Orleans", "HiveMQtt", "FluentModbus", "KubernetesClient", "Serilog", "YamlDotNet", "prometheus-net", "Microsoft.AspNetCore" };
+        string[] forbidden = { "HiveMQtt", "FluentModbus", "KubernetesClient", "Serilog", "YamlDotNet", "prometheus-net", "Microsoft.AspNetCore" };
         foreach (var f in forbidden)
             Assert.DoesNotContain(referenced, r => r.Contains(f, StringComparison.OrdinalIgnoreCase));
     }

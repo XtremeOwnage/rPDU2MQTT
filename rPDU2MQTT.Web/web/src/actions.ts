@@ -1,5 +1,5 @@
 // Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
-import { api, toast } from './helpers.js';
+import { api, toast, el, btn } from './helpers.js';
 import { state } from './state.js';
 import { refreshStatus } from './main.js';
 
@@ -23,13 +23,22 @@ export async function testModbus() {
 /// test that is still running rather than one that failed.
 export type TestResult = { ok: boolean; message: string };
 
+/// Unwraps either shape: a bespoke endpoint's {ok,message} or the generic route's {ok,result:{ok,detail}}.
+function testOutcome(body: any): { ok: boolean, message: string } {
+  const inner = body?.result;
+  if (inner && typeof inner === 'object')
+    return { ok: inner.ok !== false, message: inner.detail ?? inner.message ?? (inner.ok !== false ? 'OK' : 'Failed') };
+  return { ok: body?.ok !== false, message: body?.message ?? '' };
+}
+
 async function runTest(what: string, path: string): Promise<TestResult> {
   let out: TestResult;
   try {
     const r = await api(path, { method: 'POST' });
+    const outcome = testOutcome(r.body);
     out = {
-      ok: !!(r.body && r.body.ok),
-      message: (r.body && r.body.message)
+      ok: outcome.ok && !!(r.body && r.body.ok),
+      message: outcome.message
         || (r.ok ? `${what}: the test answered without saying anything.` : `${what}: the bridge answered ${r.status}.`),
     };
   } catch (e: any) {
@@ -39,11 +48,11 @@ async function runTest(what: string, path: string): Promise<TestResult> {
   return out;
 }
 
-export async function testMqtt() { const r = await runTest('MQTT', '/api/test/mqtt'); refreshStatus(); return r; }
-export async function testPdu() { return runTest('PDU', '/api/test/pdu'); }
-export async function testEmonCms() { const r = await runTest('EmonCMS', '/api/test/emoncms'); refreshStatus(); return r; }
+export async function testMqtt() { const r = await runTest('MQTT', '/api/integrations/mqtt/probe'); refreshStatus(); return r; }
+export async function testPdu() { return runTest('PDU', '/api/integrations/vertiv/probe'); }
+export async function testEmonCms() { const r = await runTest('EmonCMS', '/api/integrations/emoncms/probe'); refreshStatus(); return r; }
 export async function testHistory() { const r = await runTest('History', '/api/test/history'); refreshStatus(); return r; }
-export async function provisionEmonCmsFeeds() { toast('Provisioning EmonCMS feeds…', true); const r = await api('/api/emoncms/provision-feeds', { method: 'POST' }); toast(r.body.message, r.body.ok); }
+export async function provisionEmonCmsFeeds() { await runIntegrationAction('emoncms', { name: 'publish', title: 'Provision EmonCMS feeds', description: '', effect: 'write' }); }
 export async function deleteEmonCmsFeeds() {
   if (!confirm('⚠️ DELETE ALL EmonCMS feeds created by rPDU2MQTT?\n\n'
     + 'This PERMANENTLY deletes every feed under rPDU2MQTT’s tag/node — and ALL of their stored history in EmonCMS.\n\n'
@@ -53,8 +62,11 @@ export async function deleteEmonCmsFeeds() {
   const typed = prompt('Final confirmation — type  DELETE  (all caps) to permanently delete all rPDU2MQTT feeds:');
   if (typed !== 'DELETE') { toast('Cancelled — nothing was deleted.', false); return; }
   toast('Deleting EmonCMS feeds…', true);
-  const r = await api('/api/emoncms/delete-feeds', { method: 'POST' });
-  toast(r.body.message, r.body.ok);
+  // Through the generic route: the integration owns the rule and the single-owner lease, so the button and
+  // the API cannot do different things.
+  const r = await api('/api/integrations/emoncms/sweep', { method: 'POST' });
+  const inner = (r.body || {}).result || {};
+  toast(inner.message ?? r.body?.message ?? 'Done.', r.body?.ok !== false);
 }
 export async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 export async function clearHa() {
@@ -63,4 +75,44 @@ export async function clearHa() {
     + 'runs again. Nothing belonging to another integration is touched.')) return;
   const r = await api('/api/discovery/clear', { method: 'POST' });
   toast(r.body.message, r.body.ok);
+}
+
+// --- Integration actions, rendered from what each integration says it can do -----------------------------
+// Nothing here names an integration. The server derives the action list from the capabilities each one
+// declares, so a plugin dropped into plugins/ gets its buttons with no TypeScript written for it — which is
+// the whole point of the plugin contracts. The hand-wired per-destination functions above are what this
+// replaces; they stay until every built-in is converted.
+
+/// Run one action and report what came back.
+export async function runIntegrationAction(id: string, action: any) {
+  // Anything that removes something at the far end is confirmed, and named, before it happens.
+  if (action.effect === 'destructive'
+    && !confirm(`${action.title}\n\n${action.description}\n\nThis cannot be undone. Continue?`)) return;
+
+  toast(`${action.title}…`, true);
+  const r = await api(`/api/integrations/${encodeURIComponent(id)}/${encodeURIComponent(action.name)}`, { method: 'POST' });
+  const body: any = r.body || {};
+  // An action returns whatever it likes; show a message if it gave one, otherwise say it finished.
+  const result = body.result ?? {};
+  const message = body.message ?? result.message ?? result.detail
+    ?? (body.ok ? `${action.title} finished.` : `${action.title} failed.`);
+  toast(message, body.ok !== false && result.ok !== false);
+  return body;
+}
+
+/// The buttons for one integration, or null when it has none to offer.
+export async function integrationActionBar(id: string): Promise<any> {
+  const r = await api('/api/integrations');
+  if (!r.body?.ok) return null;
+  const found = (r.body.integrations || []).find((i: any) => i.id === id);
+  if (!found || !(found.actions || []).length) return null;
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  found.actions.forEach((a: any) => {
+    const b = btn(a.title, a.effect === 'destructive' ? 'danger' : a.effect === 'write' ? 'primary' : undefined);
+    b.title = a.description;
+    b.onclick = () => runIntegrationAction(id, a);
+    bar.appendChild(b);
+  });
+  return bar;
 }

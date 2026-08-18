@@ -6,7 +6,7 @@ import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { tagInput } from './tags.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -270,11 +270,11 @@ function renderList(node: any, arr: any[], path: string[]) {
 type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections: any) => any, child?: boolean };
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ schema: 'Pdus' }, { schema: 'Overrides', child: true }, { tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ schema: 'MQTT' }, { tool: addMqttImportSection, child: true }, { schema: 'Modbus' }] },
-  { title: 'Destinations', items: [{ schema: 'EmonCMS' }, { schema: 'HomeAssistant' }, { tool: addHaEnergySection, child: true }, { schema: 'Prometheus' }] },
-  { title: 'System', items: [{ tool: addFeaturesSection }, { schema: 'Gui' }, { schema: 'Api' }, { schema: 'Health' }, { schema: 'Logging' }, { schema: 'Debug' }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'System', items: [{ tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -386,9 +386,17 @@ function renderConfigSection(node: any, nav: any, sections: any) {
         sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
-      renderObjectBody(props, state.data[node.key], sec, [node.key]);
+      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
+      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      const target = node.isPlugin
+        ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
+        : state.data[node.key];
+      const path = node.isPlugin ? ['Plugins', node.key] : [node.key];
+      renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
+    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
+    if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
     // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
@@ -410,17 +418,36 @@ export function build() {
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
-  const HIDDEN = new Set(['EnergyFlow']);
-  // Any schema section not explicitly grouped (and not hidden) lands in System, so a new one is never lost.
-  const knownSchema = new Set(NAV_GROUPS.flatMap(g => g.items.filter(i => 'schema' in i).map((i: any) => i.schema)));
-  const system = NAV_GROUPS.find(g => g.title === 'System')!;
-  state.schema.forEach((n: any) => { if (!knownSchema.has(n.key) && !HIDDEN.has(n.key)) system.items.push({ schema: n.key }); });
+  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
+  // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
+  // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
+  // it belongs, and into System when it says nothing, so a new one is never lost.
+  //
+  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
+  // appended the same sections again, so saving twice put a page in the nav three times.
+  // Every schema section is placed by what the SCHEMA says, built-in or plugin. NAV_GROUPS now carries
+  // only the visual editors (Flow, Nodes, Trends…), which have no schema section to declare a group on.
+  // Holding the grouping in two places is how a section ends up registered, rendered and reachable while
+  // sitting in the wrong group, with nothing to say it was forgotten.
+  //
+  // Schema sections lead each group and the tools follow, because a tool marked `child` indents under
+  // whatever precedes it — the PDU tabs belong under the PDU page, not above it.
+  const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
+  const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
+
+  state.schema.forEach((n: any) => {
+    if (HIDDEN.has(n.key)) return;
+    groupFor(n.group || 'System').items.push({ schema: n.key });
+  });
+  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
 
   // The landing page: a status board, rendered first so it's the default tab (#186).
   const home = addHomeSection(nav, sections);
   const first: any = home.link;
 
-  for (const g of NAV_GROUPS) {
+  for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
     const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
     if (!items.length) continue;

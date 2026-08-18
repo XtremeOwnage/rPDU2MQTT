@@ -18,8 +18,35 @@ namespace rPDU2MQTT.Services;
 /// them in the GUI takes effect without a restart. A device is opened per poll (connect → read → close),
 /// which is simplest and robust for the seconds-scale cadence energy monitoring needs.
 /// </summary>
-public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValueSource, IWithheldSources
+public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValueSource, IWithheldSources, Core.Integrations.IIntegration, Core.Integrations.IStatusProvider
 {
+    // --- The integration contract ----------------------------------------------------------------------
+    // It keeps its own hosting: the poll is per-connection with its own framing probe and gateway
+    // contention rules, none of which the shared source host knows about.
+
+    public string Id => "modbus-source";
+    public string DisplayName => "Modbus sources";
+    public Core.Integrations.IntegrationGroup Group => Core.Integrations.IntegrationGroup.Integrations;
+
+    public bool Enabled(Config c) => Core.Integrations.SourceBindings.For(c, "modbus").Count > 0;
+
+    public string? Misconfigured(Config c)
+        => Enabled(c) && (c.Modbus?.Connections?.Count ?? 0) == 0
+            ? "Nodes are bound to Modbus registers, but no Modbus connections are configured."
+            : null;
+
+    public Core.Integrations.IntegrationHealth Status(Config c)
+    {
+        var bound = Core.Integrations.SourceBindings.For(c, "modbus").Count;
+        if (bound == 0) return new(Core.Integrations.HealthLevel.Off, "No registers bound");
+        if (Misconfigured(c) is { } fault) return new(Core.Integrations.HealthLevel.Bad, "Misconfigured", fault);
+
+        var withheld = ((IWithheldSources)this).Withheld.Count;
+        return withheld > 0
+            ? new(Core.Integrations.HealthLevel.Warn, "Some devices unread", $"{withheld} of {bound} binding(s) withheld")
+            : new(Core.Integrations.HealthLevel.Good, "Polling", $"{bound} binding(s) across {c.Modbus!.Connections.Count} device(s)");
+    }
+
     private readonly Config cfg;
     private readonly FlowValueCache latest = new();
     private readonly Dictionary<string, DateTime> lastPolled = new(StringComparer.Ordinal);

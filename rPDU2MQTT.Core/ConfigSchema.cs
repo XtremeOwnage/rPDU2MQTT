@@ -67,6 +67,20 @@ public sealed class SchemaNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TagChoices { get; set; }
 
+    /// <summary>
+    /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
+    /// rather than as a property of its own. The GUI reads and writes it there.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPlugin { get; set; }
+
+    /// <summary>
+    /// Which nav group this section belongs in ("Sources", "Integrations", "Destinations"). Null for the
+    /// built-in sections, whose grouping the client owns because it interleaves them with its own visual
+    /// editors — pages that have no schema section to hang a group off.
+    /// </summary>
+    public string? Group { get; set; }
+
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -121,8 +135,55 @@ public static class ConfigSchema
             .GetCustomAttribute<AllowedValuesAttribute>()!.Values
             .Select(v => v?.ToString() ?? "").ToArray();
 
+    /// <summary>
+    /// Source types a plugin has contributed, offered alongside the built-in mqtt/modbus in the node
+    /// editor. Set at startup from the registry; empty when nothing contributes one.
+    /// </summary>
+    /// <remarks>
+    /// A GUI convenience, never a constraint — the same rule as the host's time zones. The CRD keeps the
+    /// declared set, because it cannot validate against types that exist only on one operator's machine,
+    /// and a binding naming an unknown type is not rejected at runtime: it simply has nothing supplying it.
+    /// </remarks>
+    public static IReadOnlyList<(string Type, string Label)> PluginSourceTypes { get; set; } = [];
+
     /// <summary>Build the schema for the whole configuration model.</summary>
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
+
+    /// <summary>
+    /// The schema, plus a section per externally loaded plugin.
+    ///
+    /// <para>
+    /// This is what makes a runtime-loaded plugin configurable without shipping any UI: the GUI's form is
+    /// drawn from whatever this returns, so a plugin's settings class becomes a rendered page with typed
+    /// inputs, descriptions and defaults — the same treatment a built-in section gets.
+    /// </para>
+    /// <para>
+    /// The CRD generator deliberately calls <see cref="Build()"/> instead. A CRD is a compile-time contract
+    /// published to the API server; it cannot describe a type that only exists on one operator's machine,
+    /// and generating a different CRD per install is worse than not describing those fields at all.
+    /// </para>
+    /// </summary>
+    public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> plugins)
+    {
+        var schema = BuildObject(typeof(Config));
+        foreach (var (id, label, type, group) in plugins)
+        {
+            var node = new SchemaNode
+            {
+                Key = id,
+                Label = label,
+                Type = "object",
+                Description = "Settings for the " + label + " plugin.",
+                Properties = BuildObject(type),
+                IsPlugin = true,
+                // Where it belongs in the nav. Without this a plugin lands in System whatever it is, so a
+                // destination sits among the logging and diagnostics pages.
+                Group = group,
+            };
+            schema.Add(node);
+        }
+        return schema;
+    }
 
     private static List<SchemaNode> BuildObject(Type type)
     {
@@ -196,6 +257,22 @@ public static class ConfigSchema
             return node;
         }
 
+        // A plugin-supplied source type is offered alongside the declared ones. Appended rather than
+        // replacing them, and marked dynamic so the CRD generator keeps the plain declared set — it cannot
+        // validate against a type that exists only on one operator's machine.
+        if (type == typeof(string) && prop.DeclaringType == typeof(EnergyFlowSource)
+            && prop.Name == nameof(EnergyFlowSource.Type) && PluginSourceTypes.Count > 0
+            && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } declared)
+        {
+            node.EnumValues = declared.Values.Select(v => v?.ToString() ?? "")
+                .Concat(PluginSourceTypes.Select(p => p.Type))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            node.DynamicChoices = true;
+            node.Type = "enum";
+            return node;
+        }
+
         // Choices that only the running host knows — the time zones it can resolve. Same dropdown as
         // [AllowedValues], but filled in here because the list is host-dependent (see TimeZoneChoicesAttribute).
         // Blank stays first so the field can be cleared back to "use the host's zone".
@@ -206,6 +283,9 @@ public static class ConfigSchema
             node.Type = "enum";
             return node;
         }
+
+        // Where this section sits in the nav, declared on the model rather than kept in a second list.
+        if (prop.GetCustomAttribute<NavGroupAttribute>() is { } nav) node.Group = nav.Group;
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
 

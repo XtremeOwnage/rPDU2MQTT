@@ -22,8 +22,32 @@ namespace rPDU2MQTT.Services;
 /// Subscriptions are reconciled on a timer rather than only at startup, so binding a topic in the GUI
 /// takes effect without a restart (matching the rest of the app's live-reload behaviour).
 /// </summary>
-public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics, IWithheldSources
+public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueSource, IFlowValueDiagnostics, IWithheldSources, Core.Integrations.IIntegration, Core.Integrations.IStatusProvider
 {
+    // --- The integration contract ----------------------------------------------------------------------
+    // Declared rather than converted: this already was a value source, and it keeps its own hosting because
+    // it is a subscriber, not a poller — there is no cadence for the shared host to own.
+
+    public string Id => "mqtt-source";
+    public string DisplayName => "MQTT sources";
+    public Core.Integrations.IntegrationGroup Group => Core.Integrations.IntegrationGroup.Integrations;
+
+    /// <summary>On when something is bound to it — a broker connection alone is not a reason to subscribe.</summary>
+    public bool Enabled(Config c) => Core.Integrations.SourceBindings.For(c, "mqtt").Count > 0;
+
+    public Core.Integrations.IntegrationHealth Status(Config c)
+    {
+        var bound = Core.Integrations.SourceBindings.For(c, "mqtt").Count;
+        if (bound == 0) return new(Core.Integrations.HealthLevel.Off, "No topics bound");
+
+        // Withheld is its own state and the one worth seeing: the binding is right, the publisher has
+        // stopped, and the node reads "no data" rather than a stale number.
+        var withheld = ((IWithheldSources)this).Withheld.Count;
+        return withheld > 0
+            ? new(Core.Integrations.HealthLevel.Warn, "Some sources stale", $"{withheld} of {bound} binding(s) withheld")
+            : new(Core.Integrations.HealthLevel.Good, "Subscribed", $"{bound} binding(s)");
+    }
+
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     // The staleness rules live in the cache (Core) so they're testable without a broker.
@@ -31,12 +55,12 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     // Topic -> the bindings fed by it. One topic may drive several nodes/metrics.
     private volatile Dictionary<string, List<(string NodeId, EnergyFlowSource Source)>> bindings = new(StringComparer.Ordinal);
     private readonly HashSet<string> subscribed = new(StringComparer.Ordinal);
-    // v3: the subscription manager pushes each received value to the flow middleware (the FlowGrain) via this
+    // The subscription manager pushes each received value to the flow middleware via this
     // sink — event-driven, no polling bridge. Null in tests / if not wired.
     private readonly ISnapshotSink<MeasurementSnapshot>? sink;
     private long version;
     private long received;
-    // The audit's verdicts belong to one owner cluster-wide, so they live in IPeriodAuditGrain rather than
+    // The audit's verdicts belong to one owner, so they live behind IPeriodAuditor rather than
     // here: two ingests each keeping their own map wrote back over one shared record and erased each other,
     // and two replicas would have reached the verdict separately.
     private readonly IPeriodAuditor? auditor;
@@ -189,7 +213,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     /// Ask the audit's owner whether this reading may be published as the day's total.
     ///
     /// <para>
-    /// Only reached for a source declared <c>period</c>, so the grain is not on a per-message path — an
+    /// Only reached for a source declared <c>period</c>, so the audit is not on a per-message path — an
     /// install with none never calls it. The call is awaited: withholding is a correctness decision, and
     /// publishing first and asking after would put the figure out before the answer came back.
     /// </para>
@@ -222,8 +246,8 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private void OnMessageReceived(object? sender, OnMessageReceivedEventArgs e)
     {
         var now = DateTime.UtcNow;
-        // Collect the readings this message produced (only if a sink is wired) and push them to the flow grain
-        // event-driven — the "subscription manager routes events to the recipient grain" (#v3).
+        // Collect the readings this message produced (only if a sink is wired) and push them to the flow,
+        // event-driven: a value is visible the moment it arrives.
         List<MeasurementReading>? readings = sink is null ? null : new();
         Apply(bindings, latest, e.PublishMessage.Topic, e.PublishMessage.PayloadAsString, now,
             readings is null ? null : (node, metric, value, stale) =>
@@ -291,7 +315,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             // Fan the reading into its direction(s): normally one key, but a 'split' source (a single signed
             // value) writes both the out (positive part) and in (negative magnitude) keys. The 'in' key is
             // direction-qualified so it doesn't overwrite the out supply value, and — being a non-metric key —
-            // is skipped by the grain sink below (Metrics.TryParse fails), keeping charge/export out of the flow.
+            // is skipped by the sink below (Metrics.TryParse fails), keeping charge/export out of the flow.
             // A 'period' energy counter is reset by the device each day, so it already IS the daily total —
             // store it under the daily metric rather than pretending it is cumulative and measuring its
             // "rise", which loses the whole day every time the device rolls it over.

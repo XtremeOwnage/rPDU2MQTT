@@ -38,23 +38,17 @@ public sealed class ConfigurationFaults
 }
 
 /// <summary>
-/// Whether an optional destination has what it needs. Pure, so the rules are testable without building a
-/// host — the previous checks were inline in DI setup and could only be exercised by starting the app.
+/// Whether an optional feature has what it needs. Pure, so the rules are testable without building a host.
+///
+/// <para>
+/// Only the logging sinks are left here. A destination's own requirements moved onto
+/// <c>IIntegration.Misconfigured</c> when destinations became plugins: the rule belongs with the thing it
+/// is about, an externally loaded plugin has no way to add a method to this class, and a copy kept here
+/// would be a second answer to the same question — one of which nothing calls.
+/// </para>
 /// </summary>
 public static class DestinationRequirements
 {
-    /// <summary>
-    /// EmonCMS over HTTP posts to a URL; over MQTT it reuses the broker and needs none. Blank counts as
-    /// missing — the old null-only check let <c>Url: ""</c> through, to fail later at runtime instead.
-    /// </summary>
-    public static ConfigurationFault? EmonCms(bool enabled, bool httpTransport, string? url)
-    {
-        if (!enabled || !httpTransport || !string.IsNullOrWhiteSpace(url)) return null;
-        return new ConfigurationFault("emoncms", "EmonCMS.Url",
-            "EmonCMS is enabled over HTTP but EmonCMS.Url is not set, so nothing can be posted. Set the URL, "
-            + "switch Transport to Mqtt, or turn EmonCMS off. Everything else keeps running.");
-    }
-
     /// <summary>File logging needs somewhere to write.</summary>
     public static ConfigurationFault? FileLog(bool enabled, string? path)
     {

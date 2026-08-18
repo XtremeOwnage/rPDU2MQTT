@@ -1,5 +1,5 @@
 using rPDU2MQTT.Core.Flow;
-using rPDU2MQTT.Grains.Abstractions.Discovery;
+using rPDU2MQTT.Core.Discovery;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
@@ -86,188 +86,226 @@ public class TopicSampleAnalyzerTests
 /// The topic index exists only while someone is browsing: it's leased, and it's capped. Both of those are
 /// the point — the alternative is a background process quietly indexing every topic on the broker forever.
 /// </summary>
-public class TopicIndexGrainTests
+public class TopicIndexBehaviourTests
 {
     private static TopicSample Sample(string topic, string payload)
         => new() { Topic = topic, Payload = payload, SeenUtc = DateTime.UtcNow };
 
     [Fact]
-    public async Task NobodyBrowsing_MeansNothingIsCollected()
+    public void NobodyBrowsing_MeansNothingIsCollected()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+        var index = new TopicIndex();
 
-            // Un-leased: the subscriber shouldn't even be listening...
-            Assert.False(await index.Wanted());
+        // Un-leased: the subscriber shouldn't even be listening...
+        Assert.False(index.Wanted());
 
-            // ...and anything pushed at it anyway is dropped rather than accumulated.
-            await index.Observe(new List<TopicSample> { Sample("solar/pv/power", "1200 W") });
-            Assert.Empty(await index.Search("solar", 10));
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        // ...and anything pushed at it anyway is dropped rather than accumulated.
+        index.Observe(new List<TopicSample> { Sample("solar/pv/power", "1200 W") });
+        Assert.Empty(index.Search("solar", 10));
     }
 
     [Fact]
-    public async Task Browsing_LeasesTheIndex_AndSearchesIt()
+    public void Browsing_LeasesTheIndex_AndSearchesIt()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
+        var index = new TopicIndex();
+
+        var state = index.Renew(null);
+        Assert.False(state.Listening);        // nothing has reported yet
+        Assert.True(index.Wanted());    // ...but the subscriber is now asked to
+
+        index.Observe(new List<TopicSample>
         {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+            Sample("solar_assistant/inverter_1/pv_power/state", "3.4 kW"),
+            Sample("solar_assistant/inverter_1/grid_voltage/state", "241 V"),
+            Sample("tele/plug/SENSOR", """{"ENERGY":{"Power":12}}"""),
+        });
 
-            var state = await index.Renew(null);
-            Assert.False(state.Listening);        // nothing has reported yet
-            Assert.True(await index.Wanted());    // ...but the subscriber is now asked to
+        Assert.True((index.Renew(null)).Listening);
 
-            await index.Observe(new List<TopicSample>
-            {
-                Sample("solar_assistant/inverter_1/pv_power/state", "3.4 kW"),
-                Sample("solar_assistant/inverter_1/grid_voltage/state", "241 V"),
-                Sample("tele/plug/SENSOR", """{"ENERGY":{"Power":12}}"""),
-            });
+        var solar = index.Search("pv_power", 10);
+        Assert.Equal("solar_assistant/inverter_1/pv_power/state", Assert.Single(solar).Topic);
 
-            Assert.True((await index.Renew(null)).Listening);
+        // Shortest first: what you typed, not the deepest branch of the tree.
+        var all = index.Search("", 10);
+        Assert.Equal("tele/plug/SENSOR", all.First().Topic);
 
-            var solar = await index.Search("pv_power", 10);
-            Assert.Equal("solar_assistant/inverter_1/pv_power/state", Assert.Single(solar).Topic);
-
-            // Shortest first: what you typed, not the deepest branch of the tree.
-            var all = await index.Search("", 10);
-            Assert.Equal("tele/plug/SENSOR", all.First().Topic);
-
-            Assert.Equal("3.4 kW", (await index.Get("solar_assistant/inverter_1/pv_power/state"))!.Payload);
-            Assert.Null(await index.Get("nothing/here"));
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        Assert.Equal("3.4 kW", (index.Get("solar_assistant/inverter_1/pv_power/state"))!.Payload);
+        Assert.Null(index.Get("nothing/here"));
     }
 
     [Fact]
-    public async Task ChattyBroker_CantGrowItPastItsCap()
+    public void ChattyBroker_CantGrowItPastItsCap()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
-            await index.Renew(null);
+        var index = new TopicIndex();
+        index.Renew(null);
 
-            var flood = new List<TopicSample>();
-            for (var i = 0; i < 2500; i++) flood.Add(Sample($"noisy/{i}/state", i.ToString()));
-            await index.Observe(flood);
+        var flood = new List<TopicSample>();
+        for (var i = 0; i < 2500; i++) flood.Add(Sample($"noisy/{i}/state", i.ToString()));
+        index.Observe(flood);
 
-            var state = await index.Renew(null);
-            Assert.Equal(state.Capacity, state.Topics);   // held at the cap, not at 2500
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        var state = index.Renew(null);
+        Assert.Equal(state.Capacity, state.Topics);   // held at the cap, not at 2500
     }
 
     [Fact]
-    public async Task Filter_DefaultsToWildcard_Narrows_AndBlankKeepsIt()
+    public void Filter_DefaultsToWildcard_Narrows_AndBlankKeepsIt()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
+        var index = new TopicIndex();
 
-            // Default is the bare wildcard, and that's what the subscriber is told to subscribe to.
-            Assert.Equal("#", (await index.Renew(null)).Filter);
-            Assert.Equal("#", await index.DesiredFilter());
+        // Default is the bare wildcard, and that's what the subscriber is told to subscribe to.
+        Assert.Equal("#", (index.Renew(null)).Filter);
+        Assert.Equal("#", index.DesiredFilter());
 
-            // Narrowing to a prefix re-subscribes and drops what was held for the old filter.
-            await index.Observe(new List<TopicSample> { Sample("anything/1", "x") });
-            var narrowed = await index.Renew("solar_assistant/#");
-            Assert.Equal("solar_assistant/#", narrowed.Filter);
-            Assert.Equal(0, narrowed.Topics);   // cleared on the filter change
-            Assert.Equal("solar_assistant/#", await index.DesiredFilter());
+        // Narrowing to a prefix re-subscribes and drops what was held for the old filter.
+        index.Observe(new List<TopicSample> { Sample("anything/1", "x") });
+        var narrowed = index.Renew("solar_assistant/#");
+        Assert.Equal("solar_assistant/#", narrowed.Filter);
+        Assert.Equal(0, narrowed.Topics);   // cleared on the filter change
+        Assert.Equal("solar_assistant/#", index.DesiredFilter());
 
-            // A blank renew keeps the current filter (the detail lookups renew this way; they must not reset it).
-            Assert.Equal("solar_assistant/#", (await index.Renew(null)).Filter);
-            Assert.Equal("solar_assistant/#", (await index.Renew("  ")).Filter);
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        // A blank renew keeps the current filter (the detail lookups renew this way; they must not reset it).
+        Assert.Equal("solar_assistant/#", (index.Renew(null)).Filter);
+        Assert.Equal("solar_assistant/#", (index.Renew("  ")).Filter);
     }
 
     [Fact]
-    public async Task DeniedSubscription_IsVisible_AsGrantedFalse()
+    public void DeniedSubscription_IsVisible_AsGrantedFalse()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
-            await index.Renew(null);
+        var index = new TopicIndex();
+        index.Renew(null);
 
-            // Before the subscriber reports, grant is unknown (null) — not a silent "false".
-            Assert.Null((await index.Renew(null)).Granted);
+        // Before the subscriber reports, grant is unknown (null) — not a silent "false".
+        Assert.Null((index.Renew(null)).Granted);
 
-            // The subscriber reports the SUBACK outcome; a denial surfaces so the browser can explain it.
-            await index.ReportSubscription(false);
-            Assert.False((await index.Renew(null)).Granted);
+        // The subscriber reports the SUBACK outcome; a denial surfaces so the browser can explain it.
+        index.ReportSubscription(false);
+        Assert.False((index.Renew(null)).Granted);
 
-            await index.ReportSubscription(true);
-            Assert.True((await index.Renew(null)).Granted);
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        index.ReportSubscription(true);
+        Assert.True((index.Renew(null)).Granted);
     }
 
     [Fact]
-    public async Task NobodyBrowsing_HasNoDesiredFilter()
+    public void NobodyBrowsing_HasNoDesiredFilter()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            // Un-leased: the subscriber must be told to subscribe to nothing.
-            Assert.Equal("", await cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0).DesiredFilter());
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        // Un-leased: the subscriber must be told to subscribe to nothing.
+        Assert.Equal("", new TopicIndex().DesiredFilter());
     }
 
     [Fact]
-    public async Task TopicsUnder_ReturnsEverything_WhereSearchWouldCapAndReorder()
+    public void TopicsUnder_ReturnsEverything_WhereSearchWouldCapAndReorder()
     {
         // A sweep that must retract every retained discovery message cannot use Search: it caps at 200 and
         // orders by topic length for autocomplete relevance, so on a busy broker it would quietly hand back a
         // subset and the rest would survive the "clear" — the exact failure the sweep exists to prevent.
-        var cluster = await GrainTestCluster.StartAsync();
-        try
-        {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
-            await index.Renew("homeassistant/#");
+        var index = new TopicIndex();
+        index.Renew("homeassistant/#");
 
-            var samples = Enumerable.Range(0, 400)
-                .Select(i => new TopicSample { Topic = $"homeassistant/device/rPDU2MQTT_dev{i:000}/config", SeenUtc = DateTime.UtcNow })
-                .Append(new TopicSample { Topic = "other/thing", SeenUtc = DateTime.UtcNow })
-                .ToList();
-            await index.Observe(samples);
+        var samples = Enumerable.Range(0, 400)
+            .Select(i => new TopicSample { Topic = $"homeassistant/device/rPDU2MQTT_dev{i:000}/config", SeenUtc = DateTime.UtcNow })
+            .Append(new TopicSample { Topic = "other/thing", SeenUtc = DateTime.UtcNow })
+            .ToList();
+        index.Observe(samples);
 
-            var swept = await index.TopicsUnder("homeassistant/");
-            Assert.Equal(400, swept.Count);
-            Assert.DoesNotContain("other/thing", swept);
+        var swept = index.TopicsUnder("homeassistant/");
+        Assert.Equal(400, swept.Count);
+        Assert.DoesNotContain("other/thing", swept);
 
-            // What the old path would have given the sweep.
-            var browsed = await index.Search(null, 5000);
-            Assert.True(browsed.Count <= 200, $"Search is meant to stay a browse, got {browsed.Count}");
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        // What the old path would have given the sweep.
+        var browsed = index.Search(null, 5000);
+        Assert.True(browsed.Count <= 200, $"Search is meant to stay a browse, got {browsed.Count}");
     }
 
     [Fact]
-    public async Task TopicsUnder_MatchesOnPrefix_NotSubstring()
+    public void TopicsUnder_MatchesOnPrefix_NotSubstring()
     {
-        var cluster = await GrainTestCluster.StartAsync();
-        try
+        var index = new TopicIndex();
+        index.Renew("#");
+        index.Observe(new List<TopicSample>
         {
-            var index = cluster.GrainFactory.GetGrain<ITopicIndexGrain>(0);
-            await index.Renew("#");
-            await index.Observe(new List<TopicSample>
-            {
-                new() { Topic = "homeassistant/device/a/config", SeenUtc = DateTime.UtcNow },
-                new() { Topic = "mirror/homeassistant/device/b/config", SeenUtc = DateTime.UtcNow },
-            });
+            new() { Topic = "homeassistant/device/a/config", SeenUtc = DateTime.UtcNow },
+            new() { Topic = "mirror/homeassistant/device/b/config", SeenUtc = DateTime.UtcNow },
+        });
 
-            var found = await index.TopicsUnder("homeassistant/");
-            Assert.Equal(new[] { "homeassistant/device/a/config" }, found);
-        }
-        finally { await cluster.StopAllSilosAsync(); }
+        var found = index.TopicsUnder("homeassistant/");
+        Assert.Equal(new[] { "homeassistant/device/a/config" }, found);
+    }
+}
+
+public class TopicIndexLeaseTests
+{
+    private static TopicSample Sample(string topic, string? payload = "1")
+        => new() { Topic = topic, Payload = payload, SeenUtc = DateTime.UtcNow };
+
+    [Fact]
+    public void NobodyBrowsing_MeansNothingIsIndexed()
+    {
+        // Asking is what starts it; not asking is what stops it. Observing without a lease must not
+        // accumulate, or "leased" means nothing.
+        var index = new TopicIndex();
+        index.Observe([Sample("a/b")]);
+
+        Assert.False(index.Wanted());
+        Assert.Empty(index.Search(null, 10));
+    }
+
+    [Fact]
+    public void RenewingOpensIt_AndAskingKeepsItOpen()
+    {
+        var index = new TopicIndex();
+        index.Renew(null);
+        index.Observe([Sample("solar/pv_power"), Sample("solar/battery_soc")]);
+
+        Assert.True(index.Wanted());
+        Assert.Equal(2, index.Search(null, 10).Count);
+        Assert.Single(index.Search("battery", 10));
+    }
+
+    [Fact]
+    public void ANarrowedFilterIsNotResetByAPlainRenew()
+    {
+        // The detail lookups renew with no filter; if that reset the filter to '#' every time, narrowing it
+        // on a broker whose ACL forbids the wildcard would be undone by the next click.
+        var index = new TopicIndex();
+        index.Renew("solar/#");
+        index.Observe([Sample("solar/x")]);
+        index.Renew(null);
+
+        Assert.Equal("solar/#", index.DesiredFilter());
+        Assert.Single(index.Search(null, 10));   // and it kept what it had
+    }
+
+    [Fact]
+    public void ChangingTheFilterStartsAgain()
+    {
+        var index = new TopicIndex();
+        index.Renew("a/#");
+        index.Observe([Sample("a/one")]);
+        index.Renew("b/#");
+
+        Assert.Empty(index.Search(null, 10));
+        Assert.Equal("b/#", index.DesiredFilter());
+    }
+
+    [Fact]
+    public void ADeniedSubscriptionIsReported_SoAnEmptyBrowseIsExplained()
+    {
+        // An ACL forbidding the wildcard is the usual reason a browse stays empty on a working broker.
+        // Saying so beats showing nothing.
+        var index = new TopicIndex();
+        index.Renew(null);
+        index.ReportSubscription(granted: false);
+
+        Assert.False(index.Renew(null).Granted);
+    }
+
+    [Fact]
+    public void ItStopsGrowing_RatherThanFollowingAChattyBrokerForever()
+    {
+        var index = new TopicIndex();
+        index.Renew(null);
+        index.Observe([.. Enumerable.Range(0, TopicIndex.Capacity + 500).Select(i => Sample($"t/{i}"))]);
+
+        Assert.True(index.Search(null, int.MaxValue).Count <= TopicIndex.Capacity);
     }
 }

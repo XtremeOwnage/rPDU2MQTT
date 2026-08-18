@@ -30,7 +30,7 @@ public class OutletCommandService : IHostedService
         cfg = deps.Cfg;
         pdu = deps.PDU;
         leader = deps.Leader;
-        // When wired, outlet writes route to the per-outlet grain (single owner); else call the PDU directly.
+        // When wired, outlet writes route through the single-owner write path; else call the PDU directly.
         this.outletControl = outletControl;
 
         // <ParentTopic>/+/outlets/+/{set,reboot,resetStats} and the per-field config set
@@ -141,7 +141,16 @@ public class OutletCommandService : IHostedService
 
             // Otherwise it's the on/off switch command ([set]).
             var on = payload.Equals("on", StringComparison.OrdinalIgnoreCase);
-            await Exec(deviceId, outletIndex, on ? "on" : "off");
+            var result = await Exec(deviceId, outletIndex, on ? "on" : "off");
+
+            // Only echo a write that actually happened. Publishing the new state for a refused write tells
+            // Home Assistant the outlet moved when nothing touched it, and the switch then flips back by
+            // itself on the next poll with nothing to explain it.
+            if (!result.Ok)
+            {
+                Log.Warning($"Outlet command on {topic} was not applied: {result.Message}");
+                return;
+            }
 
             // Optimistically publish the new state so HA reflects it immediately instead of waiting
             // for the next poll. The regular poll will confirm/correct it shortly after.
@@ -158,19 +167,22 @@ public class OutletCommandService : IHostedService
     }
 
     /// <summary>
-    /// Action an outlet through the grain (single cluster-wide owner) when wired, else straight to the PDU.
-    /// Same underlying PDU calls either way — the grain just makes the write actor-owned.
+    /// Action an outlet through the owned write path when wired, else straight to the PDU. Same underlying
+    /// PDU calls either way; the seam is what makes the write single-owner, and what reports whether it
+    /// reached a device at all.
     /// </summary>
-    private async Task Exec(string deviceId, int outletIndex, string action)
+    private async Task<Abstractions.Pdu.OutletWriteResult> Exec(string deviceId, int outletIndex, string action)
     {
-        if (outletControl is not null) { await outletControl.Control(deviceId, outletIndex, action); return; }
+        if (outletControl is not null) return await outletControl.Control(deviceId, outletIndex, action);
         switch (action.ToLowerInvariant())
         {
             case "on": await pdu.SetOutletStateAsync(deviceId, outletIndex, true, CancellationToken.None); break;
             case "off": await pdu.SetOutletStateAsync(deviceId, outletIndex, false, CancellationToken.None); break;
             case "reboot": await pdu.ControlOutletAsync(deviceId, outletIndex, "reboot", CancellationToken.None); break;
             case "resetstats": await pdu.ResetOutletStatsAsync(deviceId, outletIndex, CancellationToken.None); break;
+            default: return Abstractions.Pdu.OutletWriteResult.Refused($"Unknown outlet action '{action}'.");
         }
+        return Abstractions.Pdu.OutletWriteResult.Applied($"{deviceId} outlet {outletIndex}: {action}.");
     }
 
     /// <summary>Write a single outlet config field (delay as a number, power-on action as a string).</summary>
@@ -181,7 +193,7 @@ public class OutletCommandService : IHostedService
 
         var isDelay = DelayFields.Contains(field);
 
-        // Route the write through the per-outlet grain (single owner) when wired; else straight to the PDU.
+        // Route the write through the single-owner path when wired; else straight to the PDU.
         // Both return the applied value string so we can echo it back.
         string applied;
         if (outletControl is not null)

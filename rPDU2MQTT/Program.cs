@@ -18,7 +18,7 @@ if (args.Contains("--emit-crd"))
 if (args.Contains("--emit-schema"))
 {
     Console.Write(System.Text.Json.JsonSerializer.Serialize(
-        rPDU2MQTT.Services.Gui.ConfigSchema.Build(), rPDU2MQTT.Services.Gui.ConfigSchema.Json));
+        rPDU2MQTT.Services.Gui.ConfigSchema.Build(rPDU2MQTT.Startup.ServiceConfiguration.PluginSections), rPDU2MQTT.Services.Gui.ConfigSchema.Json));
     return 0;
 }
 
@@ -30,7 +30,6 @@ Log.Logger = new LoggerConfiguration()
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration(o => { o.AddEnvironmentVariables(); })
-    .UseOrleans(rPDU2MQTT.Startup.SiloConfiguration.Configure)
     .ConfigureServices(ServiceConfiguration.Configure)
     .ConfigureLogging(logging =>
     {
@@ -45,7 +44,8 @@ StartupSummary.Log(
     host.Services.GetRequiredService<Config>(),
     host.Services.GetRequiredService<rPDU2MQTT.Core.HostRole>(),
     host.Services.GetRequiredService<rPDU2MQTT.Startup.ConfigSources.IConfigSource>(),
-    host.Services.GetService<rPDU2MQTT.Core.Startup.ConfigurationFaults>());
+    host.Services.GetService<rPDU2MQTT.Core.Startup.ConfigurationFaults>(),
+    host.Services.GetService<rPDU2MQTT.Core.Integrations.IntegrationRegistry>());
 
 //Ensure we can actually connect to MQTT.
 var client = host.Services.GetRequiredService<IHiveMQClient>();

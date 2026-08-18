@@ -67,27 +67,42 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         try
         {
             Log.Debug("Starting discovery job.");
-            var data = await pdu.GetRootData_Public(cancellationToken);
 
             // Collect every entity, then publish one device-based discovery message per device.
             var components = new List<baseEntity>();
+            PduData? data = null;
 
-            // Lookup (deviceKey/index -> outlet) so group devices can mirror their member switches.
-            memberOutletLookup = data.Devices
-                .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", value: (Outlet: o, Device: d))))
-                .ToDictionary(x => x.key, x => x.value);
+            // A PDU that cannot be read costs its own entities, not everyone's: a plugin device is fine and
+            // still deserves its sensors. Without this, one unreachable PDU means no discovery at all.
+            try { data = await pdu.GetRootData_Public(cancellationToken); }
+            catch (Exception ex) { Log.Warning($"Discovery could not read the PDU ({ex.Message}); publishing what else it has."); }
 
-            // Discover PDUs, Outlets, etc...
-            foreach (rPDU nestedPDU in data.PDUs)
+            if (data is not null)
             {
-                var pduDevice = nestedPDU.GetDiscoveryDevice();
-                collectDiscovery(nestedPDU.Devices, pduDevice, components);
+                // Lookup (deviceKey/index -> outlet) so group devices can mirror their member switches.
+                memberOutletLookup = data.Devices
+                    .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", value: (Outlet: o, Device: d))))
+                    .ToDictionary(x => x.key, x => x.value);
+
+                // Discover PDUs, Outlets, etc...
+                foreach (rPDU nestedPDU in data.PDUs)
+                {
+                    var pduDevice = nestedPDU.GetDiscoveryDevice();
+                    collectDiscovery(nestedPDU.Devices, pduDevice, components);
+                }
+
+                // Discover OneView Groups.
+                var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
+                if (firstPDU is not null)
+                    collectDiscovery(data.Groups, firstPDU, components);
             }
 
-            // Discover OneView Groups.
-            var firstPDU = data.PDUs.FirstOrDefault()?.GetDiscoveryDevice();
-            if (firstPDU is not null)
-                collectDiscovery(data.Groups, firstPDU, components);
+            // Devices a plugin supplies. They reach Home Assistant by the same route a PDU's do — the same
+            // entity builders, the same identifiers — because nothing downstream should be able to tell
+            // which kind of hardware reported a reading. They have no rPDU document (that is the Vertiv
+            // model), so the parent device is built from the instance that reported them.
+            foreach (var snapshot in FreshSnapshotsWithId().Where(s => s.Data.PDUs.Length == 0 && s.Data.Devices.Count > 0))
+                collectDiscovery(snapshot.Data.Devices, PluginDiscoveryDevice(snapshot), components);
 
             // Bridge device with diagnostic action buttons.
             components.AddRange(BuildDiagnosticButtons());
@@ -100,6 +115,23 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
         {
             discoveryLock.Release();
         }
+    }
+
+    /// <summary>
+    /// The Home Assistant device a plugin's devices hang under. Keyed by the instance id, which a plugin is
+    /// told to keep stable across restarts — an identifier that moves mints a second device in Home
+    /// Assistant and orphans every entity on the first.
+    /// </summary>
+    private DiscoveryDevice PluginDiscoveryDevice(Core.PduSnapshot snapshot)
+    {
+        var first = snapshot.Data.Devices[0];
+        return new DiscoveryDevice
+        {
+            UniqueIdentifier = $"rPDU2MQTT_{snapshot.InstanceId}",
+            Name = first.Entity_DisplayName ?? snapshot.InstanceId,
+            Manufacturer = first.Entity_Make ?? "rPDU2MQTT plugin",
+            Model = first.Entity_Model ?? snapshot.InstanceId,
+        };
     }
 
     /// <summary>Buttons for the bridge device: rediscover and restart (see DiagnosticService).</summary>

@@ -49,7 +49,19 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly Core.Flow.IFlowValueSource? live;
-    private readonly Core.Flow.IFlowHistory? history;
+    // Config sections contributed by externally loaded plugins, so the GUI renders a page for each.
+    private readonly PluginSchemaSections? pluginSections;
+    // Every integration this build carries, built-in or loaded from plugins/.
+    private readonly Core.Integrations.IntegrationRegistry? integrations;
+    // The write seam. Routes to the PDU that reported the device, or to the plugin that owns it.
+    private readonly Abstractions.Pdu.IOutletControl? outletControl;
+    // Anything that can offer nodes to adopt — the broker index today, a plugin tomorrow.
+    private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
+    // The Status board, held in this process.
+    private readonly Core.Status.StatusBoard? statusBoard;
+    private readonly Core.Diagnostics.ProcessRegistry? processes;
+    private readonly Core.Discovery.TopicIndex topicIndex;
+    private readonly Core.Flow.IMeasurementHistory? history;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -58,14 +70,25 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private GuiEventHub? events;
     private readonly object eventsGate = new();
 
-    private readonly Orleans.IGrainFactory grains;
+    // The deployment operator, when this build runs somewhere it can roll itself (Kubernetes).
+    private readonly Core.Operator.IOperatorControl? deployOperator;
+    // What each Modbus device last did, for the diagnostics page.
+    private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Orleans.IGrainFactory grains, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IFlowHistory? history = null, Core.RestartPending? pending = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null)
     {
         this.live = live;
+        this.pluginSections = pluginSections;
+        this.integrations = integrations;
+        this.outletControl = outletControl;
+        this.nodeProviders = nodeProviders?.ToList() ?? [];
+        this.statusBoard = statusBoard;
+        this.processes = processes;
+        this.topicIndex = topicIndex ?? new Core.Discovery.TopicIndex();
         this.history = history;
         this.pending = pending ?? new Core.RestartPending();
-        this.grains = grains;
+        this.deployOperator = deployOperator;
+        this.modbusDevices = modbusDevices;
         this.config = config;
         this.mqtt = mqtt;
         this.pdu = pdu;
@@ -299,7 +322,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return events ??= new GuiEventHub(ConfigSchema.Json,
                 // The header: version, MQTT, config writability, operator update.
                 new GuiEventHub.Feed("status", TimeSpan.FromSeconds(5), (_, ct) => BuildStatusAsync(null, ct)),
-                // The Status board's cards, straight from the component grains.
+                // The Status board's cards.
                 new GuiEventHub.Feed("board", TimeSpan.FromSeconds(3), (_, _) => BuildBoardAsync()),
                 // Readings for one instance ("livedata:<instance>"; bare "livedata" = the primary).
                 new GuiEventHub.Feed("livedata", TimeSpan.FromSeconds(2), BuildLiveDataAsync),
@@ -340,9 +363,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var prefix = config.HASS.DiscoveryTopic;
         if (string.IsNullOrWhiteSpace(prefix)) return Array.Empty<string>();
 
-        var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-        await index.Renew(prefix.Trim().Trim('/') + "/#");
-        var retained = (await index.Search(null, 5000)).Select(t => t.Topic).ToList();
+        var index = topicIndex;
+        index.Renew(prefix.Trim().Trim('/') + "/#");
+        var retained = (index.Search(null, 5000)).Select(t => t.Topic).ToList();
 
         // What the exporter would publish right now: every non-synthetic tier not already covered by native PDU discovery.
         var merged = new Models.PDU.PduData();
@@ -373,7 +396,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     {
         try
         {
-            var board = await grains.GetGrain<Grains.Abstractions.Status.IStatusBoardGrain>(0).Board();
+            // In-memory board: evaluated when someone looks, so an "…ago" cannot be stale.
+            var board = statusBoard?.Board() ?? [];
             var cards = board.Select(c => new
             {
                 id = c.Id,
@@ -638,7 +662,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
         app.MapGet("/api/schema", () =>
         {
-            var schema = ConfigSchema.Build();
+            // A runtime-loaded plugin's settings class becomes a page here, with no UI shipped by the
+            // plugin: the form is drawn from this schema, which is generated by reflection rather than
+            // compiled into the bundle.
+            var schema = ConfigSchema.Build(pluginSections?.Sections ?? []);
             // Under Kubernetes, logging is driven by the platform (stdout + the pod spec).
             if (configSource is KubernetesConfigSource)
                 schema = schema.Where(n => n.Key != "Logging").ToList();
@@ -756,7 +783,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Update checks are only available with the Kubernetes config source." }, ConfigSchema.Json);
             try
             {
-                var report = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).CheckNow(force: true);
+                var report = await Operator(op => op.CheckNow(force: true), new Core.Operator.OperatorReport { Message = "The operator is not available in this deployment." });
                 return Results.Json(new { ok = true, message = report.Message ?? "Checked.", update = report }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
@@ -794,7 +821,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "A tag is required." }, ConfigSchema.Json);
             try
             {
-                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).SetTag(tag);
+                var msg = await Operator(op => op.SetTag(tag), "The operator is not available in this deployment.");
                 return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
@@ -807,7 +834,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "Force update needs the Kubernetes config source + the operator role." }, ConfigSchema.Json);
             try
             {
-                var msg = await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Redeploy();
+                var msg = await Operator(op => op.Redeploy(), "The operator is not available in this deployment.");
                 return Results.Json(new { ok = true, message = msg }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
@@ -870,7 +897,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
 
-        // The Status board (v3): every hop's card as its own component grain computed it. The verdicts —
+        // The Status board: every hop's card as the board judged it. The verdicts —
         app.MapGet("/api/status/board", async () => Results.Json(await BuildBoardAsync(), ConfigSchema.Json));
 
         // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
@@ -881,8 +908,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             // Operator update report (#210), if the operator has written one to the CR status.
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
-            // The cluster-wide process list (v3: the ProcessRegistryGrain, replacing the MQTT heartbeat).
-            var processList = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            // The process list (the registry, replacing the MQTT heartbeat).
+            var processList = processes?.Active() ?? [];
 
             // EmonCMS export health. The exporter runs only on the worker.
             object? emonStatus = null;
@@ -892,7 +919,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     emonStatus = emonCmsStatus.Snapshot();
                 else
                     emonStatus = processList
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds)
+                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Diagnostics.ProcessRegistry.StaleAfterSeconds)
                         .OrderByDescending(p => p.TimestampUtc)
                         .Select(p => (object?)p.EmonCms)
                         .FirstOrDefault() ?? emonCmsStatus.Snapshot();
@@ -903,10 +930,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             foreach (var conn in config.Modbus.Connections)
             {
                 if (!conn.Enabled || string.IsNullOrWhiteSpace(conn.Host)) continue;
-                try
                 {
-                    var h = await grains.GetGrain<Grains.Abstractions.Modbus.IModbusGrain>(
-                        Grains.Abstractions.Modbus.IModbusGrain.KeyFor(conn.Host, conn.Port, conn.UnitId)).Health();
+                    if (modbusDevices?.For(conn.Host, conn.Port, conn.UnitId) is not { } h) continue;
                     long? okAge = h.LastOkUtc is { } okAt ? (long)Math.Max(0, (DateTime.UtcNow - okAt).TotalSeconds) : null;
                     var stale = h.LastOkUtc is null || (h.PollIntervalSeconds > 0 && okAge > Math.Max(30, h.PollIntervalSeconds * 3));
                     modbus.Add(new
@@ -915,7 +940,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         bindings = h.Bindings, values = h.LastValueCount, lastOkAgeSeconds = okAge, error = h.LastError, stale,
                     });
                 }
-                catch { /* device grain unreachable from here — leave it off rather than guess */ }
             }
 
             return Results.Json(new
@@ -963,7 +987,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                             roles = p.Roles,
                             host = p.Host,
                             ageSeconds = age,
-                            stale = age > Grains.Abstractions.Diagnostics.IProcessRegistryGrain.StaleAfterSeconds,
+                            stale = age > Core.Diagnostics.ProcessRegistry.StaleAfterSeconds,
                         };
                     })
                     .ToArray(),
@@ -976,61 +1000,34 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
-        // Grain diagnostics (v3): the live grain tree — every silo (pod), the grain types active on each.
-        app.MapGet("/api/grains", async (HttpContext ctx) =>
+        // Each configured node's rolled-up value, per metric.
+        //
+        // This used to be served by a parallel roll-up recomputing the same
+        // hierarchy the graph builder computes, whose ONLY consumer was this endpoint. Two implementations
+        // of one calculation, and the one nobody else read was the one shown on the diagnostics panel — so
+        // a disagreement between them would have surfaced here as the truth.
+        app.MapGet("/api/flow/tree", (HttpContext ctx) =>
         {
             try
             {
-                var mgmt = grains.GetGrain<Orleans.Runtime.IManagementGrain>(0);
-                var stats = await mgmt.GetSimpleGrainStatistics();
-                var hosts = await mgmt.GetHosts(onlyActive: true);
-                var leader = await grains.GetGrain<Grains.Abstractions.Cluster.ILeaderGrain>(0).CurrentLeader();
+                var merged = new Models.PDU.PduData();
+                foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
 
-                var silos = hosts
-                    .OrderBy(h => h.Key.ToParsableString())
-                    .Select(h => new { silo = h.Key.ToParsableString(), status = h.Value.ToString() })
+                var nodes = Core.Flow.FlowTiers.Graphs(merged, config, live)
+                    .SelectMany(g => g.Graph.Nodes
+                        .Where(n => !n.Synthetic && n.Value is not null)
+                        .Select(n => new { node = n.Id, metric = g.Metric, value = n.Value!.Value }))
+                    .GroupBy(x => x.node)
+                    .OrderBy(g => g.Key)
+                    .Select(g => new { node = g.Key, metrics = g.Select(x => new { metric = x.metric, value = (double?)x.value }).ToArray() })
                     .ToArray();
 
-                // Grain types → total activations + per-silo placement (the tree the Diagnostics page renders).
-                var grainTypes = stats
-                    .Where(s => !s.GrainType.StartsWith("Orleans.", StringComparison.Ordinal))
-                    .GroupBy(s => s.GrainType)
-                    .Select(g => new
-                    {
-                        type = FriendlyGrainType(g.Key),
-                        fullType = g.Key,
-                        activations = g.Sum(x => x.ActivationCount),
-                        silos = g.GroupBy(x => x.SiloAddress.ToParsableString())
-                                 .Select(sg => new { silo = sg.Key, count = sg.Sum(x => x.ActivationCount) })
-                                 .OrderBy(x => x.silo)
-                                 .ToArray(),
-                    })
-                    .Where(t => t.activations > 0)
-                    .OrderByDescending(t => t.activations).ThenBy(t => t.type)
-                    .ToArray();
-
-                return Results.Json(new { ok = true, leader, silos, grains = grainTypes }, ConfigSchema.Json);
+                return Results.Json(new { ok = true, version = nodes.Length, nodes }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
                 return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
             }
-        });
-
-        // The energy-flow tree computed by the distributed node grains (v3): each node computes its own value.
-        app.MapGet("/api/flow/tree", async (HttpContext ctx) =>
-        {
-            try
-            {
-                var snap = await grains.GetGrain<Grains.Abstractions.Flow.IFlowGrain>(0).Current();
-                var nodes = snap.Values
-                    .GroupBy(v => v.NodeId)
-                    .OrderBy(g => g.Key)
-                    .Select(g => new { node = g.Key, metrics = g.Select(v => new { metric = v.Metric.ToString(), value = v.Value }).ToArray() })
-                    .ToArray();
-                return Results.Json(new { ok = true, version = snap.Version, nodes }, ConfigSchema.Json);
-            }
-            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
         // Restart a tier — or everything.
@@ -1098,7 +1095,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
 
             // Non-Kubernetes: offer whole roles seen in the cluster (split deployment), else just this process.
-            var procs = await grains.GetGrain<Grains.Abstractions.Diagnostics.IProcessRegistryGrain>(0).Active();
+            var procs = processes?.Active() ?? [];
             var roles = procs.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
             if (procs.Count > 1 && roles.Count > 0)
             {
@@ -1159,40 +1156,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        app.MapPost("/api/test/mqtt", () =>
-        {
-            var connected = mqtt.IsConnected();
-            return Results.Json(new
-            {
-                ok = connected,
-                message = connected
-                    ? $"Connected to {mqtt.Options.Host}:{mqtt.Options.Port}."
-                    : $"Not connected to {mqtt.Options.Host}:{mqtt.Options.Port}.",
-            }, ConfigSchema.Json);
-        });
-
-        app.MapPost("/api/test/pdu", async (HttpContext ctx) =>
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(20));
-            try
-            {
-                var pdu = ResolveInstance(ctx.Request.Query["instance"]).Pdu;
-                var data = await pdu.GetRootData_Public(cts.Token);
-                var devices = data.Devices?.Count ?? 0;
-                var outlets = data.Devices?.Sum(d => d.Outlets?.Count ?? 0) ?? 0;
-                return Results.Json(new
-                {
-                    ok = true,
-                    message = $"Reached PDU: {devices} device(s), {outlets} outlet(s).",
-                }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"PDU request failed: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
-
         // Browse what's on the broker, for the Nodes editor's topic autocomplete.
         app.MapGet("/api/ha/devices/stale", async () =>
         {
@@ -1239,12 +1202,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Retained Home Assistant discovery configs this build would no longer publish — and, on POST.
-        async Task<IReadOnlyList<Grains.Abstractions.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
+        async Task<IReadOnlyList<Core.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
         {
-            var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-            return await Core.Flow.TopicIndexScan.SettleAsync<Grains.Abstractions.Discovery.TopicSample>(
-                renew: () => index.Renew(filter),
-                search: async () => await index.Search(null, 5000),
+            var index = topicIndex;
+            return await Core.Flow.TopicIndexScan.SettleAsync<Core.Discovery.TopicSample>(
+                // The index is synchronous now, so these adapt it to the helper's async shape rather than
+                // the helper pretending an in-memory dictionary needs awaiting.
+                renew: () => { index.Renew(filter); return Task.CompletedTask; },
+                search: () => Task.FromResult<IReadOnlyList<Core.Discovery.TopicSample>>(index.Search(null, 5000)),
                 delay: d => Task.Delay(d, ct),
                 pollEvery: TimeSpan.FromMilliseconds(750),
                 deadline: DateTime.UtcNow.AddSeconds(12),
@@ -1383,14 +1348,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         {
             try
             {
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var index = topicIndex;
                 // The filter to browse (default '#'); a restricted broker can narrow it, e.g. 'solar_assistant/#'.
                 var filter = ctx.Request.Query["filter"].FirstOrDefault();
-                var state = await index.Renew(filter);
+                var state = index.Renew(filter);
                 var q = ctx.Request.Query["q"].FirstOrDefault();
                 var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
 
-                var topics = (await index.Search(q, limit)).Select(t =>
+                var topics = (index.Search(q, limit)).Select(t =>
                 {
                     var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
                     return new
@@ -1418,9 +1383,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
-                await index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
-                var sample = await index.Get(topic);
+                var index = topicIndex;
+                index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
+                var sample = index.Get(topic);
                 if (sample is null)
                     return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);
 
@@ -1553,49 +1518,21 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "No history backend is wired in this process." }, ConfigSchema.Json);
             try
             {
+                // Asks a question no single integration can: "is the backend the History setting SELECTED
+                // answering?" — the answer changes when that setting changes, not when an integration does.
+                // But it is not a second implementation: the selected provider is an integration, so its own
+                // probe is what runs, and this endpoint only resolves which one that is.
+                var selected = integrations?.ById(config.History.Provider);
+                if (selected is not null)
+                {
+                    var (sok, sdetail) = await selected.ProbeAsync(config, ctx.RequestAborted);
+                    return Results.Json(new { ok = sok, message = $"{selected.DisplayName}: {sdetail}" }, ConfigSchema.Json);
+                }
+
                 var (ok, detail) = await history.ProbeAsync(ctx.RequestAborted);
                 return Results.Json(new { ok, message = ok ? $"{history.Id}: reachable — {detail}" : $"{history.Id}: {detail}" }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
-        });
-
-        // Validate the EmonCMS configuration (HTTP: reach the server + check the API key; MQTT: broker up).
-        app.MapPost("/api/test/emoncms", async (HttpContext ctx) =>
-        {
-            var e = config.EmonCMS;
-            if (!e.Enabled)
-                return Results.Json(new { ok = false, message = "EmonCMS is disabled (EmonCMS.Enabled is false)." }, ConfigSchema.Json);
-
-            if (e.Transport == EmonCmsTransport.Mqtt)
-            {
-                var topic = $"{(e.MqttBaseTopic ?? "emon").TrimEnd('/')}/{e.Node}";
-                return mqtt.IsConnected()
-                    ? Results.Json(new { ok = true, message = $"MQTT broker connected; publishing to '{topic}'. (EmonCMS receipt can't be confirmed from here.)" }, ConfigSchema.Json)
-                    : Results.Json(new { ok = false, message = "MQTT broker is not connected — check the MQTT settings." }, ConfigSchema.Json);
-            }
-
-            if (string.IsNullOrWhiteSpace(e.Url))
-                return Results.Json(new { ok = false, message = "EmonCMS.Url is required for the HTTP transport." }, ConfigSchema.Json);
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
-            cts.CancelAfter(TimeSpan.FromSeconds(15));
-            try
-            {
-                var url = $"{e.Url.TrimEnd('/')}/feed/list.json?apikey={Uri.EscapeDataString(e.ApiKey ?? string.Empty)}";
-                using var resp = await testHttp.GetAsync(url, cts.Token);
-                var body = (await resp.Content.ReadAsStringAsync(cts.Token)).TrimStart();
-                if (!resp.IsSuccessStatusCode)
-                    return Results.Json(new { ok = false, message = $"EmonCMS returned HTTP {(int)resp.StatusCode}." }, ConfigSchema.Json);
-                if (body.StartsWith("["))
-                    return Results.Json(new { ok = true, message = "Reached EmonCMS and the API key was accepted." }, ConfigSchema.Json);
-                if (body.Contains("\"success\":false", StringComparison.OrdinalIgnoreCase) || body.Equals("false", StringComparison.OrdinalIgnoreCase) || body.Contains("invalid", StringComparison.OrdinalIgnoreCase))
-                    return Results.Json(new { ok = false, message = "Reached EmonCMS but the API key was rejected (a read/write key is required)." }, ConfigSchema.Json);
-                return Results.Json(new { ok = true, message = "Reached EmonCMS." }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Could not reach EmonCMS: {ex.Message}" }, ConfigSchema.Json);
-            }
         });
 
         // HA Energy Mapping (#128): push the current hierarchy into HA's Energy Dashboard now, or clear it.
@@ -1635,31 +1572,76 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Manually run EmonCMS feed provisioning now (#163) and report what it did.
-        app.MapPost("/api/emoncms/provision-feeds", async () =>
+        // --- Integrations: one route shape for every one of them, built-in or plugin ------------------
+        // What an integration can do is derived from the capabilities it declares (probe / publish / sweep)
+        // plus whatever it adds through IIntegrationApi — so a plugin dropped into plugins/ is reachable
+        // here without a line of routing written for it.
+
+        // Everything that can offer nodes to adopt, asked at once. Discovery only — this never writes a
+        // node; what is adopted and what it is called stay the operator's.
+        app.MapGet("/api/discover/nodes", async (HttpContext ctx) =>
         {
-            try
+            var search = ctx.Request.Query["q"].ToString();
+            var found = new List<object>();
+            foreach (var provider in nodeProviders)
             {
-                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).Reconcile(force: true);
-                return Results.Json(new { ok = r.Ok, message = r.Message, feeds = r.FeedsCreated, processes = r.ProcessesSet, virtualFeeds = r.VirtualFeeds }, ConfigSchema.Json);
+                try
+                {
+                    foreach (var n in await provider.DiscoverAsync(config, search, ctx.RequestAborted))
+                        found.Add(new { key = n.Key, label = n.Label, metric = n.Metric, unit = n.Unit, sample = n.Sample, kind = n.Kind, suggestedId = n.SuggestedId });
+                }
+                catch (Exception ex)
+                {
+                    // One provider that cannot answer must not empty the picker for the others.
+                    Log.Debug($"Node discovery from {provider.GetType().Name} failed: {ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"Feed provisioning failed: {ex.Message}" }, ConfigSchema.Json);
-            }
+            return Results.Json(new { ok = true, nodes = found }, ConfigSchema.Json);
         });
 
-        // Delete every EmonCMS feed rPDU2MQTT created (under its tag/node) — the "clean up" button.
-        app.MapPost("/api/emoncms/delete-feeds", async () =>
+        app.MapGet("/api/integrations", () =>
         {
+            if (integrations is null) return Results.Json(new { ok = false, integrations = Array.Empty<object>() }, ConfigSchema.Json);
+            var list = integrations.All.Select(i => new
+            {
+                id = i.Id,
+                name = i.DisplayName,
+                group = i.Group.ToString(),
+                enabled = i.Enabled(config),
+                fault = i.Misconfigured(config),
+                capabilities = Core.Integrations.IntegrationRegistry.Capabilities(i),
+                actions = Core.Integrations.IntegrationActions.For(i, CurrentPass).Select(a => new
+                {
+                    name = a.Name, title = a.Title, description = a.Description, effect = a.Effect.ToString().ToLowerInvariant(),
+                }),
+            });
+            return Results.Json(new { ok = true, integrations = list }, ConfigSchema.Json);
+        });
+
+        app.MapPost("/api/integrations/{id}/{action}", async (string id, string action, HttpContext ctx) =>
+        {
+            if (integrations is null) return Results.Json(new { ok = false, message = "No integration registry in this process." }, ConfigSchema.Json);
+
+            var integration = integrations.ById(id);
+            if (integration is null) return Results.Json(new { ok = false, message = $"No integration called '{id}'." }, ConfigSchema.Json);
+
+            var found = Core.Integrations.IntegrationActions.Find(integration, action, CurrentPass);
+            if (found is null) return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
+
+            // Query string and form fields, flattened — an action never sees HttpContext.
+            var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in ctx.Request.Query) args[k] = v.ToString();
+            if (ctx.Request.HasFormContentType)
+                foreach (var (k, v) in await ctx.Request.ReadFormAsync()) args[k] = v.ToString();
+
             try
             {
-                var r = await grains.GetGrain<Grains.Abstractions.EmonCms.IEmonCmsFeedGrain>(0).DeleteAll();
-                return Results.Json(new { ok = r.Ok, message = r.Message }, ConfigSchema.Json);
+                var result = await found.Handler(new Core.Integrations.IntegrationActionContext(config, args), ctx.RequestAborted);
+                return Results.Json(new { ok = true, result }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
-                return Results.Json(new { ok = false, message = $"Delete feeds failed: {ex.Message}" }, ConfigSchema.Json);
+                return Results.Json(new { ok = false, message = $"{integration.DisplayName} · {found.Title} failed: {ex.Message}" }, ConfigSchema.Json);
             }
         });
 
@@ -1953,6 +1935,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 if (action == "resetstats")
                     await pdu.ResetOutletStatsAsync(req.DeviceId, req.Index, cts.Token);
+                // Through the write seam, not the Vertiv client directly: the seam is what routes a
+                // plugin-supplied device's outlet to the plugin that owns it. Calling the client meant this
+                // page could only ever switch a Vertiv PDU, however the device got here.
+                else if (outletControl is not null)
+                {
+                    // Report what the write DID. Answering ok to a refusal is how a button that does
+                    // nothing looks like it worked, and the outlet is still on when the page refreshes.
+                    var wrote = await outletControl.Control(req.DeviceId, req.Index, action, cts.Token);
+                    return Results.Json(
+                        new { ok = wrote.Ok, message = wrote.Ok ? $"Outlet {req.Index + 1} → {action}." : wrote.Message },
+                        ConfigSchema.Json);
+                }
                 else
                     await pdu.ControlOutletAsync(req.DeviceId, req.Index, action, cts.Token);
                 return Results.Json(new { ok = true, message = $"Outlet {req.Index + 1} → {action}." }, ConfigSchema.Json);
@@ -2079,14 +2073,14 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             {
                 var prefix = config.HASS.DiscoveryTopic;
                 var root = (prefix ?? "").Trim().Trim('/');
-                var index = grains.GetGrain<Grains.Abstractions.Discovery.ITopicIndexGrain>(0);
+                var index = topicIndex;
 
                 // The index only fills while someone is reading it.
-                var state = await index.Renew(root + "/#");
+                var state = index.Renew(root + "/#");
                 for (var i = 0; i < 30 && !(state.Listening && state.Granted != false); i++)
                 {
                     await Task.Delay(500);
-                    state = await index.Renew(root + "/#");
+                    state = index.Renew(root + "/#");
                 }
                 if (state.Granted == false)
                     throw new InvalidOperationException($"the broker refused a subscription to '{root}/#', so what is retained there cannot be read");
@@ -2095,7 +2089,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 await Task.Delay(2000);   // retained messages arrive in a burst; let it finish
 
                 // Uncapped on purpose: Search caps at 200 and orders by topic length.
-                var retained = await index.TopicsUnder(root + "/");
+                var retained = index.TopicsUnder(root + "/");
 
                 foreach (var topic in Core.HomeAssistant.HaDiscoveryTopics.Owned(retained, prefix))
                 {
@@ -2168,23 +2162,6 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
-    /// <summary>
-    /// Short, readable grain name from Orleans' grain-type string. That string is the assembly-qualified CLR
-    /// name (e.g. "rPDU2MQTT.Grains.Modbus.ModbusGrain, rPDU2MQTT.Grains"), so strip the ", Assembly" tail and
-    /// any generic/nested markers first, then take the class name and drop the "Grain" suffix.
-    /// </summary>
-    private static string FriendlyGrainType(string grainType)
-    {
-        if (string.IsNullOrWhiteSpace(grainType)) return grainType;
-        var s = grainType;
-        var comma = s.IndexOf(',');   if (comma >= 0) s = s[..comma];        // drop ", AssemblyName"
-        var bracket = s.IndexOf('[');  if (bracket >= 0) s = s[..bracket];    // drop generic args
-        var last = s.Split('.', '+', '/').Last().Trim();                       // class name (+ = nested type)
-        if (last.EndsWith("grain", StringComparison.OrdinalIgnoreCase))
-            last = last[..^"grain".Length];                                    // "ModbusGrain" -> "Modbus"
-        return last.Length == 0 ? grainType : char.ToUpperInvariant(last[0]) + last[1..];
-    }
-
     /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
     private static string BuildManifest(Config config)
     {
@@ -2223,9 +2200,16 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     private async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
         if (k8s is null) return null;   // operator only runs with the Kubernetes config source
-        try { return await grains.GetGrain<Grains.Abstractions.Operator.IOperatorGrain>(0).Status(); }
-        catch (Exception ex) { Log.Debug($"Could not read operator status from grain: {ex.Message}"); return null; }
+        try { return await Operator(op => op.Status(), new Core.Operator.OperatorReport { Message = "No check yet." }); }
+        catch (Exception ex) { Log.Debug($"Could not read the operator's status: {ex.Message}"); return null; }
     }
+
+    /// <summary>
+    /// Ask the operator, or answer for it. There is no operator outside Kubernetes, so every caller needs
+    /// the same "it isn't here" answer — stated once, rather than each endpoint inventing its own.
+    /// </summary>
+    private Task<T> Operator<T>(Func<Core.Operator.IOperatorControl, Task<T>> ask, T absent)
+        => deployOperator is null ? Task.FromResult(absent) : ask(deployOperator);
 
     // --- Kubernetes rollout restart ------------------------------------------------------------
 
@@ -2297,4 +2281,21 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>One (node, metric) whose current live value the Nodes editor wants.</summary>
     private sealed record LiveValueQuery(string? Node, string? Metric);
+
+    /// <summary>
+    /// The export pass as it stands right now, for actions that need to know what exists — publishing
+    /// configuration describes the nodes and devices there are. Null when nothing has been polled and no
+    /// hierarchy is configured, so a publish declines rather than telling the far end everything is gone.
+    /// </summary>
+    private Core.Integrations.ExportPass? CurrentPass()
+    {
+        try
+        {
+            var fresh = snapshots.All.ToList();
+            var pass = Core.Integrations.ExportPass.Build(fresh, config, live);
+            return pass.IsEmpty ? null : pass;
+        }
+        catch { return null; }
+    }
+
 }

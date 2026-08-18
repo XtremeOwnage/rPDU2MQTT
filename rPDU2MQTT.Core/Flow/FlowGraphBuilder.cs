@@ -114,14 +114,23 @@ public static class FlowGraphBuilder
         // Auto-derived base flow: each PDU feeds its outlets, weighted by the chosen measurement.
         foreach (var device in data.Devices)
         {
-            var pduId = $"pdu:{device.Entity_Name}";
+            var pduId = FlowNodeId.ForPdu(device.Entity_Name);
             foreach (var outlet in device.Outlets)
             {
-                var outletId = $"outlet:{device.Entity_Name}:{outlet.Key}";
+                var outletId = FlowNodeId.ForOutlet(device.Entity_Name, outlet.Key);
                 var m = outlet.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
 
                 double value;
-                if (m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var reported))
+                // An exclusive source answers for every node or not at all: the snapshot is what the device
+                // reads NOW, and dropping it into a view of an hour ago is how a past instant ends up half
+                // then and half now with nothing marking which is which.
+                if (live is { Exclusive: true })
+                {
+                    if (!live.TryGetValue(outletId, metric, out var stored)) continue;
+                    value = stored;
+                    if (string.IsNullOrEmpty(units)) units = FlowUnits.Canonical(metric);
+                }
+                else if (m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var reported))
                 {
                     value = reported;
                     if (string.IsNullOrEmpty(units)) units = m.Units;
@@ -134,7 +143,12 @@ public static class FlowGraphBuilder
                 }
                 else continue;
 
-                if (value <= 0) continue;
+                // A switched-off outlet reads 0, and that is a fact about it — the outlet is there and it
+                // is drawing nothing. Dropping it made its series vanish from every export, so a consumer
+                // could not tell "switched off" from "stopped reporting", and an energy dashboard saw a gap
+                // where it should have seen a flat zero. A negative reading is a different matter (see
+                // NegativeReading below); it cannot flow forwards, so it is still not a leaf.
+                if (value < 0) continue;
 
                 label[outletId] = outlet.Entity_DisplayName; kind[outletId] = "outlet"; leaf[outletId] = value;
                 label[pduId] = device.Entity_DisplayName; kind[pduId] = "pdu";
@@ -311,7 +325,10 @@ public static class FlowGraphBuilder
             return share;
         }
 
-        // Emit one link per edge, valued by the flow it carries.
+        // Every edge the topology has, valued by the flow it carries. This is what the graph KNOWS; the
+        // list below is what it DRAWS, and they are not the same — a zero-width ribbon is not worth drawing,
+        // but it is still the reason a node's value is zero rather than unknown.
+        var edges = new List<FlowLink>();
         var links = new List<FlowLink>();
         // Every node the topology wires up, whether or not its link survives the filter below.
         var wired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -322,6 +339,7 @@ public static class FlowGraphBuilder
 
                 var known = Knowable(from, to);
                 var value = known ? EdgeFlow(from, to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) : 0;
+                edges.Add(new FlowLink(from, to, value, known));
 
                 // A known-but-zero link is normally left off the diagram, unless dropping it would detach the chain below.
                 var passThroughZero = Wired(from, to) && incoming.TryGetValue(from, out var upstream) && upstream.Count > 0;
@@ -329,7 +347,15 @@ public static class FlowGraphBuilder
                 // The same reasoning one step earlier, for the link into an inert node that sits mid-chain.
                 var midChainInert = Inert(Mode(to)) && outgoing.TryGetValue(to, out var below) && below.Count > 0;
 
-                if (known && value <= 0 && !passThroughZero && !midChainInert) continue;
+                // A measured-zero LEAF stays attached: it is reported now, so leaving its edge out would
+                // float it off the diagram with no parent and cost it its tier label in the exports. The
+                // ribbon is zero-width either way — this is about the node being placed, not drawn. A node
+                // with something below it is a different case, handled by passThroughZero above.
+
+                var measuredZeroLeaf = leaf.ContainsKey(to)
+                    && !(outgoing.TryGetValue(to, out var beneath) && beneath.Count > 0);
+
+                if (known && value <= 0 && !passThroughZero && !midChainInert && !measuredZeroLeaf) continue;
 
                 links.Add(new FlowLink(from, to, value, known));
             }
@@ -354,6 +380,7 @@ public static class FlowGraphBuilder
                 // The same tags as the node it belongs to.
                 if (tags.TryGetValue(n.Id, out var nt)) tags[sinkId] = nt;
                 links.Add(new FlowLink(hub, sinkId, drawn, true));
+                edges.Add(new FlowLink(hub, sinkId, drawn, true));
                 wired.Add(hub); wired.Add(sinkId);
             }
         }
@@ -382,7 +409,7 @@ public static class FlowGraphBuilder
             leaf[uid] = gap;
             unmeasured.Add(new FlowLink(id, uid, gap, true));
         }
-        foreach (var l in unmeasured) { links.Add(l); wired.Add(l.Source); wired.Add(l.Target); }
+        foreach (var l in unmeasured) { links.Add(l); edges.Add(l); wired.Add(l.Source); wired.Add(l.Target); }
 
         // A node's own value: its measurement if it has one.
         double? ValueOf(string id)
@@ -393,16 +420,28 @@ public static class FlowGraphBuilder
             return anyIn || anyOut ? Math.Max(inflow, outflow) : null;
         }
 
-        // What this node's known links say arrives at it and leaves it.
+        // What this node's known edges say arrives at it and leaves it. Read from the topology, not from
+        // the drawn links: whether a ribbon was worth drawing has nothing to do with what is true.
+        //
+        // A zero edge only counts as knowledge when the node at the far end is itself measured. Otherwise
+        // "a link exists" gets read as "the value is known", and a node whose only source said it did not
+        // know — an unavailable Home Assistant entity, say — comes out as a confident zero.
         (double In, double Out, bool AnyIn, bool AnyOut) Sides(string id)
         {
             double inflow = 0, outflow = 0;
             bool anyIn = false, anyOut = false;
-            foreach (var l in links)
+            foreach (var l in edges)
             {
                 if (!l.Known) continue;
-                if (string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase)) { inflow += l.Value; anyIn = true; }
-                if (string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase)) { outflow += l.Value; anyOut = true; }
+                var intoMe = string.Equals(l.Target, id, StringComparison.OrdinalIgnoreCase);
+                var outOfMe = string.Equals(l.Source, id, StringComparison.OrdinalIgnoreCase);
+                if (!intoMe && !outOfMe) continue;
+
+                var farEnd = intoMe ? l.Source : l.Target;
+                if (l.Value <= 0 && !leaf.ContainsKey(farEnd)) continue;
+
+                if (intoMe) { inflow += l.Value; anyIn = true; }
+                if (outOfMe) { outflow += l.Value; anyOut = true; }
             }
             return (inflow, outflow, anyIn, anyOut);
         }

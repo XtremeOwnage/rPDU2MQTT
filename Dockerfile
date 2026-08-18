@@ -17,6 +17,7 @@ ARG APP_VERSION=0.0.0-dev
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 WORKDIR /src
 COPY ["rPDU2MQTT/rPDU2MQTT.csproj", "rPDU2MQTT/"]
+COPY ["rPDU2MQTT.Abstractions/rPDU2MQTT.Abstractions.csproj", "rPDU2MQTT.Abstractions/"]
 COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
 COPY ["rPDU2MQTT.Engine/rPDU2MQTT.Engine.csproj", "rPDU2MQTT.Engine/"]
 COPY ["rPDU2MQTT.Api/rPDU2MQTT.Api.csproj", "rPDU2MQTT.Api/"]
@@ -34,4 +35,7 @@ RUN dotnet publish "./rPDU2MQTT.csproj" -c $BUILD_CONFIGURATION -o /app/publish 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+# Where externally loaded plugins go (v4). Created empty so a bind mount or volume has somewhere to land,
+# and so the loader's "directory does not exist" path is not the normal case. Override with RPDU2MQTT_PLUGINS.
+RUN mkdir -p /app/plugins
 ENTRYPOINT ["dotnet", "rPDU2MQTT.dll"]

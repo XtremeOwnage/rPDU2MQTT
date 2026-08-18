@@ -12,6 +12,13 @@ namespace rPDU2MQTT.Startup;
 
 public static class ServiceConfiguration
 {
+    /// <summary>
+    /// Config sections contributed by externally loaded plugins, resolved during registration so the
+    /// schema endpoint can offer them. Static because the schema is served before the container is built.
+    /// </summary>
+    public static IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> PluginSections { get; private set; }
+        = Array.Empty<(string, string, Type, string?)>();
+
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
         // While- we can request services when building dependencies-
@@ -34,15 +41,9 @@ public static class ServiceConfiguration
         bool api = roles.HasFlag(HostRole.Api);
         bool ui = roles.HasFlag(HostRole.Ui);
 
-        // v3: cluster-leadership, the enabler for a homogeneous fleet — scale by running N identical All-role
-        // instances instead of separate worker/api/ui deployments. The "run once cluster-wide" work
-        // (publishers/exporters) self-gates on holding the lease, so N instances don't duplicate output and
-        // leadership fails over automatically. Only worker-capable instances contest leadership (the leader
-        // must be able to run the exporters) — so a split deployment's single worker is always the leader,
-        // while a homogeneous All-role fleet elects one of the replicas.
-        services.AddSingleton<LeaderState>();
-        if (worker)
-            services.AddHostedService<Hosting.LeaderRenewalService>();
+        // One process, so it is always the leader. The flag stays because the gate is real — it is what
+        // keeps run-once work run-once — and because a clustered implementation would set it from outside.
+        services.AddSingleton(new LeaderState { IsLeader = true });
 
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
@@ -53,12 +54,12 @@ public static class ServiceConfiguration
             services.AddHostedService<KubernetesStatusService>();
             services.AddHostedService<KubernetesConfigWatcher>();
 
-            // ---- Operator (#210): now an OperatorGrain (single-activation, cluster-wide). ----
-            // The registry client is a grain dependency; the activator drives the grain's periodic check.
-            // GUI check/switch/redeploy are direct grain calls — no more MQTT command topics or CR polling.
+            // ---- Operator (#210) ----
+            // GUI check/switch/redeploy call it directly — no MQTT command topics, no CR-status polling.
             services.AddSingleton<Services.Operator.IContainerRegistry, Services.Operator.ContainerRegistryClient>();
+            services.AddSingleton<Core.Operator.IOperatorControl, Hosting.KubernetesOperator>();
             if (worker)
-                services.AddHostedService<Hosting.OperatorActivator>();
+                services.AddHostedService<Hosting.OperatorUpdateCheck>();
         }
 
         // Configure Logging.
@@ -99,16 +100,7 @@ public static class ServiceConfiguration
         if (worker || api || ui)
         {
             services.AddHostedService(sp => sp.GetRequiredService<Core.SnapshotCache>());
-            // v3: PDU snapshots reach every process from the single-activation PduGrain via this sync
-            // (publishes onto the local bus → snapshot cache), replacing the MqttBusBridge mirroring.
-            services.AddHostedService<Hosting.PduSyncService>();
         }
-        // v3: PDU polling is a single-activation grain per instance; this activator drives it (worker),
-        // replacing InstanceManager's per-process poller. InstanceManager stays a singleton for the GUI
-        // (primary repoint / reconcile) but no longer runs the pollers.
-        if (worker)
-            services.AddHostedService<Hosting.PduGrainActivator>();
-
         // Shared liveness/readiness signals (uptime + last successful poll).
         services.AddSingleton<HealthState>();
         // What a save could not apply to this process — read by the status payload and the header badge.
@@ -134,16 +126,15 @@ public static class ServiceConfiguration
         // now" button, so register the singleton regardless of role.
         services.AddSingleton<Services.EmonCmsFeedSync>();
 
-        // Energy-flow values from the broker (#205, e.g. Solar Assistant). v3: the MQTT ingest runs on the
-        // worker and its values are pushed to the flow grain by MqttToFlowBridge; every other process reads
-        // them back through the grain sync (no per-process subscription duplication). The singleton stays
-        // registered everywhere so the bridge can resolve it on the worker.
-        // v3: in-process sources emit into the flow grain through this sink (event-driven). The MQTT
-        // subscription manager pushes each received value straight to the FlowGrain — no polling bridge.
-        services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>, Hosting.FlowGrainSink>();
-        // v3: outlet writes route to the per-outlet grain (single cluster-wide owner) — the "grains for
-        // writing to PDUs". The command subscriber depends only on IOutletControl, not Orleans.
-        services.AddSingleton<Abstractions.Pdu.IOutletControl, Hosting.OutletGrainControl>();
+        // Live values from every in-process source, read through the IFlowValueSource seam. Sources write
+        // straight into it, so a reading is visible the moment it arrives.
+        var liveValues = new Core.Flow.FlowValueCache();
+
+        // In-process sources emit measurement snapshots into this sink, which writes them into that cache.
+        services.AddSingleton<Abstractions.Pipeline.ISnapshotSink<Abstractions.Flow.MeasurementSnapshot>>(sp =>
+            new Core.Flow.FlowValueSink(liveValues, sp.GetService<Microsoft.Extensions.Logging.ILogger<Core.Flow.FlowValueSink>>()));
+        // A write goes to the PDU that reported the device, once across replicas (the lease).
+        services.AddSingleton<Abstractions.Pdu.IOutletControl, Services.DeviceOutletControl>();
         services.AddSingleton<Services.EnergyFlowMqttSourceService>();
         if (worker)
             services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
@@ -155,32 +146,19 @@ public static class ServiceConfiguration
         // contention — the reads time out. So the poller runs only in the Worker role (data production);
         // the API/UI read the values through the same bus/exports as any other producer.
         services.AddSingleton<Services.EnergyFlowModbusSourceService>();
-        // v3: one ModbusGrain per physical device (host:port:unitId), one owner cluster-wide. The reconciler
-        // reads config and pushes each device its bindings; the grains self-poll. Removes gateway contention.
+        // One poll per physical device (host:port:unitId), whatever the config says — two connections to
+        // the same gateway are one reader, which is what keeps its single TCP slot free.
+        services.AddSingleton<Core.Modbus.ModbusDevices>();
         if (worker)
-            services.AddHostedService<Hosting.ModbusReconciler>();
+            services.AddHostedService<Services.ModbusPollService>();
 
-        // v3: provision the polymorphic node-grain tree from the energy-flow config — each node becomes the
-        // right grain type (measured leaf / aggregate / residual) owning exactly its configured children.
-        if (worker)
-            services.AddHostedService<Hosting.FlowReconciler>();
 
-        // v3: a local mirror of the flow grain's live values (Modbus via the DeviceGrain, and later every
-        // grain-fed source), synced by FlowGrainSyncService and read through the same IFlowValueSource seam.
-        var grainSyncedFlow = new Core.Flow.FlowValueCache();
-        if (worker || api || ui)
-            services.AddHostedService(sp => new Hosting.FlowGrainSyncService(sp.GetRequiredService<Orleans.IGrainFactory>(), grainSyncedFlow));
 
-        // Reads prefer the in-process MQTT source cache, then fall back to the grain-synced mirror. In a
-        // single-binary (All-role) deployment the MQTT ingest runs in THIS process, so the GUI/exporters read
-        // the exact value the broker callback just wrote — no cross-process grain round-trip to delay it, and
-        // crucially it carries the direction-qualified (e.g. realpower#in — battery charge / grid export),
-        // state-of-charge (soc) and energy-in keys that the flow-grain sink strips out because they aren't
-        // canonical Metric names (Metrics.TryParse fails, so they never reach the grain or its mirror). Without
-        // this the battery SoC and every in-direction reading show "—" even though the ingest has them.
-        // In a UI-only split process the MQTT cache is never fed (the ingest isn't hosted there), so its reads
-        // return false and everything falls through to the mirror — this is strictly additive, never a
-        // regression. It is the single-binary deployment that makes it whole.
+        // Reads prefer the in-process MQTT source cache: the GUI/exporters get the exact value the broker
+        // callback just wrote, and crucially it carries the direction-qualified (e.g. realpower#in — battery
+        // charge / grid export), state-of-charge (soc) and energy-in keys that the flow sink drops because
+        // they are not canonical Metric names (Metrics.TryParse fails). Without this the battery SoC and
+        // every in-direction reading show "—" even though the ingest has them.
         // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
         // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
         // integrate real readings rather than its own output.
@@ -194,7 +172,7 @@ public static class ServiceConfiguration
             services.AddSingleton(sp => new Services.EnergyAggregationService(
                 cfg,
                 new Core.Flow.CompositeFlowValueSource(
-                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), grainSyncedFlow),
+                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues),
                 sp.GetRequiredService<Core.Flow.IEnergyStore>(),
                 sp.GetRequiredService<Core.ISnapshotCache>()));
             // Accumulating is data production, so only the worker does it — otherwise every replica would
@@ -209,19 +187,133 @@ public static class ServiceConfiguration
                     cfg, sp.GetRequiredService<Services.EnergyAggregationService>()));
         }
 
+        // Externally loaded plugins: reference Core, implement IIntegration, drop the DLL in plugins/.
+        // A plugin that will not load is reported and skipped — a third-party DLL cannot stop the bridge.
+        var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
+        var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
+        if (pluginIntegrations.Count > 0)
+        {
+            Plugins.PluginLoader.Configure(pluginIntegrations, cfg, m => Log.Warning(m));
+            foreach (var integration in pluginIntegrations)
+                services.AddSingleton(typeof(Core.Integrations.IIntegration), integration);
+        }
+        // The GUI renders a settings page per plugin from this, with no plugin-supplied UI involved.
+        PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
+        // Source types a plugin contributes, so the node editor offers them beside mqtt and modbus.
+        Services.Gui.ConfigSchema.PluginSourceTypes = pluginIntegrations
+            .OfType<Core.Integrations.IValueSourcePlugin>()
+            .Select(p => (p.SourceType, p.SourceTypeLabel))
+            .ToList();
+
+        // Plugin-supplied sources join the same composite as the built-in ingests, so the flow graph cannot
+        // tell where a value came from — which it never could, and is the whole point of the seam.
+        // Built-in sources that speak the plugin contract are constructed ONCE, here, and registered as
+        // that same instance. Two registrations gave the health-check registry a duplicate name; resolving
+        // them from inside the IFlowValueSource factory instead was worse — several integrations take an
+        // IFlowValueSource, so building it built them, which needed it, and startup simply hung.
+        var haSource = new Integrations.HomeAssistant.HomeAssistantValueSource(cfg);
+        services.AddSingleton<Core.Integrations.IIntegration>(haSource);
+        // The two built-in ingests are integrations too — the SAME instances the flow already reads, so the
+        // registry, the banner and the health board describe the thing that is actually running.
+        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
+        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
+
+        var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>()
+            .Cast<Core.Flow.IFlowValueSource>()
+            .ToArray();
+
         services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
-                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-                grainSyncedFlow,
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
+                liveValues,
+                haSource,
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
                 // with a real energy binding uses that and the derived total only fills a gap.
-                sp.GetRequiredService<Services.EnergyAggregationService>())
+                .. pluginSources,
+                // LAST on purpose: the composite takes the first source with a fresh reading, so a node
+                // with a real energy binding uses that and the derived total only fills a gap. The history
+                // fallback is behind even that — a stored value is older than anything else here.
+                sp.GetRequiredService<Services.EnergyAggregationService>(),
+                .. (cfg.History.Enabled && cfg.History.ValueFallback
+                    ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
+                    : [])])
             : new Core.Flow.CompositeFlowValueSource(
-                sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
-                grainSyncedFlow));
+                [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues,
+                 haSource, .. pluginSources,
+                 .. (cfg.History.Enabled && cfg.History.ValueFallback
+                     ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
+                     : [])]));
 
-        // v3: the MqttBusBridge is retired — cross-process PDU snapshot propagation is the PduGrain +
-        // PduSyncService's job now (grains, not MQTT mirroring).
+        if (worker)
+            services.AddHostedService<Services.ValueSourcePluginHost>();
+
+        if (cfg.History.Enabled && cfg.History.ValueFallback)
+            services.AddSingleton(sp => new Core.Flow.HistoryValueSource(
+                sp.GetRequiredService<Core.Flow.IMeasurementHistory>(), cfg,
+                () => cfg.EnergyFlow.Nodes.Select(n => n.Id).Where(id => !string.IsNullOrEmpty(id)).ToList()));
+
+        // The history backend read as a source (opt-in). Registered here so it can be placed LAST in the
+        // composite below — a stored value must never win over a live one, or a reading is replaced by its
+        // own echo one refresh later.
+        if (cfg.History.Enabled && cfg.History.ValueFallback)
+            services.AddHostedService<Services.HistoryValueSourceService>();
+
+        // A plugin that polls hardware is a reader like the Vertiv one, so the same poller drives it rather
+        // than a parallel host — one cadence, one ownership lease, one write path.
+        var devicePlugins = pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().ToList();
+        if (devicePlugins.Count > 0)
+            services.AddSingleton<Core.Integrations.IDeviceReader>(new Core.Integrations.PluginDeviceReader(devicePlugins));
+
+        // ---- v4: integrations as plugins -------------------------------------------------------------
+        // Discovered by reflection over the Engine assembly, never listed by hand: a registration list is
+        // exactly what this replaces — the same integration used to be named in five places, any one of
+        // which could be forgotten with no failure to show for it.
+        foreach (var type in typeof(Services.DestinationHost).Assembly.GetTypes()
+                     .Where(t => t is { IsClass: true, IsAbstract: false })
+                     .Where(t => typeof(Core.Integrations.IIntegration).IsAssignableFrom(t))
+                     // A built-in that is also a value source is wired explicitly below, as one instance
+                     // the flow composite can also hold. Letting the scan add it too made two.
+                     .Where(t => !typeof(Core.Flow.IFlowValueSource).IsAssignableFrom(t)))
+            services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
+
+        services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
+
+        services.AddSingleton<Core.Integrations.IntegrationRegistry>();
+        // An integration that is switched on and cannot run is recorded into the SAME faults collection the
+        // Status board and GUI already read — registering a second one would have replaced the instance
+        // already holding the logging-sink faults. The rule itself lives on the integration, so a plugin
+        // participates without anything here knowing what it needs.
+        services.AddHostedService<Hosting.IntegrationFaultReporter>();
+        // Publishing to the broker without inheriting a hosting model: EmonCMS's MQTT transport and Home
+        // Assistant discovery both need it, and neither IS the MQTT integration.
+        services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
+        // …and the connection state behind a seam too, so no integration can tell which MQTT client this
+        // build uses.
+        services.AddSingleton<Core.Integrations.IBrokerConnection, Services.HiveMqBrokerConnection>();
+        // Who can read a device instance. The poller asks these rather than calling the Vertiv client, so a
+        // plugin device gets the same cadence, lease and write path the built-in one has.
+        services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();
+
+        // The broker's topics, offered as nodes to adopt through the same capability a plugin would use.
+        services.AddSingleton<Core.Integrations.INodeProvider, Hosting.MqttNodeProvider>();
+        services.AddSingleton<Core.Integrations.INodeProvider, Hosting.ModbusNodeProvider>();
+
+        // One poller for every device — a configured PDU or one a plugin supplies — publishing snapshots
+        // onto the bus that everything downstream already listens to.
+        if (worker)
+            services.AddHostedService<Services.DevicePollService>();
+
+        // The PDU object-model publisher, off the hosting base class and onto the seam.
+        services.AddSingleton<Services.MqttPduPublisher>();
+        services.AddSingleton<Core.Integrations.IntegrationStatus>();
+        // The Status board, in this process. Evaluated when read, so an age is never stale.
+        services.AddSingleton<Core.Status.StatusBoard>();
+        // The browsable topic index and the process list: in this process, leased and pruned on read.
+        services.AddSingleton<Core.Discovery.TopicIndex>();
+        services.AddSingleton<Core.Diagnostics.ProcessRegistry>();
+        // Ownership of a shared resource. One process owns everything it can see; the seam stays so a
+        // clustered implementation can be dropped in without an integration noticing.
+        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
 
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();
@@ -238,18 +330,17 @@ public static class ServiceConfiguration
         else
             services.AddSingleton<Core.IProcessRestarter>(sp => sp.GetRequiredService<Hosting.StopProcessRestarter>());
 
-        // v3: each process registers itself with the cluster-wide ProcessRegistryGrain so the GUI can list
-        // every role process in a split deployment — replaces the MQTT HeartbeatService beacons.
+        // Each process registers itself so the GUI can list every role process in a split deployment.
         if (roles != HostRole.All)
             services.AddHostedService<Hosting.ProcessRegistrar>();
 
-        // v3: the Status board is grains too — each process reports the facts it can see (broker connection,
-        // last poll, export outcome, itself) to the owning component grain, which decides what they mean.
+        // The Status board: this process reports the facts it can see (broker connection, last poll, export
+        // outcome, itself) and the board decides what they mean.
         services.AddHostedService<Hosting.StatusReporter>();
 
         // Topic autocomplete for the Nodes editor. Registered everywhere with a broker connection, but it
-        // only subscribes while someone is actually browsing (the index grain hands out short leases), so
-        // there is no standing background indexer.
+        // only subscribes while someone is actually browsing (the index hands out short leases), so there
+        // is no standing background indexer.
         services.AddHostedService<Hosting.MqttTopicIndexService>();
 
         // Listens for GUI-issued restart requests over the bus (#210), so a tier can be restarted remotely.
@@ -259,40 +350,14 @@ public static class ServiceConfiguration
         // ---- Worker role: the data-processing workload (publish, export, discovery, control). ----
         if (worker)
         {
-            services.AddHostedService<MQTTPublishingService>();
 
-            // Energy-hierarchy MQTT export (#164) — a no-op until EnergyFlow.MqttExport is enabled, which
-            // the GUI can toggle at runtime, so register unconditionally rather than gating on the flag.
-            services.AddHostedService<EnergyFlowMqttExportService>();
-
-            // Optional metric exporters.
-            if (cfg.Prometheus.Exporter || cfg.Prometheus.Pushgateway.Enabled)
-                services.AddHostedService<PrometheusExportService>();
-
-            if (cfg.EmonCMS.Enabled)
-            {
-                // Url is only needed for the HTTP transport; the MQTT transport uses the existing broker.
-                // A missing one used to throw here, so enabling EmonCMS in the GUI before filling in the
-                // URL left the process unable to start — taking the PDU poll, MQTT, HA and the flow with
-                // it. Skip just this exporter and say so; nothing a toggle can do may stop the bridge.
-                var emonFault = Core.Startup.DestinationRequirements.EmonCms(
-                    cfg.EmonCMS.Enabled,
-                    cfg.EmonCMS.Transport == Models.Config.EmonCmsTransport.Http,
-                    cfg.EmonCMS.Url);
-                if (emonFault is not null)
-                {
-                    Log.Error(emonFault.Message);
-                    faults.Record(emonFault);
-                }
-                else
-                    services.AddHostedService<EmonCmsExportService>();
-            }
-
-            // Feed auto-provisioning (#163) honors the live EmonCMS.Feeds.AutoConfigure toggle, so register
-            // it unconditionally (self-gates on Enabled/AutoConfigure/Url/ApiKey each pass) — enabling it in
-            // the GUI takes effect without a restart. v3: the writes to EmonCMS are owned by a single-
-            // activation grain, so this only pokes it; "once cluster-wide" is the grain, not a leader check.
-            services.AddHostedService<Hosting.EmonCmsReconciler>();
+            // v4: destinations are plugins. They are registered unconditionally and self-gate on their own
+            // Enabled(cfg) every pass, so a toggle in the GUI takes effect without a restart — and the host
+            // builds ONE ExportPass and offers it to all of them, so none can quietly omit the hierarchy.
+            services.AddHostedService<DestinationHost>();
+            // Configuration is not a reading: it changes when the operator changes something, so each
+            // publisher runs on its own (much slower) cadence rather than once per poll.
+            services.AddHostedService<ConfigurationPublisherHost>();
 
             // Registered unconditionally and self-gating on the live HomeAssistant.DiscoveryEnabled, the same
             // way EmonCmsReconciler above honours its own toggle. Registering only when the flag happened to
@@ -306,7 +371,6 @@ public static class ServiceConfiguration
 
             // Sync the energy-flow hierarchy into HA's Energy Dashboard via its WebSocket API (#128).
             // Registered unconditionally; it honors the live HomeAssistant.EnergyDashboard.Enabled toggle.
-            services.AddHostedService<HaEnergyDashboardService>();
 
             // Outlet control is opt-in; only subscribe to command topics when explicitly enabled.
             if (cfg.Primary.ActionsEnabled)
@@ -352,11 +416,12 @@ public static class ServiceConfiguration
         // Registered unconditionally, and the router reads Enabled and Provider per call — turning history
         // on, or switching backend, takes effect on the next request rather than at the next restart.
         // A dashboard read must not hang the page when the backend is down or slow.
-        services.AddSingleton<Core.Flow.IFlowHistory>(_ =>
+        services.AddSingleton<Core.Flow.IMeasurementHistory>(_ =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg));
 
-        // The audit's verdicts have one owner cluster-wide (a grain); the ingests see only the port.
-        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp => new Hosting.GrainPeriodAuditor(sp.GetRequiredService<IGrainFactory>()));
+        // The audit's verdicts have one owner; the ingests see only the port.
+        services.AddSingleton<Core.Flow.IPeriodAuditor>(sp =>
+            new Core.Flow.PeriodAuditor(sp.GetRequiredService<Core.Flow.IPeriodAuditStore>()));
 
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)

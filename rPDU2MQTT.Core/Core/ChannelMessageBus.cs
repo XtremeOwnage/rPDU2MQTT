@@ -43,12 +43,34 @@ public sealed class ChannelMessageBus : IMessageBus
         return Read(channel, cancellationToken);
     }
 
+    /// <summary>
+    /// One subscriber's stream. Cancelling it means that subscriber is going away — a consumer shutting
+    /// down — which is an ending, not a fault.
+    /// </summary>
+    /// <remarks>
+    /// Written as a manual read loop rather than <c>ReadAllAsync(token)</c> because that throws
+    /// <see cref="OperationCanceledException"/> on cancellation, and an iterator cannot catch around a
+    /// <c>yield return</c> — only <c>try/finally</c> is legal there. So the exception escaped into whatever
+    /// was enumerating: <c>SnapshotCache</c>, a BackgroundService, which reported it to the host as a
+    /// crashed background service on every clean shutdown. Awaiting inside the try and yielding outside it
+    /// is what lets the ending be an ending.
+    /// </remarks>
     private async IAsyncEnumerable<PduSnapshot> Read(Channel<PduSnapshot> channel, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         try
         {
-            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+            while (true)
+            {
+                PduSnapshot? item;
+                try
+                {
+                    if (!await channel.Reader.WaitToReadAsync(cancellationToken)) break;   // writer completed
+                    if (!channel.Reader.TryRead(out item)) continue;                        // raced another read
+                }
+                catch (OperationCanceledException) { break; }
+
                 yield return item;
+            }
         }
         finally
         {

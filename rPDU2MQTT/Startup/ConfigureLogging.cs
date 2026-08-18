@@ -24,12 +24,11 @@ public static class ConfigureLoggingExtension
             if (fileFault is not null)
                 Console.Error.WriteLine("[config] " + fileFault.Message);   // the logger isn't built yet
 
-            if (cfg.Logging.File.Enabled && fileFault is null)
+            if (cfg.Logging.File.Enabled && fileFault is null && cfg.Logging.File.Path is { Length: > 0 } logPath)
             {
-
                 // The file sink's own level and format — it used to be given the console's, which made the
                 // one combination people actually want (quiet console, full detail on disk) impossible.
-                o.WriteTo.File(path: cfg.Logging.File.Path
+                o.WriteTo.File(path: logPath
                     , restrictedToMinimumLevel: cfg.Logging.File.Severity
                     , outputTemplate: cfg.Logging.File.Format
                     , rollingInterval: cfg.Logging.File.FileRollover

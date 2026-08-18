@@ -96,7 +96,7 @@ public class HistoryRangeTests
         Assert.All(HistoryParsing.PrometheusRange(json, Steps), slot => Assert.Empty(slot));
     }
 
-    private sealed class OneAtATime : IFlowHistory
+    private sealed class OneAtATime : IMeasurementHistory
     {
         public int Calls;
         public string Id => "test";
@@ -118,7 +118,7 @@ public class HistoryRangeTests
         var backend = new OneAtATime();
         DateTime[] steps = [new(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc), new(2026, 8, 8, 12, 5, 0, DateTimeKind.Utc)];
 
-        var slots = await ((IFlowHistory)backend).SeriesAsync(["solar"], "realpower", steps, default);
+        var slots = await ((IMeasurementHistory)backend).SeriesAsync(["solar"], "realpower", steps, default);
 
         Assert.Equal(2, slots.Count);
         Assert.Equal(0, slots[0]["solar"]);

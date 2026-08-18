@@ -2,19 +2,12 @@ using rPDU2MQTT.Abstractions.Pipeline;
 
 namespace rPDU2MQTT.Abstractions.Flow;
 
-/// <summary>One node's rolled-up value for a metric, as computed by the flow middleware.</summary>
+/// <summary>One node's rolled-up value for a metric.</summary>
 public readonly record struct FlowNodeValue(string NodeId, Metric Metric, double Value);
 
 /// <summary>
-/// A raw (un-rolled-up) leaf value the middleware currently holds for a bound <c>(node, metric)</c> — what
-/// a source last reported, fresh. Used to sync the middleware's live values out to each process's
-/// <c>IFlowValueSource</c> so local graph builds and exports read grain-backed data.
-/// </summary>
-public sealed record RawValue(string NodeId, Metric Metric, double Value);
-
-/// <summary>
-/// The flow middleware's output — the whole mapped energy hierarchy at a point in time. This is the snapshot
-/// that flows <b>middleware → destinations</b>. It is itself an <see cref="ISnapshot"/> (SourceId
+/// The whole mapped energy hierarchy at a point in time — the snapshot that flows to the destinations. It is
+/// itself an <see cref="ISnapshot"/> (SourceId
 /// <see cref="FlowSourceId"/>), so a destination consumes it exactly like it consumes a raw source snapshot:
 /// the pipeline is snapshots-and-events all the way down.
 /// </summary>
