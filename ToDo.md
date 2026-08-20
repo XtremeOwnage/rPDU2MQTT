@@ -690,3 +690,22 @@ Notes
     Lesson: the list was the design, and a list that has to be remembered is a list that will not be. The
     test does not check the two I found; it checks the shape of the model, so the next credential added is
     covered before anyone thinks about it.
+
+29. The Energy tiles have a shape now
+    Each tile showed a single instant — "4.6 kW" — with no way to tell a clear morning from a cloud that had
+    just passed. Each now carries a sparkline of the last three hours, read from the same history the Flow
+    page uses (`/api/flow/series?minutes=&step=`), with no backend change.
+    [x] One series per tile, coloured by the entity the tile already carries, inside a labelled tile — so
+        identity is never colour alone and no legend is needed. Running the dataviz validator over the four
+        tile accents as a categorical CHART palette FAILS them (amber↔green ΔE 6.6 protan; muted reads gray)
+        — which is fine for four single-series plots in four labelled tiles, and would NOT be fine if those
+        four were ever drawn together in one chart. Noted here so the next person re-steps them first.
+    [x] The honesty rules are the flow's own, and each is a test: no readings draws nothing (never a flat
+        zero); a gap in the middle breaks the line rather than joining through it; and a step where only
+        SOME of a tile's nodes reported is a gap, because three MPPTs with one missing is not the array's
+        output. Sabotage-verified on the first two.
+    [x] Hover gives the value and the clock time at that point, on the whole strip rather than the 2px line.
+    [x] `sparkline.check.mjs` runs in the build.
+    Incident: I reverted the uncommitted board work with a careless `git checkout --` while restoring a
+    sabotage, and had to reapply it. Restore from a copy, not from the index, when the file also holds work
+    that was never committed.

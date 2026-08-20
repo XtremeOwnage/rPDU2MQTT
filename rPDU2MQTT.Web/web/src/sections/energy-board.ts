@@ -4,6 +4,7 @@ import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { state } from '../state.js';
 // The energy rules every view shares — see energy.ts for why they are not written twice.
 import { homeEnergy, selfSufficiencyPct, coveredEnergy } from '../energy.js';
+import { sparkline } from '../charts.js';
 import { historyControl, historyQuery, historyNote } from '../history-control.js';
 
 
@@ -67,7 +68,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   const tile = (cls: string, icon: string, label: string, value: string, sub: string, subCls = '',
-                gauge?: { fraction: number, over: boolean, max: number, units: string }) => {
+                gauge?: { fraction: number, over: boolean, max: number, units: string },
+                trend?: { values: (number | null)[], color: string, units: string, at?: (i: number) => string }) => {
     const t = el('div', { class: 'energy-tile' + (cls ? ' ' + cls : '') });
     const head = el('div', { class: 'energy-head' });
     head.append(el('span', { class: 'energy-icon', text: icon }), el('span', { class: 'energy-label', text: label }));
@@ -85,7 +87,27 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
         : `${Math.round(gauge.fraction * 100)}% of the ${formatNum(gauge.max)} ${gauge.units} maximum set for this node.`;
       t.appendChild(wrap);
     }
+    // The shape behind the number. A tile without one looks exactly as it did before — no placeholder, and
+    // no flat line standing in for readings nobody has.
+    if (trend) t.appendChild(sparkline({ values: trend.values, color: trend.color, units: trend.units, at: trend.at }));
     return t;
+  };
+
+  /// One trend per tile, summed across the nodes that tile is made of.
+  ///
+  /// Strict on gaps: a step counts only when EVERY node behind the tile reported at it. A partial sum drawn
+  /// as a total is the same lie as a fabricated reading — three MPPTs where one dropped out would show the
+  /// array's output falling, when what fell was the coverage.
+  const trendFor = (ids: string[], color: string, units: string) => {
+    if (!ids.length || !trendSeries) return undefined;
+    const rows = ids.map(id => trendSeries!.byNode.get(id)).filter(Boolean) as (number | null)[][];
+    if (rows.length !== ids.length || !rows.length) return undefined;
+
+    const values = rows[0].map((_, i) =>
+      rows.every(r => r[i] != null && Number.isFinite(r[i] as number))
+        ? rows.reduce((sum, r) => sum + (r[i] as number), 0)
+        : null);
+    return values.some(v => v != null) ? { values, color, units, at: trendSeries!.at } : undefined;
   };
 
   /// The gauge for a node, or undefined when one would be a guess.
@@ -202,6 +224,35 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     try { await loadBoard(); } finally { loading = false; }
   };
 
+  // The last few hours behind the tiles, keyed by node. Null until a load fills it, and left null when
+  // history is off or the backend has nothing — which is why a tile can simply have no trend.
+  let trendSeries: { byNode: Map<string, (number | null)[]>, at: (i: number) => string } | null = null;
+
+  /// Read the window every tile's trend is drawn from. One request for the whole board.
+  const loadTrend = async (metric: string) => {
+    trendSeries = null;
+    // A past instant is a moment, not a window: the trend would be the same line on every tile.
+    if (hist.at() || hist.span() > 1) return;
+    try {
+      const minutes = 180, step = 300;
+      const r = await api(withInstance(
+        `/api/flow/series?minutes=${minutes}&step=${step}&metric=${encodeURIComponent(metric)}`, instSel));
+      const body = r?.body;
+      if (!body || !body.ok || !Array.isArray(body.series) || !body.series.length) return;
+
+      const byNode = new Map<string, (number | null)[]>();
+      for (const s of body.series) if (s && s.node) byNode.set(s.node, s.values || []);
+      const points = Math.max(...[...byNode.values()].map(v => v.length), 0);
+      if (points < 2) return;
+
+      // Each point's clock time in the viewer's own zone, for the hover.
+      const stepMs = step * 1000, endMs = Date.now();
+      const at = (i: number) => new Date(endMs - (points - 1 - i) * stepMs)
+        .toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      trendSeries = { byNode, at };
+    } catch { /* the board is the point; a missing trend just means no line */ }
+  };
+
   const loadBoard = async () => {
     // The whole board reads one metric (#371).
     const metric = showSel.value || 'realpower';
@@ -213,6 +264,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
     try { r = await api(path); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
+    await loadTrend(metric);
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
       // Say what actually went wrong.
@@ -348,7 +400,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
         subOrWhy(solar.value, 'solar', solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
-        dial(solarIds, solar.value)));
+        dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units)));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
@@ -358,7 +410,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
       // The dial is the battery's power against its rating; the slim bar below is state of charge.
       const t = tile('battery', '🔋', 'Battery', fmt(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls,
-        dial(battIds, battNet == null ? null : Math.abs(battNet)));
+        dial(battIds, battNet == null ? null : Math.abs(battNet)), trendFor(battIds, 'var(--good)', units));
       if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
@@ -376,13 +428,13 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
       grid.appendChild(tile('grid', '⚡', 'Grid', fmt(gridShown),
         isEnergy ? `${sub} · net for the day` : sub, cls,
-        dial(gridIds, gridNet == null ? null : Math.abs(gridNet))));
+        dial(gridIds, gridNet == null ? null : Math.abs(gridNet)), trendFor(gridIds, 'var(--accent)', units)));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
-        dial(loadIds, home)));
+        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units)));
 
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);

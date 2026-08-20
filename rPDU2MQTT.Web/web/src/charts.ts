@@ -182,3 +182,96 @@ export function barChart(opts: {
 
   return { svg, gaps };
 }
+
+/// A tile's trend: one series, no axes, no legend — the tile's own label names it.
+///
+/// It answers "and what has it been doing?", which a single instantaneous figure cannot. Deliberately not a
+/// chart in the full sense: axes and a legend on a 44px-tall plot cost more room than the shape is worth,
+/// and the number it sits under is the headline.
+///
+/// Gaps stay gaps. A reading the backend does not have is a break in the line, never a drop to zero joined
+/// up to its neighbours — the same rule the rest of the flow follows, and the reason the line is drawn as
+/// runs of consecutive points rather than one path.
+export function sparkline(opts: {
+  values: (number | null)[]; color: string; units: string; width?: number; height?: number;
+  at?: (i: number) => string;      // what to call point i when someone hovers it
+}): any {
+  const { values, color, units } = opts;
+  const w = opts.width ?? 132, h = opts.height ?? 40;
+  const pad = 3;                                   // room for the 2px stroke and the hover dot's ring
+
+  const known = values.filter((v): v is number => v != null && Number.isFinite(v));
+  if (known.length < 2) {
+    // One point is not a trend, and none is not a zero. Say so rather than draw a flat line through nothing.
+    const empty = el('div', { class: 'spark spark-empty', text: known.length ? '—' : '' });
+    empty.title = known.length ? 'Only one reading in this window' : 'No readings stored for this window';
+    return empty;
+  }
+
+  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const span = hi - lo || 1;
+  const x = (i: number) => pad + (values.length === 1 ? 0 : (i * (w - pad * 2)) / (values.length - 1));
+  const y = (v: number) => h - pad - ((v - lo) / span) * (h - pad * 2);
+
+  const svg = svgTag('svg', {
+    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark',
+    preserveAspectRatio: 'none', role: 'img',
+    'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
+  });
+
+  // Consecutive runs, so a gap in the data is a gap in the line.
+  const runs: { i: number; v: number }[][] = [];
+  let run: { i: number; v: number }[] = [];
+  values.forEach((v, i) => {
+    if (v == null || !Number.isFinite(v)) { if (run.length) runs.push(run); run = []; return; }
+    run.push({ i, v: v as number });
+  });
+  if (run.length) runs.push(run);
+
+  for (const r of runs) {
+    if (r.length === 1) {
+      // A lone reading between gaps is a dot: a segment needs two points, and inventing the second one
+      // would be drawing a trend nobody measured.
+      svg.appendChild(svgTag('circle', { cx: x(r[0].i), cy: y(r[0].v), r: 1.6, fill: color, class: 'spark-dot' }));
+      continue;
+    }
+    const line = r.map(p => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' L');
+    // The area first, so the line sits on top of it.
+    svg.appendChild(svgTag('path', {
+      d: `M${line} L${x(r[r.length - 1].i).toFixed(1)},${h - pad} L${x(r[0].i).toFixed(1)},${h - pad} Z`,
+      fill: color, 'fill-opacity': '0.14', stroke: 'none',
+    }));
+    svg.appendChild(svgTag('path', {
+      d: `M${line}`, fill: 'none', stroke: color, 'stroke-width': '2',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    }));
+  }
+
+  // The latest reading, marked: it is the one the tile's big number is showing.
+  const last = known[known.length - 1];
+  const lastAt = values.length - 1 - [...values].reverse().findIndex(v => v != null && Number.isFinite(v as number));
+  svg.appendChild(svgTag('circle', {
+    cx: x(lastAt), cy: y(last), r: 2.4, fill: color, stroke: 'var(--panel2)', 'stroke-width': '1.5',
+  }));
+
+  // The hover layer. The plot is 40px tall, so the target is the whole strip and the nearest point wins —
+  // asking someone to hit a 2px line with a mouse is asking them not to bother.
+  const hit = svgTag('rect', { x: 0, y: 0, width: w, height: h, fill: 'transparent', class: 'spark-hit' });
+  svg.appendChild(hit);
+  hit.addEventListener('mousemove', (ev: any) => {
+    const box = svg.getBoundingClientRect?.() ?? { left: 0, width: w };
+    const frac = box.width ? (ev.clientX - box.left) / box.width : 0;
+    const i = Math.max(0, Math.min(values.length - 1, Math.round(frac * (values.length - 1))));
+    const v = values[i];
+    const c = hoverCard();
+    c.innerHTML = '';
+    c.appendChild(el('div', { class: 'nc-title', text: opts.at ? opts.at(i) : `Point ${i + 1}` }));
+    c.appendChild(el('div', { text: v == null ? 'no reading' : `${formatNum(v)} ${units}` }));
+    c.classList.add('show');
+    c.style.left = `${ev.clientX + 12}px`;
+    c.style.top = `${ev.clientY + 12}px`;
+  });
+  hit.addEventListener('mouseleave', () => hideCard());
+
+  return svg;
+}
