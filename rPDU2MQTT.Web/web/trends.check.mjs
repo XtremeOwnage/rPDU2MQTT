@@ -53,14 +53,25 @@ const wholeDay = {
   ],
 };
 
+// The same window asked about as energy: a cumulative counter, which climbs and must never be summed.
+const counter = {
+  ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus', stepSeconds: 300,
+  at,
+  series: [{ node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] }],
+};
+
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow/series')) {
       asked.push(url);
       if (url.includes('back=1')) return wholeDay;
+      // Asked for energy over an intra-day window: a counter climbing, not a per-period total.
+      if (url.includes('metric=energytoday') && url.includes('minutes=')) return counter;
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
+    if (url.includes('/api/flow/metrics'))
+      return { ok: true, metrics: [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -344,9 +355,39 @@ const dayStatus = query(sec, 'span', true).map(x => x.textContent).join(' ');
 if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus))
   fail(`the status line does not say what window is charted: ${dayStatus}`);
 
+// --- What the page says it is showing is what it is showing ----------------------------------------
+// The blurb was fixed prose: "Daily energy over time" stood above a chart of watts, on every intra-day
+// range, and there was no way to ask for anything else.
+const blurb = () => (query(sec, '.desc', true).map(d => d.textContent)[0] || '');
+if (!/power/i.test(blurb())) fail(`the page describes a chart of watts as: ${blurb().slice(0, 120)}`);
+if (/Daily energy over time/.test(blurb())) fail('the page still calls a chart of power "daily energy"');
+
+// The metric is a control, not something the range decides for you.
+rangeSel.value = 'minutes=360&step=300';
+rangeSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energytoday'));
+if (!metricSel) fail('no way to choose what is charted');
+metricSel.value = 'energytoday';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+if (!/metric=energytoday/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
+if (!/energy/i.test(blurb())) fail(`the page still describes power after energy was chosen: ${blurb().slice(0, 120)}`);
+
+// A counter read through a day climbs. Adding those readings up counts the same energy in again at every
+// step, so the column is the highest reading — 10+12+14+16=52 kWh is a number nothing measured.
+const counterRows = query(sec, 'th', true).map(h => h.textContent);
+if (counterRows.some(h => /^Total/.test(h))) fail(`a cumulative counter is being totalled: ${counterRows.join(', ')}`);
+const solarCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
+if (/52/.test(solarCounter.textContent)) fail(`the counter's readings were summed: ${solarCounter.textContent}`);
+if (!/16/.test(solarCounter.textContent)) fail(`the counter's highest reading is not shown: ${solarCounter.textContent}`);
+// …and kWh is not "estimated" from readings that are already kWh.
+if (counterRows.some(h => /kWh, est/.test(h))) fail('energy readings were integrated as if they were watts');
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
   + 'many days they cover; today counts, faded and marked as unfinished; within a day it charts power on a '
   + 'clock axis and integrates kWh; yesterday is '
   + 'the period before this one, fits on screen whole, is labelled every other hour and says which window '
-  + 'it charted; the table sorts');
+  + 'it charted; what is charted is chosen and described in the same words; a cumulative counter is not '
+  + 'summed; the table sorts');

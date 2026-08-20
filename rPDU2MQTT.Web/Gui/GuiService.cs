@@ -1780,6 +1780,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted), ConfigSchema.Json);
         });
 
+        // Which metrics history can be asked for, so the page offers the ones that were actually exported
+        // rather than a hardcoded guess. Units come with them: whether a bar is a rate or a quantity decides
+        // what arithmetic the page is allowed to do on it.
+        app.MapGet("/api/flow/metrics", () => Results.Json(new
+        {
+            ok = true,
+            metrics = FlowTiers.Metrics(config).Select(m => new { metric = m, units = FlowUnits.Canonical(m) }),
+        }, ConfigSchema.Json));
+
         // Readings the bridge is deliberately dropping, and why.
         app.MapGet("/api/flow/withheld", (HttpContext ctx) =>
         {
