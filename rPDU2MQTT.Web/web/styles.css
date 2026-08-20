@@ -786,3 +786,10 @@
     height:40px; margin:8px 0 0; display:flex; align-items:center; justify-content:center;
     color:var(--faint); font-size:11px; letter-spacing:.04em;
   }
+
+  /* A tile or diagram node that leads somewhere. The cue is the same one links carry elsewhere. */
+  .energy-tile.is-linked:hover { border-color:var(--accent); }
+  .energy-tile.is-linked:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .energy-node.is-linked { cursor:pointer; }
+  .energy-node.is-linked:hover .energy-node-ring { stroke-width:3; }
+  .energy-node.is-linked:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }

@@ -3,6 +3,7 @@ import { api, btn, el, activate, formatNum, navLink, instanceSelector, withInsta
 // The energy rules every view shares, so this page and the Energy Overview cannot answer differently.
 import { homeEnergy, selfSufficiencyPct, sumKnown } from '../energy.js';
 import { barChart, hideCard, colorFor, KIND_COLOR, type Line } from '../charts.js';
+import { takeFocus } from '../state.js';
 
 // The bar chart itself — axis, gaps, signs, hover — lives in charts.ts.
 
@@ -75,8 +76,34 @@ export function addTrendsSection(nav: any, sections: any) {
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (body && body.message) || 'Could not load the series.' }));
       return;
     }
-    if (!off.size) resetSelection();
+    // Arrived from another page asking for something specific — "show me Solar for today".
+    if (pending) {
+      off.clear();
+      const wanted = new Set(pending.nodes);
+      (body.series || []).forEach((x: any) => { if (!wanted.has(x.node)) off.add(x.node); });
+      // If none of what was asked for is in this window, say so rather than silently charting nothing.
+      if (off.size === (body.series || []).length) {
+        off.clear();
+        resetSelection();
+        status.textContent = `no history for ${pending.label || 'that node'} in this range`;
+      }
+      pending = null;
+    }
+    else if (!off.size) resetSelection();
     draw();
+  };
+
+  /// A request from another page, applied on the next load.
+  let pending: { nodes: string[]; range: string | null; label: string | null } | null = null;
+
+  /// Open this page focused on a set of nodes, over a range. Called when someone clicks a tile elsewhere.
+  const openFocused = () => {
+    const want = takeFocus();
+    if (!want) return false;
+    pending = want;
+    if (want.range && RANGES.some(r => r[0] === want.range)) rangeSel.value = want.range;
+    load();
+    return true;
   };
 
   const shown = () => (body?.series || []).filter((s: any) => !off.has(s.node));
@@ -347,6 +374,8 @@ export function addTrendsSection(nav: any, sections: any) {
   };
 
   refresh.onclick = () => load();
-  link.onclick = () => { activate(link, sec); if (!body) load(); };
+  link.onclick = () => { activate(link, sec); if (!openFocused() && !body) load(); };
+  // Landing here from another page's click: the request is collected when this section becomes visible.
+  window.addEventListener('rpdu:activate', () => { if (sec.classList.contains('active')) openFocused(); });
   return { link, sec };
 }

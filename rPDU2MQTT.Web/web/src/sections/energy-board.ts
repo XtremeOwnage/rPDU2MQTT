@@ -5,6 +5,7 @@ import { state } from '../state.js';
 // The energy rules every view shares — see energy.ts for why they are not written twice.
 import { homeEnergy, selfSufficiencyPct, coveredEnergy } from '../energy.js';
 import { sparkline } from '../charts.js';
+import { requestFocus } from '../state.js';
 import { historyControl, historyQuery, historyNote } from '../history-control.js';
 
 
@@ -69,7 +70,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
   const tile = (cls: string, icon: string, label: string, value: string, sub: string, subCls = '',
                 gauge?: { fraction: number, over: boolean, max: number, units: string },
-                trend?: { values: (number | null)[], color: string, units: string, at?: (i: number) => string }) => {
+                trend?: { values: (number | null)[], color: string, units: string, at?: (i: number) => string },
+                link?: { ids: string[], label: string }) => {
     const t = el('div', { class: 'energy-tile' + (cls ? ' ' + cls : '') });
     const head = el('div', { class: 'energy-head' });
     head.append(el('span', { class: 'energy-icon', text: icon }), el('span', { class: 'energy-label', text: label }));
@@ -90,7 +92,30 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // The shape behind the number. A tile without one looks exactly as it did before — no placeholder, and
     // no flat line standing in for readings nobody has.
     if (trend) t.appendChild(sparkline({ values: trend.values, color: trend.color, units: trend.units, at: trend.at }));
+    if (link && link.ids.length) openOnClick(t, link.ids, link.label);
     return t;
+  };
+
+  /// Make something a way into this node's own day on the Trends page.
+  ///
+  /// The board answers "what is happening now"; the obvious next question is "and what has it been doing
+  /// today", which was three deliberate steps away — open Trends, change the range, then untick everything
+  /// that is not this. The click carries the node set the tile was summed from, so the answer is about the
+  /// same nodes the figure came from rather than whatever Trends happened to be showing.
+  const openOnClick = (elm: any, ids: string[], label: string) => {
+    elm.classList?.add('is-linked');
+    elm.style.cursor = 'pointer';
+    if (elm.setAttribute) elm.setAttribute('tabindex', '0');
+    const title = `Show ${label} for today on the Trends page`;
+    if (elm.setAttribute) elm.setAttribute('title', title); else elm.title = title;
+
+    const go = () => {
+      requestFocus(ids, 'today=1&step=300', label);
+      const link = [...document.querySelectorAll('nav a')].find((a: any) => (a.dataset?.label || '') === 'Trends');
+      if (link) (link as any).click();
+    };
+    elm.addEventListener('click', go);
+    elm.addEventListener('keydown', (e: any) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault?.(); go(); } });
   };
 
   /// One trend per tile, summed across the nodes that tile is made of.
@@ -126,7 +151,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const NODEPOS: Record<string, { x: number, y: number }> = {
     solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
   };
-  const drawFlow = (arms: { key: string, icon: string, label: string, text: string, color: string, flow: number | null }[]) => {
+  const drawFlow = (arms: { key: string, icon: string, label: string, text: string, color: string, flow: number | null, ids?: string[] }[]) => {
     flowWrap.innerHTML = '';
     // Frame only the arms that exist.
     const ys = arms.map(a => NODEPOS[a.key].y);
@@ -165,6 +190,9 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
       const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
       const val = svgEl('text', { x: p.x, y: p.y + 57, class: 'energy-node-val' }); val.textContent = a.text; g.appendChild(val);
+      // Click through to this node's own day. The whole group is the target — asking anyone to hit the
+      // 26px ring exactly is asking them not to bother.
+      if (a.ids && a.ids.length) openOnClick(g, a.ids, a.label);
       nodes.appendChild(g);
     });
 
@@ -390,17 +418,17 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms: any[] = [];
-    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: 'var(--warn)', flow: solar.value });
-    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet });
-    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet });
-    if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home });
+    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: 'var(--warn)', flow: solar.value, ids: solarIds });
+    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
+    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
+    if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
     if (arms.length) drawFlow(arms);
 
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
         subOrWhy(solar.value, 'solar', solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
-        dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units)));
+        dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units), { ids: solarIds, label: 'Solar' }));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
@@ -410,7 +438,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
       // The dial is the battery's power against its rating; the slim bar below is state of charge.
       const t = tile('battery', '🔋', 'Battery', fmt(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls,
-        dial(battIds, battNet == null ? null : Math.abs(battNet)), trendFor(battIds, 'var(--good)', units));
+        dial(battIds, battNet == null ? null : Math.abs(battNet)), trendFor(battIds, 'var(--good)', units), { ids: battIds, label: 'Battery' });
       if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
@@ -428,13 +456,13 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
       grid.appendChild(tile('grid', '⚡', 'Grid', fmt(gridShown),
         isEnergy ? `${sub} · net for the day` : sub, cls,
-        dial(gridIds, gridNet == null ? null : Math.abs(gridNet)), trendFor(gridIds, 'var(--accent)', units)));
+        dial(gridIds, gridNet == null ? null : Math.abs(gridNet)), trendFor(gridIds, 'var(--accent)', units), { ids: gridIds, label: 'Grid' }));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
-        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units)));
+        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
 
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);
