@@ -674,3 +674,19 @@ Notes
         protocol, but a generic process registry should not name one integration either — that is the
         pre-plugin world showing through, from before `IntegrationStatus` existed. Generalising them changes
         the diagnostics payload the GUI reads, so it is its own change rather than a rider on this one.
+
+28. Two credentials were being written out in plain text
+    Found by a guard written while adding a new config section, not by looking for it. `RedactSecrets` is a
+    hand-kept list, and two secrets had never been added to it:
+    `HomeAssistant.EnergyDashboard.Token` (a long-lived access token) and `Cache.Password`.
+    [x] Where they went: `KubernetesConfigSource.SaveAsync` writes the redacted spec into the RpduConfig CR
+        on EVERY save — its own comment says "the CR spec is always written redacted" — so both sat in the
+        CR in plain text, readable by anyone with `get rpduconfig` and committed to whatever repo the CR is
+        kept in. The GUI's Export → manifest offers the same content for GitOps re-import.
+    [x] Both redacted now.
+    [x] `RedactedSecretsTests` walks the whole config tree rather than trusting the list: it fills every
+        secret-shaped property (password / apikey / token / secret) with a marker, redacts, and goes looking
+        for the marker. Sabotage-verified — removing any existing redaction fails it by name.
+    Lesson: the list was the design, and a list that has to be remembered is a list that will not be. The
+    test does not check the two I found; it checks the shape of the model, so the next credential added is
+    covered before anyone thinks about it.
