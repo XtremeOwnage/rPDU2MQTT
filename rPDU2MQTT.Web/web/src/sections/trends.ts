@@ -12,12 +12,10 @@ export function addTrendsSection(nav: any, sections: any) {
   link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Trends' }));
-  sec.appendChild(el('div', {
-    class: 'desc',
-    text: 'Daily energy over time, read from the history backend. A day the backend has no reading for is '
-      + 'left empty rather than drawn as zero, and is left out of every total — nothing recorded is not the '
-      + 'same as nothing used.',
-  }));
+  // What this page is showing depends on what was asked for, so it is written when the answer arrives
+  // rather than fixed here — it said "daily energy over time" over a chart of watts.
+  const desc = el('div', { class: 'desc' });
+  sec.appendChild(desc);
 
   const bar = el('div', { class: 'ld-toolbar' });
   const refresh = btn('Refresh');
@@ -39,15 +37,86 @@ export function addTrendsSection(nav: any, sections: any) {
   const rangeSel = el('select', { title: 'How far back to chart. Within a day the charts show power; across days, the daily energy totals.' }) as HTMLSelectElement;
   RANGES.forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
   rangeSel.value = 'days=30';
-  rangeSel.onchange = () => load();
-  const intraDay = () => (RANGES.find(r => r[0] === rangeSel.value) || [])[2] === 'power';
+  rangeSel.onchange = () => { if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  /// Where an intra-day window actually fell, in the reader's own clock. The day rolls over on the server's
+  /// configured period zone, which is not necessarily the reader's — so it is said outright rather than
+  /// inferred from the axis.
+  const windowNote = (at: string[] | undefined) => {
+    if (perDay() || !at?.length) return '';
+    const from = new Date(at[0]), to = new Date(at[at.length - 1]);
+    const clock = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return ` · ${from.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(from)} → ${clock(to)}`;
+  };
+  /// One bar per period, which is the server's call: it labels the bars with period keys when they are
+  /// periods, and sends bare instants when they are samples on a clock.
+  const perDay = () => !!body?.days;
+  /// A total is only a real quantity when each bar is one period's own accumulation. Summing samples of a
+  /// rate gives a number in watts that is a quantity of nothing; summing a counter's readings is worse —
+  /// it adds the same energy in again at every step.
+  const summable = () => perDay() && !rate();
+  const byNodeTitle = () => perDay()
+    ? `Daily ${metricName()} by node`
+    : `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} by node`;
+  /// What the page is showing, in the same words as the chart above it.
+  const describe = () => {
+    const from = 'read from the history backend.';
+    if (perDay()) {
+      desc.textContent = `Daily ${metricName()} totals over time, ${from} A day the backend has no reading `
+        + 'for is left empty rather than drawn as zero, and is left out of every total — nothing recorded '
+        + 'is not the same as nothing used.';
+      return;
+    }
+    const every = body?.stepSeconds ? `every ${Math.round(body.stepSeconds / 60)} minutes` : 'sampled';
+    desc.textContent = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} ${every} through the `
+      + `window, ${from} A sample the backend has no reading for is left empty rather than drawn as zero.`
+      + (rate() ? ' These are instantaneous readings, so they are not added up.' : '');
+  };
+  /// A window that is still filling. "Yesterday" is not one, and neither is any range that ended.
+  const running = () => !rangeSel.value.includes('back=');
+  /// How wide an intra-day chart may be. A day of five-minute samples is 288 bars: at the daily rule of
+  /// 26px each that is a 7,488px chart in a ~1,600px pane, so the reader sees a fifth of their day, opened
+  /// at the far end, with two axis labels on it. A day belongs on screen whole.
+  const fitTo = () => (body?.at?.length || 0) > 60 ? (charts.clientWidth || 1200) : undefined;
+
+  // What to chart. The range no longer decides it silently: the range's own default is filled in, and from
+  // then on this is the answer.
+  const LABELS: Record<string, string> = {
+    realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
+    frequency: 'frequency', energy: 'energy', energytoday: 'energy',
+  };
+  const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
+  // Seeded with the two every build exports, so a page that cannot reach /api/flow/metrics still offers
+  // the right default for each range instead of labelling a chart of energy "power".
+  let METRICS: { metric: string; units: string }[] = [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }];
+  const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
+  let metricChosen = false;
+  const unitsOf = (m: string) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
+  /// A rate is a condition sampled at an instant — it is never added up. A quantity accumulated over a
+  /// period is. Which one this is follows the metric, not the range.
+  const rate = () => RATES.includes(unitsOf(metricSel.value));
+  const metricName = () => LABELS[metricSel.value] || metricSel.value;
+  /// The metric a range implies when nobody has said otherwise.
+  const impliedMetric = () => {
+    const wants = (RANGES.find(r => r[0] === rangeSel.value) || [])[2];
+    const found = METRICS.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
+    return (found || METRICS[0]).metric;
+  };
+  const fillMetrics = () => {
+    metricSel.innerHTML = '';
+    METRICS.forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
+    if (!metricChosen) metricSel.value = impliedMetric();
+  };
+  fillMetrics();
+  metricSel.onchange = () => { metricChosen = true; load(); };
 
   const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' }) as HTMLSelectElement;
   [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
   modeSel.onchange = () => draw();
 
   const status = el('span', { class: 'ld-count' });
-  bar.append(refresh, el('label', { class: 'ld-inst' }, 'Show ', rangeSel), el('label', { class: 'ld-inst' }, 'as ', modeSel), instSel.wrap, status);
+  bar.append(refresh, el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
+    el('label', { class: 'ld-inst' }, 'of ', metricSel), el('label', { class: 'ld-inst' }, 'as ', modeSel),
+    instSel.wrap, status);
   sec.appendChild(bar);
 
   const tagRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
@@ -66,7 +135,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const load = async () => {
     status.textContent = 'loading…';
     charts.innerHTML = ''; table.innerHTML = ''; picker.innerHTML = ''; tagRow.innerHTML = '';
-    const path = withInstance('/api/flow/series?' + rangeSel.value, instSel);
+    const path = withInstance('/api/flow/series?' + rangeSel.value + '&metric=' + encodeURIComponent(metricSel.value), instSel);
     let r: any;
     try { r = await api(path); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
@@ -187,9 +256,10 @@ export function addTrendsSection(nav: any, sections: any) {
       box.appendChild(row);
     }
     charts.appendChild(box);
-    // A chart wider than the page opens on its oldest bars, and the newest are what the page is about —
-    // so start at the right-hand end (#378). scrollWidth is only known once the SVG is in the document.
-    scroll.scrollLeft = scroll.scrollWidth;
+    // A chart wider than the page opens on its oldest bars, and for a window still filling the newest are
+    // what the page is about — so start at the right-hand end (#378). A window that has already ended has no
+    // "newest", and opening yesterday at 11pm hides the day. scrollWidth is only known once in the document.
+    if (running()) scroll.scrollLeft = scroll.scrollWidth;
     return made.gaps;
   };
 
@@ -197,6 +267,7 @@ export function addTrendsSection(nav: any, sections: any) {
     drawTags(); drawPicker();
     charts.innerHTML = ''; table.innerHTML = '';
     hideCard();
+    describe();
     if (!body?.ok) return;
 
     // A day carries the server's period key; a moment within one is named here, in the viewer's clock.
@@ -213,12 +284,12 @@ export function addTrendsSection(nav: any, sections: any) {
       const lines: Line[] = series.map((s: any, i: number) => ({
         label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s),
       }));
-      gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node',
+      gaps = section(byNodeTitle(),
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial }), lines);
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo() }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
-      box.appendChild(el('h3', { text: intraDay() ? 'Power by node' : 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
+      box.appendChild(el('h3', { text: byNodeTitle(), style: { margin: '4px 0', fontSize: '15px' } }));
       box.appendChild(el('div', { class: 'desc', text: 'No nodes selected — pick one above, or press Reset. The charts below are about the whole system and are not affected by the selection.' }));
       charts.appendChild(box);
     }
@@ -232,16 +303,16 @@ export function addTrendsSection(nav: any, sections: any) {
       const imports = sumOf(gridSupply), exports_ = gridReturn.length ? sumOf(gridReturn) : null;
       const gridLines: Line[] = [{ label: 'Import', color: KIND_COLOR.grid, values: imports }];
       if (exports_) gridLines.push({ label: 'Export', color: '#6fb0e0', values: exports_ });
-      section(intraDay() ? 'Grid' : 'Grid per day',
+      section(perDay() ? 'Grid per day' : 'Grid',
         'Every grid node, whatever is selected above. Import above the line, export below it'
         + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
-        barChart({ days, lines: gridLines, units, stacked: true, partial }), gridLines);
+        barChart({ days, lines: gridLines, units, stacked: true, partial, fitTo: fitTo() }), gridLines);
     }
 
     // --- Self-sufficiency ---------------------------------------------------------------------------
     const solar = byKind('solar'), batt = byKind('battery'), load = byKind('load');
     // Self-sufficiency is a share of energy over a period.
-    if (!intraDay() && gridIn && (load || solar)) {
+    if (summable() && gridIn && (load || solar)) {
       // A kind this system does not have is left out of the balance entirely.
       const drawn = sumOf(gridSupply);
       const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
@@ -276,16 +347,16 @@ export function addTrendsSection(nav: any, sections: any) {
         if (v.some(x => x != null)) supplyLines.push({ label, color: colour, values: v });
       });
     if (supplyLines.length > 1) {
-      section(intraDay() ? 'Where the power is coming from' : 'Where the day’s energy came from',
+      section(perDay() ? `Where the day’s ${metricName()} came from` : `Where the ${metricName()} is coming from`,
         'Each kind summed across its nodes, whatever is selected above. What went back — battery charge, '
         + 'grid export — is below the line, so the same energy is not counted as produced and then again '
         + 'as returned.',
-        barChart({ days, lines: supplyLines, units, stacked: true, partial }), supplyLines);
+        barChart({ days, lines: supplyLines, units, stacked: true, partial, fitTo: fitTo() }), supplyLines);
     }
 
     // --- Totals ----------------------------------------------------------------------------------
     if (!series.length) {
-      status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`;
+      status.textContent = `${days.length} ${perDay() ? 'day(s)' : 'sample(s)'} from ${body.source}`;
       return;
     }
 
@@ -299,10 +370,10 @@ export function addTrendsSection(nav: any, sections: any) {
       const sum = vals.reduce((a: number, [v]: any) => a + v, 0);
       const best = vals.reduce((a: any, b: any) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as any);
       // Energy from power samples: each sample stands for one step of time.
-      const kwh = intraDay() && step > 0 ? (sum * step) / 3_600_000 : null;
+      const kwh = rate() && units === 'W' && step > 0 ? (sum * step) / 3_600_000 : null;
       return {
         label: s.label || s.node,
-        headline: intraDay() ? (best ? best[0] : null) : sum,
+        headline: summable() ? sum : (best ? best[0] : null),
         kwh,
         mean: vals.length ? sum / vals.length : null,
         covered: vals.length,
@@ -314,24 +385,24 @@ export function addTrendsSection(nav: any, sections: any) {
     const denom = days.length;
     const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string }[] = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
-      { head: intraDay() ? `Peak (${units})` : `Total (${units})`, num: true,
+      { head: summable() ? `Total (${units})` : `Peak (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
         sort: r => r.headline ?? -Infinity,
         // Adding up power samples gives a number in watts that is a quantity of nothing.
-        title: intraDay() ? 'The highest sample in the window. Power samples are not added up — that would give a number in watts that is a quantity of nothing.'
+        title: !summable() ? 'The highest reading in the window. These bars are not added up: a sum of them would be a quantity of nothing.'
           : 'Summed over the days that reported' + (partial ? `, including ${partial} as far as it has got.` : '.') },
-      ...(intraDay() ? [{ head: 'Energy (kWh, est.)', num: true,
+      ...(rate() && units === 'W' ? [{ head: 'Energy (kWh, est.)', num: true,
         text: (r: any) => r.kwh == null ? '—' : formatNum(Number(r.kwh.toFixed(3))),
         sort: (r: any) => r.kwh ?? -Infinity,
         title: `Each sample held for its ${step}s step and added up. An estimate: it assumes the power between samples was the sampled value, and it covers only the samples that exist.` }] : []),
-      { head: `Mean per ${intraDay() ? 'sample' : 'day'} (${units})`, num: true,
+      { head: `Mean per ${perDay() ? 'day' : 'sample'} (${units})`, num: true,
         text: r => r.mean == null ? '—' : formatNum(Number(r.mean.toFixed(2))), sort: r => r.mean ?? -Infinity,
         // An early day counts as a whole one here, so say so rather than let a low mean look like a quiet week.
-        title: intraDay() || !partial ? undefined
+        title: !perDay() || !partial ? undefined
           : `Over the days that reported. ${partial} is one of them and is only part-way through, so the mean reads low until it ends.` },
-      { head: `${intraDay() ? 'Samples' : 'Days'} with data`, num: true,
+      { head: `${perDay() ? 'Days' : 'Samples'} with data`, num: true,
         text: r => `${r.covered} of ${denom}`, sort: r => r.covered },
-      { head: intraDay() ? 'Peak at' : 'Peak day', num: false,
+      { head: perDay() ? 'Peak day' : 'Peak at', num: false,
         // The day in progress can hold the peak, and it is a peak that may still rise — say which it is.
         text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
         sort: r => r.peakAt },
@@ -365,7 +436,8 @@ export function addTrendsSection(nav: any, sections: any) {
     t.appendChild(tb);
     table.appendChild(t);
 
-    status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`
+    status.textContent = `${days.length} ${perDay() ? 'day(s)' : 'sample(s)'} from ${body.source}`
+      + windowNote(body.at)
       + (gaps ? ` · ${gaps} with no reading` : '')
       + (partial ? ` · ${partial} still in progress` : '');
     status.title = gaps
@@ -374,7 +446,18 @@ export function addTrendsSection(nav: any, sections: any) {
   };
 
   refresh.onclick = () => load();
-  link.onclick = () => { activate(link, sec); if (!openFocused() && !body) load(); };
+  /// The exported metrics, asked for once. Until they arrive the page offers power, which every build has.
+  let metricsAsked = false;
+  const loadMetrics = async () => {
+    if (metricsAsked) return;
+    metricsAsked = true;
+    try {
+      const r: any = await api('/api/flow/metrics');
+      if (r?.body?.ok && r.body.metrics?.length) { METRICS = r.body.metrics; fillMetrics(); }
+    } catch { /* the page still works with power alone */ }
+  };
+
+  link.onclick = () => { activate(link, sec); loadMetrics(); if (!openFocused() && !body) load(); };
   // Landing here from another page's click: the request is collected when this section becomes visible.
   window.addEventListener('rpdu:activate', () => { if (sec.classList.contains('active')) openFocused(); });
   return { link, sec };

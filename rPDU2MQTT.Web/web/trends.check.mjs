@@ -41,13 +41,37 @@ const power = {
   ],
 };
 
+// A whole day of five-minute samples — 288 of them, which is what "yesterday" actually returns.
+const dayStart = new Date(2026, 7, 19, 0, 0, 0);
+const wholeDay = {
+  ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
+  at: Array.from({ length: 288 }, (_, i) => new Date(dayStart.getTime() + i * 300_000).toISOString()),
+  series: [
+    { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: 288 },
+        (_, i) => Math.max(0, Math.round(5000 * Math.sin(Math.PI * (i - 84) / 120))) ) },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: Array.from({ length: 288 }, () => 400) },
+  ],
+};
+
+// The same window asked about as energy: a cumulative counter, which climbs and must never be summed.
+const counter = {
+  ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus', stepSeconds: 300,
+  at,
+  series: [{ node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] }],
+};
+
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow/series')) {
       asked.push(url);
+      if (url.includes('back=1')) return wholeDay;
+      // Asked for energy over an intra-day window: a counter climbing, not a per-period total.
+      if (url.includes('metric=energytoday') && url.includes('minutes=')) return counter;
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
+    if (url.includes('/api/flow/metrics'))
+      return { ok: true, metrics: [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -303,8 +327,67 @@ const askedYesterday = decodeURIComponent(asked.at(-1));
 if (!/today=1/.test(askedYesterday) || !/back=1/.test(askedYesterday))
   fail(`yesterday was not asked for as the previous period: ${askedYesterday}`);
 
+// …and a whole day fits on screen. 288 five-minute samples at the daily rule of 26px a bar is a 7,488px
+// chart in a ~1,600px pane, opened at its right-hand end: the reader gets the last five hours of yesterday
+// and two axis labels, with nothing saying the other nineteen hours exist (#393 follow-up).
+const dayChart = query(sec, 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
+if (!dayChart) fail('no chart drawn for yesterday');
+const chartW = Number(dayChart.attrs.width);
+if (!(chartW > 0 && chartW <= 1200)) fail(`a day of samples was drawn ${chartW}px wide — it does not fit a pane`);
+
+// Every other hour across the whole day, not two labels at one end of it.
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const axis = query(dayChart, 'text', true)
+  .filter(t => Number(t.attrs.y) === 216)   // the x-axis row; the value ticks down the left are not it
+  .map(t => t.textContent).filter(Boolean);
+if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s): ${axis.join(', ')}`);
+// The first is the moment the day rolled over, in the reader's clock — the axis begins where the day did.
+if (axis[0] !== clock(wholeDay.at[0])) fail(`the axis does not start at the window's start: ${axis[0]}`);
+
+// A finished day has no "newest", so it opens at its beginning. Jumping to the end is for a window that
+// is still filling.
+const scrolled = query(sec, 'div', true).filter(d => 'scrollLeft' in d);
+if (scrolled.length) fail('a finished day was opened scrolled to its right-hand end');
+
+// And the page says outright where the window fell in the reader's own clock — the day rolls over on the
+// server's configured zone, which is not necessarily theirs.
+const dayStatus = query(sec, 'span', true).map(x => x.textContent).join(' ');
+if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus))
+  fail(`the status line does not say what window is charted: ${dayStatus}`);
+
+// --- What the page says it is showing is what it is showing ----------------------------------------
+// The blurb was fixed prose: "Daily energy over time" stood above a chart of watts, on every intra-day
+// range, and there was no way to ask for anything else.
+const blurb = () => (query(sec, '.desc', true).map(d => d.textContent)[0] || '');
+if (!/power/i.test(blurb())) fail(`the page describes a chart of watts as: ${blurb().slice(0, 120)}`);
+if (/Daily energy over time/.test(blurb())) fail('the page still calls a chart of power "daily energy"');
+
+// The metric is a control, not something the range decides for you.
+rangeSel.value = 'minutes=360&step=300';
+rangeSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energytoday'));
+if (!metricSel) fail('no way to choose what is charted');
+metricSel.value = 'energytoday';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+if (!/metric=energytoday/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
+if (!/energy/i.test(blurb())) fail(`the page still describes power after energy was chosen: ${blurb().slice(0, 120)}`);
+
+// A counter read through a day climbs. Adding those readings up counts the same energy in again at every
+// step, so the column is the highest reading — 10+12+14+16=52 kWh is a number nothing measured.
+const counterRows = query(sec, 'th', true).map(h => h.textContent);
+if (counterRows.some(h => /^Total/.test(h))) fail(`a cumulative counter is being totalled: ${counterRows.join(', ')}`);
+const solarCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
+if (/52/.test(solarCounter.textContent)) fail(`the counter's readings were summed: ${solarCounter.textContent}`);
+if (!/16/.test(solarCounter.textContent)) fail(`the counter's highest reading is not shown: ${solarCounter.textContent}`);
+// …and kWh is not "estimated" from readings that are already kWh.
+if (counterRows.some(h => /kWh, est/.test(h))) fail('energy readings were integrated as if they were watts');
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
   + 'many days they cover; today counts, faded and marked as unfinished; within a day it charts power on a '
   + 'clock axis and integrates kWh; yesterday is '
-  + 'the period before this one; the table sorts');
+  + 'the period before this one, fits on screen whole, is labelled every other hour and says which window '
+  + 'it charted; what is charted is chosen and described in the same words; a cumulative counter is not '
+  + 'summed; the table sorts');

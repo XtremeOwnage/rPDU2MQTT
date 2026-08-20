@@ -41,6 +41,12 @@ export function hideCard() { if (card) card.classList.remove('show'); }
 export function barChart(opts: {
   days: string[]; lines: Line[]; units: string; stacked: boolean; max?: number; pct?: boolean;
   partial?: string | null;
+  /// Fit the chart into this many pixels instead of letting it grow at 26px a bar.
+  ///
+  /// 26px suits a bar per DAY — thirty of them is a readable 780px. A bar per five-minute sample is the
+  /// same rule applied to 288 of them: a 7,488px chart in a ~1,600px pane, so a reader sees a fifth of
+  /// their day and two axis labels, and cannot tell that the rest exists.
+  fitTo?: number;
 }): { svg: any; gaps: number } {
   const { days, lines, units, stacked } = opts;
   const has = (d: number) => lines.some(l => l.values[d] != null);
@@ -59,7 +65,9 @@ export function barChart(opts: {
     0);
   const span = (peak - trough) || 1;
 
-  const W = Math.max(720, days.length * 26);
+  const W = opts.fitTo && opts.fitTo > 0
+    ? Math.max(360, Math.min(days.length * 26, opts.fitTo))
+    : Math.max(720, days.length * 26);
   const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const slot = plotW / days.length;
