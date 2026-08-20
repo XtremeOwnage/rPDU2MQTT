@@ -1,14 +1,25 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using rPDU2MQTT.Core.Flow;
 
-namespace rPDU2MQTT.Core.Flow;
+namespace rPDU2MQTT.Integrations.Prometheus;
 
 /// <summary>
-/// Reading a backend's answer into node values. Pure, so the shapes each API returns — including the ones
-/// that mean "no data" — are covered without a server.
+/// Reading and writing Prometheus's own dialect: the PromQL a history read is expressed in, and the JSON
+/// its API answers with — including the shapes that mean "no data".
+///
+/// <para>
+/// This lives with the Prometheus integration rather than in Core because it is Prometheus's grammar and
+/// nobody else's. A second history backend brings its own; it does not extend a shared parser, and Core
+/// does not learn a third vendor's wire format to accommodate it. What everything outside this folder sees
+/// is <see cref="IMeasurementHistory"/>.
+/// </para>
+/// <para>
+/// Pure, so every one of those shapes is covered without a server.
+/// </para>
 /// </summary>
-public static class HistoryParsing
+internal static class PrometheusWire
 {
     /// <summary>
     /// The query that reads one value per node, whatever produced it.
@@ -20,7 +31,7 @@ public static class HistoryParsing
     /// A Prometheus range answer: one series per node, each a list of [timestamp, value] pairs, folded onto
     /// the step boundaries the caller asked for.
     /// </summary>
-    public static IReadOnlyList<IReadOnlyDictionary<string, double>> PrometheusRange(string json, IReadOnlyList<long> stepsUnix)
+    public static IReadOnlyList<IReadOnlyDictionary<string, double>> Range(string json, IReadOnlyList<long> stepsUnix)
     {
         var steps = stepsUnix.Count;
         var slots = new List<Dictionary<string, double>>(steps);
@@ -75,7 +86,64 @@ public static class HistoryParsing
     /// A non-finite sample is dropped. Prometheus renders staleness and division results as "NaN" and
     /// "+Inf" in the same field a number appears in, and either would enter the roll-up as a figure.
     /// </remarks>
-    public static IReadOnlyDictionary<string, double> PrometheusInstant(string json)
+    /// <summary>
+    /// What Prometheus said about a query: its own <c>status</c> and, when it refused, the reason it gave.
+    ///
+    /// <para>
+    /// A rejected query answers 400 with <c>{"status":"error","error":"…"}</c>, and reading only the HTTP
+    /// code loses the half that says what to fix. This is what lets a probe report "unknown escape
+    /// sequence" instead of a green tick over a backend that has refused every read for weeks.
+    /// </para>
+    /// </summary>
+    public static (bool Ok, string? Error, int Series) Status(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var status = root.TryGetProperty("status", out var st) ? st.GetString() : null;
+            if (!string.Equals(status, "success", StringComparison.Ordinal))
+            {
+                var error = root.TryGetProperty("error", out var e) ? e.GetString() : null;
+                return (false, error ?? status ?? "no status in the answer", 0);
+            }
+
+            var series = root.TryGetProperty("data", out var data)
+                      && data.TryGetProperty("result", out var result)
+                      && result.ValueKind == JsonValueKind.Array
+                ? result.GetArrayLength() : 0;
+            return (true, null, series);
+        }
+        catch (JsonException ex) { return (false, $"unreadable answer ({ex.Message})", 0); }
+    }
+
+    /// <summary>
+    /// The single number an aggregate query answers with (<c>count(...)</c> has no <c>node</c> label, so
+    /// <see cref="Instant"/> — which keys by node — finds nothing in it). 0 when there is none.
+    /// </summary>
+    public static double InstantScalar(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return 0;
+            if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array) return 0;
+
+            foreach (var series in result.EnumerateArray())
+            {
+                if (!series.TryGetProperty("value", out var pair) || pair.ValueKind != JsonValueKind.Array) continue;
+                var parts = pair.EnumerateArray().ToList();
+                if (parts.Count < 2) continue;
+                var raw = parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() : parts[1].ToString();
+                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v))
+                    return v;
+            }
+            return 0;
+        }
+        catch (JsonException) { return 0; }
+    }
+
+    public static IReadOnlyDictionary<string, double> Instant(string json)
     {
         var found = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         JsonDocument doc;
@@ -104,62 +172,6 @@ public static class HistoryParsing
             }
         }
         return found;
-    }
-
-    /// <summary>EmonCMS <c>/feed/list.json</c>: feed name -> id.</summary>
-    public static IReadOnlyDictionary<string, string> EmonCmsFeeds(string json)
-    {
-        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return found;
-            foreach (var feed in doc.RootElement.EnumerateArray())
-            {
-                var name = feed.TryGetProperty("name", out var n) ? n.GetString() : null;
-                var id = feed.TryGetProperty("id", out var i)
-                    ? (i.ValueKind == JsonValueKind.String ? i.GetString() : i.ToString())
-                    : null;
-                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(id)) found[name!] = id!;
-            }
-        }
-        catch (JsonException) { /* an unreadable list means no feeds, not a crash */ }
-        return found;
-    }
-
-    /// <summary>
-    /// EmonCMS <c>/feed/data.json</c>: <c>[[msTimestamp, value], …]</c>. Returns the last point at or before
-    /// <paramref name="atUnixMs"/>, or null when the window holds none.
-    /// </summary>
-    /// <remarks>
-    /// A null value is a gap EmonCMS records where the feed had no data, and it appears in the array
-    /// alongside real points. Taking the last element regardless would report a gap as a reading.
-    /// </remarks>
-    public static double? EmonCmsPointAt(string json, long atUnixMs)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
-
-            double? best = null;
-            long bestAt = long.MinValue;
-            foreach (var point in doc.RootElement.EnumerateArray())
-            {
-                if (point.ValueKind != JsonValueKind.Array) continue;
-                var parts = point.EnumerateArray().ToList();
-                if (parts.Count < 2) continue;
-                if (!parts[0].TryGetInt64(out var ts) || ts > atUnixMs) continue;
-                if (parts[1].ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) continue;
-
-                var raw = parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() : parts[1].ToString();
-                if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v)) continue;
-
-                if (ts >= bestAt) { bestAt = ts; best = v; }
-            }
-            return best;
-        }
-        catch (JsonException) { return null; }
     }
 
     /// <summary>Characters RE2 reads as pattern syntax. ':' and '#' are ordinary text and must be left alone.</summary>

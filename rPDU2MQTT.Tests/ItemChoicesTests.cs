@@ -2,6 +2,8 @@ using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Services.Gui;
 using Xunit;
 
+using rPDU2MQTT.Integrations.Prometheus;
+
 namespace rPDU2MQTT.Tests;
 
 /// <summary>

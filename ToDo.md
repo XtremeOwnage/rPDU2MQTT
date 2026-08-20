@@ -629,3 +629,48 @@ Notes
     Note: the history check located the Flow section by matching the sentence "Drag to pan", so changing
     that copy broke it. It matches a class now — a check should not be the reason a sentence cannot be
     reworded.
+
+26. A probe that can fail the way the feature fails
+    The history outage (item 23) was live for weeks with "Test history backend" showing a green tick the
+    whole time, because the probe asked Prometheus `/-/ready` — a question whose answer stays yes while the
+    server refuses every query this bridge sends. A probe that cannot fail the way the feature fails is
+    decoration.
+    [x] The Prometheus probe now sends the reader's own query shape for a node id carrying the punctuation
+        real ids have (':' and '#'). It matches nothing on purpose: an empty result proves the grammar, and
+        a refusal is reported with the server's own words. Then it counts what is stored, so "reachable,
+        holding nothing" and "reachable, holding a fortnight" stop reading the same.
+    [x] The EmonCMS probe asks the same question in its own terms: not "are there feeds" but "is there a
+        feed named the way a read looks one up". A changed `FlowInputNameTemplate` leaves every feed in
+        place and every read empty — a shelf full of data nobody can address.
+    [x] `HistoryParsing.PrometheusStatus` keeps the backend's own error text, which the transport had been
+        discarding in favour of the status code.
+    [x] 8 tests, sabotage-verified. Confirmed through the real endpoint, not just the class: against a stub
+        that refuses queries the button answers
+        `ok=false … rejected the query this reads with: parse error: unknown escape sequence U+0023 '#'`,
+        and against a healthy one `ok=true … · 40 flow series`. The same two queries were run against a
+        production Prometheus: the matcher parses, the count returns 40, and the old broken escaping still
+        produces exactly the 400 the probe now surfaces.
+
+27. Review on #390: the vendor's knowledge belongs to the vendor
+    Asked of the probe diff — "shouldn't that logic be closer to the Prometheus plugin, and use interfaces?"
+    Correct, and it was not one file. `Core/Flow/HistoryParsing.cs` held PromQL syntax AND two vendors' JSON
+    parsers; `Core/EmonCms/` held EmonCMS payload composition and feed planning; `Core/Helpers/` held
+    Prometheus's label rules. Every production consumer was an Engine integration. Core was carrying four
+    vendors' worth of protocol for nobody.
+    [x] Split by vendor, next to the integration that speaks it: `Integrations/Prometheus/PrometheusWire.cs`
+        + `PrometheusFlowHistory` + `PrometheusLabels`, `Integrations/EmonCms/EmonCmsWire.cs` +
+        `EmonCmsFlowHistory` + `EmonCmsPayload` + `EmonCmsFeedPlanner`. The parsers are `internal` now: what
+        anything outside the folder sees is `IMeasurementHistory`, which was always the seam.
+    [x] `FlowHistoryProviders.cs` held all three history classes in one file. The two vendor providers moved
+        into their integrations; `FlowHistoryRouter` stays in Services because choosing a backend from
+        config is the one part that is nobody's vendor.
+    [x] The names lost their stutter on the way: `HistoryParsing.PrometheusInstant` is `PrometheusWire.Instant`.
+    [x] `CoreKnowsNoVendorTests` guards it, sabotage-verified: a vendor-named type reappearing in Core fails
+        with a message saying where it belongs. The config model is exempt by design — the schema, the GUI
+        form and the CRD are all generated from Core's types, and naming a vendor's SETTINGS is not knowing
+        its protocol.
+    [ ] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
+        outcome a process carries on its heartbeat and in the process registry. They know nothing about the
+        protocol, but a generic process registry should not name one integration either — that is the
+        pre-plugin world showing through, from before `IntegrationStatus` existed. Generalising them changes
+        the diagnostics payload the GUI reads, so it is its own change rather than a rider on this one.

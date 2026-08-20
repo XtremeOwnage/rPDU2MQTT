@@ -1,6 +1,10 @@
 using rPDU2MQTT.Core.Flow;
 using Xunit;
 
+using rPDU2MQTT.Integrations.Prometheus;
+
+using rPDU2MQTT.Integrations.EmonCms;
+
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
@@ -20,7 +24,7 @@ public class FlowHistoryTests
           {"metric":{"__name__":"rpdu2mqtt_flow_realpower","node":"fridge"},"value":[1786000000,"94.6"]}]}}
         """;
 
-        var values = HistoryParsing.PrometheusInstant(json);
+        var values = PrometheusWire.Instant(json);
 
         Assert.Equal(2, values.Count);
         Assert.Equal(7080, values["grid"]);
@@ -38,15 +42,15 @@ public class FlowHistoryTests
         var json = """{"data":{"result":[{"metric":{"node":"grid"},"value":[1786000000,"SAMPLE"]}]}}"""
             .Replace("SAMPLE", sample);
 
-        Assert.Empty(HistoryParsing.PrometheusInstant(json));
+        Assert.Empty(PrometheusWire.Instant(json));
     }
 
     [Fact]
     public void PrometheusInstant_SurvivesAnEmptyOrBrokenAnswer()
     {
-        Assert.Empty(HistoryParsing.PrometheusInstant("""{"status":"success","data":{"result":[]}}"""));
-        Assert.Empty(HistoryParsing.PrometheusInstant("""{"status":"error","error":"bad query"}"""));
-        Assert.Empty(HistoryParsing.PrometheusInstant("not json"));
+        Assert.Empty(PrometheusWire.Instant("""{"status":"success","data":{"result":[]}}"""));
+        Assert.Empty(PrometheusWire.Instant("""{"status":"error","error":"bad query"}"""));
+        Assert.Empty(PrometheusWire.Instant("not json"));
     }
 
     [Fact]
@@ -54,7 +58,7 @@ public class FlowHistoryTests
     {
         // Another exporter's series can match a hand-edited metric name; without a node label there is
         // nothing to attribute it to.
-        Assert.Empty(HistoryParsing.PrometheusInstant("""{"data":{"result":[{"metric":{"job":"x"},"value":[1,"5"]}]}}"""));
+        Assert.Empty(PrometheusWire.Instant("""{"data":{"result":[{"metric":{"job":"x"},"value":[1,"5"]}]}}"""));
     }
 
     [Fact]
@@ -64,7 +68,7 @@ public class FlowHistoryTests
         // starts a fresh series for the same node. A bare selector returns all of them and the reader took
         // whichever the answer happened to list last — on the cluster this was found on, eighteen
         // instances in a day.
-        var query = HistoryParsing.NodeQuery("rpdu2mqtt_flow_energytoday", ["solar", "grid"]);
+        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energytoday", ["solar", "grid"]);
 
         Assert.StartsWith("max by (node) (", query);
         Assert.Contains("rpdu2mqtt_flow_energytoday{node=~", query);
@@ -79,7 +83,7 @@ public class FlowHistoryTests
                  + "{\"metric\":{\"node\":\"solar\"},\"value\":[1786000000,\"62\"]},"
                  + "{\"metric\":{\"node\":\"solar\"},\"value\":[1786000000,\"33\"]}]}}";
 
-        var values = HistoryParsing.PrometheusInstant(json);
+        var values = PrometheusWire.Instant(json);
 
         Assert.Single(values);
     }
@@ -89,7 +93,7 @@ public class FlowHistoryTests
     {
         // A '.' or '|' left unescaped widens the match to other nodes. The backslash is DOUBLED because
         // PromQL reads this as a string first and hands what survives to the pattern.
-        var matcher = HistoryParsing.NodeMatcher(["outlet:pdu_1:4", "a.b", "c|d"]);
+        var matcher = PrometheusWire.NodeMatcher(["outlet:pdu_1:4", "a.b", "c|d"]);
 
         Assert.Contains(@"a\\.b", matcher);
         Assert.DoesNotContain("a.b|", matcher);
@@ -102,7 +106,7 @@ public class FlowHistoryTests
         // The bug this exists for: '#' is ordinary text to RE2, and PromQL rejects "\#" as an unknown
         // escape — so a single return-lane id in the list failed the whole query with an HTTP 400, and
         // every node's history came back empty. ':' is the same kind of character, in every outlet id.
-        var matcher = HistoryParsing.NodeMatcher(["grid#in", "outlet:pdu_1:4", "eg4-flexboss21-battery#in"]);
+        var matcher = PrometheusWire.NodeMatcher(["grid#in", "outlet:pdu_1:4", "eg4-flexboss21-battery#in"]);
 
         Assert.Equal("grid#in|outlet:pdu_1:4|eg4-flexboss21-battery#in", matcher);
     }
@@ -112,7 +116,7 @@ public class FlowHistoryTests
     {
         // PromQL's string escapes are Go's: a lone backslash before anything but " \ n r t etc. is a parse
         // error. Every backslash we emit must therefore be part of a pair.
-        var query = HistoryParsing.NodeQuery("rpdu2mqtt_flow_energytoday",
+        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energytoday",
             ["grid#in", "outlet:pdu_1:4", "a.b", "solar"]);
 
         for (var i = 0; i < query.Length; i++)
@@ -133,7 +137,7 @@ public class FlowHistoryTests
     {
         const string json = """[{"id":"12","name":"fridge_realpower"},{"id":13,"name":"grid"}]""";
 
-        var feeds = HistoryParsing.EmonCmsFeeds(json);
+        var feeds = EmonCmsWire.Feeds(json);
 
         Assert.Equal("12", feeds["fridge_realpower"]);
         Assert.Equal("13", feeds["grid"]);
@@ -144,9 +148,9 @@ public class FlowHistoryTests
     {
         const string json = "[[1000,5.0],[2000,6.0],[3000,7.0]]";
 
-        Assert.Equal(6.0, HistoryParsing.EmonCmsPointAt(json, 2500));
-        Assert.Equal(7.0, HistoryParsing.EmonCmsPointAt(json, 9999));
-        Assert.Null(HistoryParsing.EmonCmsPointAt(json, 500));   // nothing that early
+        Assert.Equal(6.0, EmonCmsWire.PointAt(json, 2500));
+        Assert.Equal(7.0, EmonCmsWire.PointAt(json, 9999));
+        Assert.Null(EmonCmsWire.PointAt(json, 500));   // nothing that early
     }
 
     [Fact]
@@ -154,10 +158,10 @@ public class FlowHistoryTests
     {
         // EmonCMS records a gap as a null in the same array as real points. Taking the last element
         // regardless would report the gap as a reading.
-        Assert.Equal(6.0, HistoryParsing.EmonCmsPointAt("[[1000,5.0],[2000,6.0],[3000,null]]", 9999));
-        Assert.Null(HistoryParsing.EmonCmsPointAt("[[1000,null]]", 9999));
-        Assert.Null(HistoryParsing.EmonCmsPointAt("[]", 9999));
-        Assert.Null(HistoryParsing.EmonCmsPointAt("not json", 9999));
+        Assert.Equal(6.0, EmonCmsWire.PointAt("[[1000,5.0],[2000,6.0],[3000,null]]", 9999));
+        Assert.Null(EmonCmsWire.PointAt("[[1000,null]]", 9999));
+        Assert.Null(EmonCmsWire.PointAt("[]", 9999));
+        Assert.Null(EmonCmsWire.PointAt("not json", 9999));
     }
 
     // --- The seam --------------------------------------------------------------------------------------

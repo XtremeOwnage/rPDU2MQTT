@@ -2,6 +2,8 @@ using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
 using Xunit;
 
+using rPDU2MQTT.Integrations.Prometheus;
+
 namespace rPDU2MQTT.Tests;
 
 /// <summary>PrometheusLabels: the configurable exporter label set (#188).</summary>
