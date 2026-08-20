@@ -50,6 +50,7 @@
 			<GuiSource Include="web\trends.check.mjs" />
 			<GuiSource Include="web\mobile.check.mjs" />
 			<GuiSource Include="web\sparkline.check.mjs" />
+			<GuiSource Include="web\drilldown.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -93,6 +94,9 @@
 		<!-- The tiles' trends: drawn from readings the backend has, absent when it has none, and a gap left
 		     as a gap rather than joined through. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sparkline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- Clicking a tile has to chart the nodes that tile's figure came from, not whatever Trends was
+		     showing — an answer about different nodes is worse than no link. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/drilldown.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

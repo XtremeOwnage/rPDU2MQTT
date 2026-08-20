@@ -709,3 +709,22 @@ Notes
     Incident: I reverted the uncommitted board work with a careless `git checkout --` while restoring a
     sabotage, and had to reapply it. Restore from a copy, not from the index, when the file also holds work
     that was never committed.
+
+30. Click a tile, get that node's day
+    Asked for from the running instance: "be cool if i could click on the solar icon and it would show me
+    the solar usage for the day." It was three deliberate steps — open Trends, change the range, untick
+    everything that is not solar.
+    [x] Every Energy tile and every node in the flow diagram now opens Trends on that node's own day.
+    [x] The click carries the node set the tile's FIGURE was summed from, not a tag or a guess. Solar on the
+        board is three MPPTs summed; clicking it charts those three. An answer about different nodes than
+        the number that was clicked would be worse than no link.
+    [x] The request is one-shot and lives in memory, not in the URL: the hash is the tab, and a node set
+        encoded into it would be a second router to keep honest. Landing on Trends again does not re-apply
+        a selection the reader has since changed.
+    [x] Asked for something history has nothing about, Trends says so and falls back to its normal
+        selection rather than charting an empty page.
+    [x] `drilldown.check.mjs` runs in the build; sabotage-verified by ignoring the requested node set.
+    Also seen for the first time, from a screenshot of the real instance: the Home tile has no sparkline.
+    That is correct — Home is the BALANCE of measured sources, not a set of nodes, so there is nothing to
+    sum a trend from. Deriving it per step (solar + grid + battery, each known at that step) would give it
+    one honestly; worth doing, and it is the only tile without a shape.
