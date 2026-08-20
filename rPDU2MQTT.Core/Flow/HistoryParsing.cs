@@ -75,6 +75,63 @@ public static class HistoryParsing
     /// A non-finite sample is dropped. Prometheus renders staleness and division results as "NaN" and
     /// "+Inf" in the same field a number appears in, and either would enter the roll-up as a figure.
     /// </remarks>
+    /// <summary>
+    /// What Prometheus said about a query: its own <c>status</c> and, when it refused, the reason it gave.
+    ///
+    /// <para>
+    /// A rejected query answers 400 with <c>{"status":"error","error":"…"}</c>, and reading only the HTTP
+    /// code loses the half that says what to fix. This is what lets a probe report "unknown escape
+    /// sequence" instead of a green tick over a backend that has refused every read for weeks.
+    /// </para>
+    /// </summary>
+    public static (bool Ok, string? Error, int Series) PrometheusStatus(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var status = root.TryGetProperty("status", out var st) ? st.GetString() : null;
+            if (!string.Equals(status, "success", StringComparison.Ordinal))
+            {
+                var error = root.TryGetProperty("error", out var e) ? e.GetString() : null;
+                return (false, error ?? status ?? "no status in the answer", 0);
+            }
+
+            var series = root.TryGetProperty("data", out var data)
+                      && data.TryGetProperty("result", out var result)
+                      && result.ValueKind == JsonValueKind.Array
+                ? result.GetArrayLength() : 0;
+            return (true, null, series);
+        }
+        catch (JsonException ex) { return (false, $"unreadable answer ({ex.Message})", 0); }
+    }
+
+    /// <summary>
+    /// The single number an aggregate query answers with (<c>count(...)</c> has no <c>node</c> label, so
+    /// <see cref="PrometheusInstant"/> — which keys by node — finds nothing in it). 0 when there is none.
+    /// </summary>
+    public static double PrometheusInstantScalar(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return 0;
+            if (!data.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array) return 0;
+
+            foreach (var series in result.EnumerateArray())
+            {
+                if (!series.TryGetProperty("value", out var pair) || pair.ValueKind != JsonValueKind.Array) continue;
+                var parts = pair.EnumerateArray().ToList();
+                if (parts.Count < 2) continue;
+                var raw = parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() : parts[1].ToString();
+                if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && double.IsFinite(v))
+                    return v;
+            }
+            return 0;
+        }
+        catch (JsonException) { return 0; }
+    }
+
     public static IReadOnlyDictionary<string, double> PrometheusInstant(string json)
     {
         var found = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);

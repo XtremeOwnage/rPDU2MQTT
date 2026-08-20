@@ -13,6 +13,22 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
 {
     public string Id => "prometheus";
 
+    /// <summary>
+    /// Reachable, and does a read actually work?
+    ///
+    /// <para>
+    /// Readiness alone is not the question anyone is asking when they press "Test history backend". A server
+    /// can be perfectly up and refuse every query this bridge sends — which is exactly what happened: the
+    /// label matcher carried an escape PromQL rejects, every read came back empty for weeks, and the test
+    /// button stayed green the whole time because <c>/-/ready</c> knew nothing about it.
+    /// </para>
+    /// <para>
+    /// So the probe now sends the same query shape the reader sends, for a node id carrying the characters
+    /// that make matchers fail (':' and '#'). It matches nothing on purpose: an empty result proves the
+    /// grammar, and a refusal reports what the server said. Then it counts what is actually stored, because
+    /// "reachable, holding nothing" and "reachable, holding a fortnight" are different answers.
+    /// </para>
+    /// </summary>
     public async Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
     {
         var baseUrl = (cfg.History.PrometheusUrl ?? "").TrimEnd('/');
@@ -21,9 +37,18 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
         {
             // Its own readiness endpoint: it answers whether the server is up.
             var response = await http.GetAsync($"{baseUrl}/-/ready", ct);
-            return response.IsSuccessStatusCode
-                ? (true, baseUrl)
-                : (false, $"{baseUrl} answered {(int)response.StatusCode}");
+            if (!response.IsSuccessStatusCode) return (false, $"{baseUrl} answered {(int)response.StatusCode}");
+
+            var name = MetricsHelper.PrometheusFlowMetricName(Core.Flow.FlowGraphBuilder.DefaultMetric, cfg);
+
+            // The reader's own query shape, against an id that exercises the punctuation real node ids carry.
+            var matcher = await QueryAsync(baseUrl, HistoryParsing.NodeQuery(name, [ProbeNodeId]), ct);
+            if (!matcher.Ok) return (false, $"{baseUrl} rejected the query this reads with: {matcher.Error}");
+
+            // …and what it is holding, so "nothing stored yet" is not mistaken for "broken".
+            var stored = await QueryAsync(baseUrl, $"count({name})", ct);
+            var held = stored.Ok && stored.Series > 0 ? $"{stored.Count:0} flow series" : "no flow series stored yet";
+            return (true, $"{baseUrl} · {held}");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -34,6 +59,22 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
         {
             return (false, $"{baseUrl}: {ex.Message}");
         }
+    }
+
+    /// <summary>A node id nothing will match, carrying the punctuation that makes a label matcher fail.</summary>
+    private const string ProbeNodeId = "rpdu2mqtt:probe#in";
+
+    /// <summary>Run one instant query and report whether Prometheus accepted it, and what came back.</summary>
+    private async Task<(bool Ok, string? Error, int Series, double Count)> QueryAsync(string baseUrl, string query, CancellationToken ct)
+    {
+        var response = await http.GetAsync($"{baseUrl}/api/v1/query?query={Uri.EscapeDataString(query)}", ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var (ok, error, series) = HistoryParsing.PrometheusStatus(body);
+        if (!ok) return (false, error, 0, 0);
+
+        // count() answers as a single scalar-ish series; its value is the number we want to report.
+        var value = HistoryParsing.PrometheusInstantScalar(body);
+        return (true, null, series, value);
     }
 
     /// <summary>
@@ -135,7 +176,19 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
         }
         catch (Exception ex) { return (false, $"{baseUrl}: {ex.Message}"); }
         // Reachable but with no feeds is still a working backend with nothing to show.
-        return list.Count > 0 ? (true, $"{baseUrl} · {list.Count} feed(s)") : (false, $"{baseUrl}: no feeds readable");
+        if (list.Count == 0) return (false, $"{baseUrl}: no feeds readable");
+
+        // A shelf full of feeds proves nothing if none of them is named the way the READER looks them up:
+        // the lookup key comes from FlowInputNameTemplate, so changing that template leaves every feed in
+        // place and every read empty. Name a node that would be asked for and say whether it is there.
+        var wanted = cfg.EnergyFlow.Nodes.Select(n => n.Id).FirstOrDefault(id => !string.IsNullOrWhiteSpace(id));
+        if (wanted is null) return (true, $"{baseUrl} · {list.Count} feed(s)");
+
+        var key = MetricsHelper.EmonCmsFlowInputName(wanted, wanted, "", Core.Flow.FlowGraphBuilder.DefaultMetric, cfg);
+        var matched = list.ContainsKey(key) || list.ContainsKey($"{wanted}_{Core.Flow.FlowGraphBuilder.DefaultMetric}") || list.ContainsKey(wanted);
+        return (true, matched
+            ? $"{baseUrl} · {list.Count} feed(s), '{key}' among them"
+            : $"{baseUrl} · {list.Count} feed(s), but none named '{key}' — a read for '{wanted}' finds nothing");
     }
 
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
