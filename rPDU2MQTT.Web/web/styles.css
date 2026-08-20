@@ -777,3 +777,12 @@
     .toasts { left:var(--sp-3); right:var(--sp-3); max-width:none; }
     .appbar-user, .brand-tag { display:none; }
   }
+
+  /* A tile's trend. Sized by the tile, not by the viewport: the plot is context for the number above it,
+     so it never grows into a chart of its own. */
+  .energy-tile .spark { display:block; width:100%; height:40px; margin:8px 0 0; overflow:visible; }
+  .energy-tile .spark-hit { cursor:crosshair; }
+  .energy-tile .spark-empty {
+    height:40px; margin:8px 0 0; display:flex; align-items:center; justify-content:center;
+    color:var(--faint); font-size:11px; letter-spacing:.04em;
+  }

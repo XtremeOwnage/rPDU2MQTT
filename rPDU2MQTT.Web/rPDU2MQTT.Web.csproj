@@ -49,6 +49,7 @@
 			<GuiSource Include="web\history.check.mjs" />
 			<GuiSource Include="web\trends.check.mjs" />
 			<GuiSource Include="web\mobile.check.mjs" />
+			<GuiSource Include="web\sparkline.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -89,6 +90,9 @@
 		<!-- The chart on a phone: opened at its natural width inside a ~390px screen, with the only zoom
 		     gesture being Ctrl/⌘ + wheel — neither half of which a touch device has. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/mobile.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- The tiles' trends: drawn from readings the backend has, absent when it has none, and a gap left
+		     as a gap rather than joined through. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sparkline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

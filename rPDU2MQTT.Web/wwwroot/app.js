@@ -1406,6 +1406,98 @@ function barChart(opts
   return { svg, gaps };
 }
 
+/// A tile's trend: one series, no axes, no legend — the tile's own label names it.
+///
+/// It answers "and what has it been doing?", which a single instantaneous figure cannot. Deliberately not a
+/// chart in the full sense: axes and a legend on a 44px-tall plot cost more room than the shape is worth,
+/// and the number it sits under is the headline.
+///
+/// Gaps stay gaps. A reading the backend does not have is a break in the line, never a drop to zero joined
+/// up to its neighbours — the same rule the rest of the flow follows, and the reason the line is drawn as
+/// runs of consecutive points rather than one path.
+function sparkline(opts
+
+ )      {
+  const { values, color, units } = opts;
+  const w = opts.width ?? 132, h = opts.height ?? 40;
+  const pad = 3;                                   // room for the 2px stroke and the hover dot's ring
+
+  const known = values.filter((v)              => v != null && Number.isFinite(v));
+  if (known.length < 2) {
+    // One point is not a trend, and none is not a zero. Say so rather than draw a flat line through nothing.
+    const empty = el('div', { class: 'spark spark-empty', text: known.length ? '—' : '' });
+    empty.title = known.length ? 'Only one reading in this window' : 'No readings stored for this window';
+    return empty;
+  }
+
+  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const span = hi - lo || 1;
+  const x = (i        ) => pad + (values.length === 1 ? 0 : (i * (w - pad * 2)) / (values.length - 1));
+  const y = (v        ) => h - pad - ((v - lo) / span) * (h - pad * 2);
+
+  const svg = svgTag('svg', {
+    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark',
+    preserveAspectRatio: 'none', role: 'img',
+    'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
+  });
+
+  // Consecutive runs, so a gap in the data is a gap in the line.
+  const runs                               = [];
+  let run                             = [];
+  values.forEach((v, i) => {
+    if (v == null || !Number.isFinite(v)) { if (run.length) runs.push(run); run = []; return; }
+    run.push({ i, v: v           });
+  });
+  if (run.length) runs.push(run);
+
+  for (const r of runs) {
+    if (r.length === 1) {
+      // A lone reading between gaps is a dot: a segment needs two points, and inventing the second one
+      // would be drawing a trend nobody measured.
+      svg.appendChild(svgTag('circle', { cx: x(r[0].i), cy: y(r[0].v), r: 1.6, fill: color, class: 'spark-dot' }));
+      continue;
+    }
+    const line = r.map(p => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' L');
+    // The area first, so the line sits on top of it.
+    svg.appendChild(svgTag('path', {
+      d: `M${line} L${x(r[r.length - 1].i).toFixed(1)},${h - pad} L${x(r[0].i).toFixed(1)},${h - pad} Z`,
+      fill: color, 'fill-opacity': '0.14', stroke: 'none',
+    }));
+    svg.appendChild(svgTag('path', {
+      d: `M${line}`, fill: 'none', stroke: color, 'stroke-width': '2',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    }));
+  }
+
+  // The latest reading, marked: it is the one the tile's big number is showing.
+  const last = known[known.length - 1];
+  const lastAt = values.length - 1 - [...values].reverse().findIndex(v => v != null && Number.isFinite(v          ));
+  svg.appendChild(svgTag('circle', {
+    cx: x(lastAt), cy: y(last), r: 2.4, fill: color, stroke: 'var(--panel2)', 'stroke-width': '1.5',
+  }));
+
+  // The hover layer. The plot is 40px tall, so the target is the whole strip and the nearest point wins —
+  // asking someone to hit a 2px line with a mouse is asking them not to bother.
+  const hit = svgTag('rect', { x: 0, y: 0, width: w, height: h, fill: 'transparent', class: 'spark-hit' });
+  svg.appendChild(hit);
+  hit.addEventListener('mousemove', (ev     ) => {
+    const box = svg.getBoundingClientRect?.() ?? { left: 0, width: w };
+    const frac = box.width ? (ev.clientX - box.left) / box.width : 0;
+    const i = Math.max(0, Math.min(values.length - 1, Math.round(frac * (values.length - 1))));
+    const v = values[i];
+    const c = hoverCard();
+    c.innerHTML = '';
+    c.appendChild(el('div', { class: 'nc-title', text: opts.at ? opts.at(i) : `Point ${i + 1}` }));
+    c.appendChild(el('div', { text: v == null ? 'no reading' : `${formatNum(v)} ${units}` }));
+    c.classList.add('show');
+    c.style.left = `${ev.clientX + 12}px`;
+    c.style.top = `${ev.clientY + 12}px`;
+  });
+  hit.addEventListener('mouseleave', () => hideCard());
+
+  return svg;
+}
+
 // ── flow-banners.ts ─────────────────────────────────────────────
 // The banners above the flow chart: sources the bridge is withholding.
 
@@ -4692,7 +4784,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
   };
 
   const tile = (cls        , icon        , label        , value        , sub        , subCls = '',
-                gauge                                                                  ) => {
+                gauge                                                                  ,
+                trend                                                                                          ) => {
     const t = el('div', { class: 'energy-tile' + (cls ? ' ' + cls : '') });
     const head = el('div', { class: 'energy-head' });
     head.append(el('span', { class: 'energy-icon', text: icon }), el('span', { class: 'energy-label', text: label }));
@@ -4710,7 +4803,27 @@ function addEnergyOverviewSection(nav     , sections     ) {
         : `${Math.round(gauge.fraction * 100)}% of the ${formatNum(gauge.max)} ${gauge.units} maximum set for this node.`;
       t.appendChild(wrap);
     }
+    // The shape behind the number. A tile without one looks exactly as it did before — no placeholder, and
+    // no flat line standing in for readings nobody has.
+    if (trend) t.appendChild(sparkline({ values: trend.values, color: trend.color, units: trend.units, at: trend.at }));
     return t;
+  };
+
+  /// One trend per tile, summed across the nodes that tile is made of.
+  ///
+  /// Strict on gaps: a step counts only when EVERY node behind the tile reported at it. A partial sum drawn
+  /// as a total is the same lie as a fabricated reading — three MPPTs where one dropped out would show the
+  /// array's output falling, when what fell was the coverage.
+  const trendFor = (ids          , color        , units        ) => {
+    if (!ids.length || !trendSeries) return undefined;
+    const rows = ids.map(id => trendSeries .byNode.get(id)).filter(Boolean)                       ;
+    if (rows.length !== ids.length || !rows.length) return undefined;
+
+    const values = rows[0].map((_, i) =>
+      rows.every(r => r[i] != null && Number.isFinite(r[i]          ))
+        ? rows.reduce((sum, r) => sum + (r[i]          ), 0)
+        : null);
+    return values.some(v => v != null) ? { values, color, units, at: trendSeries .at } : undefined;
   };
 
   /// The gauge for a node, or undefined when one would be a guess.
@@ -4827,6 +4940,35 @@ function addEnergyOverviewSection(nav     , sections     ) {
     try { await loadBoard(); } finally { loading = false; }
   };
 
+  // The last few hours behind the tiles, keyed by node. Null until a load fills it, and left null when
+  // history is off or the backend has nothing — which is why a tile can simply have no trend.
+  let trendSeries                                                                               = null;
+
+  /// Read the window every tile's trend is drawn from. One request for the whole board.
+  const loadTrend = async (metric        ) => {
+    trendSeries = null;
+    // A past instant is a moment, not a window: the trend would be the same line on every tile.
+    if (hist.at() || hist.span() > 1) return;
+    try {
+      const minutes = 180, step = 300;
+      const r = await api(withInstance(
+        `/api/flow/series?minutes=${minutes}&step=${step}&metric=${encodeURIComponent(metric)}`, instSel));
+      const body = r?.body;
+      if (!body || !body.ok || !Array.isArray(body.series) || !body.series.length) return;
+
+      const byNode = new Map                           ();
+      for (const s of body.series) if (s && s.node) byNode.set(s.node, s.values || []);
+      const points = Math.max(...[...byNode.values()].map(v => v.length), 0);
+      if (points < 2) return;
+
+      // Each point's clock time in the viewer's own zone, for the hover.
+      const stepMs = step * 1000, endMs = Date.now();
+      const at = (i        ) => new Date(endMs - (points - 1 - i) * stepMs)
+        .toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      trendSeries = { byNode, at };
+    } catch { /* the board is the point; a missing trend just means no line */ }
+  };
+
   const loadBoard = async () => {
     // The whole board reads one metric (#371).
     const metric = showSel.value || 'realpower';
@@ -4838,6 +4980,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
+    await loadTrend(metric);
     grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
     if (!r.body || !r.body.ok) {
       // Say what actually went wrong.
@@ -4973,7 +5116,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
         subOrWhy(solar.value, 'solar', solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
-        dial(solarIds, solar.value)));
+        dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units)));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
@@ -4983,7 +5126,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
       // The dial is the battery's power against its rating; the slim bar below is state of charge.
       const t = tile('battery', '🔋', 'Battery', fmt(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls,
-        dial(battIds, battNet == null ? null : Math.abs(battNet)));
+        dial(battIds, battNet == null ? null : Math.abs(battNet)), trendFor(battIds, 'var(--good)', units));
       if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
       // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
@@ -5001,13 +5144,13 @@ function addEnergyOverviewSection(nav     , sections     ) {
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
       grid.appendChild(tile('grid', '⚡', 'Grid', fmt(gridShown),
         isEnergy ? `${sub} · net for the day` : sub, cls,
-        dial(gridIds, gridNet == null ? null : Math.abs(gridNet))));
+        dial(gridIds, gridNet == null ? null : Math.abs(gridNet)), trendFor(gridIds, 'var(--accent)', units)));
     }
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
-        dial(loadIds, home)));
+        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units)));
 
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);
