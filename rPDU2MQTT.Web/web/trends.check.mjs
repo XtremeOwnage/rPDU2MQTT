@@ -41,11 +41,24 @@ const power = {
   ],
 };
 
+// A whole day of five-minute samples — 288 of them, which is what "yesterday" actually returns.
+const dayStart = new Date(2026, 7, 19, 0, 0, 0);
+const wholeDay = {
+  ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
+  at: Array.from({ length: 288 }, (_, i) => new Date(dayStart.getTime() + i * 300_000).toISOString()),
+  series: [
+    { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: 288 },
+        (_, i) => Math.max(0, Math.round(5000 * Math.sin(Math.PI * (i - 84) / 120))) ) },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: Array.from({ length: 288 }, () => 400) },
+  ],
+};
+
 const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow/series')) {
       asked.push(url);
+      if (url.includes('back=1')) return wholeDay;
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
     return url.includes('/api/schema') ? schema
@@ -303,8 +316,37 @@ const askedYesterday = decodeURIComponent(asked.at(-1));
 if (!/today=1/.test(askedYesterday) || !/back=1/.test(askedYesterday))
   fail(`yesterday was not asked for as the previous period: ${askedYesterday}`);
 
+// …and a whole day fits on screen. 288 five-minute samples at the daily rule of 26px a bar is a 7,488px
+// chart in a ~1,600px pane, opened at its right-hand end: the reader gets the last five hours of yesterday
+// and two axis labels, with nothing saying the other nineteen hours exist (#393 follow-up).
+const dayChart = query(sec, 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
+if (!dayChart) fail('no chart drawn for yesterday');
+const chartW = Number(dayChart.attrs.width);
+if (!(chartW > 0 && chartW <= 1200)) fail(`a day of samples was drawn ${chartW}px wide — it does not fit a pane`);
+
+// Every other hour across the whole day, not two labels at one end of it.
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const axis = query(dayChart, 'text', true)
+  .filter(t => Number(t.attrs.y) === 216)   // the x-axis row; the value ticks down the left are not it
+  .map(t => t.textContent).filter(Boolean);
+if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s): ${axis.join(', ')}`);
+// The first is the moment the day rolled over, in the reader's clock — the axis begins where the day did.
+if (axis[0] !== clock(wholeDay.at[0])) fail(`the axis does not start at the window's start: ${axis[0]}`);
+
+// A finished day has no "newest", so it opens at its beginning. Jumping to the end is for a window that
+// is still filling.
+const scrolled = query(sec, 'div', true).filter(d => 'scrollLeft' in d);
+if (scrolled.length) fail('a finished day was opened scrolled to its right-hand end');
+
+// And the page says outright where the window fell in the reader's own clock — the day rolls over on the
+// server's configured zone, which is not necessarily theirs.
+const dayStatus = query(sec, 'span', true).map(x => x.textContent).join(' ');
+if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus))
+  fail(`the status line does not say what window is charted: ${dayStatus}`);
+
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
   + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
   + 'many days they cover; today counts, faded and marked as unfinished; within a day it charts power on a '
   + 'clock axis and integrates kWh; yesterday is '
-  + 'the period before this one; the table sorts');
+  + 'the period before this one, fits on screen whole, is labelled every other hour and says which window '
+  + 'it charted; the table sorts');

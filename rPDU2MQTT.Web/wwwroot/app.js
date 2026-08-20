@@ -1288,6 +1288,8 @@ function hideCard() { if (card) card.classList.remove('show'); }
 // day where every series is null is drawn as an empty slot and reported, never as a bar of zero.
 function barChart(opts
 
+                                
+
  )                             {
   const { days, lines, units, stacked } = opts;
   const has = (d        ) => lines.some(l => l.values[d] != null);
@@ -1306,7 +1308,9 @@ function barChart(opts
     0);
   const span = (peak - trough) || 1;
 
-  const W = Math.max(720, days.length * 26);
+  const W = opts.fitTo && opts.fitTo > 0
+    ? Math.max(360, Math.min(days.length * 26, opts.fitTo))
+    : Math.max(720, days.length * 26);
   const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const slot = plotW / days.length;
@@ -5741,6 +5745,21 @@ function addTrendsSection(nav     , sections     ) {
   rangeSel.value = 'days=30';
   rangeSel.onchange = () => load();
   const intraDay = () => (RANGES.find(r => r[0] === rangeSel.value) || [])[2] === 'power';
+  /// Where an intra-day window actually fell, in the reader's own clock. The day rolls over on the server's
+  /// configured period zone, which is not necessarily the reader's — so it is said outright rather than
+  /// inferred from the axis.
+  const windowNote = (at                      ) => {
+    if (!intraDay() || !at?.length) return '';
+    const from = new Date(at[0]), to = new Date(at[at.length - 1]);
+    const clock = (d      ) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return ` · ${from.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(from)} → ${clock(to)}`;
+  };
+  /// A window that is still filling. "Yesterday" is not one, and neither is any range that ended.
+  const running = () => !rangeSel.value.includes('back=');
+  /// How wide an intra-day chart may be. A day of five-minute samples is 288 bars: at the daily rule of
+  /// 26px each that is a 7,488px chart in a ~1,600px pane, so the reader sees a fifth of their day, opened
+  /// at the far end, with two axis labels on it. A day belongs on screen whole.
+  const fitTo = () => intraDay() ? (charts.clientWidth || 1200) : undefined;
 
   const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' })                     ;
   [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
@@ -5887,9 +5906,10 @@ function addTrendsSection(nav     , sections     ) {
       box.appendChild(row);
     }
     charts.appendChild(box);
-    // A chart wider than the page opens on its oldest bars, and the newest are what the page is about —
-    // so start at the right-hand end (#378). scrollWidth is only known once the SVG is in the document.
-    scroll.scrollLeft = scroll.scrollWidth;
+    // A chart wider than the page opens on its oldest bars, and for a window still filling the newest are
+    // what the page is about — so start at the right-hand end (#378). A window that has already ended has no
+    // "newest", and opening yesterday at 11pm hides the day. scrollWidth is only known once in the document.
+    if (running()) scroll.scrollLeft = scroll.scrollWidth;
     return made.gaps;
   };
 
@@ -5915,7 +5935,7 @@ function addTrendsSection(nav     , sections     ) {
       }));
       gaps = section(intraDay() ? 'Power by node' : 'Daily energy by node',
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial }), lines);
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo() }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
       box.appendChild(el('h3', { text: intraDay() ? 'Power by node' : 'Daily energy by node', style: { margin: '4px 0', fontSize: '15px' } }));
@@ -5935,7 +5955,7 @@ function addTrendsSection(nav     , sections     ) {
       section(intraDay() ? 'Grid' : 'Grid per day',
         'Every grid node, whatever is selected above. Import above the line, export below it'
         + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
-        barChart({ days, lines: gridLines, units, stacked: true, partial }), gridLines);
+        barChart({ days, lines: gridLines, units, stacked: true, partial, fitTo: fitTo() }), gridLines);
     }
 
     // --- Self-sufficiency ---------------------------------------------------------------------------
@@ -5980,7 +6000,7 @@ function addTrendsSection(nav     , sections     ) {
         'Each kind summed across its nodes, whatever is selected above. What went back — battery charge, '
         + 'grid export — is below the line, so the same energy is not counted as produced and then again '
         + 'as returned.',
-        barChart({ days, lines: supplyLines, units, stacked: true, partial }), supplyLines);
+        barChart({ days, lines: supplyLines, units, stacked: true, partial, fitTo: fitTo() }), supplyLines);
     }
 
     // --- Totals ----------------------------------------------------------------------------------
@@ -6066,6 +6086,7 @@ function addTrendsSection(nav     , sections     ) {
     table.appendChild(t);
 
     status.textContent = `${days.length} ${intraDay() ? 'sample(s)' : 'day(s)'} from ${body.source}`
+      + windowNote(body.at)
       + (gaps ? ` · ${gaps} with no reading` : '')
       + (partial ? ` · ${partial} still in progress` : '');
     status.title = gaps
