@@ -8,6 +8,7 @@ using rPDU2MQTT.Services;
 // The client library and Core.Flow both define a Gauge; in this file it is always the metric.
 using Gauge = global::Prometheus.Gauge;
 using Metrics = global::Prometheus.Metrics;
+using rPDU2MQTT.Integrations.Prometheus;
 
 namespace rPDU2MQTT.Integrations.Prometheus;
 

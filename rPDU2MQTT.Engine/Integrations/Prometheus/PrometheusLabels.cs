@@ -1,6 +1,8 @@
 using rPDU2MQTT.Classes;
 
-namespace rPDU2MQTT.Helpers;
+using rPDU2MQTT.Helpers;
+
+namespace rPDU2MQTT.Integrations.Prometheus;
 
 /// <summary>
 /// Resolves the configurable Prometheus label set (#188). Prometheus requires a consistent label set per

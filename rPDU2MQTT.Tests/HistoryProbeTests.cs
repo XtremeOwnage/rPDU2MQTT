@@ -4,6 +4,10 @@ using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Services;
 using Xunit;
 
+using rPDU2MQTT.Integrations.Prometheus;
+
+using rPDU2MQTT.Integrations.EmonCms;
+
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
@@ -122,7 +126,7 @@ public class HistoryProbeTests
     [Fact]
     public void TheStatusReaderKeepsPrometheusOwnReason()
     {
-        var (ok, error, series) = HistoryParsing.PrometheusStatus(
+        var (ok, error, series) = PrometheusWire.Status(
             """{"status":"error","errorType":"bad_data","error":"1:49: parse error: unknown escape sequence"}""");
 
         Assert.False(ok);

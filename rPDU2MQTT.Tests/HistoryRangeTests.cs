@@ -1,6 +1,8 @@
 using rPDU2MQTT.Core.Flow;
 using Xunit;
 
+using rPDU2MQTT.Integrations.Prometheus;
+
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
@@ -25,7 +27,7 @@ public class HistoryRangeTests
           {"metric":{"node":"grid"},"values":[[1786000000,"0"],[1786000600,"120"]]}]}}
         """;
 
-        var slots = HistoryParsing.PrometheusRange(json, Steps);
+        var slots = PrometheusWire.Range(json, Steps);
 
         Assert.Equal(3, slots.Count);
         Assert.Equal(4200, slots[0]["solar"]);
@@ -42,7 +44,7 @@ public class HistoryRangeTests
         {"data":{"result":[{"metric":{"node":"grid"},"values":[[1786000000,"5"],[1786000600,"7"]]}]}}
         """;
 
-        var slots = HistoryParsing.PrometheusRange(json, Steps);
+        var slots = PrometheusWire.Range(json, Steps);
 
         Assert.False(slots[1].ContainsKey("grid"));
         Assert.Equal(5, slots[0]["grid"]);
@@ -57,7 +59,7 @@ public class HistoryRangeTests
         {"data":{"result":[{"metric":{"node":"solar"},"values":[[1786000301,"4400"]]}]}}
         """;
 
-        Assert.Equal(4400, HistoryParsing.PrometheusRange(json, Steps)[1]["solar"]);
+        Assert.Equal(4400, PrometheusWire.Range(json, Steps)[1]["solar"]);
     }
 
     [Fact]
@@ -67,7 +69,7 @@ public class HistoryRangeTests
         {"data":{"result":[{"metric":{"node":"solar"},"values":[[1700000000,"1"],[1900000000,"2"]]}]}}
         """;
 
-        Assert.All(HistoryParsing.PrometheusRange(json, Steps), slot => Assert.Empty(slot));
+        Assert.All(PrometheusWire.Range(json, Steps), slot => Assert.Empty(slot));
     }
 
     [Theory]
@@ -78,22 +80,22 @@ public class HistoryRangeTests
         var json = """{"data":{"result":[{"metric":{"node":"solar"},"values":[[1786000000,"S"]]}]}}"""
             .Replace("S", sample);
 
-        Assert.Empty(HistoryParsing.PrometheusRange(json, Steps)[0]);
+        Assert.Empty(PrometheusWire.Range(json, Steps)[0]);
     }
 
     [Fact]
     public void ABrokenOrEmptyAnswerIsNoHistory_NotACrash()
     {
-        Assert.All(HistoryParsing.PrometheusRange("not json", Steps), slot => Assert.Empty(slot));
-        Assert.All(HistoryParsing.PrometheusRange("""{"status":"error"}""", Steps), slot => Assert.Empty(slot));
-        Assert.Empty(HistoryParsing.PrometheusRange("""{"data":{"result":[]}}""", []));
+        Assert.All(PrometheusWire.Range("not json", Steps), slot => Assert.Empty(slot));
+        Assert.All(PrometheusWire.Range("""{"status":"error"}""", Steps), slot => Assert.Empty(slot));
+        Assert.Empty(PrometheusWire.Range("""{"data":{"result":[]}}""", []));
     }
 
     [Fact]
     public void ASeriesWithNoNodeLabelIsIgnored()
     {
         const string json = """{"data":{"result":[{"metric":{"job":"x"},"values":[[1786000000,"5"]]}]}}""";
-        Assert.All(HistoryParsing.PrometheusRange(json, Steps), slot => Assert.Empty(slot));
+        Assert.All(PrometheusWire.Range(json, Steps), slot => Assert.Empty(slot));
     }
 
     private sealed class OneAtATime : IMeasurementHistory

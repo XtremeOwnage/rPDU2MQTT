@@ -2,7 +2,7 @@ using rPDU2MQTT.Classes;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.PDU;
 
-namespace rPDU2MQTT.Core.EmonCms;
+namespace rPDU2MQTT.Integrations.EmonCms;
 
 /// <summary>An EmonCMS input as returned by <c>input/get_inputs</c>: its id, key and processlist.</summary>
 public sealed record EmonInput(int Id, string Name, string ProcessList);

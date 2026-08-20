@@ -4,7 +4,7 @@ using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Core.EmonCms;
+namespace rPDU2MQTT.Integrations.EmonCms;
 
 /// <summary>
 /// What an EmonCMS export pass sends: input key -> value, keyed by the payload it belongs to

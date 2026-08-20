@@ -1,5 +1,5 @@
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Core.EmonCms;
+using rPDU2MQTT.Integrations.EmonCms;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Core.Integrations;

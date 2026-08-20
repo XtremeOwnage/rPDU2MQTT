@@ -650,3 +650,27 @@ Notes
         and against a healthy one `ok=true … · 40 flow series`. The same two queries were run against a
         production Prometheus: the matcher parses, the count returns 40, and the old broken escaping still
         produces exactly the 400 the probe now surfaces.
+
+27. Review on #390: the vendor's knowledge belongs to the vendor
+    Asked of the probe diff — "shouldn't that logic be closer to the Prometheus plugin, and use interfaces?"
+    Correct, and it was not one file. `Core/Flow/HistoryParsing.cs` held PromQL syntax AND two vendors' JSON
+    parsers; `Core/EmonCms/` held EmonCMS payload composition and feed planning; `Core/Helpers/` held
+    Prometheus's label rules. Every production consumer was an Engine integration. Core was carrying four
+    vendors' worth of protocol for nobody.
+    [x] Split by vendor, next to the integration that speaks it: `Integrations/Prometheus/PrometheusWire.cs`
+        + `PrometheusFlowHistory` + `PrometheusLabels`, `Integrations/EmonCms/EmonCmsWire.cs` +
+        `EmonCmsFlowHistory` + `EmonCmsPayload` + `EmonCmsFeedPlanner`. The parsers are `internal` now: what
+        anything outside the folder sees is `IMeasurementHistory`, which was always the seam.
+    [x] `FlowHistoryProviders.cs` held all three history classes in one file. The two vendor providers moved
+        into their integrations; `FlowHistoryRouter` stays in Services because choosing a backend from
+        config is the one part that is nobody's vendor.
+    [x] The names lost their stutter on the way: `HistoryParsing.PrometheusInstant` is `PrometheusWire.Instant`.
+    [x] `CoreKnowsNoVendorTests` guards it, sabotage-verified: a vendor-named type reappearing in Core fails
+        with a message saying where it belongs. The config model is exempt by design — the schema, the GUI
+        form and the CRD are all generated from Core's types, and naming a vendor's SETTINGS is not knowing
+        its protocol.
+    [ ] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
+        outcome a process carries on its heartbeat and in the process registry. They know nothing about the
+        protocol, but a generic process registry should not name one integration either — that is the
+        pre-plugin world showing through, from before `IntegrationStatus` existed. Generalising them changes
+        the diagnostics payload the GUI reads, so it is its own change rather than a rider on this one.
