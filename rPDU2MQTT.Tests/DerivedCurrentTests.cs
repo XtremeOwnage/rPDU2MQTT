@@ -110,6 +110,45 @@ public class DerivedCurrentTests
         Assert.Empty(src.Withheld);
     }
 
+    /// <summary>
+    /// A binding added through the GUI works when it is saved. EnergyFlow is applied live and the panel
+    /// says so outright — "takes effect without a restart once saved" — so a set built once at startup
+    /// makes the editor tell an operator something that is not true.
+    /// </summary>
+    [Fact]
+    public void ABindingAddedAfterStartupTakesEffect()
+    {
+        var inner = new Fake();
+        inner.Values["grid|realpower"] = 2745;
+        inner.Values["grid|voltage"] = 249.1;
+        var flow = Flow(Src("realpower"), Src("voltage"));
+        var src = new DerivedFlowValueSource(inner, flow);
+
+        Assert.False(src.TryGetValue("grid", "current", out _));
+
+        // …the operator adds the calculated binding and saves.
+        flow.Nodes[0].Sources.Add(Derived());
+
+        Assert.True(src.TryGetValue("grid", "current", out var amps));
+        Assert.Equal(2745 / 249.1, amps, 6);
+    }
+
+    /// <summary>The same for a binding removed: it stops answering, without a restart.</summary>
+    [Fact]
+    public void ABindingRemovedStopsAnswering()
+    {
+        var inner = new Fake();
+        inner.Values["grid|realpower"] = 2745;
+        inner.Values["grid|voltage"] = 249.1;
+        var flow = Flow(Src("realpower"), Src("voltage"), Derived());
+        var src = new DerivedFlowValueSource(inner, flow);
+        Assert.True(src.TryGetValue("grid", "current", out _));
+
+        flow.Nodes[0].Sources.RemoveAll(DerivedCurrent.IsDerived);
+
+        Assert.False(src.TryGetValue("grid", "current", out _));
+    }
+
     // --- Saying so before it runs --------------------------------------------------------------------
 
     [Fact]

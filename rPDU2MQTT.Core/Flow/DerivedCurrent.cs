@@ -26,7 +26,7 @@ public static class DerivedCurrent
     public static IReadOnlyList<string> Keys(EnergyFlowConfig? flow)
         => (flow?.Nodes ?? new List<EnergyFlowNode>())
             .Where(n => !string.IsNullOrEmpty(n.Id))
-            .SelectMany(n => (n.Sources ?? new List<EnergyFlowSource>())
+            .SelectMany(n => n.AllSources()
                 .Where(s => IsDerived(s) && string.Equals(s.Metric, Metric, StringComparison.OrdinalIgnoreCase))
                 .Select(s => n.Id + '|' + FlowMetricKey.For(Metric, s.Direction)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -46,7 +46,7 @@ public static class DerivedCurrent
         var problems = new List<(string, string)>();
         foreach (var node in flow?.Nodes ?? new List<EnergyFlowNode>())
         {
-            var sources = node.Sources ?? new List<EnergyFlowSource>();
+            var sources = node.AllSources().ToList();
             foreach (var derived in sources.Where(IsDerived))
             {
                 if (!string.Equals(derived.Metric, Metric, StringComparison.OrdinalIgnoreCase))
@@ -65,6 +65,26 @@ public static class DerivedCurrent
             }
         }
         return problems;
+    }
+
+    /// <summary>
+    /// Does this node ask for this exact metric key to be worked out? Read from the config every time
+    /// rather than snapshotted: EnergyFlow is applied live, so a binding added in the GUI has to work when
+    /// it is saved — not after a restart, which is the one thing the panel promises it will not need.
+    /// </summary>
+    public static bool AsksFor(EnergyFlowConfig? flow, string nodeId, string metricKey)
+    {
+        foreach (var node in flow?.Nodes ?? new List<EnergyFlowNode>())
+        {
+            if (!string.Equals(node.Id, nodeId, StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (var s in node.AllSources())
+                if (IsDerived(s)
+                    && string.Equals(s.Metric, Metric, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(FlowMetricKey.For(Metric, s.Direction), metricKey, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;   // node ids are unique; no other entry can answer for it
+        }
+        return false;
     }
 
     private static bool Binds(IEnumerable<EnergyFlowSource> sources, string metric)

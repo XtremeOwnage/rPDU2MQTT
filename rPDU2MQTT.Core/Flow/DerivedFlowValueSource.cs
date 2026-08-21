@@ -16,17 +16,12 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
 {
     private readonly IFlowValueSource inner;
     private readonly EnergyFlowConfig? flow;
-    private readonly HashSet<string> derived;
 
     public DerivedFlowValueSource(IFlowValueSource inner, EnergyFlowConfig? flow)
     {
         this.inner = inner;
         this.flow = flow;
-        derived = new HashSet<string>(DerivedCurrent.Keys(flow), StringComparer.OrdinalIgnoreCase);
     }
-
-    /// <summary>Whether anything at all is configured to be worked out; false means this is pass-through.</summary>
-    public bool Any => derived.Count > 0;
 
     public bool TryGetValue(string nodeId, string metric, out double value)
     {
@@ -34,7 +29,8 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
         if (inner.TryGetValue(nodeId, metric, out value)) return true;
 
         value = 0;
-        if (derived.Count == 0 || !derived.Contains(nodeId + '|' + metric)) return false;
+        // Asked of the config each time, not of a set built at startup: EnergyFlow applies live.
+        if (!DerivedCurrent.AsksFor(flow, nodeId, metric)) return false;
         return Compute(nodeId, metric, out value) is null;
     }
 
@@ -66,7 +62,7 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
         get
         {
             var list = new List<WithheldSource>((inner as IWithheldSources)?.Withheld ?? Array.Empty<WithheldSource>());
-            foreach (var key in derived)
+            foreach (var key in DerivedCurrent.Keys(flow))
             {
                 var split = key.Split('|');
                 if (split.Length != 2) continue;
