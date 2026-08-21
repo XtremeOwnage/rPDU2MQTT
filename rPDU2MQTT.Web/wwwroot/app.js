@@ -1961,6 +1961,61 @@ function applyUnmeasuredPref(nodes       , links       )                        
   };
 }
 
+/// Hide the branches that are carrying nothing. On by default: a rack of switched-off outlets is most of
+/// the diagram and none of the information.
+let hideEmpty = (() => { try { return localStorage.getItem('rpdu-flow-hide-empty') !== '0'; } catch { return true; } })();
+
+function setHideEmpty(on         ) {
+  hideEmpty = on;
+  try { localStorage.setItem('rpdu-flow-hide-empty', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading zero when nothing downstream of them is carrying anything either.
+///
+/// A node with NO value is left alone. "0 A" and "no data" are different statements: the first is a
+/// measurement, the second is a gap in the model — nothing measures that node — and hiding it by default
+/// would bury exactly the sort of thing this diagram exists to surface.
+///
+/// The test is downstream only. A zero node still on a live supply path stays, so the solar chain after
+/// dark — MPPTs at 0 feeding an aggregate at 0 feeding a live inverter — is drawn as the connected thing
+/// it is. A zero node with nothing live below it is a switched-off outlet, and that is what goes.
+function applyHideEmptyPref(nodes       , links       )                                 {
+  if (!hideEmpty) return { nodes, links };
+
+  const carrying = (n     ) => n.value != null && Math.abs(n.value) > 0;
+  const byId = new Map             (nodes.map((n     ) => [n.id, n]));
+  const out = new Map                  ();
+  links.forEach((l     ) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
+
+  // Memoised so a wide fan-out is walked once, and cycle-safe because a node in progress answers false
+  // rather than recursing back into itself.
+  const feedsSomethingLive = new Map                 ();
+  const walking = new Set        ();
+  const live = (id        )          => {
+    if (feedsSomethingLive.has(id)) return feedsSomethingLive.get(id) ;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && carrying(n)) || live(t);
+    });
+    walking.delete(id);
+    feedsSomethingLive.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id        ) => {
+    const n = byId.get(id);
+    if (!n) return false;
+    return n.value == null || carrying(n) || live(id);
+  };
+
+  return {
+    nodes: nodes.filter((n     ) => keep(n.id)),
+    links: links.filter((l     ) => keep(l.source) && keep(l.target)),
+  };
+}
+
 /// The "Unmeasured load" view switch, shown wherever the group chips are.
 function unmeasuredToggle(onToggle            )              {
   const lbl = el('label', {
@@ -1999,6 +2054,7 @@ function groupToggles(onToggle            , drawn = true)                     {
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
+    row.appendChild(hideEmptyToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
   }
@@ -2023,6 +2079,22 @@ function groupToggles(onToggle            , drawn = true)                     {
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+
+/// The "Hide empty" view switch. Per-viewer, like the others here.
+function hideEmptyToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Hide branches reading zero — switched-off outlets and anything they feed. Nodes with NO data '
+      + 'stay: nothing measures those, which is a gap in the model rather than an empty branch. A view '
+      + 'setting only; no total changes.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = hideEmpty;
+  cb.onchange = () => { setHideEmpty(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Hide empty'));
+  return lbl;
+}
 
 // ── node-templates.ts ───────────────────────────────────────────
 // Ready-made device templates, and the two panels that import them (MQTT Import, and the Nodes page).
@@ -3106,8 +3178,10 @@ function addFlowSection(nav     , sections     ) {
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
-    // ...and finally honour the unmetered-remainder view switch.
-    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...then honour the unmetered-remainder view switch...
+    const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...and finally drop the branches carrying nothing, if that switch is on.
+    const folded = applyHideEmptyPref(shown.nodes, shown.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -3630,10 +3704,11 @@ function addFlowSection(nav     , sections     ) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram.
+    // Three switches deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
-      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
+      + 'saved by them.'));
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target).

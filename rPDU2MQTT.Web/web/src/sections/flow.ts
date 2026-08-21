@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
+import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -203,8 +203,10 @@ export function addFlowSection(nav: any, sections: any) {
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
-    // ...and finally honour the unmetered-remainder view switch.
-    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...then honour the unmetered-remainder view switch...
+    const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...and finally drop the branches carrying nothing, if that switch is on.
+    const folded = applyHideEmptyPref(shown.nodes, shown.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -728,10 +730,11 @@ export function addFlowSection(nav: any, sections: any) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram.
+    // Three switches deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
-      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
+      + 'saved by them.'));
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target).
