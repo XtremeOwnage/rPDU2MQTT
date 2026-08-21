@@ -7505,13 +7505,16 @@ function renderList(node     , arr       , path          ) {
 // value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
 // plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
 // (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
+/// `after` names the schema section a tool belongs to. Without it a tool lands at the END of its group,
+/// and `child: true` then indents it under whatever schema section happened to sort last — which is how
+/// "HA Energy Mapping" ended up hanging off EmonCMS.
 
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
-  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
@@ -7547,25 +7550,6 @@ function featurePointer(label        ) {
   wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
   const go = btn('Features');
   go.onclick = () => jumpToFeatures();
-  wrap.appendChild(go);
-  return wrap;
-}
-
-// The Energy Dashboard's own settings — including the URL and the long-lived token — are edited on the HA
-// Energy Mapping page, so they are filtered out of this form. A section that simply is not here reads as a
-// missing feature: the status board says "no long-lived access token is set" and the page it names has no
-// such field on it.
-function energyDashboardPointer() {
-  const wrap = el('div', { class: 'desc feature-pointer' });
-  wrap.appendChild(el('span', {
-    text: 'The Energy Dashboard sync — its Home Assistant URL and long-lived access token — is set up on '
-      + 'the HA Energy Mapping page. ',
-  }));
-  const go = btn('HA Energy Mapping');
-  go.onclick = () => {
-    const links        = Array.from(document.querySelectorAll('nav a'));
-    links.find(a => a.dataset?.label === 'HA Energy Mapping')?.click();
-  };
   wrap.appendChild(go);
   return wrap;
 }
@@ -7632,13 +7616,12 @@ function renderConfigSection(node     , nav     , sections     ) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form — but
-      // say where it went, or its settings look absent rather than elsewhere.
+      // The Energy Dashboard's settings — its URL and long-lived token above all — are rendered here, on
+      // the Home Assistant page, because that is where anyone looks for them: the status board reports the
+      // sync as "Home Assistant — Failing", and this is the page it names. The HA Energy Mapping page keeps
+      // its own copies of the two connection fields, bound to this same object, because it cannot test a
+      // connection it has no way to enter.
       let props = node.properties;
-      if (node.key === 'HomeAssistant') {
-        props = (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard');
-        sec.appendChild(energyDashboardPointer());
-      }
       // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
       // removed here rather than duplicated: two switches bound to one value would disagree the moment one
       // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
@@ -7704,7 +7687,13 @@ function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
-  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
+  NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
+    // A tool that names its parent section sits directly after it; everything else keeps to the end.
+    const after = 'after' in it ? it.after : undefined;
+    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
+    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
+    else navGroups[i].items.push(it);
+  }));
 
   // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
   const overview = addOverviewSection(nav, sections);
