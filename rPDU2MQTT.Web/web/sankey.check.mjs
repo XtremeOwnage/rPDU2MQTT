@@ -223,6 +223,50 @@ if (y2('pdu_1#unmeasured') < Math.max(...['kube01', 'kube05', 'nas'].map(y2)))
 if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(y2)))
   fail("Rack-PDU-2's remainder is drawn above its own measured siblings");
 
+// --- Where a column sits against a much larger parent ------------------------------------------------
+// A ribbon leaves a bar at its top and stacks downward, so a 3,012 W panel whose drawn children total
+// ~640 W carries all of them in the top fifth of its bar. Relaxing the children toward the panel's CENTRE
+// aimed at a point no ribbon touches and pushed the column 141px down the canvas (#404 follow-up).
+{
+  const bigParent = {
+    ok: true, metric: 'realpower', units: 'W',
+    nodes: [
+      { id: 'panel', label: 'Main Panel', value: 3012 },
+      { id: 'pdu1', label: 'Rack-PDU-1', value: 309 },
+      { id: 'pdu2', label: 'Rack-PDU-2', value: 287 },
+      { id: 'fridge', label: 'fridge', value: 44 },
+    ],
+    links: [
+      { source: 'panel', target: 'pdu1', value: 309 },
+      { source: 'panel', target: 'pdu2', value: 287 },
+      { source: 'panel', target: 'fridge', value: 44 },
+    ],
+  };
+  const dom = makeDom({
+    bodies: (url) =>
+      url.includes('/api/schema') ? schema :
+      url.includes('/api/instances') ? { ok: true, instances: [] } :
+      url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] } } :
+      url.includes('/api/flow') ? bigParent :
+      { ok: true },
+  });
+  vm.createContext(dom.sandbox);
+  vm.runInContext(code, dom.sandbox, { filename: 'app.js' });
+  await new Promise(r => setTimeout(r, 60));
+  query(dom.getEl('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
+  await new Promise(r => setTimeout(r, 200));
+
+  const bars = Object.fromEntries(query(dom.getEl('sections'), 'rect', true)
+    .filter(r => r.attrs['data-node'])
+    .map(r => [r.attrs['data-node'], Math.round(+r.attrs.y)]));
+
+  // The panel's own bar starts at the top margin, and so does the first child its ribbons reach.
+  if (bars.pdu1 == null || bars.panel == null) fail(`the diagram did not draw: ${JSON.stringify(bars)}`);
+  if (bars.pdu1 > bars.panel + 30)
+    fail(`the children hang ${bars.pdu1 - bars.panel}px below a parent whose ribbons all leave its top`);
+  if (bars.pdu2 < bars.pdu1) fail('the children are out of order');
+}
+
 // --- The pane the diagram lives in ------------------------------------------------------------------
 // The hierarchy IS the page, so it grows to its own height: a pane capped at 74vh put a scrollbar inside
 // the page's scrollbar, and the graph read as an iframe someone had embedded (#395).
