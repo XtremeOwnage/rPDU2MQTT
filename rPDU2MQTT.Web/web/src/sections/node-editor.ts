@@ -506,7 +506,12 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
                 + ' on this node.' }));
         }
         tr.appendChild(cell);
-        tr.appendChild(el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'no source to read' })));
+        // The same em dash every other inapplicable cell in this table uses. "no source to read" read as a
+        // fault report sitting beside a working value.
+        tr.appendChild(el('td', {}, el('span', {
+          text: '—', style: { color: 'var(--muted)' },
+          title: 'A calculated value has no source of its own — it is worked out from this node’s other bindings.',
+        })));
       }
       else if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
         const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());

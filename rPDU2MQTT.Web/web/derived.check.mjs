@@ -66,7 +66,7 @@ const rowsFor = async (sources) => {
 
 // The row's text includes every option of its own dropdowns, so the assertions read the sentences the row
 // adds rather than the row.
-const sums = (row) => (/= ([a-z ]+?[×÷][a-z ]+?)(?=assumes|Needs|no source|$)/.exec(row) || [, ''])[1].trim();
+const sums = (row) => (/= ([a-z ]+?[×÷][a-z ]+?)(?=assumes|Needs|—|$)/.exec(row) || [, ''])[1].trim();
 const needs = (row) => (/Needs ([^.]*)\./.exec(row) || [, ''])[1];
 const rowOf = (rows) => rows.find(r => /[×÷]/.test(r)) || '';
 
