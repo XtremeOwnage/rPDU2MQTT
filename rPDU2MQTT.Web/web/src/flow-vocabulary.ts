@@ -37,7 +37,15 @@ export const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind |
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
 // The built-in source types, and their labels. A plugin's type is appended from the schema at render
 // time (see sourceTypes()), so contributing one needs no edit here.
-export const BUILTIN_SOURCE_TYPES: [string, string][] = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+export const BUILTIN_SOURCE_TYPES: [string, string][] = [
+  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'], ['derived', 'Calculated'],
+];
+
+/// What a calculated binding works out, and from what. Current is the only one: a meter that reports watts
+/// and volts but no amps can have its amps back, and nothing else follows from the readings we hold.
+export const DERIVED_FORMULA: Record<string, { label: string; needs: string[] }> = {
+  current: { label: 'power ÷ voltage', needs: ['realpower', 'voltage'] },
+};
 
 /// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
 ///

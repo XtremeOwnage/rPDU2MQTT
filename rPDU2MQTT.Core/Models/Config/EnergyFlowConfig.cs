@@ -257,8 +257,8 @@ public class EnergyFlowNode
 public class EnergyFlowSource
 {
     [DefaultValue("mqtt")]
-    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection).")]
-    [AllowedValues("mqtt", "modbus")]
+    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps).")]
+    [AllowedValues("mqtt", "modbus", "derived")]
     public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]

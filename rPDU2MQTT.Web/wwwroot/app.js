@@ -974,7 +974,15 @@ const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
 // The built-in source types, and their labels. A plugin's type is appended from the schema at render
 // time (see sourceTypes()), so contributing one needs no edit here.
-const BUILTIN_SOURCE_TYPES                     = [['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP']];
+const BUILTIN_SOURCE_TYPES                     = [
+  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'], ['derived', 'Calculated'],
+];
+
+/// What a calculated binding works out, and from what. Current is the only one: a meter that reports watts
+/// and volts but no amps can have its amps back, and nothing else follows from the readings we hold.
+const DERIVED_FORMULA                                                     = {
+  current: { label: 'power ÷ voltage', needs: ['realpower', 'voltage'] },
+};
 
 /// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
 ///
@@ -4304,7 +4312,30 @@ function renderNodeEditor(node     , links       , cand                  , reren
       // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
       // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
       const type = (src.Type || 'mqtt').toLowerCase();
-      if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+      if (type === 'derived') {
+        // Nothing to point at: the value comes from this node's other bindings. What it needs is the
+        // useful thing to say, and whether it is there.
+        const metric = (src.Metric || 'current').toLowerCase();
+        const rule = DERIVED_FORMULA[metric];
+        const bound = (m        ) => sources.some((o     ) => o !== src
+          && (o.Type || 'mqtt').toLowerCase() !== 'derived'
+          && (o.Metric || 'realpower').toLowerCase() === m);
+        const missing = (rule?.needs || []).filter(m => !bound(m));
+        const cell = el('td', {});
+        cell.appendChild(el('span', { class: 'desc', style: { margin: '0' },
+          text: rule ? `= ${rule.label}` : `'${metricLabel(metric)}' cannot be calculated` }));
+        if (!rule || missing.length) {
+          cell.appendChild(el('div', {
+            class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: !rule
+              ? 'Only current can be calculated, from power ÷ voltage.'
+              : `Needs a ${missing.map(m => metricLabel(m)).join(' and a ')} binding on this node.`,
+          }));
+        }
+        tr.appendChild(cell);
+        tr.appendChild(el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'no source to read' })));
+      }
+      else if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
         const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
         tr.appendChild(srcCell);
         tr.appendChild(detailCell);

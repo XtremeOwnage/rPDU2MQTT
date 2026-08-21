@@ -851,6 +851,31 @@ Notes:
 - Values feed the same exports as everything else, so an MQTT-sourced node reaches Prometheus, the MQTT
   tier export, and the HA Energy Dashboard without any extra wiring.
 
+### Current worked out from power and voltage
+
+A meter that publishes watts and volts but no amps can still have its amps. Add a binding of type
+`derived` for `current` and the value is computed as **I = P ÷ V** from that node's own readings:
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - Id: grid
+      Label: Grid
+      Sources:
+        - { Type: mqtt, Metric: realpower, Topic: solar_assistant/inverter_1/grid_power/state, Direction: split }
+        - { Type: mqtt, Metric: voltage,   Topic: solar_assistant/inverter_1/grid_voltage/state }
+        - { Type: derived, Metric: current, Direction: split }
+```
+
+- **Both readings are required.** A node with a derived current and no power or no voltage binding is
+  flagged in the node editor, and the value is simply absent — never a zero, and never half the answer.
+- A **measured** current always wins. Bind an ammeter and the arithmetic steps aside.
+- Both directions work: `current#in` is worked out from the power flowing that way, divided by the same
+  bus voltage (voltage has no direction — the bus is at one voltage whichever way power moves through it).
+- A voltage reading of `0`, or either reading gone stale, produces no current at all. The Energy and
+  Hierarchy pages say which node and why, in the withheld-sources banner.
+- `current` is the only metric that can be derived. Nothing else follows from the readings held.
+
 ### Live sources from Modbus TCP
 
 A node's value can also come from a Modbus TCP device (an inverter, a meter, a PLC). Define the connection

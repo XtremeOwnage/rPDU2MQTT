@@ -222,7 +222,10 @@ public static class ServiceConfiguration
             .Cast<Core.Flow.IFlowValueSource>()
             .ToArray();
 
-        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => aggregationOn || periodsOn
+        // Values worked out from other values (current = power ÷ voltage) wrap the whole composite: the two
+        // readings they divide may arrive from different ingests, and a measured reading still wins.
+        services.AddSingleton<Core.Flow.IFlowValueSource>(sp => new Core.Flow.DerivedFlowValueSource(
+            aggregationOn || periodsOn
             ? new Core.Flow.CompositeFlowValueSource(
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 liveValues,
@@ -242,7 +245,7 @@ public static class ServiceConfiguration
                  haSource, .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
-                     : [])]));
+                     : [])]), cfg.EnergyFlow));
 
         if (worker)
             services.AddHostedService<Services.ValueSourcePluginHost>();

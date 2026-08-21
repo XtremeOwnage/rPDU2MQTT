@@ -7,7 +7,7 @@ import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
-  NODE_KINDS, NODE_MODES, SIGNED_METRICS, sourceTypes,
+  NODE_KINDS, NODE_MODES, SIGNED_METRICS, sourceTypes, DERIVED_FORMULA,
   isAdditiveMetric, kindMeta, metricLabel, metricMeta, sourceMetricKey,
 } from '../flow-vocabulary.js';
 
@@ -461,7 +461,30 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
       // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
       const type = (src.Type || 'mqtt').toLowerCase();
-      if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+      if (type === 'derived') {
+        // Nothing to point at: the value comes from this node's other bindings. What it needs is the
+        // useful thing to say, and whether it is there.
+        const metric = (src.Metric || 'current').toLowerCase();
+        const rule = DERIVED_FORMULA[metric];
+        const bound = (m: string) => sources.some((o: any) => o !== src
+          && (o.Type || 'mqtt').toLowerCase() !== 'derived'
+          && (o.Metric || 'realpower').toLowerCase() === m);
+        const missing = (rule?.needs || []).filter(m => !bound(m));
+        const cell = el('td', {});
+        cell.appendChild(el('span', { class: 'desc', style: { margin: '0' },
+          text: rule ? `= ${rule.label}` : `'${metricLabel(metric)}' cannot be calculated` }));
+        if (!rule || missing.length) {
+          cell.appendChild(el('div', {
+            class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: !rule
+              ? 'Only current can be calculated, from power ÷ voltage.'
+              : `Needs a ${missing.map(m => metricLabel(m)).join(' and a ')} binding on this node.`,
+          }));
+        }
+        tr.appendChild(cell);
+        tr.appendChild(el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'no source to read' })));
+      }
+      else if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
         const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
         tr.appendChild(srcCell);
         tr.appendChild(detailCell);
