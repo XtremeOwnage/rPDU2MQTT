@@ -190,6 +190,12 @@ internal class YamlConfigLoader
 
         var oidcSecret = ResolveSecret("RPDU2MQTT_OIDC_CLIENT_SECRET");
         if (oidcSecret is not null) { config.Gui.Oidc.ClientSecret = oidcSecret; Log.Information("Using OIDC client secret from environment."); }
+
+        var hassToken = ResolveSecret("RPDU2MQTT_HASS_TOKEN");
+        if (hassToken is not null) { config.HASS.EnergyDashboard.Token = hassToken; Log.Information("Using Home Assistant token from environment."); }
+
+        var cachePass = ResolveSecret("RPDU2MQTT_CACHE_PASSWORD");
+        if (cachePass is not null) { config.Cache.Password = cachePass; Log.Information("Using cache password from environment."); }
     }
 
     /// <summary>

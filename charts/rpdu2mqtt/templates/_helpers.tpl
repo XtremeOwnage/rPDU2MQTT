@@ -111,7 +111,7 @@ Usage: include "rpdu2mqtt.backendService" (dict "root" $ "service" "api")
 
 {{/* True when a credentials Secret should be referenced (either managed here or external). */}}
 {{- define "rpdu2mqtt.hasSecret" -}}
-{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret .Values.credentials.apiKey -}}
+{{- if or .Values.existingSecret .Values.credentials.mqtt.username .Values.credentials.mqtt.password .Values.credentials.pdu.username .Values.credentials.pdu.password .Values.credentials.emoncmsApiKey .Values.credentials.oidcClientSecret .Values.credentials.apiKey .Values.credentials.hassToken .Values.credentials.cachePassword .Values.credentials.guiPassword -}}
 true
 {{- end -}}
 {{- end -}}
