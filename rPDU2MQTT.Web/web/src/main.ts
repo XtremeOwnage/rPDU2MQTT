@@ -22,6 +22,9 @@ window.addEventListener('hashchange', () => {
 export async function load() {
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
+  // Older backends have no such endpoint; the editor then says what it can without the arithmetic.
+  try { state.derivations = ((await api('/api/flow/derivations')).body || {}).metrics || []; }
+  catch { state.derivations = []; }
   build();
   // Whatever the server just handed us is, by definition, the saved state.
   setBaseline();

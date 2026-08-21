@@ -129,4 +129,23 @@ public class KubernetesConfigTests
             dir = dir.Parent;
         return dir?.FullName ?? throw new InvalidOperationException("Could not locate the repository root (no rPDU2MQTT.sln above the test output).");
     }
+
+    /// <summary>
+    /// The CRD must not enumerate a source's <c>Type</c>. The set is open — plugins contribute types at
+    /// runtime, and the built-ins grow — so an enum in the CRD has the API server reject a value this build
+    /// accepts. Seen live: saving a calculated binding failed with
+    /// <c>Unsupported value: "derived": supported values: "", "mqtt", "modbus"</c>, and a plugin-supplied
+    /// type would have failed in exactly the same way.
+    /// </summary>
+    [Fact]
+    public void TheCrdDoesNotEnumerateSourceTypes()
+    {
+        var crd = File.ReadAllText(Path.Combine(FindRepoRoot(), "charts", "rpdu2mqtt", "crds", "rpduconfig.yaml"));
+
+        // The Type property of a flow source, and whatever follows it.
+        var i = crd.IndexOf("Where this value comes from", StringComparison.Ordinal);
+        Assert.True(i > 0, "the flow source Type property is no longer in the CRD");
+        var before = crd[Math.Max(0, i - 400)..i];
+        Assert.DoesNotContain("enum", before);
+    }
 }

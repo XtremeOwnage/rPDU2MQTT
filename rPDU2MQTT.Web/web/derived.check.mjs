@@ -10,6 +10,24 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('derived check FAILED: ' + m); process.exit(1); };
 
+// What the backend serves: one entry per metric that can be worked out, and the pairs it can use.
+const derivations = { ok: true, metrics: [
+  { metric: 'apparentpower', name: 'apparent power', units: 'VA', from: [
+    { a: 'voltage', b: 'current', label: 'voltage × current' },
+    { a: 'realpower', b: 'powerfactor', label: 'power ÷ power factor' }] },
+  { metric: 'voltage', name: 'voltage', units: 'V', from: [
+    { a: 'apparentpower', b: 'current', label: 'apparent power ÷ current' },
+    { a: 'realpower', b: 'current', label: 'power ÷ current', assumes: 'a power factor of 1' }] },
+  { metric: 'current', name: 'current', units: 'A', from: [
+    { a: 'apparentpower', b: 'voltage', label: 'apparent power ÷ voltage' },
+    { a: 'realpower', b: 'voltage', label: 'power ÷ voltage', assumes: 'a power factor of 1' }] },
+  { metric: 'realpower', name: 'power', units: 'W', from: [
+    { a: 'apparentpower', b: 'powerfactor', label: 'apparent power × power factor' },
+    { a: 'voltage', b: 'current', label: 'voltage × current', assumes: 'a power factor of 1' }] },
+  { metric: 'powerfactor', name: 'power factor', units: '', from: [
+    { a: 'realpower', b: 'apparentpower', label: 'power ÷ apparent power' }] },
+] };
+
 const mqtt = (metric) => ({ Type: 'mqtt', Metric: metric, Topic: `x/${metric}` });
 const derived = (metric = 'current') => ({ Type: 'derived', Metric: metric });
 
@@ -20,7 +38,8 @@ const rowsFor = async (sources) => {
     EnergyFlow: { Nodes: [{ Id: 'grid', Label: 'Grid', Kind: 'grid', Sources: sources }], Links: [] },
   };
   const { sandbox, getEl } = makeDom({
-    bodies: (url) => url.includes('/api/schema') ? schema
+    bodies: (url) => url.includes('/api/flow/derivations') ? derivations
+      : url.includes('/api/schema') ? schema
       : url.includes('/api/config') ? config
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : { ok: true },
@@ -45,34 +64,49 @@ const rowsFor = async (sources) => {
   return rows;
 };
 
-// Everything it needs: the row states the rule and asks for nothing.
-// The row's text includes every option of its own dropdowns, so the assertions read the sentence the row
+// The row's text includes every option of its own dropdowns, so the assertions read the sentences the row
 // adds rather than the row.
-const needs = (row) => (/Needs a ([^.]*)\./.exec(row) || [, ''])[1];
+const sums = (row) => (/= ([a-z ]+?[×÷][a-z ]+?)(?=assumes|Needs|no source|$)/.exec(row) || [, ''])[1].trim();
+const needs = (row) => (/Needs ([^.]*)\./.exec(row) || [, ''])[1];
+const rowOf = (rows) => rows.find(r => /[×÷]/.test(r)) || '';
 
-let rows = await rowsFor([mqtt('realpower'), mqtt('voltage'), derived()]);
-let row = rows.find(r => /= power ÷ voltage/.test(r));
-if (!row) fail(`the calculated row does not say what it works out: ${rows.length} rows`);
-if (needs(row)) fail(`a binding with both readings is asking for one: ${needs(row)}`);
+// Power and voltage: the only pair available, and it is the one that assumes a power factor of 1 — said
+// out loud, because P = V × I is exact for a DC string and an approximation for an AC feeder.
+let row = rowOf(await rowsFor([mqtt('realpower'), mqtt('voltage'), derived('current')]));
+if (sums(row) !== 'power ÷ voltage') fail(`the wrong sum was offered: ${sums(row) || row.slice(0, 60)}`);
+if (needs(row)) fail(`a binding with a pair to work from is asking for one: ${needs(row)}`);
+if (!/assumes a power factor of 1/.test(row)) fail('the unity-power-factor assumption is not stated');
 
-// Voltage missing: named, on its own.
-rows = await rowsFor([mqtt('realpower'), derived()]);
-row = rows.find(r => /= power ÷ voltage/.test(r)) || '';
-if (!needs(row)) fail('a calculated current with no voltage says nothing');
-if (!/Voltage/i.test(needs(row))) fail(`the missing voltage is not named: ${needs(row)}`);
-if (/Power/i.test(needs(row))) fail(`power is bound but reported missing: ${needs(row)}`);
+// Apparent power and voltage: exact, so no caveat.
+row = rowOf(await rowsFor([mqtt('apparentpower'), mqtt('voltage'), derived('current')]));
+if (sums(row) !== 'apparent power ÷ voltage') fail(`an exact pair was not preferred: ${sums(row)}`);
+if (/assumes/.test(row)) fail(`an exact relation is claiming an assumption: ${row.slice(-80)}`);
 
-// Neither: both named.
-rows = await rowsFor([derived()]);
-row = rows.find(r => /= power ÷ voltage/.test(r)) || '';
+// With a power factor to hand the exact route is reached in two steps — S = P ÷ PF, then I = S ÷ V — and
+// taking the shortcut would under-report the current by that factor.
+row = rowOf(await rowsFor([mqtt('realpower'), mqtt('voltage'), mqtt('powerfactor'), derived('current')]));
+if (sums(row) !== 'apparent power ÷ voltage') fail(`the power factor was ignored in favour of the shortcut: ${sums(row)}`);
+if (/assumes/.test(row)) fail('an exact two-step route is claiming an assumption');
+
+// Half a pair is nothing to work from, and the row names the pairs that would do.
+row = rowOf(await rowsFor([mqtt('realpower'), derived('current')]));
+if (!needs(row)) fail('a calculated current with no second reading says nothing');
+if (!/voltage/i.test(needs(row))) fail(`the pairs that would work are not named: ${needs(row)}`);
+
+// Nothing at all bound: same, and it still names them rather than going quiet.
+row = rowOf(await rowsFor([derived('current')]));
 if (!needs(row)) fail('a calculated current with nothing behind it says nothing');
-if (!/Power/i.test(needs(row)) || !/Voltage/i.test(needs(row)))
-  fail(`only one of the two missing readings is named: ${needs(row)}`);
 
-// Nothing else can be worked out from what we hold, and asking is a mistake worth saying out loud.
-rows = await rowsFor([mqtt('realpower'), mqtt('voltage'), derived('energy')]);
-if (!rows.some(r => /cannot be calculated/.test(r)))
-  fail('a calculated energy binding was accepted silently');
+// Every metric in a relation can be worked out, not just current.
+row = rowOf(await rowsFor([mqtt('voltage'), mqtt('current'), derived('realpower')]));
+if (sums(row) !== 'voltage × current') fail(`power is not offered from volts and amps: ${sums(row)}`);
+row = rowOf(await rowsFor([mqtt('realpower'), mqtt('apparentpower'), derived('powerfactor')]));
+if (sums(row) !== 'power ÷ apparent power') fail(`power factor is not offered from W and VA: ${sums(row)}`);
 
-console.log('derived: a calculated current states its rule, names the bindings it still needs, and refuses '
-  + 'to be anything other than current');
+// Energy follows from none of the relations, and saying so beats a binding that quietly never works.
+const rows = await rowsFor([mqtt('realpower'), mqtt('voltage'), derived('energy')]);
+if (!rows.some(r => /cannot be calculated/.test(r))) fail('a calculated energy binding was accepted silently');
+
+console.log('derived: a calculated binding states the sum it will actually do, prefers an exact relation '
+  + 'over one that assumes a power factor of 1 and says so when it cannot, names the pairs that would work '
+  + 'when it has none, and refuses a metric no relation covers');

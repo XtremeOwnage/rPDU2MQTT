@@ -1,7 +1,9 @@
 // ── state.ts ────────────────────────────────────────────────────
-// Shared, mutable app state: the config schema and the editable config document, both set on load().
+// Shared, mutable app state: the config schema and the editable config document, both set on load(), plus
+// the relations a calculated binding can use — served by the backend rather than restated here, because a
+// second copy of the electrics is a second thing to be wrong about.
 // (Authored as ES modules; the build bundles them into one shared scope, as the GUI has always run.)
-const state                               = { schema: [], data: {} };
+const state                                                   = { schema: [], data: {}, derivations: [] };
 
 /// One page asking another to open on something specific — "show me Solar for today".
 ///
@@ -977,12 +979,6 @@ const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node
 const BUILTIN_SOURCE_TYPES                     = [
   ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'], ['derived', 'Calculated'],
 ];
-
-/// What a calculated binding works out, and from what. Current is the only one: a meter that reports watts
-/// and volts but no amps can have its amps back, and nothing else follows from the readings we hold.
-const DERIVED_FORMULA                                                     = {
-  current: { label: 'power ÷ voltage', needs: ['realpower', 'voltage'] },
-};
 
 /// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
 ///
@@ -4313,24 +4309,48 @@ function renderNodeEditor(node     , links       , cand                  , reren
       // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
       const type = (src.Type || 'mqtt').toLowerCase();
       if (type === 'derived') {
-        // Nothing to point at: the value comes from this node's other bindings. What it needs is the
-        // useful thing to say, and whether it is there.
-        const metric = (src.Metric || 'current').toLowerCase();
-        const rule = DERIVED_FORMULA[metric];
+        // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
+        // do, and what it still needs to do any of them, are the useful things to say.
+        const metric = (src.Metric || 'realpower').toLowerCase();
+        const rule = (state.derivations || []).find((d     ) => d.metric === metric);
         const bound = (m        ) => sources.some((o     ) => o !== src
           && (o.Type || 'mqtt').toLowerCase() !== 'derived'
           && (o.Metric || 'realpower').toLowerCase() === m);
-        const missing = (rule?.needs || []).filter(m => !bound(m));
+        // An operand may itself be worked out, so "have I got it" is asked the same way the backend asks.
+        const have = (m        , seen              = new Set())          => {
+          if (bound(m)) return true;
+          if (seen.has(m)) return false;
+          seen.add(m);
+          const r = (state.derivations || []).find((d     ) => d.metric === m);
+          return (r?.from || []).some((f     ) => have(f.a, seen) && have(f.b, seen));
+        };
+        // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
+        // itself — which would offer a sum the backend will not do.
+        const reach = (m        ) => have(m, new Set([metric]));
+        const usable = (rule?.from || []).find((f     ) => reach(f.a) && reach(f.b));
+
         const cell = el('td', {});
-        cell.appendChild(el('span', { class: 'desc', style: { margin: '0' },
-          text: rule ? `= ${rule.label}` : `'${metricLabel(metric)}' cannot be calculated` }));
-        if (!rule || missing.length) {
-          cell.appendChild(el('div', {
-            class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
-            text: !rule
-              ? 'Only current can be calculated, from power ÷ voltage.'
-              : `Needs a ${missing.map(m => metricLabel(m)).join(' and a ')} binding on this node.`,
-          }));
+        // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
+        // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
+        if (!(state.derivations || []).length) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
+        }
+        else if (!rule) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `'${metricLabel(metric)}' cannot be calculated` }));
+          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: `These can: ${(state.derivations || []).map((d     ) => d.name).join(', ')}.` }));
+        }
+        else if (usable) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${usable.label}` }));
+          if (usable.assumes)
+            cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--warn)' },
+              text: `assumes ${usable.assumes}` }));
+        }
+        else {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${(rule.from[0] || {}).label || ''}` }));
+          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: 'Needs ' + (rule.from || []).map((f     ) => `${metricLabel(f.a)} and ${metricLabel(f.b)}`).join(', or ')
+                + ' on this node.' }));
         }
         tr.appendChild(cell);
         tr.appendChild(el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'no source to read' })));
@@ -8029,6 +8049,9 @@ window.addEventListener('hashchange', () => {
 async function load() {
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
+  // Older backends have no such endpoint; the editor then says what it can without the arithmetic.
+  try { state.derivations = ((await api('/api/flow/derivations')).body || {}).metrics || []; }
+  catch { state.derivations = []; }
   build();
   // Whatever the server just handed us is, by definition, the saved state.
   setBaseline();
