@@ -3069,6 +3069,7 @@ function addFlowSection(nav     , sections     ) {
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what     ) => {
+    periods.mark(null);
     // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
@@ -3079,6 +3080,18 @@ function addFlowSection(nav     , sections     ) {
     }
     load();
   });
+  // One click for the periods people actually ask for, as on the Energy and Trends pages. A period is a
+  // question about energy — "how much yesterday" — so it answers in energy rather than leaving a power
+  // reading under a heading about a month.
+  const periods = periodRow((key           ) => {
+    const { day, days } = periodWindow(key);
+    hist.set(day, days);
+    if (metricSel.value !== 'energytoday') { metricSel.value = 'energytoday'; showDayNote(); }
+    periods.mark(key);
+    hadDay = true;
+    load();
+  });
+  sec.appendChild(periods.row);
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 

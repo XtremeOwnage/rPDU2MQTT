@@ -896,6 +896,29 @@ EnergyFlow:
 > `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/crds/rpduconfig.yaml` once and it
 > will not happen again, for this or any future type.
 
+### Repairing Home Assistant statistics
+
+A tier's `energy` field feeds a sensor declared `state_class: total_increasing`. Home Assistant reads a
+drop in such a series as a meter reset and takes the next reading as a delta from zero, so anything that
+makes the value fall records a whole counter as one period's usage.
+
+If the Energy dashboard shows megawatt-hours a day, the statistics already stored have to be cleared —
+fixing the publisher stops new corruption but cannot repair what the recorder wrote:
+
+```bash
+pip install websockets
+export HA_URL=http://homeassistant.local:8123
+export HA_TOKEN=<long-lived access token>
+
+python3 scripts/ha-clear-energyflow-statistics.py --dry-run   # list what would go
+python3 scripts/ha-clear-energyflow-statistics.py --yes       # clear it
+```
+
+It touches only `sensor.energyflow_*` — the sensors this bridge publishes. The same thing can be done by
+hand in **Developer tools → Statistics**, which offers to fix or clear one entity at a time.
+
+Run it *after* the corrected build is live, or the next bad reading lands on top of the corrected total.
+
 ### Live sources from Modbus TCP
 
 A node's value can also come from a Modbus TCP device (an inverter, a meter, a PLC). Define the connection
