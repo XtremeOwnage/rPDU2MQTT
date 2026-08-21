@@ -905,11 +905,7 @@ spec:
                             properties:
                               Type:
                                 type: string
-                                enum:
-                                - ''
-                                - mqtt
-                                - modbus
-                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
                                 enum:
@@ -1002,11 +998,7 @@ spec:
                             properties:
                               Type:
                                 type: string
-                                enum:
-                                - ''
-                                - mqtt
-                                - modbus
-                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic) or 'modbus' (read a register from a Modbus TCP connection)."
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
                                 enum:

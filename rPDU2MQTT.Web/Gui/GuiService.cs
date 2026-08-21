@@ -1791,6 +1791,21 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 .Select(m => new { metric = m, units = FlowUnits.Canonical(m), epoch = FlowUnits.Epoch(m) }),
         }, ConfigSchema.Json));
 
+        // The relations a calculated binding can use. Served rather than restated in TypeScript: the editor
+        // has to name the pairs that would work, and a second copy of the electrics is a second thing to be
+        // wrong about.
+        app.MapGet("/api/flow/derivations", () => Results.Json(new
+        {
+            ok = true,
+            metrics = DerivedMetrics.Derivable.Select(m => new
+            {
+                metric = m,
+                name = DerivedMetrics.Name(m),
+                units = FlowUnits.Canonical(m),
+                from = DerivedMetrics.PairsFor(m).Select(p => new { a = p.A, b = p.B, label = p.Label, assumes = p.Assumes }),
+            }),
+        }, ConfigSchema.Json));
+
         // Readings the bridge is deliberately dropping, and why.
         app.MapGet("/api/flow/withheld", (HttpContext ctx) =>
         {

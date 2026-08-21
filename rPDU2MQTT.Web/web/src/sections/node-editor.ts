@@ -461,7 +461,54 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
       // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
       const type = (src.Type || 'mqtt').toLowerCase();
-      if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+      if (type === 'derived') {
+        // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
+        // do, and what it still needs to do any of them, are the useful things to say.
+        const metric = (src.Metric || 'realpower').toLowerCase();
+        const rule = (state.derivations || []).find((d: any) => d.metric === metric);
+        const bound = (m: string) => sources.some((o: any) => o !== src
+          && (o.Type || 'mqtt').toLowerCase() !== 'derived'
+          && (o.Metric || 'realpower').toLowerCase() === m);
+        // An operand may itself be worked out, so "have I got it" is asked the same way the backend asks.
+        const have = (m: string, seen: Set<string> = new Set()): boolean => {
+          if (bound(m)) return true;
+          if (seen.has(m)) return false;
+          seen.add(m);
+          const r = (state.derivations || []).find((d: any) => d.metric === m);
+          return (r?.from || []).some((f: any) => have(f.a, seen) && have(f.b, seen));
+        };
+        // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
+        // itself — which would offer a sum the backend will not do.
+        const reach = (m: string) => have(m, new Set([metric]));
+        const usable = (rule?.from || []).find((f: any) => reach(f.a) && reach(f.b));
+
+        const cell = el('td', {});
+        // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
+        // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
+        if (!(state.derivations || []).length) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
+        }
+        else if (!rule) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `'${metricLabel(metric)}' cannot be calculated` }));
+          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: `These can: ${(state.derivations || []).map((d: any) => d.name).join(', ')}.` }));
+        }
+        else if (usable) {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${usable.label}` }));
+          if (usable.assumes)
+            cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--warn)' },
+              text: `assumes ${usable.assumes}` }));
+        }
+        else {
+          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${(rule.from[0] || {}).label || ''}` }));
+          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+            text: 'Needs ' + (rule.from || []).map((f: any) => `${metricLabel(f.a)} and ${metricLabel(f.b)}`).join(', or ')
+                + ' on this node.' }));
+        }
+        tr.appendChild(cell);
+        tr.appendChild(el('td', {}, el('span', { class: 'desc', style: { margin: '0' }, text: 'no source to read' })));
+      }
+      else if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
         const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
         tr.appendChild(srcCell);
         tr.appendChild(detailCell);

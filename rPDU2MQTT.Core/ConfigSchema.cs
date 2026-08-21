@@ -247,21 +247,15 @@ public static class ConfigSchema
         if (prop.GetCustomAttribute<VisibleWhenAttribute>() is { } vis)
             node.VisibleWhen = new VisibleWhenRule { Key = vis.Key, Values = vis.Values };
 
-        // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
-        // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).
-        if (type == typeof(string) && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } allowed)
-        {
-            var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
-            node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
-            node.Type = "enum";
-            return node;
-        }
-
         // A plugin-supplied source type is offered alongside the declared ones. Appended rather than
         // replacing them, and marked dynamic so the CRD generator keeps the plain declared set — it cannot
         // validate against a type that exists only on one operator's machine.
+        // Always dynamic, whether or not a plugin happens to be loaded on the machine emitting the CRD: the
+        // set of source types is open by design. A CRD that enumerates it makes the API server reject a type
+        // this build accepts — seen live as "Unsupported value: derived: supported values: mqtt, modbus"
+        // when saving from the GUI, and a plugin-contributed type would have failed exactly the same way.
         if (type == typeof(string) && prop.DeclaringType == typeof(EnergyFlowSource)
-            && prop.Name == nameof(EnergyFlowSource.Type) && PluginSourceTypes.Count > 0
+            && prop.Name == nameof(EnergyFlowSource.Type)
             && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } declared)
         {
             node.EnumValues = declared.Values.Select(v => v?.ToString() ?? "")
@@ -269,6 +263,16 @@ public static class ConfigSchema
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             node.DynamicChoices = true;
+            node.Type = "enum";
+            return node;
+        }
+
+        // A string with a fixed set of choices ([AllowedValues]) renders as a dropdown, not free text (#176).
+        // An optional one keeps a leading blank choice so it can be cleared back to "unset" (auto).
+        if (type == typeof(string) && prop.GetCustomAttribute<AllowedValuesAttribute>() is { } allowed)
+        {
+            var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
+            node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
             node.Type = "enum";
             return node;
         }

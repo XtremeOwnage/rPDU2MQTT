@@ -79,7 +79,7 @@
             {
               "key": "JsonField",
               "label": "JsonField",
-              "description": "Field holding the value when the payload is JSON — dotted for nesting. Leave blank when the payload is the bare number.",
+              "description": "Field holding the value when the payload is JSON \u2014 dotted for nesting. Leave blank when the payload is the bare number.",
               "type": "string",
               "required": false
             },
@@ -204,7 +204,7 @@
       {
         "key": "MessageTimestamp",
         "label": "Message Timestamp",
-        "description": "Carry the time a measurement was read. 'None' (default) publishes exactly as before. 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone — verify it against your broker first, since a broker or client that mishandles user properties on PUBLISH can drop the connection. 'Payload' publishes {\"value\": …, \"timestamp\": …} instead of a bare value (Home Assistant discovery adapts automatically).",
+        "description": "Carry the time a measurement was read. 'None' (default) publishes exactly as before. 'UserProperty' adds an MQTT v5 'timestamp' property and leaves the payload alone \u2014 verify it against your broker first, since a broker or client that mishandles user properties on PUBLISH can drop the connection. 'Payload' publishes {\"value\": \u2026, \"timestamp\": \u2026} instead of a bare value (Home Assistant discovery adapts automatically).",
         "type": "enum",
         "required": false,
         "default": "None",
@@ -394,7 +394,7 @@
         "description": "Name template for a group's mirrored member switches. Placeholders: {device}, {outlet}, {number}, {group}.",
         "type": "string",
         "required": false,
-        "default": "{device} — Outlet {number} ({outlet})",
+        "default": "{device} \u2014 Outlet {number} ({outlet})",
         "templateVars": [
           "device",
           "outlet",
@@ -434,7 +434,7 @@
           {
             "key": "NodeTags",
             "label": "NodeTags",
-            "description": "Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent — never a value, and never any other destination.",
+            "description": "Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent \u2014 never a value, and never any other destination.",
             "type": "object",
             "required": false,
             "properties": [
@@ -485,7 +485,7 @@
           {
             "key": "EnergyMeasurementType",
             "label": "EnergyMeasurementType",
-            "description": "Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.",
+            "description": "Measurement type holding each entity's cumulative energy (kWh) \u2014 used to find the Energy Dashboard stat for each tier.",
             "type": "string",
             "required": false,
             "default": "energy"
@@ -870,7 +870,7 @@
       {
         "key": "NodeTags",
         "label": "NodeTags",
-        "description": "Limit the energy-flow metrics to nodes with particular tags. Empty exposes every node. Filtering changes only what is scraped — never a value, and never any other destination.",
+        "description": "Limit the energy-flow metrics to nodes with particular tags. Empty exposes every node. Filtering changes only what is scraped \u2014 never a value, and never any other destination.",
         "type": "object",
         "required": false,
         "properties": [
@@ -1141,7 +1141,7 @@
       {
         "key": "NodeTags",
         "label": "NodeTags",
-        "description": "Limit the exported energy-flow nodes to particular tags. Empty sends every node. Filtering changes only what is sent — never a value, and never any other destination.",
+        "description": "Limit the exported energy-flow nodes to particular tags. Empty sends every node. Filtering changes only what is sent \u2014 never a value, and never any other destination.",
         "type": "object",
         "required": false,
         "properties": [
@@ -1281,7 +1281,7 @@
                 {
                   "key": "Daily",
                   "label": "Daily",
-                  "description": "Also create a daily kWh/d feed (an extra processlist step: kWh→kWh/d). Typically only for the energy type.",
+                  "description": "Also create a daily kWh/d feed (an extra processlist step: kWh\u2192kWh/d). Typically only for the energy type.",
                   "type": "bool",
                   "required": false,
                   "default": false
@@ -1357,7 +1357,7 @@
           {
             "key": "Virtual",
             "label": "Virtual",
-            "description": "Optionally create friendly-named virtual feeds that source from the stable storage feeds — so dashboards get nice names while the underlying feeds stay idempotent.",
+            "description": "Optionally create friendly-named virtual feeds that source from the stable storage feeds \u2014 so dashboards get nice names while the underlying feeds stay idempotent.",
             "type": "object",
             "required": false,
             "properties": [
@@ -1388,7 +1388,7 @@
               {
                 "key": "Tag",
                 "label": "Tag",
-                "description": "The EmonCMS tag (group/node) virtual feeds are filed under — set this to keep the friendly virtual feeds separate from the storage feeds. Blank uses the main Feeds tag.",
+                "description": "The EmonCMS tag (group/node) virtual feeds are filed under \u2014 set this to keep the friendly virtual feeds separate from the storage feeds. Blank uses the main Feeds tag.",
                 "type": "string",
                 "required": false
               }
@@ -1397,7 +1397,7 @@
           {
             "key": "Processes",
             "label": "Processes",
-            "description": "EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs → process dropdown).",
+            "description": "EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs \u2192 process dropdown).",
             "type": "object",
             "required": false,
             "properties": [
@@ -1615,7 +1615,7 @@
         "type": "bool",
         "required": false,
         "default": false,
-        "notEditableReason": "Turning the GUI off from inside the GUI would lock you out of the only place you could turn it back on. Set it where the deployment is defined — the Helm values, the container environment, or config.yaml.",
+        "notEditableReason": "Turning the GUI off from inside the GUI would lock you out of the only place you could turn it back on. Set it where the deployment is defined \u2014 the Helm values, the container environment, or config.yaml.",
         "isFeatureToggle": true
       },
       {
@@ -1745,7 +1745,7 @@
       {
         "key": "Enabled",
         "label": "Enabled",
-        "description": "Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network — it is unauthenticated, like the health endpoints.",
+        "description": "Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network \u2014 it is unauthenticated, like the health endpoints.",
         "type": "bool",
         "required": false,
         "default": false,
@@ -1771,7 +1771,7 @@
   {
     "key": "EnergyFlow",
     "label": "EnergyFlow",
-    "description": "Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.",
+    "description": "Virtual upstream nodes (breakers, transfer switches, a \u201cTotal\u201d) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.",
     "type": "object",
     "required": false,
     "properties": [
@@ -1817,7 +1817,7 @@
           {
             "key": "PeriodTimeZone",
             "label": "PeriodTimeZone",
-            "description": "IANA time zone the daily total rolls over in, e.g. \"America/Chicago\". Blank uses the host's local time zone — which in a container is usually UTC.",
+            "description": "IANA time zone the daily total rolls over in, e.g. \"America/Chicago\". Blank uses the host's local time zone \u2014 which in a container is usually UTC.",
             "type": "enum",
             "required": false,
             "enumValues": [
@@ -2310,14 +2310,14 @@
             {
               "key": "Max",
               "label": "Max",
-              "description": "Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed.",
+              "description": "Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead \u2014 no ceiling is ever guessed.",
               "type": "double",
               "required": false
             },
             {
               "key": "Tags",
               "label": "Tags",
-              "description": "Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.",
+              "description": "Free-form tags for filtering the diagram and the energy views \u2014 e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.",
               "type": "list",
               "required": false,
               "valueSchema": {
@@ -2337,7 +2337,7 @@
             {
               "key": "Mode",
               "label": "Mode",
-              "description": "How to value this node when it has no direct measurement: 'auto' (aggregate children; carries unmet demand only when it is the single path into a node — never splits a load between several unmeasured feeders), 'static' (a fixed leaf at Value), 'residual' (the designated absorber of what its target still needs — this is how you say where unaccounted power comes from), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.",
+              "description": "How to value this node when it has no direct measurement: 'auto' (aggregate children; carries unmet demand only when it is the single path into a node \u2014 never splits a load between several unmeasured feeders), 'static' (a fixed leaf at Value), 'residual' (the designated absorber of what its target still needs \u2014 this is how you say where unaccounted power comes from), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins.",
               "type": "enum",
               "required": false,
               "default": "auto",
@@ -2372,13 +2372,14 @@
                     "enumValues": [
                       "",
                       "mqtt",
-                      "modbus"
+                      "modbus",
+                      "derived"
                     ]
                   },
                   {
                     "key": "Metric",
                     "label": "Metric",
-                    "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).",
+                    "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile \u2014 not rolled up).",
                     "type": "enum",
                     "required": false,
                     "default": "realpower",
@@ -2397,7 +2398,7 @@
                   {
                     "key": "Accumulation",
                     "label": "Accumulation",
-                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
+                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default \u2014 a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
                     "type": "enum",
                     "required": false,
                     "default": "lifetime",
@@ -2410,7 +2411,7 @@
                   {
                     "key": "Direction",
                     "label": "Direction",
-                    "description": "Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.",
+                    "description": "Which way energy flows for this source, relative to the node: 'out' (default \u2014 battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' \u2014 one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single \u00b1 power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.",
                     "type": "enum",
                     "required": false,
                     "default": "out",
@@ -2424,7 +2425,7 @@
                   {
                     "key": "Unit",
                     "label": "Unit",
-                    "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.",
+                    "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, \u2026) on ingest. Blank = already canonical.",
                     "type": "string",
                     "required": false
                   },
@@ -2445,7 +2446,7 @@
                   {
                     "key": "Scale",
                     "label": "Scale",
-                    "description": "Multiplier applied to the received value — for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
+                    "description": "Multiplier applied to the received value \u2014 for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
                     "type": "double",
                     "required": false,
                     "default": 1
@@ -2477,7 +2478,7 @@
                   {
                     "key": "RegisterType",
                     "label": "RegisterType",
-                    "description": "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4).",
+                    "description": "For Type 'modbus': which register bank \u2014 'holding' (function 3) or 'input' (function 4).",
                     "type": "enum",
                     "required": false,
                     "default": "holding",
@@ -2490,7 +2491,7 @@
                   {
                     "key": "DataType",
                     "label": "DataType",
-                    "description": "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32.",
+                    "description": "For Type 'modbus': how to decode the register(s) \u2014 uint16, int16, uint32, int32, or float32.",
                     "type": "enum",
                     "required": false,
                     "default": "uint16",
@@ -2506,7 +2507,7 @@
                   {
                     "key": "WordOrder",
                     "label": "WordOrder",
-                    "description": "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
+                    "description": "For Type 'modbus' 32-bit values: word order \u2014 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
                     "type": "enum",
                     "required": false,
                     "default": "big",
@@ -2556,13 +2557,14 @@
                     "enumValues": [
                       "",
                       "mqtt",
-                      "modbus"
+                      "modbus",
+                      "derived"
                     ]
                   },
                   {
                     "key": "Metric",
                     "label": "Metric",
-                    "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).",
+                    "description": "Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile \u2014 not rolled up).",
                     "type": "enum",
                     "required": false,
                     "default": "realpower",
@@ -2581,7 +2583,7 @@
                   {
                     "key": "Accumulation",
                     "label": "Accumulation",
-                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
+                    "description": "Whether this counter runs forever or restarts each day: 'lifetime' (default \u2014 a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.",
                     "type": "enum",
                     "required": false,
                     "default": "lifetime",
@@ -2594,7 +2596,7 @@
                   {
                     "key": "Direction",
                     "label": "Direction",
-                    "description": "Which way energy flows for this source, relative to the node: 'out' (default — battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' — one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single ± power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.",
+                    "description": "Which way energy flows for this source, relative to the node: 'out' (default \u2014 battery discharge, grid import, solar production), 'in' (battery charge, grid export), or 'split' \u2014 one signed value fanned into both directions, positive as out and the magnitude of negative as in (for a single \u00b1 power/current topic or register). Only meaningful for directional metrics (realpower, apparentpower, current, energy); ignored for voltage/frequency/powerfactor/soc.",
                     "type": "enum",
                     "required": false,
                     "default": "out",
@@ -2608,7 +2610,7 @@
                   {
                     "key": "Unit",
                     "label": "Unit",
-                    "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, …) on ingest. Blank = already canonical.",
+                    "description": "Unit the source publishes in (e.g. kW, Wh, mV). Converted to the metric's canonical unit (W, kWh, V, \u2026) on ingest. Blank = already canonical.",
                     "type": "string",
                     "required": false
                   },
@@ -2629,7 +2631,7 @@
                   {
                     "key": "Scale",
                     "label": "Scale",
-                    "description": "Multiplier applied to the received value — for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
+                    "description": "Multiplier applied to the received value \u2014 for unit conversion, e.g. 0.001 to turn W into kW, or -1 to flip a sign convention.",
                     "type": "double",
                     "required": false,
                     "default": 1
@@ -2661,7 +2663,7 @@
                   {
                     "key": "RegisterType",
                     "label": "RegisterType",
-                    "description": "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4).",
+                    "description": "For Type 'modbus': which register bank \u2014 'holding' (function 3) or 'input' (function 4).",
                     "type": "enum",
                     "required": false,
                     "default": "holding",
@@ -2674,7 +2676,7 @@
                   {
                     "key": "DataType",
                     "label": "DataType",
-                    "description": "For Type 'modbus': how to decode the register(s) — uint16, int16, uint32, int32, or float32.",
+                    "description": "For Type 'modbus': how to decode the register(s) \u2014 uint16, int16, uint32, int32, or float32.",
                     "type": "enum",
                     "required": false,
                     "default": "uint16",
@@ -2690,7 +2692,7 @@
                   {
                     "key": "WordOrder",
                     "label": "WordOrder",
-                    "description": "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
+                    "description": "For Type 'modbus' 32-bit values: word order \u2014 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).",
                     "type": "enum",
                     "required": false,
                     "default": "big",
@@ -2736,14 +2738,14 @@
             {
               "key": "From",
               "label": "From",
-              "description": "Source node id — energy flows out of here.",
+              "description": "Source node id \u2014 energy flows out of here.",
               "type": "string",
               "required": false
             },
             {
               "key": "To",
               "label": "To",
-              "description": "Target node id — energy flows into here.",
+              "description": "Target node id \u2014 energy flows into here.",
               "type": "string",
               "required": false
             }
@@ -2772,7 +2774,7 @@
             {
               "key": "Tags",
               "label": "Tags",
-              "description": "Tags to apply to every node the pattern matches. A tag never changes a reading — only what a view shows and what the exports may carry.",
+              "description": "Tags to apply to every node the pattern matches. A tag never changes a reading \u2014 only what a view shows and what the exports may carry.",
               "type": "list",
               "required": false,
               "valueSchema": {
@@ -2862,7 +2864,7 @@
       {
         "key": "InferFromConservation",
         "label": "InferFromConservation",
-        "description": "Work out an unmeasured node's value from what it feeds, when exactly one path could have supplied it. Sound arithmetic, but it describes the hierarchy you drew rather than anything measured — so results are always labelled 'inferred'. Turn it off to show 'no data' instead.",
+        "description": "Work out an unmeasured node's value from what it feeds, when exactly one path could have supplied it. Sound arithmetic, but it describes the hierarchy you drew rather than anything measured \u2014 so results are always labelled 'inferred'. Turn it off to show 'no data' instead.",
         "type": "bool",
         "required": false,
         "default": true
@@ -2878,7 +2880,7 @@
       {
         "key": "MqttExportTags",
         "label": "MqttExportTags",
-        "description": "Limit the MQTT export to nodes with particular tags. Empty exports every node. Filtering changes only what is sent — never a value, and never any other destination.",
+        "description": "Limit the MQTT export to nodes with particular tags. Empty exports every node. Filtering changes only what is sent \u2014 never a value, and never any other destination.",
         "type": "object",
         "required": false,
         "properties": [
@@ -2982,7 +2984,7 @@
             {
               "key": "Framing",
               "label": "Framing",
-              "description": "Wire protocol: 'auto' (try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device answers), 'tcp' (native Modbus TCP), or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket — what most RS485-to-Ethernet gateways / serial dongles speak, e.g. an EG4 inverter on port 4196/8899). Leave on 'auto' unless you want to pin one.",
+              "description": "Wire protocol: 'auto' (try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device answers), 'tcp' (native Modbus TCP), or 'rtu-over-tcp' (Modbus RTU frames over a raw TCP socket \u2014 what most RS485-to-Ethernet gateways / serial dongles speak, e.g. an EG4 inverter on port 4196/8899). Leave on 'auto' unless you want to pin one.",
               "type": "enum",
               "required": false,
               "default": "auto",
@@ -3116,7 +3118,7 @@
       {
         "key": "CheckForUpdates",
         "label": "CheckForUpdates",
-        "description": "Periodically check the container registry for a newer image and report it (in the CR status and the GUI Diagnostics page). Read-only — never changes the Deployment on its own.",
+        "description": "Periodically check the container registry for a newer image and report it (in the CR status and the GUI Diagnostics page). Read-only \u2014 never changes the Deployment on its own.",
         "type": "bool",
         "required": false,
         "default": true
@@ -3145,7 +3147,7 @@
       {
         "key": "AutoUpdate",
         "label": "AutoUpdate",
-        "description": "Automatically roll the Deployment to the newest eligible release (bounded by Policy). Off by default — checking is safe, but applying an update restarts the workload.",
+        "description": "Automatically roll the Deployment to the newest eligible release (bounded by Policy). Off by default \u2014 checking is safe, but applying an update restarts the workload.",
         "type": "bool",
         "required": false,
         "default": false

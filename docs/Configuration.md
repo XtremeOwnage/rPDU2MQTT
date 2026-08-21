@@ -851,6 +851,51 @@ Notes:
 - Values feed the same exports as everything else, so an MQTT-sourced node reaches Prometheus, the MQTT
   tier export, and the HA Energy Dashboard without any extra wiring.
 
+### Values worked out from a node's other readings
+
+A meter that reports some of what it measures can have the rest. Add a binding of type `derived` and the
+value is computed from the node's own readings, using the electrical relations and nothing else:
+
+| Relation | Exact when |
+| --- | --- |
+| `S = V × I` | always (single phase) |
+| `P = S × PF` | always |
+| `P = V × I` | only at a power factor of 1 — a DC string, a resistive load |
+
+So **voltage, current, power, apparent power and power factor** can each be worked out from a pair of the
+others:
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - Id: grid
+      Label: Grid
+      Sources:
+        - { Type: mqtt, Metric: realpower, Topic: solar_assistant/inverter_1/grid_power/state, Direction: split }
+        - { Type: mqtt, Metric: voltage,   Topic: solar_assistant/inverter_1/grid_voltage/state }
+        - { Type: derived, Metric: current, Direction: split }
+```
+
+- **The exact relation wins.** With a power factor bound, current resolves as `(P ÷ PF) ÷ V` — reached in
+  two steps — rather than `P ÷ V`, which would under-report it by that factor. Operands may themselves be
+  derived; nothing is ever derived from itself.
+- **An approximation says so.** `P ÷ V` is offered only when nothing better fits, and the node editor prints
+  *assumes a power factor of 1* beside it.
+- **A measured reading always wins.** Bind an ammeter and the arithmetic steps aside.
+- **Both readings are required.** A node whose derived binding has no pair to work from is flagged in the
+  editor, naming the pairs that would do. The value is simply absent — never a zero, never half an answer.
+- A reading of `0` in a divisor, or either reading gone stale, produces nothing, and the Energy and
+  Hierarchy pages say which node and why in the withheld-sources banner.
+- Direction is carried through: `current#in` uses the power flowing that way, over the same bus voltage —
+  voltage and power factor have no direction.
+- The relations are single-phase. A three-phase meter reporting a line voltage needs its own maths, which
+  this does not attempt.
+
+> **Kubernetes:** the CRD no longer enumerates a source's `Type` — the set is open, since plugins contribute
+> types at runtime. If your cluster still has an older CRD, saving a `derived` binding fails with
+> `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/crds/rpduconfig.yaml` once and it
+> will not happen again, for this or any future type.
+
 ### Live sources from Modbus TCP
 
 A node's value can also come from a Modbus TCP device (an inverter, a meter, a PLC). Define the connection

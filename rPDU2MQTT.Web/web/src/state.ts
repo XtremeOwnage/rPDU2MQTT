@@ -1,6 +1,8 @@
-// Shared, mutable app state: the config schema and the editable config document, both set on load().
+// Shared, mutable app state: the config schema and the editable config document, both set on load(), plus
+// the relations a calculated binding can use — served by the backend rather than restated here, because a
+// second copy of the electrics is a second thing to be wrong about.
 // (Authored as ES modules; the build bundles them into one shared scope, as the GUI has always run.)
-export const state: { schema: any[]; data: any } = { schema: [], data: {} };
+export const state: { schema: any[]; data: any; derivations: any[] } = { schema: [], data: {}, derivations: [] };
 
 /// One page asking another to open on something specific — "show me Solar for today".
 ///
