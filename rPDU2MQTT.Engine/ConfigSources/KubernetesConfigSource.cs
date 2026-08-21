@@ -39,6 +39,11 @@ public sealed class KubernetesConfigSource : IConfigSource
         ("RPDU2MQTT_GUI_PASSWORD",   c => c.Gui.Password,   (c, v) => c.Gui.Password = v),
         ("RPDU2MQTT_API_KEY",        c => c.Api.ApiKey,     (c, v) => c.Api.ApiKey = v),
         ("RPDU2MQTT_OIDC_CLIENT_SECRET", c => c.Gui.Oidc?.ClientSecret, (c, v) => (c.Gui.Oidc ??= new()).ClientSecret = v),
+        // Every secret RedactSecrets strips has to be listed here, or a save writes the CR without it and
+        // there is nowhere left for it to come back from. These two were redacted from the CR before they
+        // were kept anywhere, and the first save after that destroyed the token.
+        ("RPDU2MQTT_HASS_TOKEN", c => c.HASS.EnergyDashboard.Token, (c, v) => c.HASS.EnergyDashboard.Token = v),
+        ("RPDU2MQTT_CACHE_PASSWORD", c => c.Cache.Password, (c, v) => c.Cache.Password = v),
     };
 
     public KubernetesConfigSource()
