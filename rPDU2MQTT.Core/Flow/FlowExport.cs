@@ -22,9 +22,6 @@ public static class FlowExport
     /// </summary>
     public static bool ToMetricsStore(FlowNode node) => !node.Synthetic || node.ReturnLane;
 
-    public static double NodeValue(FlowGraph graph, string id)
-        => TryNodeValue(graph, id, out var value) ? value : 0;
-
     /// <summary>
     /// The node's value when the graph actually determined one. False means nothing measures this node and
     /// nothing downstream determines it — publishing a number for it would be inventing one.
