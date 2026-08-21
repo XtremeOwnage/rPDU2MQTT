@@ -479,7 +479,7 @@
             "key": "Token",
             "label": "Token",
             "description": "Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).",
-            "type": "string",
+            "type": "password",
             "required": false
           },
           {
@@ -1095,7 +1095,7 @@
         "key": "ApiKey",
         "label": "ApiKey",
         "description": "EmonCMS write API key (or set RPDU2MQTT_EMONCMS_APIKEY). (Http transport.)",
-        "type": "string",
+        "type": "password",
         "required": false
       },
       {
@@ -1763,7 +1763,7 @@
         "key": "ApiKey",
         "label": "ApiKey",
         "description": "Optional API key enabling the write/control endpoints (or set RPDU2MQTT_API_KEY). When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).",
-        "type": "string",
+        "type": "password",
         "required": false
       }
     ]

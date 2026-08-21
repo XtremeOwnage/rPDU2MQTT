@@ -319,9 +319,18 @@ public static class ConfigSchema
 
     private static string ClassifyAndPopulate(Type type, string name, SchemaNode node)
     {
+        // What the GUI masks, and keeps out of the change-review list. A token and an API key are
+        // credentials as much as a password is: the Home Assistant long-lived token was rendered in clear
+        // text in the browser and shown verbatim in the review diff.
+        //
+        // Matched on whole words rather than "key", so a NodeKey or a GroupKey is still an editable string.
         if (type == typeof(string))
-            return name.Contains("password", StringComparison.OrdinalIgnoreCase) || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
-                ? "password" : "string";
+        {
+            var lower = name.ToLowerInvariant();
+            var secret = lower.Contains("password") || lower.Contains("secret")
+                      || lower.Contains("token") || lower.Contains("apikey");
+            return secret ? "password" : "string";
+        }
 
         if (type == typeof(bool)) return "bool";
         if (type == typeof(int) || type == typeof(long) || type == typeof(short)) return "int";

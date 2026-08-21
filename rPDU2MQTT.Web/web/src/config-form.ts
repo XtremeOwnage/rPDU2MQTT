@@ -156,7 +156,8 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
-    f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
+    // A masked field with no way to read it back is how a mistyped credential survives three attempts.
+    f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
     // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
     if (node.notEditableReason) {
       const why = document.createElement('div');
@@ -305,6 +306,25 @@ function navGroup(nav: any, title: string) {
   header.onclick = () => wrap.classList.toggle('collapsed');
   wrap.append(header, items); nav.appendChild(wrap);
   return items;
+}
+
+// A credential field with a show/hide button. Hidden by default — it is a credential — but readable while
+// it is being entered, because a value you cannot see is a value you cannot check against the one you
+// copied.
+function revealWrap(input: any) {
+  const wrap = el('div', { class: 'reveal-wrap' });
+  const eye = btn('Show');
+  eye.type = 'button';
+  eye.className = 'small reveal-btn';
+  eye.title = 'Show this value';
+  eye.onclick = () => {
+    const hidden = input.type === 'password';
+    input.type = hidden ? 'text' : 'password';
+    eye.textContent = hidden ? 'Hide' : 'Show';
+    eye.title = hidden ? 'Hide this value' : 'Show this value';
+  };
+  wrap.append(input, eye);
+  return wrap;
 }
 
 // Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
