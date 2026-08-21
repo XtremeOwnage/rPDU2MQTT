@@ -18,4 +18,15 @@ if (stickyHeader && /overflow\s*:\s*hidden/.test(tableRule[0]))
 if (!/table\.ld thead tr:first-child th:first-child\s*\{[^}]*border-top-left-radius/.test(css))
   fail('the table lost its rounded corners along with overflow:hidden');
 
-console.log('css: a sticky table header is not trapped inside its own table, and the corners are still round');
+// A phone fits about one and a half of the app bar's three groups. Without a breakpoint the brand's
+// nowrap text overflowed its shrunk box and ran underneath the status pills, and the build string
+// (v0.0.0-feat-gui-enhancements-395.1185+71ed512) was still asking for its full width (#395).
+const phone = /@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/.exec(css);
+if (!phone) fail('no phone breakpoint — the app bar has three groups and room for one and a half');
+if (!/\.brand-name\s*\{[^}]*text-overflow/.test(phone[1]))
+  fail('the brand can still overflow its box on a phone instead of being clipped');
+if (!/pill-mono\s*\{[^}]*display: *none/.test(phone[1]))
+  fail('the build string is still asking for its full width on a phone');
+
+console.log('css: a sticky table header is not trapped inside its own table, the corners are still round, '
+  + 'and the app bar gives way on a phone');

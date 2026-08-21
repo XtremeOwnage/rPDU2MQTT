@@ -126,16 +126,45 @@ export function addOverviewSection(nav: any, sections: any) {
       dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
       return;
     }
-    const strip = ([kind, label, icon]: [string, string, string]) => {
-      const list = (body.series || []).filter((s: any) => s.kind === kind && !String(s.node).includes('#'));
-      if (!list.length) return;
-      // Only a step every node reported counts: a partial sum reads as a dip that never happened.
-      const n = list[0].values.length;
-      const values = Array.from({ length: n }, (_, i) => {
+    const steps = ((body.series || [])[0]?.values || []).length;
+    /// Sum a set of series step by step. Only a step EVERY one of them reported counts: a partial sum reads
+    /// as a dip that never happened.
+    const sumSeries = (list: any[]) => !list.length ? [] : Array.from({ length: steps }, (_, i) => {
+      let total = 0;
+      for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
+      return total as number | null;
+    });
+    const ofKind = (kind: string, returns = false) => (body.series || [])
+      .filter((s: any) => s.kind === kind && String(s.node).endsWith('#in') === returns);
+
+    /// What the house drew at each step: the same balance as the figure above, done per reading rather
+    /// than once. A step missing any part of that balance is a gap — filling it with a zero would draw a
+    /// house that stopped using power.
+    const homeValues = () => {
+      const metered = ofKind('load');
+      if (metered.length) return sumSeries(metered);
+      const net = (kind: string) => {
+        const out = sumSeries(ofKind(kind)), back = sumSeries(ofKind(kind, true));
+        if (!out.length && !back.length) return [];
+        return Array.from({ length: steps }, (_, i) => {
+          const o = out[i], b = back[i];
+          if (o == null && b == null) return null;
+          return (o ?? 0) - (b ?? 0);
+        });
+      };
+      const solar = sumSeries(ofKind('solar')), grid = net('grid'), batt = net('battery');
+      const parts = [solar, grid, batt].filter(p => p.some(v => v != null));
+      if (!parts.length) return [];
+      return Array.from({ length: steps }, (_, i) => {
         let total = 0;
-        for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
-        return total;
+        for (const p of parts) { const v = p[i]; if (v == null) return null; total += v; }
+        return total as number | null;
       });
+    };
+
+    const strip = ([kind, label, icon]: [string, string, string]) => {
+      const values = kind === 'home' ? homeValues() : sumSeries(ofKind(kind));
+      if (!values.length || !values.some(v => v != null)) return;
       // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
       // its own says "something happened" without saying what.
       const known = values.filter((v): v is number => typeof v === 'number');
@@ -148,14 +177,14 @@ export function addOverviewSection(nav: any, sections: any) {
           el('span', { class: 'ov-peak', text: peak == null ? '' : `peak ${fmtW(peak)}` })),
         el('div', { class: 'ov-value', text: fmtW(nowV) }),
         sparkline({
-          values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W',
+          values, color: kind === 'home' ? 'var(--accent)' : (KIND_COLOR[kind] || 'var(--accent)'), units: body.units || 'W',
           width: 300, height: 72,
           at: (i: number) => (body.at || [])[i] ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         }),
         el('div', { class: 'ov-sub', text: known.length ? `${known.length} of ${values.length} readings` : 'no readings' }));
       dayRow.appendChild(box);
     };
-    ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['load', 'Load', '⌂']] as [string, string, string][]).forEach(strip);
+    ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['home', 'Home', '⌂']] as [string, string, string][]).forEach(strip);
   };
 
   const loadDay = async () => {

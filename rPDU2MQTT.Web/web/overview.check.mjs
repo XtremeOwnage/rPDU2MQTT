@@ -37,7 +37,7 @@ const day = { ok: true, units: 'W', stepSeconds: 900,
   at: Array.from({ length: n }, (_, i) => new Date(Date.now() - (n - i) * 900e3).toISOString()),
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: n }, (_, i) => Math.max(0, Math.round(9600 * Math.sin(Math.PI * (i - 24) / 48)))) },
-    { node: 'battery', label: 'Battery', kind: 'battery', values: Array.from({ length: n }, () => 0) },
+    { node: 'battery', label: 'Battery', kind: 'battery', values: Array.from({ length: n }, (_, i) => i === 10 ? null : 0) },
   ] };
 
 const { sandbox, getEl } = makeDom({
@@ -86,7 +86,15 @@ if (!/53\.4 V/.test(text())) fail(`the battery voltage is not shown: ${text().sl
 
 // Each 24-hour strip is a tile in its own right: what it is now, and the peak behind it.
 const strips = query(sec, 'div', true).filter(d => /ov-strip/.test(d.attrs?.class || d.className || ''));
-if (strips.length !== 2) fail(`expected a strip for solar and battery, got ${strips.length}`);
+// Solar and battery reported; the house is the balance of them. Grid has no node at all in this system,
+// and a kind nothing reports is not a strip of zeros.
+if (strips.length !== 3) fail(`expected strips for solar, battery and home, got ${strips.length}`);
+if (strips.some(s => /Grid/.test(s.textContent))) fail('a kind with no nodes was charted as zeros');
+const homeStrip = strips.find(s => /Home/.test(s.textContent));
+if (!homeStrip) fail(`the house's own 24 hours is missing: ${strips.map(s => s.textContent.slice(0, 20)).join(' | ')}`);
+// The battery missed one reading, so the balance is unknown for that step — 95 of 96, not 96 with a dip.
+if (!/95 of 96 readings/.test(homeStrip.textContent))
+  fail(`a step missing part of the balance was filled in rather than left out: ${homeStrip.textContent}`);
 for (const s of strips) {
   if (!/peak/.test(s.textContent)) fail(`a strip does not say its peak: ${s.textContent.slice(0, 80)}`);
   if (!/readings/.test(s.textContent)) fail(`a strip does not say how much of the window it covers: ${s.textContent.slice(0, 80)}`);
