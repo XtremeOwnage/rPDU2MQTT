@@ -443,6 +443,18 @@ for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}
   for (const want of ['Token', 'Url']) {
     if (!labels.includes(want)) fail(`the Energy Dashboard's ${want} is not on the Home Assistant page`);
   }
+
+  // …and it is a credential: masked in the browser, with a way to read back what was pasted.
+  const tokenField = query(ha, 'div', true).find(d => (d.dataset?.path || '').endsWith('EnergyDashboard.Token'));
+  if (!tokenField) fail('the token field has no path to identify it');
+  const box = query(tokenField, 'input', true)[0];
+  if (box?.type !== 'password') fail(`the Home Assistant token renders as ${box?.type} — it is a credential`);
+  const eye = query(tokenField, 'button', true).find(b => /Show|Hide/.test(b.textContent || ''));
+  if (!eye) fail('a masked credential has no way to be read back');
+  eye.onclick({});
+  if (box.type !== 'text') fail('the reveal button does not reveal');
+  eye.onclick({});
+  if (box.type !== 'password') fail('the reveal button does not hide again');
 }
 
 // A tool page belongs under the section it configures. Appended to the end of its group and marked as a
