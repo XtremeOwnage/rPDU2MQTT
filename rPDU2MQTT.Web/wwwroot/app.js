@@ -340,6 +340,12 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   const detach = () => cleanups.forEach(f => f());
   (detach       ).fit = () => { chosen = false; fit(); };
+  /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
+  /// at the pane is looking at.
+  (detach       ).zoomBy = (factor        ) => {
+    const r = scroll.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
+    zoomAbout(r.left + r.width / 2, r.top + r.height / 2, factor);
+  };
   return detach;
 }
 
@@ -1126,6 +1132,50 @@ function sumKnown(values                               )                {
 // ── history-control.ts ──────────────────────────────────────────
 // The "show a past moment" control, its query (`at`, `span`) and the sentence describing what came back.
 
+/// The periods people actually ask for. One click each, rather than a date, a time and a span to assemble.
+
+const PERIODS                        = [
+  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'],
+  ['month', 'This month'], ['year', 'This year'],
+];
+
+/// Which day a period ends on, and how many days it covers — in the reader's own calendar, because that is
+/// the calendar the words "this month" were said in.
+function periodWindow(key           , now       = new Date())                                {
+  const iso = (d      ) => d.toLocaleDateString('en-CA');
+  if (key === 'yesterday') {
+    const d = new Date(now.getTime());
+    d.setDate(d.getDate() - 1);
+    return { day: iso(d), days: 1 };
+  }
+  if (key === 'week') return { day: iso(now), days: now.getDay() + 1 };
+  if (key === 'month') return { day: iso(now), days: now.getDate() };
+  if (key === 'year') {
+    const jan1 = new Date(now.getFullYear(), 0, 1);
+    // Whole days between two local midnights: the difference in ms divided by a day is off by an hour
+    // twice a year, and rounding puts it back.
+    return { day: iso(now), days: Math.round((now.setHours(0, 0, 0, 0) - jan1.getTime()) / 86_400_000) + 1 };
+  }
+  return { day: iso(now), days: 1 };
+}
+
+/// A row of one-click periods, with the one being shown marked.
+function periodRow(onPick                          )                                                              {
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
+  const buttons = PERIODS.map(([key, label]) => {
+    const b = btn(label);
+    b.dataset.period = key;
+    b.onclick = () => onPick(key);
+    row.appendChild(b);
+    return b;
+  });
+  return {
+    row,
+    mark: (key) => buttons.forEach(b => b.classList[b.dataset.period === key ? 'add' : 'remove']('primary')),
+  };
+}
+
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
 function historyQuery(hist                                          )         {
   const at = hist.at();
@@ -1223,6 +1273,18 @@ function historyControl(onChange                             )
   window.addEventListener?.('rpdu:activate', syncEnabled);
   return {
     row,
+    /// Show a period: the day it ends on, and how many days it covers. A span the fixed list does not offer
+    /// (this month is however many days into the month it is) is added to it, so the control still reads as
+    /// one setting rather than going blank.
+    set: (day        , days        ) => {
+      input.value = day;
+      timeIn.value = '';
+      const want = String(Math.max(1, days));
+      if (!Array.from(spanSel.children).some((o     ) => o.value === want))
+        spanSel.appendChild(el('option', { value: want, text: `${want} days to it` }));
+      spanSel.value = want;
+      syncSpan();
+    },
     /// The instant to ask for.
     at: () => {
       if (!historyOn() || !input.value) return '';
@@ -1290,6 +1352,8 @@ function barChart(opts
 
                                 
 
+                                           
+
  )                             {
   const { days, lines, units, stacked } = opts;
   const has = (d        ) => lines.some(l => l.values[d] != null);
@@ -1308,14 +1372,15 @@ function barChart(opts
     0);
   const span = (peak - trough) || 1;
 
-  const W = opts.fitTo && opts.fitTo > 0
-    ? Math.max(360, Math.min(days.length * 26, opts.fitTo))
-    : Math.max(720, days.length * 26);
-  const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
+  // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
+  // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(360, opts.fitTo) : Math.max(720, days.length * 26);
+  const H = opts.height && opts.height > 0 ? opts.height : 240;
+  const padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const slot = plotW / days.length;
   const x = (d        ) => padL + slot * d;
-  const barW = Math.max(3, slot * 0.72);
+  const barW = Math.min(Math.max(3, slot * 0.72), 48);
   const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
   const zeroY = y(0);
 
@@ -1525,6 +1590,67 @@ function sparkline(opts
 
   return svg;
 }
+
+// ── energy-diagram.ts ───────────────────────────────────────────
+// The animated energy diagram: a hub with an arm per source, dots travelling the way the power is going.
+// Shared, because the home page and the Energy page must not draw the same system two different ways.
+
+// A central hub with Solar (top), Grid (left), Battery (right), Home (bottom).
+const HUB = { x: 220, y: 150 };
+const NODEPOS                                           = {
+  solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
+};
+
+/// Draw the arms into `target`, replacing whatever was there. `onOpen`, when given, makes a node clickable.
+function drawEnergyFlow(target     , arms           , onOpen                                     ) {
+    target.innerHTML = '';
+    // Frame only the arms that exist.
+    const ys = arms.map(a => NODEPOS[a.key].y);
+    // Below a node sits its label (+42) and value (+57); above it, the ring (r 26).
+    const y0 = Math.min(HUB.y, ...ys) - 40, y1 = Math.max(HUB.y, ...ys) + 70;
+    const svg = svgEl('svg', {
+      viewBox: `12 ${y0} 416 ${y1 - y0}`,
+      width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
+    });
+    const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
+    svg.append(lines, dots, nodes);
+
+    arms.forEach(a => {
+      const p = NODEPOS[a.key];
+      // Base connector (always visible, dim) between the node and the hub.
+      lines.appendChild(svgEl('line', { x1: p.x, y1: p.y, x2: HUB.x, y2: HUB.y, class: 'energy-arm' }));
+
+      // Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node). Home only ever consumes.
+      const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
+      const mag = Math.abs(a.flow ?? 0);
+      if (a.flow != null && mag > 1) {
+        const [sx, sy, ex, ey] = toHub ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
+        const kw = mag / 1000;
+        const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
+        const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
+        for (let i = 0; i < count; i++) {
+          const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
+          dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
+          dots.appendChild(dot);
+        }
+      }
+
+      // Node: a coloured ring with its icon, a label and the live figure.
+      const g = svgEl('g', { class: 'energy-node' + (a.flow != null && mag > 1 ? ' live' : '') });
+      g.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 26, class: 'energy-node-ring', style: `stroke:${a.color}` }));
+      const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
+      const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
+      const val = svgEl('text', { x: p.x, y: p.y + 57, class: 'energy-node-val' }); val.textContent = a.text; g.appendChild(val);
+      // Click through to this node's own day. The whole group is the target — asking anyone to hit the
+      // 26px ring exactly is asking them not to bother.
+      if (onOpen && a.ids && a.ids.length) onOpen(a, g);
+      nodes.appendChild(g);
+    });
+
+    // A small hub dot where the arms meet.
+    nodes.appendChild(svgEl('circle', { cx: HUB.x, cy: HUB.y, r: 5, class: 'energy-hub' }));
+    target.appendChild(svg);
+  }
 
 // ── flow-banners.ts ─────────────────────────────────────────────
 // The banners above the flow chart: sources the bridge is withholding.
@@ -3344,10 +3470,27 @@ function addFlowSection(nav     , sections     ) {
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
-    const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
-    scroll.appendChild(svg); wrap.appendChild(scroll);
+    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once
+    // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
+    const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
+    scroll.appendChild(svg);
+    const stage = el('div', { class: 'flow-stage' }, scroll);
+    wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    // Zoom where the diagram is, not in a toolbar under it: on a graph this size the reader's attention is
+    // already inside the pane.
+    const zoomBtn = (label        , title        , act            ) => {
+      const b = btn(label);
+      b.title = title;
+      b.onclick = act;
+      return b;
+    };
+    stage.appendChild(el('div', { class: 'flow-zoom' },
+      zoomBtn('+', 'Zoom in', () => (zoom       ).zoomBy(1.2)),
+      zoomBtn('−', 'Zoom out', () => (zoom       ).zoomBy(1 / 1.2)),
+      zoomBtn('⤢', 'Fit the diagram to the page', () => (zoom       ).fit())));
 
     // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
     // and being told to use them while the diagram sits three screens wide is its own kind of broken.
@@ -4772,12 +4915,24 @@ function addEnergyOverviewSection(nav     , sections     ) {
   // As on the Flow page: a whole day is an energy question, a specific time is a power one.
   let hadDay = false;
   const hist = historyControl((what     ) => {
+    periods.mark(null);
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
       showSel.value = 'energytoday';
     load();
   });
+  // One click for the periods people actually ask for. A period is a question about energy — "how much
+  // today" — so it answers in energy rather than leaving a power reading under a heading about a month.
+  const periods = periodRow((key           ) => {
+    const { day, days } = periodWindow(key);
+    hist.set(day, days);
+    showSel.value = 'energytoday';
+    periods.mark(key);
+    hadDay = true;
+    load();
+  });
+  sec.appendChild(periods.row);
   sec.appendChild(hist.row);
   showSel.onchange = () => load();
 
@@ -4889,60 +5044,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return { fraction, over: value > max, max, units };
   };
 
-  // The animated flow diagram: a central hub with Solar (top), Grid (left).
-  const HUB = { x: 220, y: 150 };
-  const NODEPOS                                           = {
-    solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
-  };
-  const drawFlow = (arms                                                                                                                  ) => {
-    flowWrap.innerHTML = '';
-    // Frame only the arms that exist.
-    const ys = arms.map(a => NODEPOS[a.key].y);
-    // Below a node sits its label (+42) and value (+57); above it, the ring (r 26).
-    const y0 = Math.min(HUB.y, ...ys) - 40, y1 = Math.max(HUB.y, ...ys) + 70;
-    const svg = svgEl('svg', {
-      viewBox: `12 ${y0} 416 ${y1 - y0}`,
-      width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
-    });
-    const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
-    svg.append(lines, dots, nodes);
-
-    arms.forEach(a => {
-      const p = NODEPOS[a.key];
-      // Base connector (always visible, dim) between the node and the hub.
-      lines.appendChild(svgEl('line', { x1: p.x, y1: p.y, x2: HUB.x, y2: HUB.y, class: 'energy-arm' }));
-
-      // Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node). Home only ever consumes.
-      const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
-      const mag = Math.abs(a.flow ?? 0);
-      if (a.flow != null && mag > 1) {
-        const [sx, sy, ex, ey] = toHub ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
-        const kw = mag / 1000;
-        const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
-        const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
-        for (let i = 0; i < count; i++) {
-          const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
-          dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
-          dots.appendChild(dot);
-        }
-      }
-
-      // Node: a coloured ring with its icon, a label and the live figure.
-      const g = svgEl('g', { class: 'energy-node' + (a.flow != null && mag > 1 ? ' live' : '') });
-      g.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 26, class: 'energy-node-ring', style: `stroke:${a.color}` }));
-      const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
-      const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
-      const val = svgEl('text', { x: p.x, y: p.y + 57, class: 'energy-node-val' }); val.textContent = a.text; g.appendChild(val);
-      // Click through to this node's own day. The whole group is the target — asking anyone to hit the
-      // 26px ring exactly is asking them not to bother.
-      if (a.ids && a.ids.length) openOnClick(g, a.ids, a.label);
-      nodes.appendChild(g);
-    });
-
-    // A small hub dot where the arms meet.
-    nodes.appendChild(svgEl('circle', { cx: HUB.x, cy: HUB.y, r: 5, class: 'energy-hub' }));
-    flowWrap.appendChild(svg);
-  };
+  const drawFlow = (arms           ) =>
+    drawEnergyFlow(flowWrap, arms, (a, g) => openOnClick(g, a.ids , a.label));
 
   // Why is this tile empty?
   const whyNoReading = (kind        ) => {
@@ -5235,6 +5338,253 @@ function addEnergyOverviewSection(nav     , sections     ) {
   // Fallback for when the stream isn't up; it does nothing while it is.
   setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
+}
+
+// ── sections/overview.ts ────────────────────────────────────────
+// The landing page: what the system is doing right now, in one screen.
+//
+// The Status board answered "is the bridge healthy", which is the question you ask second. The first one
+// is "what is my power doing" — and it was three clicks away behind a board of green dots (#395).
+
+function addOverviewSection(nav     , sections     ) {
+  const link = navLink(nav, 'Overview', '⌂');
+  const sec = el('div', { class: 'section' }); sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Overview' }));
+  sec.appendChild(el('div', {
+    class: 'desc',
+    text: 'What the system is doing now, what it has done today, and anything that needs attention. '
+      + 'Nothing here is estimated: a figure nothing measured is shown as a dash.',
+  }));
+
+  const bar = el('div', { class: 'sec-actions' });
+  const refresh = btn('Refresh');
+  const stamp = el('span', { class: 'ld-count' });
+  bar.append(refresh, stamp); sec.appendChild(bar);
+
+  // Anything wrong goes at the top, at full size. When nothing is, it collapses to a single line.
+  const alerts = el('div'); sec.appendChild(alerts);
+
+  const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
+  const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
+  const battWrap = el('div', { class: 'ov-battery' }); now.appendChild(battWrap);
+
+  sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
+  const todayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(todayRow);
+
+  sec.appendChild(el('h3', { text: 'Last 24 hours', class: 'ov-h3' }));
+  const dayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(dayRow);
+
+  const fmtW = (w               ) => w == null ? '—'
+    : Math.abs(w) >= 1000 ? `${formatNum(Math.round(w / 100) / 10)} kW` : `${formatNum(Math.round(w))} W`;
+  const fmtKwh = (v               ) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} kWh`;
+
+  const idsOfKind = (nodes       , kind        ) => nodes.filter(n => n.kind === kind && !n.id.includes('#')).map(n => n.id);
+  const sumOfKind = (nodes       , kind        ) => {
+    const vals = nodes.filter(n => n.kind === kind && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
+    return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
+  };
+
+  /// A figure with its name, and the sub-line that says what it means. Clicking opens that node's day.
+  const tile = (kind        , icon        , label        , value        , sub        , ids          ) => {
+    const t = el('div', { class: 'ov-tile ov-' + kind });
+    t.append(
+      el('div', { class: 'ov-tile-head' }, el('span', { class: 'ov-icon', text: icon }), el('span', { text: label })),
+      el('div', { class: 'ov-value', text: value }),
+      el('div', { class: 'ov-sub', text: sub }));
+    if (ids.length) {
+      t.classList.add('is-link');
+      t.title = `Show ${label} through the day`;
+      t.onclick = () => {
+        requestFocus(ids, 'today=1&step=300', label);
+        (document.querySelector('nav a[data-label="Trends"]')       )?.click();
+      };
+    }
+    return t;
+  };
+
+  /// The battery, as the thing people actually look for: how full, which way, and how fast.
+  const drawBattery = (soc               , watts               , why        ) => {
+    battWrap.innerHTML = '';
+    const charging = watts != null && watts < -1;
+    const idle = watts == null || Math.abs(watts) <= 1;
+    const pct = soc == null ? null : Math.max(0, Math.min(100, soc));
+    const level = pct == null ? 'unknown' : pct >= 60 ? 'good' : pct >= 25 ? 'warn' : 'bad';
+
+    const card = el('div', { class: 'ov-batt-card' });
+    card.appendChild(el('div', { class: 'ov-batt-title', text: 'Battery' }));
+    // A battery drawn as a battery: the fill IS the charge, so the number is confirmation, not the message.
+    const body = el('div', { class: 'ov-batt-body ov-batt-' + level });
+    const shell = el('div', { class: 'ov-batt-shell' });
+    const fill = el('div', { class: 'ov-batt-fill' });
+    fill.style.height = (pct == null ? 0 : pct) + '%';
+    shell.append(fill, el('div', { class: 'ov-batt-cap' }));
+    body.append(shell, el('div', { class: 'ov-batt-read' },
+      el('div', { class: 'ov-batt-pct', text: pct == null ? '—' : pct + '%' }),
+      el('div', { class: 'ov-sub', text: pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts ))}` : `discharging · ${fmtW(watts )}` })));
+    card.appendChild(body);
+    battWrap.appendChild(card);
+  };
+
+  /// One problem, said plainly and at a size that cannot be scrolled past.
+  const alertCard = (level        , title        , state        , detail        ) =>
+    el('div', { class: 'ov-alert ' + level },
+      el('span', { class: 'ov-alert-icon', text: level === 'bad' ? '⛔' : '⚠' }),
+      el('div', {},
+        el('div', { class: 'ov-alert-title', text: `${title} — ${state}` }),
+        el('div', { class: 'desc', text: detail || '' })));
+
+  const drawStatus = (body     ) => {
+    const cards = (body && body.cards) || [];
+    alerts.innerHTML = '';
+    if (!cards.length) return;
+    const wrong = cards.filter((c     ) => c.level === 'bad' || c.level === 'warn');
+    if (!wrong.length) {
+      const ok = cards.filter((c     ) => c.level === 'good').length;
+      alerts.appendChild(el('div', { class: 'ov-allgood' },
+        el('span', { class: 'dot good' }),
+        el('span', { text: `All ${ok} component${ok === 1 ? '' : 's'} healthy` }),
+        el('a', { class: 'ov-allgood-link', text: 'Status board', onclick: () => (document.querySelector('nav a[data-label="Status"]')       )?.click() })));
+      return;
+    }
+    wrong.sort((a     , b     ) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
+    wrong.forEach((c     ) => alerts.appendChild(alertCard(c.level, c.title, c.state, c.detail)));
+  };
+
+  let lastDay      = null;
+
+  const drawDay = () => {
+    dayRow.innerHTML = '';
+    const body = lastDay;
+    if (!body?.ok || !(body.series || []).length) {
+      dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
+      return;
+    }
+    const strip = ([kind, label]                  ) => {
+      const list = (body.series || []).filter((s     ) => s.kind === kind && !String(s.node).includes('#'));
+      if (!list.length) return;
+      // Only a step every node reported counts: a partial sum reads as a dip that never happened.
+      const n = list[0].values.length;
+      const values = Array.from({ length: n }, (_, i) => {
+        let total = 0;
+        for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
+        return total;
+      });
+      const box = el('div', { class: 'ov-tile' });
+      box.append(
+        el('div', { class: 'ov-tile-head' }, el('span', { text: label })),
+        sparkline({ values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W', width: 260, height: 64 }));
+      dayRow.appendChild(box);
+    };
+    ([['solar', 'Solar'], ['grid', 'Grid'], ['battery', 'Battery'], ['load', 'Load']]                      ).forEach(strip);
+  };
+
+  const loadDay = async () => {
+    try {
+      const r = await api('/api/flow/series?minutes=1440&step=900&metric=realpower');
+      lastDay = r.body;
+    } catch { lastDay = null; }
+    drawDay();
+  };
+
+  const drawNow = (power     , energy     , live                        , liveInfo                     ) => {
+    const nodes = (power?.nodes || [])         ;
+    const solarIds = idsOfKind(nodes, 'solar'), gridIds = idsOfKind(nodes, 'grid'), battIds = idsOfKind(nodes, 'battery');
+    const solarW = sumOfKind(nodes, 'solar');
+    const gridOut = sumOfKind(nodes, 'grid');
+    const gridIn = sumKnown(gridIds.map(id => live[`${id}|realpower#in`]));
+    const battOut = sumOfKind(nodes, 'battery');
+    const battIn = sumKnown(battIds.map(id => live[`${id}|realpower#in`]));
+    // One signed figure per bidirectional node: out is positive, in is negative.
+    const gridNet = gridOut == null && gridIn == null ? null : (gridOut || 0) - (gridIn || 0);
+    const battNet = battOut == null && battIn == null ? null : (battOut || 0) - (battIn || 0);
+    // A metered load node wins over the balance of sources; without one the home is what is left over.
+    const loadW = idsOfKind(nodes, 'load').length ? sumOfKind(nodes, 'load') : undefined;
+    const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
+
+    const arms            = [];
+    if (solarIds.length) arms.push({ key: 'solar', icon: '☀', label: 'Solar', text: fmtW(solarW), color: KIND_COLOR.solar, flow: solarW, ids: solarIds });
+    if (gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmtW(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
+    if (battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: fmtW(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
+    arms.push({ key: 'home', icon: '⌂', label: 'Home', text: fmtW(homeW), color: 'var(--accent)', flow: homeW == null ? null : -homeW });
+    drawEnergyFlow(flowWrap, arms, (a, g) => {
+      g.style.cursor = 'pointer';
+      g.onclick = () => {
+        requestFocus(a.ids , 'today=1&step=300', a.label);
+        (document.querySelector('nav a[data-label="Trends"]')       )?.click();
+      };
+    });
+
+    const socVals = battIds.map(id => live[`${id}|soc`]).filter((v)              => typeof v === 'number');
+    drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
+      battNet, battIds.length ? 'no charge source bound' : 'no battery configured');
+
+    // --- Today ------------------------------------------------------------------------------------
+    todayRow.innerHTML = '';
+    const eNodes = (energy?.nodes || [])         ;
+    if (!eNodes.length) {
+      todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
+      return;
+    }
+    const eSolar = sumOfKind(eNodes, 'solar');
+    const eGridOut = sumOfKind(eNodes, 'grid');
+    const eGridIn = sumKnown(gridIds.map(id => {
+      const n = eNodes.find((x     ) => x.id === id + '#in');
+      return typeof n?.value === 'number' ? n.value : undefined;
+    }));
+    const eBattOut = sumOfKind(eNodes, 'battery');
+    const eLoad = idsOfKind(eNodes, 'load').length ? sumOfKind(eNodes, 'load') : undefined;
+    const eHome = homeEnergy({
+      solar: eSolar, battery: eBattOut,
+      grid: eGridOut == null && eGridIn == null ? null : (eGridOut || 0) - (eGridIn || 0),
+      ...(eLoad === undefined ? {} : { load: eLoad }),
+    });
+
+    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), 'since the day rolled over', solarIds));
+    if (gridIds.length) todayRow.appendChild(tile('grid', '⚡', 'Grid imported', fmtKwh(eGridOut), eGridIn ? `${fmtKwh(eGridIn)} exported` : 'nothing exported', gridIds));
+    todayRow.appendChild(tile('home', '⌂', 'Home used', fmtKwh(eHome), eHome == null ? 'no measured sources' : 'everything the house drew', []));
+    const pct = selfSufficiencyPct(eHome, eGridOut);
+    todayRow.appendChild(tile('self', '◔', 'Self-sufficiency', pct == null ? '—' : `${Math.round(pct)}%`,
+      pct == null ? 'needs both home use and grid import' : 'of what the house used came from you', []));
+  };
+
+  let power      = null, energy      = null;
+
+  const load = async () => {
+    stamp.textContent = 'loading…';
+    try {
+      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energytoday')]);
+      power = p.body; energy = e.body;
+      const nodes = (power?.nodes || [])         ;
+      const battIds = idsOfKind(nodes, 'battery'), gridIds = idsOfKind(nodes, 'grid');
+      const q = [
+        ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
+        ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
+      ];
+      const live                         = {}, liveInfo                      = {};
+      if (q.length) {
+        try {
+          const lr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+          (lr.body?.values || []).forEach((v     ) => {
+            liveInfo[`${v.node}|${v.metric}`] = v;
+            if (typeof v.value === 'number') live[`${v.node}|${v.metric}`] = v.value;
+          });
+        } catch { /* the live cache is not there; those readings stay absent */ }
+      }
+      drawNow(power, energy, live, liveInfo);
+      stamp.textContent = 'updated ' + new Date().toLocaleTimeString();
+    } catch (err     ) {
+      stamp.textContent = '';
+      alerts.appendChild(alertCard('bad', 'Overview', 'could not load', err?.message || 'the request failed'));
+    }
+    try { drawStatus((await api('/api/status/board')).body); } catch { /* the board has its own page */ }
+    await loadDay();
+  };
+
+  refresh.onclick = () => load();
+  liveWhileActive(sec, () => 'flow:realpower', () => load());
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 15000);
+  link.onclick = () => { activate(link, sec); load(); };
+  return { link, load };
 }
 
 // ── sections/mqtt-import.ts ─────────────────────────────────────
@@ -5741,7 +6091,7 @@ function addTrendsSection(nav     , sections     ) {
   const rangeSel = el('select', { title: 'How far back to chart. Within a day the charts show power; across days, the daily energy totals.' })                     ;
   RANGES.forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
   rangeSel.value = 'days=30';
-  rangeSel.onchange = () => { if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  rangeSel.onchange = () => { periods.mark(null); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
   /// Where an intra-day window actually fell, in the reader's own clock. The day rolls over on the server's
   /// configured period zone, which is not necessarily the reader's — so it is said outright rather than
   /// inferred from the axis.
@@ -5780,10 +6130,14 @@ function addTrendsSection(nav     , sections     ) {
   /// How wide an intra-day chart may be. A day of five-minute samples is 288 bars: at the daily rule of
   /// 26px each that is a 7,488px chart in a ~1,600px pane, so the reader sees a fifth of their day, opened
   /// at the far end, with two axis labels on it. A day belongs on screen whole.
-  const fitTo = () => (body?.at?.length || 0) > 60 ? (charts.clientWidth || 1200) : undefined;
+  const fitTo = () => charts.clientWidth || 1200;
+  /// The chart everything else on the page is read against gets the room a tall window offers it; the ones
+  /// stacked below keep their own size so they all stay on screen together.
+  const leadHeight = () => Math.max(240, Math.min(Math.round((window.innerHeight || 900) * 0.34), 420));
 
   // What to chart. The range no longer decides it silently: the range's own default is filled in, and from
   // then on this is the answer.
+
   const LABELS                         = {
     realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
     frequency: 'frequency', energy: 'energy', energytoday: 'energy',
@@ -5791,7 +6145,7 @@ function addTrendsSection(nav     , sections     ) {
   const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
   // Seeded with the two every build exports, so a page that cannot reach /api/flow/metrics still offers
   // the right default for each range instead of labelling a chart of energy "power".
-  let METRICS                                      = [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }];
+  let METRICS           = [{ metric: 'realpower', units: 'W', epoch: 'instant' }, { metric: 'energytoday', units: 'kWh', epoch: 'period' }];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
   const unitsOf = (m        ) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
@@ -5802,12 +6156,16 @@ function addTrendsSection(nav     , sections     ) {
   /// The metric a range implies when nobody has said otherwise.
   const impliedMetric = () => {
     const wants = (RANGES.find(r => r[0] === rangeSel.value) || [])[2];
-    const found = METRICS.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
-    return (found || METRICS[0]).metric;
+    const list = chartable();
+    const found = list.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
+    return (found || list[0]).metric;
   };
+  /// What can honestly be drawn as a bar per point. A lifetime counter cannot: each bar would be everything
+  /// the meter has ever seen, so the chart is a staircase and the day's own figure is nowhere on it.
+  const chartable = () => METRICS.filter(m => m.epoch !== 'lifetime');
   const fillMetrics = () => {
     metricSel.innerHTML = '';
-    METRICS.forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
+    chartable().forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
     if (!metricChosen) metricSel.value = impliedMetric();
   };
   fillMetrics();
@@ -5816,6 +6174,23 @@ function addTrendsSection(nav     , sections     ) {
   const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' })                     ;
   [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
   modeSel.onchange = () => draw();
+
+  // One click for the periods people actually ask for, and a period is a question about energy.
+  const periods = periodRow((key           ) => {
+    const { days } = periodWindow(key);
+    // A day is charted through its own clock; several are charted a bar each.
+    const range = key === 'today' ? 'today=1&step=300'
+      : key === 'yesterday' ? 'today=1&back=1&step=300'
+      : days < 2 ? 'today=1&step=300' : `days=${days}`;
+    if (!Array.from(rangeSel.children).some((o     ) => o.value === range))
+      rangeSel.appendChild(el('option', { value: range, text: `${key === 'week' ? 'this week' : key === 'month' ? 'this month' : 'this year'} (${days} days)` }));
+    rangeSel.value = range;
+    const energy = chartable().find(m => !RATES.includes(m.units));
+    if (energy) { metricSel.value = energy.metric; metricChosen = true; }
+    periods.mark(key);
+    load();
+  });
+  sec.appendChild(periods.row);
 
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
@@ -5990,7 +6365,7 @@ function addTrendsSection(nav     , sections     ) {
       }));
       gaps = section(byNodeTitle(),
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo() }), lines);
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo(), height: leadHeight() }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
       box.appendChild(el('h3', { text: byNodeTitle(), style: { margin: '4px 0', fontSize: '15px' } }));
@@ -6032,7 +6407,7 @@ function addTrendsSection(nav     , sections     ) {
           + 'The share of the home’s energy that did not come from the grid'
           + (load ? '.' : ', with the home taken as the balance of the measured sources.')
           + ' A day missing either figure is left empty rather than estimated.',
-          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial }), ssLines);
+          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial, fitTo: fitTo() }), ssLines);
       }
     }
 
@@ -6867,7 +7242,8 @@ const NAV_GROUPS                                        = [
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
-  { title: 'System', items: [{ tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  // The status board is a System page: it answers "is the bridge healthy", which is the second question.
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -7036,9 +7412,9 @@ function build() {
   });
   NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
 
-  // The landing page: a status board, rendered first so it's the default tab (#186).
-  const home = addHomeSection(nav, sections);
-  const first      = home.link;
+  // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
+  const overview = addOverviewSection(nav, sections);
+  const first      = overview.link;
 
   for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).

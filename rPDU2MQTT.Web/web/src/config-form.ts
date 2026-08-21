@@ -17,6 +17,7 @@ import { addTrendsSection } from './sections/trends.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addHomeSection } from './sections/home.js';
+import { addOverviewSection } from './sections/overview.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
 import { addFeaturesSection, featureToggle, jumpToFeatures } from './sections/features.js';
 
@@ -274,7 +275,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
-  { title: 'System', items: [{ tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  // The status board is a System page: it answers "is the bridge healthy", which is the second question.
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -443,9 +445,9 @@ export function build() {
   });
   NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
 
-  // The landing page: a status board, rendered first so it's the default tab (#186).
-  const home = addHomeSection(nav, sections);
-  const first: any = home.link;
+  // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
+  const overview = addOverviewSection(nav, sections);
+  const first: any = overview.link;
 
   for (const g of navGroups) {
     // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).

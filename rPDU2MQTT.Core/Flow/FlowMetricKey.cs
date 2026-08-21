@@ -14,6 +14,15 @@ public static class FlowMetricKey
     /// <summary>Suffix marking an in-direction reading. Chosen so it can't collide with a real metric name.</summary>
     public const string InSuffix = "#in";
 
+    /// <summary>
+    /// How a return lane is named: the node's own label, plus what flowing back in means for its kind. One
+    /// rule, because the graph and a history chart naming the same lane differently is a bug report.
+    /// </summary>
+    public static string ReturnLabel(string label, string? kind)
+        => label + (string.Equals(kind, "battery", System.StringComparison.OrdinalIgnoreCase) ? " (charging)"
+                  : string.Equals(kind, "grid", System.StringComparison.OrdinalIgnoreCase) ? " (export)"
+                  : " (in)");
+
     /// <summary>The storage key for <paramref name="metric"/> in the given direction ("in" / "out").</summary>
     public static string For(string metric, string? direction)
         => string.Equals(direction, "in", System.StringComparison.OrdinalIgnoreCase) ? metric + InSuffix : metric;

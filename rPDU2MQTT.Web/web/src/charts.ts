@@ -47,6 +47,8 @@ export function barChart(opts: {
   /// same rule applied to 288 of them: a 7,488px chart in a ~1,600px pane, so a reader sees a fifth of
   /// their day and two axis labels, and cannot tell that the rest exists.
   fitTo?: number;
+  /// Chart height in px. Defaults to 240 — the size that suits a chart with others stacked under it.
+  height?: number;
 }): { svg: any; gaps: number } {
   const { days, lines, units, stacked } = opts;
   const has = (d: number) => lines.some(l => l.values[d] != null);
@@ -65,14 +67,15 @@ export function barChart(opts: {
     0);
   const span = (peak - trough) || 1;
 
-  const W = opts.fitTo && opts.fitTo > 0
-    ? Math.max(360, Math.min(days.length * 26, opts.fitTo))
-    : Math.max(720, days.length * 26);
-  const H = 240, padL = 56, padB = 40, padT = 12, padR = 8;
+  // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
+  // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(360, opts.fitTo) : Math.max(720, days.length * 26);
+  const H = opts.height && opts.height > 0 ? opts.height : 240;
+  const padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const slot = plotW / days.length;
   const x = (d: number) => padL + slot * d;
-  const barW = Math.max(3, slot * 0.72);
+  const barW = Math.min(Math.max(3, slot * 0.72), 48);
   const y = (v: number) => padT + plotH - ((v - trough) / span) * plotH;
   const zeroY = y(0);
 

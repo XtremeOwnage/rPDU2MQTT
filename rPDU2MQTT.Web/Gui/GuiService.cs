@@ -489,14 +489,13 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
 
             // The shape of the graph comes from the live build — its nodes, labels and kinds.
             var shape = FlowGraphBuilder.Build(data, config.EnergyFlow, metric, live);
-            var ids = shape.Nodes.Where(n => !n.Synthetic).Select(n => n.Id).ToList();
-            if (ids.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
+            var lanes = FlowLanes.For(shape.Nodes);
+            if (lanes.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
 
             // One request where the backend can answer a range.
-            var perDay = await history.SeriesAsync(ids, metric, when, cts.Token);
+            var perDay = await history.SeriesAsync(lanes.Select(l => l.Id).ToList(), metric, when, cts.Token);
 
-            var series = shape.Nodes
-                .Where(n => !n.Synthetic)
+            var series = lanes
                 .Select(n => new
                 {
                     node = n.Id,
@@ -1769,7 +1768,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     null, null, ctx.RequestAborted), ConfigSchema.Json);
             }
 
-            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 92) : 30;
+            // Up to a year: "this year" is a period people ask for, and 92 days silently answered a different
+            // question than the one the button said.
+            var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 366) : 30;
             var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
 
             // Each day read at its own rollover, not at whatever time of day it happens to be now.
@@ -1786,7 +1787,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/api/flow/metrics", () => Results.Json(new
         {
             ok = true,
-            metrics = FlowTiers.Metrics(config).Select(m => new { metric = m, units = FlowUnits.Canonical(m) }),
+            metrics = FlowTiers.Metrics(config)
+                .Select(m => new { metric = m, units = FlowUnits.Canonical(m), epoch = FlowUnits.Epoch(m) }),
         }, ConfigSchema.Json));
 
         // Readings the bridge is deliberately dropping, and why.

@@ -310,6 +310,12 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
 
   const detach = () => cleanups.forEach(f => f());
   (detach as any).fit = () => { chosen = false; fit(); };
+  /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
+  /// at the pane is looking at.
+  (detach as any).zoomBy = (factor: number) => {
+    const r = scroll.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
+    zoomAbout(r.left + r.width / 2, r.top + r.height / 2, factor);
+  };
   return detach;
 }
 

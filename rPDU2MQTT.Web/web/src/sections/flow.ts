@@ -592,10 +592,27 @@ export function addFlowSection(nav: any, sections: any) {
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
-    const scroll = el('div', { style: { overflow: 'auto', maxHeight: '74vh', border: '1px solid var(--line)', borderRadius: '6px' } });
-    scroll.appendChild(svg); wrap.appendChild(scroll);
+    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once
+    // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
+    const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
+    scroll.appendChild(svg);
+    const stage = el('div', { class: 'flow-stage' }, scroll);
+    wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+
+    // Zoom where the diagram is, not in a toolbar under it: on a graph this size the reader's attention is
+    // already inside the pane.
+    const zoomBtn = (label: string, title: string, act: () => void) => {
+      const b = btn(label);
+      b.title = title;
+      b.onclick = act;
+      return b;
+    };
+    stage.appendChild(el('div', { class: 'flow-zoom' },
+      zoomBtn('+', 'Zoom in', () => (zoom as any).zoomBy(1.2)),
+      zoomBtn('−', 'Zoom out', () => (zoom as any).zoomBy(1 / 1.2)),
+      zoomBtn('⤢', 'Fit the diagram to the page', () => (zoom as any).fit())));
 
     // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
     // and being told to use them while the diagram sits three screens wide is its own kind of broken.

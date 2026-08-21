@@ -84,6 +84,8 @@ await new Promise(r => setTimeout(r, 50));
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Trends');
 if (!link) fail('no Trends page');
+// The landing page asks for its own window on startup; this check is about what Trends asks for.
+asked.length = 0;
 link.click();
 await new Promise(r => setTimeout(r, 300));
 
@@ -338,7 +340,7 @@ if (!(chartW > 0 && chartW <= 1200)) fail(`a day of samples was drawn ${chartW}p
 // Every other hour across the whole day, not two labels at one end of it.
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const axis = query(dayChart, 'text', true)
-  .filter(t => Number(t.attrs.y) === 216)   // the x-axis row; the value ticks down the left are not it
+  .filter(t => t.attrs['text-anchor'] === 'middle')   // the x-axis row; the value ticks down the left are anchored 'end'
   .map(t => t.textContent).filter(Boolean);
 if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s): ${axis.join(', ')}`);
 // The first is the moment the day rolled over, in the reader's clock — the axis begins where the day did.

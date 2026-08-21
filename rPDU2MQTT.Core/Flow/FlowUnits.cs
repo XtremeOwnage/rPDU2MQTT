@@ -53,6 +53,22 @@ public static class FlowUnits
     /// <summary>The unit the flow/exports express <paramref name="metric"/> in (blank for the unitless power factor).</summary>
     public static string Canonical(string metric) => Table.TryGetValue(metric, out var t) ? t.Canonical : "";
 
+    /// <summary>
+    /// When a metric's readings started counting, which decides what may be drawn from them over a window.
+    /// <list type="bullet">
+    /// <item><c>instant</c> — a condition sampled at a moment (power, current, voltage). Never added up.</item>
+    /// <item><c>period</c> — a total that re-bases each period, so one reading is that period's own figure
+    /// and a chart of them is a chart of daily energy.</item>
+    /// <item><c>lifetime</c> — a counter that never re-bases. A reading is everything since the meter was
+    /// installed, so a chart of them is a staircase and the difference between two of them is the only
+    /// quantity in there.</item>
+    /// </list>
+    /// </summary>
+    public static string Epoch(string metric)
+        => string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase) ? "period"
+         : string.Equals(Canonical(metric), "kWh", StringComparison.Ordinal) ? "lifetime"
+         : "instant";
+
     /// <summary>The input units offered for <paramref name="metric"/>, canonical first-or-natural order.</summary>
     public static IReadOnlyList<string> UnitsFor(string metric)
         => Table.TryGetValue(metric, out var t) ? t.Factors.Keys.ToList() : Array.Empty<string>();

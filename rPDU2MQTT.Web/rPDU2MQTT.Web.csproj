@@ -97,6 +97,12 @@
 		<!-- Clicking a tile has to chart the nodes that tile's figure came from, not whatever Trends was
 		     showing — an answer about different nodes is worse than no link. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/drilldown.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
+		     impossible to scroll past. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
+		     fine in Firefox and sat on top of the first row in Chrome. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
 

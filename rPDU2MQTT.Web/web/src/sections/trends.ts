@@ -4,6 +4,7 @@ import { api, btn, el, activate, formatNum, navLink, instanceSelector, withInsta
 import { homeEnergy, selfSufficiencyPct, sumKnown } from '../energy.js';
 import { barChart, hideCard, colorFor, KIND_COLOR, type Line } from '../charts.js';
 import { takeFocus } from '../state.js';
+import { periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 
 // The bar chart itself — axis, gaps, signs, hover — lives in charts.ts.
 
@@ -37,7 +38,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const rangeSel = el('select', { title: 'How far back to chart. Within a day the charts show power; across days, the daily energy totals.' }) as HTMLSelectElement;
   RANGES.forEach(([v, t]) => rangeSel.appendChild(el('option', { value: v, text: t })));
   rangeSel.value = 'days=30';
-  rangeSel.onchange = () => { if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  rangeSel.onchange = () => { periods.mark(null); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
   /// Where an intra-day window actually fell, in the reader's own clock. The day rolls over on the server's
   /// configured period zone, which is not necessarily the reader's — so it is said outright rather than
   /// inferred from the axis.
@@ -76,10 +77,14 @@ export function addTrendsSection(nav: any, sections: any) {
   /// How wide an intra-day chart may be. A day of five-minute samples is 288 bars: at the daily rule of
   /// 26px each that is a 7,488px chart in a ~1,600px pane, so the reader sees a fifth of their day, opened
   /// at the far end, with two axis labels on it. A day belongs on screen whole.
-  const fitTo = () => (body?.at?.length || 0) > 60 ? (charts.clientWidth || 1200) : undefined;
+  const fitTo = () => charts.clientWidth || 1200;
+  /// The chart everything else on the page is read against gets the room a tall window offers it; the ones
+  /// stacked below keep their own size so they all stay on screen together.
+  const leadHeight = () => Math.max(240, Math.min(Math.round((window.innerHeight || 900) * 0.34), 420));
 
   // What to chart. The range no longer decides it silently: the range's own default is filled in, and from
   // then on this is the answer.
+  type Metric = { metric: string; units: string; epoch?: string };
   const LABELS: Record<string, string> = {
     realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
     frequency: 'frequency', energy: 'energy', energytoday: 'energy',
@@ -87,7 +92,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
   // Seeded with the two every build exports, so a page that cannot reach /api/flow/metrics still offers
   // the right default for each range instead of labelling a chart of energy "power".
-  let METRICS: { metric: string; units: string }[] = [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }];
+  let METRICS: Metric[] = [{ metric: 'realpower', units: 'W', epoch: 'instant' }, { metric: 'energytoday', units: 'kWh', epoch: 'period' }];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
   let metricChosen = false;
   const unitsOf = (m: string) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
@@ -98,12 +103,16 @@ export function addTrendsSection(nav: any, sections: any) {
   /// The metric a range implies when nobody has said otherwise.
   const impliedMetric = () => {
     const wants = (RANGES.find(r => r[0] === rangeSel.value) || [])[2];
-    const found = METRICS.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
-    return (found || METRICS[0]).metric;
+    const list = chartable();
+    const found = list.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
+    return (found || list[0]).metric;
   };
+  /// What can honestly be drawn as a bar per point. A lifetime counter cannot: each bar would be everything
+  /// the meter has ever seen, so the chart is a staircase and the day's own figure is nowhere on it.
+  const chartable = () => METRICS.filter(m => m.epoch !== 'lifetime');
   const fillMetrics = () => {
     metricSel.innerHTML = '';
-    METRICS.forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
+    chartable().forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
     if (!metricChosen) metricSel.value = impliedMetric();
   };
   fillMetrics();
@@ -112,6 +121,23 @@ export function addTrendsSection(nav: any, sections: any) {
   const modeSel = el('select', { title: 'Stack the day’s nodes into one bar, or draw them side by side.' }) as HTMLSelectElement;
   [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
   modeSel.onchange = () => draw();
+
+  // One click for the periods people actually ask for, and a period is a question about energy.
+  const periods = periodRow((key: PeriodKey) => {
+    const { days } = periodWindow(key);
+    // A day is charted through its own clock; several are charted a bar each.
+    const range = key === 'today' ? 'today=1&step=300'
+      : key === 'yesterday' ? 'today=1&back=1&step=300'
+      : days < 2 ? 'today=1&step=300' : `days=${days}`;
+    if (!Array.from(rangeSel.children).some((o: any) => o.value === range))
+      rangeSel.appendChild(el('option', { value: range, text: `${key === 'week' ? 'this week' : key === 'month' ? 'this month' : 'this year'} (${days} days)` }));
+    rangeSel.value = range;
+    const energy = chartable().find(m => !RATES.includes(m.units));
+    if (energy) { metricSel.value = energy.metric; metricChosen = true; }
+    periods.mark(key);
+    load();
+  });
+  sec.appendChild(periods.row);
 
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
@@ -286,7 +312,7 @@ export function addTrendsSection(nav: any, sections: any) {
       }));
       gaps = section(byNodeTitle(),
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo() }), lines);
+        barChart({ days, lines, units, stacked: modeSel.value === 'stack', partial, fitTo: fitTo(), height: leadHeight() }), lines);
     } else {
       const box = el('div', { style: { margin: '18px 0 4px' } });
       box.appendChild(el('h3', { text: byNodeTitle(), style: { margin: '4px 0', fontSize: '15px' } }));
@@ -328,7 +354,7 @@ export function addTrendsSection(nav: any, sections: any) {
           + 'The share of the home’s energy that did not come from the grid'
           + (load ? '.' : ', with the home taken as the balance of the measured sources.')
           + ' A day missing either figure is left empty rather than estimated.',
-          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial }), ssLines);
+          barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial, fitTo: fitTo() }), ssLines);
       }
     }
 
