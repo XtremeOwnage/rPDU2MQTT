@@ -215,6 +215,24 @@ public class DerivedMetricsTests
         Assert.Equal(4, amps);
     }
 
+    /// <summary>
+    /// A split source fans one signed reading into both directions, so its key is the bare metric. The
+    /// GUI's live probe asks for that key, and this is the direction a grid tie is actually configured with.
+    /// </summary>
+    [Fact]
+    public void ASplitDirectionAnswersOnTheBareMetric()
+    {
+        var inner = new Fake();
+        inner.Values["grid|realpower"] = 2505;
+        inner.Values["grid|voltage"] = 247.8;
+        var src = Build(inner, Src("realpower", direction: "split"), Src("voltage"), Derived("current", "split"));
+
+        Assert.True(src.TryGetValue("grid", "current", out var amps));
+        Assert.Equal(2505 / 247.8, amps, 6);
+        // …and nothing is claimed for the return lane, which has no power reading of its own.
+        Assert.False(src.TryGetValue("grid", "current#in", out _));
+    }
+
     // --- Live config ----------------------------------------------------------------------------------
 
     /// <summary>
