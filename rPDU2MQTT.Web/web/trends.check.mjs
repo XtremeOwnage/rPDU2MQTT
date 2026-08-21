@@ -57,7 +57,11 @@ const wholeDay = {
 const counter = {
   ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus', stepSeconds: 300,
   at,
-  series: [{ node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] }],
+  series: [
+    { node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] },
+    // This one's counter re-based partway through the window — a midnight rollover, or a meter reset.
+    { node: 'grid', label: 'Grid', kind: 'grid', values: [8, 9, 1, 3] },
+  ],
 };
 
 const asked = [];
@@ -71,7 +75,9 @@ const { sandbox, getEl } = makeDom({
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
     if (url.includes('/api/flow/metrics'))
-      return { ok: true, metrics: [{ metric: 'realpower', units: 'W' }, { metric: 'energytoday', units: 'kWh' }] };
+      return { ok: true, metrics: [
+        { metric: 'realpower', units: 'W', epoch: 'instant' },
+        { metric: 'energytoday', units: 'kWh', epoch: 'period' }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -84,6 +90,8 @@ await new Promise(r => setTimeout(r, 50));
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Trends');
 if (!link) fail('no Trends page');
+// The landing page asks for its own window on startup; this check is about what Trends asks for.
+asked.length = 0;
 link.click();
 await new Promise(r => setTimeout(r, 300));
 
@@ -338,7 +346,7 @@ if (!(chartW > 0 && chartW <= 1200)) fail(`a day of samples was drawn ${chartW}p
 // Every other hour across the whole day, not two labels at one end of it.
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const axis = query(dayChart, 'text', true)
-  .filter(t => Number(t.attrs.y) === 216)   // the x-axis row; the value ticks down the left are not it
+  .filter(t => t.attrs['text-anchor'] === 'middle')   // the x-axis row; the value ticks down the left are anchored 'end'
   .map(t => t.textContent).filter(Boolean);
 if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s): ${axis.join(', ')}`);
 // The first is the moment the day rolled over, in the reader's clock — the axis begins where the day did.
@@ -374,14 +382,32 @@ await new Promise(r => setTimeout(r, 300));
 if (!/metric=energytoday/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
 if (!/energy/i.test(blurb())) fail(`the page still describes power after energy was chosen: ${blurb().slice(0, 120)}`);
 
-// A counter read through a day climbs. Adding those readings up counts the same energy in again at every
-// step, so the column is the highest reading — 10+12+14+16=52 kWh is a number nothing measured.
+// A counter read through a day climbs: 10, 12, 14, 16 kWh is the day's total restated four times, not
+// four measurements of anything. Charting it drew a staircase where every bar was the whole day so far and
+// none said what was used at that moment (#395). What the reader asked about is the DIFFERENCE between
+// readings — 2 kWh an interval — and those add up to the day instead of each restating it.
 const counterRows = query(sec, 'th', true).map(h => h.textContent);
-if (counterRows.some(h => /^Total/.test(h))) fail(`a cumulative counter is being totalled: ${counterRows.join(', ')}`);
 const solarCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
-if (/52/.test(solarCounter.textContent)) fail(`the counter's readings were summed: ${solarCounter.textContent}`);
-if (!/16/.test(solarCounter.textContent)) fail(`the counter's highest reading is not shown: ${solarCounter.textContent}`);
-// …and kWh is not "estimated" from readings that are already kWh.
+const counterCells = query(solarCounter, 'td', true).map(t => t.textContent);
+if (counterCells.includes('52')) fail(`the counter's readings were summed: ${counterCells.join(' | ')}`);
+if (counterCells.includes('16')) fail(`the counter itself is being charted: ${counterCells.join(' | ')}`);
+// 2 + 2 + 2 = 6 kWh over the three intervals the readings cover. The first has no predecessor, so it is a
+// gap: three intervals from four readings, never four.
+if (!counterCells.includes('6')) fail(`the intervals do not add up to the day: ${counterCells.join(' | ')}`);
+if (!counterCells.some(c => /3 of 4/.test(c))) fail(`an interval was invented for the first reading: ${counterCells.join(' | ')}`);
+if (!counterRows.some(h => /^Total/.test(h))) fail(`deltas are a quantity and do add up: ${counterRows.join(', ')}`);
+// A counter that re-based went 9 → 1, which is not "minus 8 kWh": nothing was measured across that step,
+// so it is a gap. Charting the negative would draw a bar below the line that never happened.
+const gridCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Grid'));
+const gridCells = query(gridCounter, 'td', true).map(t => t.textContent);
+if (gridCells.some(c => /-/.test(c))) fail(`a counter re-base was charted as negative energy: ${gridCells.join(' | ')}`);
+// 1 + 2 = 3 kWh over the two intervals that have both readings.
+if (!gridCells.includes('3')) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
+if (!gridCells.some(c => /2 of 4/.test(c))) fail(`the re-based step was counted as measured: ${gridCells.join(' | ')}`);
+
+// …and the page says that is what it did.
+if (!/changed between two readings/.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
+// kWh is not "estimated" from readings that are already kWh.
 if (counterRows.some(h => /kWh, est/.test(h))) fail('energy readings were integrated as if they were watts');
 
 console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '

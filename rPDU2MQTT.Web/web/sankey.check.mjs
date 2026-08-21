@@ -223,5 +223,20 @@ if (y2('pdu_1#unmeasured') < Math.max(...['kube01', 'kube05', 'nas'].map(y2)))
 if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(y2)))
   fail("Rack-PDU-2's remainder is drawn above its own measured siblings");
 
+// --- The pane the diagram lives in ------------------------------------------------------------------
+// The hierarchy IS the page, so it grows to its own height: a pane capped at 74vh put a scrollbar inside
+// the page's scrollbar, and the graph read as an iframe someone had embedded (#395).
+const stage = query(getEl('sections'), 'div', true).find(d => (d.attrs?.class || d.className || '') === 'flow-stage');
+if (!stage) fail('the diagram is not on a stage, so nothing can be pinned over it');
+const pane = (stage.children || [])[0];
+if (pane?.style?.maxHeight) fail(`the diagram pane is capped at ${pane.style.maxHeight} — the page scrolls twice`);
+
+// Zoom belongs on the diagram, not in a toolbar under it.
+const zoom = query(stage, 'div', true).find(d => (d.attrs?.class || d.className || '') === 'flow-zoom');
+if (!zoom) fail('no zoom controls pinned on the diagram');
+const labels = (zoom.children || []).map(b => b.textContent);
+if (labels.length < 3) fail(`expected zoom in, out and fit; got ${labels.join(' ')}`);
+if (!labels.includes('+') || !labels.includes('\u2212')) fail(`no zoom in/out control: ${labels.join(' ')}`);
+
 console.log(`sankey: night-time chain holds together (MPPTs within ${Math.round(drift)}px of Solar), `
-  + `${ribbons.length} ribbons all visible; each parent's remainder sits below its OWN siblings and the two families do not interleave`);
+  + `${ribbons.length} ribbons all visible; each parent's remainder sits below its OWN siblings and the two families do not interleave; the pane is uncapped and carries its own zoom controls`);

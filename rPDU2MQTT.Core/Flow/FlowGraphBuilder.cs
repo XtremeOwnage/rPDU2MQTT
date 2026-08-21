@@ -373,8 +373,7 @@ public static class FlowGraphBuilder
                 var hub = fed[0];
                 var sinkId = n.Id + FlowMetricKey.InSuffix;
                 var k = kind.TryGetValue(n.Id, out var nk) ? nk : "node";
-                label[sinkId] = (label.TryGetValue(n.Id, out var nl) ? nl : n.Id)
-                    + (k == "battery" ? " (charging)" : k == "grid" ? " (export)" : " (in)");
+                label[sinkId] = FlowMetricKey.ReturnLabel(label.TryGetValue(n.Id, out var nl) ? nl : n.Id, k);
                 kind[sinkId] = k;
                 leaf[sinkId] = drawn;
                 // The same tags as the node it belongs to.

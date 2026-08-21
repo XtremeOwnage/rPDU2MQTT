@@ -2,6 +2,51 @@
 import { el, btn } from '../helpers.js';
 import { state } from '../state.js';
 
+/// The periods people actually ask for. One click each, rather than a date, a time and a span to assemble.
+export type PeriodKey = 'today' | 'yesterday' | 'week' | 'month' | 'year';
+
+export const PERIODS: [PeriodKey, string][] = [
+  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'],
+  ['month', 'This month'], ['year', 'This year'],
+];
+
+/// Which day a period ends on, and how many days it covers — in the reader's own calendar, because that is
+/// the calendar the words "this month" were said in.
+export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: string; days: number } {
+  const iso = (d: Date) => d.toLocaleDateString('en-CA');
+  if (key === 'yesterday') {
+    const d = new Date(now.getTime());
+    d.setDate(d.getDate() - 1);
+    return { day: iso(d), days: 1 };
+  }
+  if (key === 'week') return { day: iso(now), days: now.getDay() + 1 };
+  if (key === 'month') return { day: iso(now), days: now.getDate() };
+  if (key === 'year') {
+    const jan1 = new Date(now.getFullYear(), 0, 1);
+    // Whole days between two local midnights: the difference in ms divided by a day is off by an hour
+    // twice a year, and rounding puts it back.
+    return { day: iso(now), days: Math.round((now.setHours(0, 0, 0, 0) - jan1.getTime()) / 86_400_000) + 1 };
+  }
+  return { day: iso(now), days: 1 };
+}
+
+/// A row of one-click periods, with the one being shown marked.
+export function periodRow(onPick: (key: PeriodKey) => void): { row: HTMLElement; mark: (key: PeriodKey | null) => void } {
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
+  const buttons = PERIODS.map(([key, label]) => {
+    const b = btn(label);
+    b.dataset.period = key;
+    b.onclick = () => onPick(key);
+    row.appendChild(b);
+    return b;
+  });
+  return {
+    row,
+    mark: (key) => buttons.forEach(b => b.classList[b.dataset.period === key ? 'add' : 'remove']('primary')),
+  };
+}
+
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
 export function historyQuery(hist: { at: () => string, span: () => number }): string {
   const at = hist.at();
@@ -102,6 +147,18 @@ export function historyControl(onChange: (what: HistoryPick) => void): {
   window.addEventListener?.('rpdu:activate', syncEnabled);
   return {
     row,
+    /// Show a period: the day it ends on, and how many days it covers. A span the fixed list does not offer
+    /// (this month is however many days into the month it is) is added to it, so the control still reads as
+    /// one setting rather than going blank.
+    set: (day: string, days: number) => {
+      input.value = day;
+      timeIn.value = '';
+      const want = String(Math.max(1, days));
+      if (!Array.from(spanSel.children).some((o: any) => o.value === want))
+        spanSel.appendChild(el('option', { value: want, text: `${want} days to it` }));
+      spanSel.value = want;
+      syncSpan();
+    },
     /// The instant to ask for.
     at: () => {
       if (!historyOn() || !input.value) return '';

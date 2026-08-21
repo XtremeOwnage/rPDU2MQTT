@@ -607,11 +607,19 @@
   .ld-toolbar label, .ld-inst { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; }
   .ld-inst select { width:auto; }
   .ld-count { color:var(--faint); font-size:12px; }
+  /* No `overflow:hidden` here, however tempting for the rounded corners: it makes the table its own scroll
+     container, and a sticky <th> then resolves `top` against the TABLE instead of the viewport. Chrome
+     parked the header 56px down inside the table, on top of the first row, on every table in the app;
+     Firefox did not (#395). The corners are rounded on the corner cells instead. */
   table.ld {
     width:100%; border-collapse:separate; border-spacing:0; font-size:13px;
-    background:var(--panel); border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
     box-shadow:var(--shadow-sm);
   }
+  table.ld thead tr:first-child th:first-child { border-top-left-radius:var(--r); }
+  table.ld thead tr:first-child th:last-child { border-top-right-radius:var(--r); }
+  table.ld tbody tr:last-child td:first-child { border-bottom-left-radius:var(--r); }
+  table.ld tbody tr:last-child td:last-child { border-bottom-right-radius:var(--r); }
   table.ld th, table.ld td { text-align:left; padding:9px 13px; border-bottom:1px solid var(--line-soft); }
   table.ld tbody tr:last-child td { border-bottom:none; }
   table.ld th {
@@ -793,3 +801,102 @@
   .energy-node.is-linked { cursor:pointer; }
   .energy-node.is-linked:hover .energy-node-ring { stroke-width:3; }
   .energy-node.is-linked:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
+  .flow-stage { position: relative; }
+  .flow-zoom {
+    position: absolute; top: 8px; right: 8px; z-index: 2;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .flow-zoom button {
+    width: 30px; height: 28px; padding: 0; line-height: 1;
+    background: var(--panel); border: 1px solid var(--line); opacity: 0.92;
+  }
+  .flow-zoom button:hover { opacity: 1; }
+
+  /* --- Overview: the landing page ------------------------------------------------------------------- */
+  .ov-h3 { margin: 22px 0 8px; font-size: 15px; }
+  /* Now: the diagram beside the battery, stacking on a narrow screen. */
+  .ov-now { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  /* The diagram is drawn on a 416-wide viewBox; past ~620px it is just bigger, not clearer. */
+  .ov-flow { flex: 1 1 420px; min-width: 300px; max-width: 560px; }
+  /* Capped so today's figures are on screen with it, not below the fold. */
+  .ov-flow .energy-flow-svg { max-height: 340px; }
+  .ov-batt-side { flex: 0 1 240px; display: flex; }
+  .ov-batt-card {
+    flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm);
+  }
+  .ov-batt-title { font-weight: 700; font-size: 13px; color: var(--muted); }
+  .ov-batt-body { display: flex; align-items: center; gap: 14px; }
+  /* Drawn as an object rather than a rectangle: a recessed case, a lit charge, and a highlight down one
+     side so the eye reads a cylinder. The fill IS the reading — the number beside it only confirms it. */
+  .ov-batt-shell {
+    position: relative; width: 52px; height: 96px; border: 2px solid var(--line);
+    border-radius: 8px; display: flex; align-items: flex-end; overflow: hidden;
+    background: linear-gradient(180deg, var(--panel3), var(--panel2));
+    box-shadow: inset 0 3px 7px rgba(0,0,0,.42), inset 0 -2px 4px rgba(0,0,0,.28), var(--shadow-sm);
+  }
+  /* The glass: a bright edge on the left, a soft one on the right, over whatever the level is. */
+  .ov-batt-shell::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 6px;
+    background:
+      linear-gradient(100deg, rgba(255,255,255,.16) 0 22%, rgba(255,255,255,.04) 30%, transparent 46%),
+      linear-gradient(260deg, rgba(255,255,255,.07) 0 14%, transparent 24%);
+  }
+  .ov-batt-cap {
+    position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+    width: 20px; height: 6px; border-radius: 3px 3px 1px 1px;
+    background: linear-gradient(180deg, var(--panel3), var(--line));
+    box-shadow: 0 1px 0 rgba(0,0,0,.4);
+  }
+  .ov-batt-fill {
+    width: 100%; transition: height .5s var(--ease); background-color: var(--muted);
+    /* A lit top edge and a shaded foot: the charge has a surface, not just a boundary. */
+    background-image:
+      linear-gradient(180deg, rgba(255,255,255,.34), rgba(255,255,255,.06) 38%, rgba(0,0,0,.14));
+    box-shadow: 0 -1px 6px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.4);
+  }
+  .ov-batt-good .ov-batt-fill { background-color: var(--good); }
+  .ov-batt-warn .ov-batt-fill { background-color: var(--warn); }
+  .ov-batt-bad .ov-batt-fill { background-color: var(--bad); }
+  .ov-batt-volts {
+    font-size: 13px; font-weight: 700; color: var(--muted);
+    font-variant-numeric: tabular-nums; margin: -2px 0 2px;
+  }
+  .ov-batt-pct { font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+  /* Tiles: today's figures, and the 24-hour strips. */
+  .ov-tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+  .ov-tile {
+    flex: 1 1 220px; min-width: 190px; padding: 12px 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm);
+  }
+  .ov-tile.is-link { cursor: pointer; }
+  .ov-tile.is-link:hover { border-color: var(--accent-dim); }
+  .ov-tile-head { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
+  .ov-icon { font-size: 14px; }
+  .ov-value { font-size: 26px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .ov-sub { font-size: 11.5px; color: var(--faint); }
+
+  /* Healthy is one line; anything wrong is a card you cannot scroll past. */
+  .ov-allgood {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 7px 12px;
+    background: var(--good-bg); border: 1px solid var(--line); border-radius: var(--r); font-size: 13px;
+  }
+  .ov-allgood-link { margin-left: auto; color: var(--accent); cursor: pointer; font-size: 12px; }
+  .ov-alert {
+    display: flex; gap: 12px; align-items: flex-start; margin: 0 0 10px; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: var(--r); background: var(--panel);
+  }
+  .ov-alert.bad { background: var(--bad-bg); border-color: var(--bad); }
+  .ov-alert.warn { background: var(--warn-bg); border-color: var(--warn); }
+  .ov-alert-icon { font-size: 20px; line-height: 1.2; }
+  .ov-alert-title { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+
+  /* A 24-hour strip is a tile like the others: the figure leads, the shape explains it. */
+  .ov-strip { flex: 1 1 300px; }
+  .ov-strip .spark { width: 100%; height: 72px; display: block; margin: 2px 0 4px; }
+  .ov-peak { margin-left: auto; font-weight: 400; color: var(--faint); letter-spacing: 0; }
+  .ov-strip .ov-value { font-size: 22px; }
+  .ov-strip .spark-hit { cursor: crosshair; }
