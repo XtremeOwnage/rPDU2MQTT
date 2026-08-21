@@ -49,8 +49,12 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
         // Discovery needs nothing but the broker this bridge already has, so only the dashboard can be
         // misconfigured — and only when it is the part that is switched on.
         if (!ed.Enabled) return null;
-        if (string.IsNullOrWhiteSpace(ed.Url)) return "The Energy Dashboard sync is enabled but HomeAssistant.EnergyDashboard.Url is not set.";
-        if (string.IsNullOrWhiteSpace(ed.Token)) return "The Energy Dashboard sync is enabled but no long-lived access token is set.";
+        // Both messages name the page that has the field. These settings are not on the Home Assistant page
+        // — they have their own — and a fault that names neither sends the operator to the wrong one.
+        if (string.IsNullOrWhiteSpace(ed.Url))
+            return "The Energy Dashboard sync is enabled but no Home Assistant URL is set. Set it on the HA Energy Mapping page.";
+        if (string.IsNullOrWhiteSpace(ed.Token))
+            return "The Energy Dashboard sync is enabled but no long-lived access token is set. Set it on the HA Energy Mapping page.";
         return null;
     }
 

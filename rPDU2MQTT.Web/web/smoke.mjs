@@ -430,5 +430,23 @@ for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}
        + 'collapses every toggle. Add :not(.switch), or raise the switch selector above it.');
 }
 
+// A section filtered out of a form has to say where it went. The Energy Dashboard's URL and token are
+// edited on their own page, and the status board's fault names the Home Assistant page — so that page
+// pointing nowhere sent the operator hunting for a field that was never on it.
+{
+  const haLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Home Assistant');
+  if (!haLink) fail('no Home Assistant page');
+  haLink.click();
+  await new Promise(r => setTimeout(r, 120));
+  const ha = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+  const text = ha?.textContent || '';
+  // Its own label, not the word in the sentence pointing at the page that has it.
+  const labelled = query(ha, 'div', true).concat(query(ha, 'label', true))
+    .some(e => (e.textContent || '').trim() === 'Token');
+  if (labelled) fail('the token field is duplicated onto the Home Assistant page');
+  if (!/HA Energy Mapping/.test(text))
+    fail('the Home Assistant page does not say where the Energy Dashboard token is set');
+}
+
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);

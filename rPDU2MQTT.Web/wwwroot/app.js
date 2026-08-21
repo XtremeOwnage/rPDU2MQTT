@@ -7551,6 +7551,25 @@ function featurePointer(label        ) {
   return wrap;
 }
 
+// The Energy Dashboard's own settings — including the URL and the long-lived token — are edited on the HA
+// Energy Mapping page, so they are filtered out of this form. A section that simply is not here reads as a
+// missing feature: the status board says "no long-lived access token is set" and the page it names has no
+// such field on it.
+function energyDashboardPointer() {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  wrap.appendChild(el('span', {
+    text: 'The Energy Dashboard sync — its Home Assistant URL and long-lived access token — is set up on '
+      + 'the HA Energy Mapping page. ',
+  }));
+  const go = btn('HA Energy Mapping');
+  go.onclick = () => {
+    const links        = Array.from(document.querySelectorAll('nav a'));
+    links.find(a => a.dataset?.label === 'HA Energy Mapping')?.click();
+  };
+  wrap.appendChild(go);
+  return wrap;
+}
+
 // Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
 // names — so there is nothing to configure for it here. Point at the page that does configure it rather
 // than leave the page looking empty, or worse, duplicate the server and key into a second place to edit.
@@ -7613,8 +7632,13 @@ function renderConfigSection(node     , nav     , sections     ) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
-      let props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard') : node.properties;
+      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form — but
+      // say where it went, or its settings look absent rather than elsewhere.
+      let props = node.properties;
+      if (node.key === 'HomeAssistant') {
+        props = (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard');
+        sec.appendChild(energyDashboardPointer());
+      }
       // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
       // removed here rather than duplicated: two switches bound to one value would disagree the moment one
       // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
