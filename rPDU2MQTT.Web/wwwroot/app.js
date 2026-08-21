@@ -3291,26 +3291,49 @@ function addFlowSection(nav     , sections     ) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
+    /// Where each ribbon actually meets each bar, in the order they are drawn.
+    ///
+    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
+    /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
+    /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
+    /// its bar, and its children get pulled to the middle of a bar they never reach.
+    const attachments = () => {
+      const at = new Map                                   ();
+      const outOff                         = {}, inOff                         = {};
+      [...links]
+        .sort((a     , b     ) =>
+          (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+          (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0))
+        .forEach((l     ) => {
+          const sp = pos[l.source], tp = pos[l.target];
+          if (!sp || !tp) return;
+          const h = l.known === false || l.value * pxPerUnit < 1.5 ? 1.5 : l.value * pxPerUnit;
+          const so = outOff[l.source] || 0, to = inOff[l.target] || 0;
+          at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
+          outOff[l.source] = so + h;
+          inOff[l.target] = to + h;
+        });
+      return at;
+    };
+
     const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
     for (const c of relaxOrder) {
       const cn = cols[c];
       if (!cn || !cn.length) continue;
+      const at = attachments();
       let w = 0, s = 0;
       cn.forEach((n     ) => {
-        const sp = pos[n.id];
-        if (!sp) return;
-        const mid = sp.y + sp.h / 2;
-        // Both sides, not just what it feeds.
+        // Both sides, not just what it feeds, and each side measured where the ribbon lands.
         (outgoing[n.id] || []).forEach((l     ) => {
-          const tp = pos[l.target];
-          if (!tp) return;
-          s += ((tp.y + tp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.to - a.from) * linkW(l);
           w += linkW(l);
         });
         (incoming[n.id] || []).forEach((l     ) => {
-          const fp = pos[l.source];
-          if (!fp) return;
-          s += ((fp.y + fp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.from - a.to) * linkW(l);
           w += linkW(l);
         });
       });
