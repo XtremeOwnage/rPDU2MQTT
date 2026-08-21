@@ -786,6 +786,20 @@
     .appbar-user, .brand-tag { display:none; }
   }
 
+  /* Phone. The bar has three groups and room for about one and a half of them, so the ones that are not
+     the product's name give way. Without this the brand's nowrap text simply overflowed its shrunk box and
+     ran underneath the status pills. */
+  @media (max-width: 560px) {
+    .brand { overflow:hidden; }
+    .brand-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+    /* A build string like v0.0.0-feat-gui-enhancements-395.1185+71ed512 is not a phone-sized thing. */
+    .appbar-status .pill-mono { display:none; }
+    .appbar-status { gap:var(--sp-1); }
+    /* The connection pills keep their dot — the colour is the whole message — and drop the word. */
+    .appbar-status #st-live, .appbar-status #st-mqtt { font-size:0; padding:4px 6px; gap:0; }
+    .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
+  }
+
   /* A tile's trend. Sized by the tile, not by the viewport: the plot is context for the number above it,
      so it never grows into a chart of its own. */
   .energy-tile .spark { display:block; width:100%; height:40px; margin:8px 0 0; overflow:visible; }
@@ -895,7 +909,7 @@
   .ov-alert-title { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
 
   /* A 24-hour strip is a tile like the others: the figure leads, the shape explains it. */
-  .ov-strip { flex: 1 1 300px; }
+  .ov-strip { flex: 1 1 262px; }
   .ov-strip .spark { width: 100%; height: 72px; display: block; margin: 2px 0 4px; }
   .ov-peak { margin-left: auto; font-weight: 400; color: var(--faint); letter-spacing: 0; }
   .ov-strip .ov-value { font-size: 22px; }
