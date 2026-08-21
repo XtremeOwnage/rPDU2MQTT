@@ -48,13 +48,35 @@ export function addTrendsSection(nav: any, sections: any) {
     const clock = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return ` · ${from.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(from)} → ${clock(to)}`;
   };
+  /// A counter's readings are not a per-bar quantity; the differences between them are.
+  ///
+  /// Charting `energytoday` through a day draws the counter itself — a staircase climbing to the day's
+  /// total, where every bar restates the whole day so far and none of them says what was used at that
+  /// moment. The difference between one reading and the next is the energy in that interval, which is the
+  /// quantity the chart is asking about, and those DO add up to the day.
+  ///
+  /// A negative difference means the counter re-based (midnight, or a meter reset). Nothing measured that
+  /// interval, so it is a gap rather than a zero.
+  const toDeltas = (body: any) => {
+    (body.series || []).forEach((s: any) => {
+      const raw = s.values as (number | null)[];
+      s.values = raw.map((v, i) => {
+        if (i === 0 || v == null) return null;
+        const prev = raw[i - 1];
+        if (prev == null) return null;
+        return v - prev < 0 ? null : v - prev;
+      });
+    });
+    body.deltas = true;
+  };
+
   /// One bar per period, which is the server's call: it labels the bars with period keys when they are
   /// periods, and sends bare instants when they are samples on a clock.
   const perDay = () => !!body?.days;
   /// A total is only a real quantity when each bar is one period's own accumulation. Summing samples of a
   /// rate gives a number in watts that is a quantity of nothing; summing a counter's readings is worse —
   /// it adds the same energy in again at every step.
-  const summable = () => perDay() && !rate();
+  const summable = () => (perDay() || !!body?.deltas) && !rate();
   const byNodeTitle = () => perDay()
     ? `Daily ${metricName()} by node`
     : `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} by node`;
@@ -67,9 +89,17 @@ export function addTrendsSection(nav: any, sections: any) {
         + 'is not the same as nothing used.';
       return;
     }
-    const every = body?.stepSeconds ? `every ${Math.round(body.stepSeconds / 60)} minutes` : 'sampled';
-    desc.textContent = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} ${every} through the `
-      + `window, ${from} A sample the backend has no reading for is left empty rather than drawn as zero.`
+    const mins = body?.stepSeconds ? Math.round(body.stepSeconds / 60) : 0;
+    const every = mins ? `every ${mins} minutes` : 'sampled';
+    const name = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}`;
+    if (body?.deltas) {
+      desc.textContent = `${name} per ${mins || 5} minutes through the window, ${from} Each bar is what `
+        + 'changed between two readings of the day’s counter, so the bars add up to the day rather than '
+        + 'each restating it. An interval either reading is missing from is left empty.';
+      return;
+    }
+    desc.textContent = `${name} ${every} through the window, ${from} A sample the backend has no reading `
+      + 'for is left empty rather than drawn as zero.'
       + (rate() ? ' These are instantaneous readings, so they are not added up.' : '');
   };
   /// A window that is still filling. "Yesterday" is not one, and neither is any range that ended.
@@ -96,6 +126,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
   let metricChosen = false;
   const unitsOf = (m: string) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
+  const epochOf = (m: string) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
   /// A rate is a condition sampled at an instant — it is never added up. A quantity accumulated over a
   /// period is. Which one this is follows the metric, not the range.
   const rate = () => RATES.includes(unitsOf(metricSel.value));
@@ -166,6 +197,8 @@ export function addTrendsSection(nav: any, sections: any) {
     try { r = await api(path); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
+    // A period counter read at intervals within its own period is charted as what changed between reads.
+    if (body?.ok && !body.days && epochOf(metricSel.value) === 'period') toDeltas(body);
     if (!body || !body.ok) {
       status.textContent = '';
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (body && body.message) || 'Could not load the series.' }));

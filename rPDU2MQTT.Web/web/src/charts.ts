@@ -194,6 +194,10 @@ export function barChart(opts: {
   return { svg, gaps };
 }
 
+// Gradient ids have to be unique in a document: two sparklines sharing one would paint the second in the
+// first's colour.
+let sparkSeq = 0;
+
 /// A tile's trend: one series, no axes, no legend — the tile's own label names it.
 ///
 /// It answers "and what has it been doing?", which a single instantaneous figure cannot. Deliberately not a
@@ -230,6 +234,22 @@ export function sparkline(opts: {
     'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
   });
 
+  // The area fades from the line down to nothing. A flat wash reads as a solid block of colour and buries
+  // the shape it is meant to sit under; a fade keeps the line the thing you look at.
+  const fillId = 'sparkfill-' + (++sparkSeq);
+  const defs = svgTag('defs', {});
+  const grad = svgTag('linearGradient', { id: fillId, x1: '0', y1: '0', x2: '0', y2: '1' });
+  grad.appendChild(svgTag('stop', { offset: '0', 'stop-color': color, 'stop-opacity': '0.38' }));
+  grad.appendChild(svgTag('stop', { offset: '1', 'stop-color': color, 'stop-opacity': '0.02' }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  // A baseline, so a line that runs near the floor is seen to be near the floor.
+  svg.appendChild(svgTag('line', {
+    x1: pad, y1: (h - pad).toFixed(1), x2: w - pad, y2: (h - pad).toFixed(1),
+    stroke: 'var(--line)', 'stroke-width': 1, 'stroke-opacity': '0.7',
+  }));
+
   // Consecutive runs, so a gap in the data is a gap in the line.
   const runs: { i: number; v: number }[][] = [];
   let run: { i: number; v: number }[] = [];
@@ -250,11 +270,11 @@ export function sparkline(opts: {
     // The area first, so the line sits on top of it.
     svg.appendChild(svgTag('path', {
       d: `M${line} L${x(r[r.length - 1].i).toFixed(1)},${h - pad} L${x(r[0].i).toFixed(1)},${h - pad} Z`,
-      fill: color, 'fill-opacity': '0.14', stroke: 'none',
+      fill: `url(#${fillId})`, stroke: 'none',
     }));
     svg.appendChild(svgTag('path', {
       d: `M${line}`, fill: 'none', stroke: color, 'stroke-width': '2',
-      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: 'spark-line',
     }));
   }
 

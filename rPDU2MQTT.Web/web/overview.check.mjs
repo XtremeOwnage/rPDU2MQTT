@@ -26,13 +26,25 @@ let board = { ok: true, cards: [
   { id: 'mqtt', level: 'good', title: 'MQTT', state: 'Connected', detail: '' },
   { id: 'prom', level: 'good', title: 'Prometheus', state: 'Scraped', detail: '' },
 ] };
-let live = { ok: true, values: [{ node: 'battery', metric: 'soc', value: 74 }] };
+let live = { ok: true, values: [
+  { node: 'battery', metric: 'soc', value: 74 },
+  { node: 'battery', metric: 'voltage', value: 53.4 },
+] };
+
+// A day of readings behind the strips: solar rises and falls, the battery sits flat at zero.
+const n = 96;
+const day = { ok: true, units: 'W', stepSeconds: 900,
+  at: Array.from({ length: n }, (_, i) => new Date(Date.now() - (n - i) * 900e3).toISOString()),
+  series: [
+    { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: n }, (_, i) => Math.max(0, Math.round(9600 * Math.sin(Math.PI * (i - 24) / 48)))) },
+    { node: 'battery', label: 'Battery', kind: 'battery', values: Array.from({ length: n }, () => 0) },
+  ] };
 
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow/live')) return live;
     if (url.includes('/api/status/board')) return board;
-    if (url.includes('/api/flow/series')) return { ok: true, units: 'W', stepSeconds: 900, at: [], series: [] };
+    if (url.includes('/api/flow/series')) return day;
     if (url.includes('/api/flow')) return url.includes('energytoday') ? energy : power;
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
@@ -68,6 +80,23 @@ if (!/47\.7 kWh/.test(text())) fail(`the house's own use is not the balance of t
 
 // The battery: how full, in the place people look for it.
 if (!/74%/.test(text())) fail('the battery percentage is not shown');
+
+// The pack's voltage, which is how a sagging battery is told from a full one — the percentage never says it.
+if (!/53\.4 V/.test(text())) fail(`the battery voltage is not shown: ${text().slice(0, 300)}`);
+
+// Each 24-hour strip is a tile in its own right: what it is now, and the peak behind it.
+const strips = query(sec, 'div', true).filter(d => /ov-strip/.test(d.attrs?.class || d.className || ''));
+if (strips.length !== 2) fail(`expected a strip for solar and battery, got ${strips.length}`);
+for (const s of strips) {
+  if (!/peak/.test(s.textContent)) fail(`a strip does not say its peak: ${s.textContent.slice(0, 80)}`);
+  if (!/readings/.test(s.textContent)) fail(`a strip does not say how much of the window it covers: ${s.textContent.slice(0, 80)}`);
+}
+// A strip must not borrow the layout class of the panel beside it: `ov-` + kind once collided with the
+// battery card's own container, and the battery strip laid itself out sideways (#395).
+const sideClass = (query(sec, 'div', true).find(d => /ov-batt-side/.test(d.attrs?.class || d.className || '')) || {});
+if (!sideClass.attrs && !sideClass.className) fail('the battery panel lost its container');
+for (const s of strips)
+  if (/\bov-batt-side\b/.test(s.attrs?.class || s.className || '')) fail('a strip is wearing the battery panel’s layout class');
 
 // Everything healthy is one line, not a wall of green cards.
 if (query(sec, '.ov-alert', true).length) fail('a healthy system is raising alerts');

@@ -1499,6 +1499,10 @@ function barChart(opts
   return { svg, gaps };
 }
 
+// Gradient ids have to be unique in a document: two sparklines sharing one would paint the second in the
+// first's colour.
+let sparkSeq = 0;
+
 /// A tile's trend: one series, no axes, no legend — the tile's own label names it.
 ///
 /// It answers "and what has it been doing?", which a single instantaneous figure cannot. Deliberately not a
@@ -1534,6 +1538,22 @@ function sparkline(opts
     'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
   });
 
+  // The area fades from the line down to nothing. A flat wash reads as a solid block of colour and buries
+  // the shape it is meant to sit under; a fade keeps the line the thing you look at.
+  const fillId = 'sparkfill-' + (++sparkSeq);
+  const defs = svgTag('defs', {});
+  const grad = svgTag('linearGradient', { id: fillId, x1: '0', y1: '0', x2: '0', y2: '1' });
+  grad.appendChild(svgTag('stop', { offset: '0', 'stop-color': color, 'stop-opacity': '0.38' }));
+  grad.appendChild(svgTag('stop', { offset: '1', 'stop-color': color, 'stop-opacity': '0.02' }));
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  // A baseline, so a line that runs near the floor is seen to be near the floor.
+  svg.appendChild(svgTag('line', {
+    x1: pad, y1: (h - pad).toFixed(1), x2: w - pad, y2: (h - pad).toFixed(1),
+    stroke: 'var(--line)', 'stroke-width': 1, 'stroke-opacity': '0.7',
+  }));
+
   // Consecutive runs, so a gap in the data is a gap in the line.
   const runs                               = [];
   let run                             = [];
@@ -1554,11 +1574,11 @@ function sparkline(opts
     // The area first, so the line sits on top of it.
     svg.appendChild(svgTag('path', {
       d: `M${line} L${x(r[r.length - 1].i).toFixed(1)},${h - pad} L${x(r[0].i).toFixed(1)},${h - pad} Z`,
-      fill: color, 'fill-opacity': '0.14', stroke: 'none',
+      fill: `url(#${fillId})`, stroke: 'none',
     }));
     svg.appendChild(svgTag('path', {
       d: `M${line}`, fill: 'none', stroke: color, 'stroke-width': '2',
-      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: 'spark-line',
     }));
   }
 
@@ -5366,7 +5386,8 @@ function addOverviewSection(nav     , sections     ) {
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
-  const battWrap = el('div', { class: 'ov-battery' }); now.appendChild(battWrap);
+  // Not `ov-battery`: a tile for the battery kind is built as `ov-` + kind, and the two collided.
+  const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
   sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
   const todayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(todayRow);
@@ -5403,7 +5424,7 @@ function addOverviewSection(nav     , sections     ) {
   };
 
   /// The battery, as the thing people actually look for: how full, which way, and how fast.
-  const drawBattery = (soc               , watts               , why        ) => {
+  const drawBattery = (soc               , watts               , why        , volts               ) => {
     battWrap.innerHTML = '';
     const charging = watts != null && watts < -1;
     const idle = watts == null || Math.abs(watts) <= 1;
@@ -5418,9 +5439,12 @@ function addOverviewSection(nav     , sections     ) {
     const fill = el('div', { class: 'ov-batt-fill' });
     fill.style.height = (pct == null ? 0 : pct) + '%';
     shell.append(fill, el('div', { class: 'ov-batt-cap' }));
+    const state = pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts ))}` : `discharging · ${fmtW(watts )}`;
     body.append(shell, el('div', { class: 'ov-batt-read' },
       el('div', { class: 'ov-batt-pct', text: pct == null ? '—' : pct + '%' }),
-      el('div', { class: 'ov-sub', text: pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts ))}` : `discharging · ${fmtW(watts )}` })));
+      // Volts are how you tell a healthy pack from a sagging one, and the percentage alone never says it.
+      el('div', { class: 'ov-batt-volts', text: volts == null ? '' : `${formatNum(Math.round(volts * 10) / 10)} V` }),
+      el('div', { class: 'ov-sub', text: state })));
     card.appendChild(body);
     battWrap.appendChild(card);
   };
@@ -5459,7 +5483,7 @@ function addOverviewSection(nav     , sections     ) {
       dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
       return;
     }
-    const strip = ([kind, label]                  ) => {
+    const strip = ([kind, label, icon]                          ) => {
       const list = (body.series || []).filter((s     ) => s.kind === kind && !String(s.node).includes('#'));
       if (!list.length) return;
       // Only a step every node reported counts: a partial sum reads as a dip that never happened.
@@ -5469,13 +5493,26 @@ function addOverviewSection(nav     , sections     ) {
         for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
         return total;
       });
-      const box = el('div', { class: 'ov-tile' });
+      // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
+      // its own says "something happened" without saying what.
+      const known = values.filter((v)              => typeof v === 'number');
+      const nowV = [...values].reverse().find((v)              => typeof v === 'number') ?? null;
+      const peak = known.length ? Math.max(...known) : null;
+      const box = el('div', { class: 'ov-tile ov-strip ov-' + kind });
       box.append(
-        el('div', { class: 'ov-tile-head' }, el('span', { text: label })),
-        sparkline({ values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W', width: 260, height: 64 }));
+        el('div', { class: 'ov-tile-head' },
+          el('span', { class: 'ov-icon', text: icon }), el('span', { text: label }),
+          el('span', { class: 'ov-peak', text: peak == null ? '' : `peak ${fmtW(peak)}` })),
+        el('div', { class: 'ov-value', text: fmtW(nowV) }),
+        sparkline({
+          values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W',
+          width: 300, height: 72,
+          at: (i        ) => (body.at || [])[i] ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        }),
+        el('div', { class: 'ov-sub', text: known.length ? `${known.length} of ${values.length} readings` : 'no readings' }));
       dayRow.appendChild(box);
     };
-    ([['solar', 'Solar'], ['grid', 'Grid'], ['battery', 'Battery'], ['load', 'Load']]                      ).forEach(strip);
+    ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['load', 'Load', '⌂']]                              ).forEach(strip);
   };
 
   const loadDay = async () => {
@@ -5515,8 +5552,11 @@ function addOverviewSection(nav     , sections     ) {
     });
 
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v)              => typeof v === 'number');
+    // Voltage is a condition at a point, never a sum: several packs in parallel share one bus voltage.
+    const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v)              => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
-      battNet, battIds.length ? 'no charge source bound' : 'no battery configured');
+      battNet, battIds.length ? 'no charge source bound' : 'no battery configured',
+      voltVals.length ? voltVals.reduce((a, b) => a + b, 0) / voltVals.length : null);
 
     // --- Today ------------------------------------------------------------------------------------
     todayRow.innerHTML = '';
@@ -5559,6 +5599,7 @@ function addOverviewSection(nav     , sections     ) {
       const q = [
         ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
         ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
+        ...battIds.map(id => ({ Node: id, Metric: 'voltage' })),
       ];
       const live                         = {}, liveInfo                      = {};
       if (q.length) {
@@ -6101,13 +6142,35 @@ function addTrendsSection(nav     , sections     ) {
     const clock = (d      ) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return ` · ${from.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${clock(from)} → ${clock(to)}`;
   };
+  /// A counter's readings are not a per-bar quantity; the differences between them are.
+  ///
+  /// Charting `energytoday` through a day draws the counter itself — a staircase climbing to the day's
+  /// total, where every bar restates the whole day so far and none of them says what was used at that
+  /// moment. The difference between one reading and the next is the energy in that interval, which is the
+  /// quantity the chart is asking about, and those DO add up to the day.
+  ///
+  /// A negative difference means the counter re-based (midnight, or a meter reset). Nothing measured that
+  /// interval, so it is a gap rather than a zero.
+  const toDeltas = (body     ) => {
+    (body.series || []).forEach((s     ) => {
+      const raw = s.values                     ;
+      s.values = raw.map((v, i) => {
+        if (i === 0 || v == null) return null;
+        const prev = raw[i - 1];
+        if (prev == null) return null;
+        return v - prev < 0 ? null : v - prev;
+      });
+    });
+    body.deltas = true;
+  };
+
   /// One bar per period, which is the server's call: it labels the bars with period keys when they are
   /// periods, and sends bare instants when they are samples on a clock.
   const perDay = () => !!body?.days;
   /// A total is only a real quantity when each bar is one period's own accumulation. Summing samples of a
   /// rate gives a number in watts that is a quantity of nothing; summing a counter's readings is worse —
   /// it adds the same energy in again at every step.
-  const summable = () => perDay() && !rate();
+  const summable = () => (perDay() || !!body?.deltas) && !rate();
   const byNodeTitle = () => perDay()
     ? `Daily ${metricName()} by node`
     : `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} by node`;
@@ -6120,9 +6183,17 @@ function addTrendsSection(nav     , sections     ) {
         + 'is not the same as nothing used.';
       return;
     }
-    const every = body?.stepSeconds ? `every ${Math.round(body.stepSeconds / 60)} minutes` : 'sampled';
-    desc.textContent = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)} ${every} through the `
-      + `window, ${from} A sample the backend has no reading for is left empty rather than drawn as zero.`
+    const mins = body?.stepSeconds ? Math.round(body.stepSeconds / 60) : 0;
+    const every = mins ? `every ${mins} minutes` : 'sampled';
+    const name = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}`;
+    if (body?.deltas) {
+      desc.textContent = `${name} per ${mins || 5} minutes through the window, ${from} Each bar is what `
+        + 'changed between two readings of the day’s counter, so the bars add up to the day rather than '
+        + 'each restating it. An interval either reading is missing from is left empty.';
+      return;
+    }
+    desc.textContent = `${name} ${every} through the window, ${from} A sample the backend has no reading `
+      + 'for is left empty rather than drawn as zero.'
       + (rate() ? ' These are instantaneous readings, so they are not added up.' : '');
   };
   /// A window that is still filling. "Yesterday" is not one, and neither is any range that ended.
@@ -6149,6 +6220,7 @@ function addTrendsSection(nav     , sections     ) {
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
   const unitsOf = (m        ) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
+  const epochOf = (m        ) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
   /// A rate is a condition sampled at an instant — it is never added up. A quantity accumulated over a
   /// period is. Which one this is follows the metric, not the range.
   const rate = () => RATES.includes(unitsOf(metricSel.value));
@@ -6219,6 +6291,8 @@ function addTrendsSection(nav     , sections     ) {
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
+    // A period counter read at intervals within its own period is charted as what changed between reads.
+    if (body?.ok && !body.days && epochOf(metricSel.value) === 'period') toDeltas(body);
     if (!body || !body.ok) {
       status.textContent = '';
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (body && body.message) || 'Could not load the series.' }));

@@ -29,7 +29,8 @@ export function addOverviewSection(nav: any, sections: any) {
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
-  const battWrap = el('div', { class: 'ov-battery' }); now.appendChild(battWrap);
+  // Not `ov-battery`: a tile for the battery kind is built as `ov-` + kind, and the two collided.
+  const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
   sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
   const todayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(todayRow);
@@ -66,7 +67,7 @@ export function addOverviewSection(nav: any, sections: any) {
   };
 
   /// The battery, as the thing people actually look for: how full, which way, and how fast.
-  const drawBattery = (soc: number | null, watts: number | null, why: string) => {
+  const drawBattery = (soc: number | null, watts: number | null, why: string, volts: number | null) => {
     battWrap.innerHTML = '';
     const charging = watts != null && watts < -1;
     const idle = watts == null || Math.abs(watts) <= 1;
@@ -81,9 +82,12 @@ export function addOverviewSection(nav: any, sections: any) {
     const fill = el('div', { class: 'ov-batt-fill' });
     fill.style.height = (pct == null ? 0 : pct) + '%';
     shell.append(fill, el('div', { class: 'ov-batt-cap' }));
+    const state = pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts!))}` : `discharging · ${fmtW(watts!)}`;
     body.append(shell, el('div', { class: 'ov-batt-read' },
       el('div', { class: 'ov-batt-pct', text: pct == null ? '—' : pct + '%' }),
-      el('div', { class: 'ov-sub', text: pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts!))}` : `discharging · ${fmtW(watts!)}` })));
+      // Volts are how you tell a healthy pack from a sagging one, and the percentage alone never says it.
+      el('div', { class: 'ov-batt-volts', text: volts == null ? '' : `${formatNum(Math.round(volts * 10) / 10)} V` }),
+      el('div', { class: 'ov-sub', text: state })));
     card.appendChild(body);
     battWrap.appendChild(card);
   };
@@ -122,7 +126,7 @@ export function addOverviewSection(nav: any, sections: any) {
       dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
       return;
     }
-    const strip = ([kind, label]: [string, string]) => {
+    const strip = ([kind, label, icon]: [string, string, string]) => {
       const list = (body.series || []).filter((s: any) => s.kind === kind && !String(s.node).includes('#'));
       if (!list.length) return;
       // Only a step every node reported counts: a partial sum reads as a dip that never happened.
@@ -132,13 +136,26 @@ export function addOverviewSection(nav: any, sections: any) {
         for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
         return total;
       });
-      const box = el('div', { class: 'ov-tile' });
+      // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
+      // its own says "something happened" without saying what.
+      const known = values.filter((v): v is number => typeof v === 'number');
+      const nowV = [...values].reverse().find((v): v is number => typeof v === 'number') ?? null;
+      const peak = known.length ? Math.max(...known) : null;
+      const box = el('div', { class: 'ov-tile ov-strip ov-' + kind });
       box.append(
-        el('div', { class: 'ov-tile-head' }, el('span', { text: label })),
-        sparkline({ values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W', width: 260, height: 64 }));
+        el('div', { class: 'ov-tile-head' },
+          el('span', { class: 'ov-icon', text: icon }), el('span', { text: label }),
+          el('span', { class: 'ov-peak', text: peak == null ? '' : `peak ${fmtW(peak)}` })),
+        el('div', { class: 'ov-value', text: fmtW(nowV) }),
+        sparkline({
+          values, color: KIND_COLOR[kind] || 'var(--accent)', units: body.units || 'W',
+          width: 300, height: 72,
+          at: (i: number) => (body.at || [])[i] ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        }),
+        el('div', { class: 'ov-sub', text: known.length ? `${known.length} of ${values.length} readings` : 'no readings' }));
       dayRow.appendChild(box);
     };
-    ([['solar', 'Solar'], ['grid', 'Grid'], ['battery', 'Battery'], ['load', 'Load']] as [string, string][]).forEach(strip);
+    ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['load', 'Load', '⌂']] as [string, string, string][]).forEach(strip);
   };
 
   const loadDay = async () => {
@@ -178,8 +195,11 @@ export function addOverviewSection(nav: any, sections: any) {
     });
 
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v): v is number => typeof v === 'number');
+    // Voltage is a condition at a point, never a sum: several packs in parallel share one bus voltage.
+    const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v): v is number => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
-      battNet, battIds.length ? 'no charge source bound' : 'no battery configured');
+      battNet, battIds.length ? 'no charge source bound' : 'no battery configured',
+      voltVals.length ? voltVals.reduce((a, b) => a + b, 0) / voltVals.length : null);
 
     // --- Today ------------------------------------------------------------------------------------
     todayRow.innerHTML = '';
@@ -222,6 +242,7 @@ export function addOverviewSection(nav: any, sections: any) {
       const q = [
         ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
         ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
+        ...battIds.map(id => ({ Node: id, Metric: 'voltage' })),
       ];
       const live: Record<string, number> = {}, liveInfo: Record<string, any> = {};
       if (q.length) {
