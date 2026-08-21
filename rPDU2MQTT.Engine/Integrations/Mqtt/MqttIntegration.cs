@@ -121,7 +121,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 continue;
 
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
-            var energy = FlowExport.NodeValue(energyGraph, node.Id);   // 0 when this tier has no energy sensor
+            // Null — not 0 — when nothing determines it, exactly like energy_in / energy_today / soc below.
+            // The sensor this feeds is state_class total_increasing, and to Home Assistant a series that
+            // drops to zero is a meter reset: the next real reading is taken as a delta from zero and an
+            // entire lifetime counter lands on one day's bar.
+            double? energy = FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null;
             // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn

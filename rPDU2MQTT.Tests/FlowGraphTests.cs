@@ -604,7 +604,7 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void FlowExport_NodeValue_IsMaxOfInflowAndOutflow()
+    public void FlowExport_TryNodeValue_IsMaxOfInflowAndOutflow()
     {
         // a -> b (50); b -> c (30), b -> d (20). b balances at 50; a is a 50W source; c/d are sinks.
         var graph = new FlowGraph(
@@ -612,10 +612,16 @@ public class FlowGraphTests
             new[] { new FlowLink("a", "b", 50), new FlowLink("b", "c", 30), new FlowLink("b", "d", 20) },
             "realpower", "W");
 
-        Assert.Equal(50, FlowExport.NodeValue(graph, "a"));   // source: outflow only
-        Assert.Equal(50, FlowExport.NodeValue(graph, "b"));   // balanced: max(in 50, out 50)
-        Assert.Equal(30, FlowExport.NodeValue(graph, "c"));   // sink: inflow only
-        Assert.Equal(20, FlowExport.NodeValue(graph, "d"));
+        static double Value(FlowGraph g, string id)
+        {
+            Assert.True(FlowExport.TryNodeValue(g, id, out var v), $"{id} has no value");
+            return v;
+        }
+
+        Assert.Equal(50, Value(graph, "a"));   // source: outflow only
+        Assert.Equal(50, Value(graph, "b"));   // balanced: max(in 50, out 50)
+        Assert.Equal(30, Value(graph, "c"));   // sink: inflow only
+        Assert.Equal(20, Value(graph, "d"));
 
         // Parents = the feeders pointing into a node (a root has none; a node can have several).
         Assert.Empty(FlowExport.Parents(graph, "a"));
