@@ -245,7 +245,7 @@ public static class ServiceConfiguration
                  haSource, .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
-                     : [])]), cfg.EnergyFlow));
+                     : [])]), cfg));
 
         if (worker)
             services.AddHostedService<Services.ValueSourcePluginHost>();

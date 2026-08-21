@@ -1,4 +1,5 @@
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Models.Config;
 
 namespace rPDU2MQTT.Tests;
@@ -15,6 +16,10 @@ public class DerivedMetricsTests
         Nodes = new() { new EnergyFlowNode { Id = "grid", Label = "Grid", Kind = "grid", Sources = sources.ToList() } },
     };
 
+    /// The source reads the hierarchy through the root config, because that is the object that survives a
+    /// save — the EnergyFlow inside it is replaced.
+    private static Config Configured(params EnergyFlowSource[] sources) => new() { EnergyFlow = Flow(sources) };
+
     private static EnergyFlowSource Src(string metric, string type = "mqtt", string direction = "out")
         => new() { Type = type, Metric = metric, Direction = direction, Topic = type == "mqtt" ? "x/y" : "" };
 
@@ -28,7 +33,7 @@ public class DerivedMetricsTests
     }
 
     private static DerivedFlowValueSource Build(Fake inner, params EnergyFlowSource[] sources)
-        => new(inner, Flow(sources));
+        => new(inner, Configured(sources));
 
     // --- Each way round ------------------------------------------------------------------------------
 
@@ -245,11 +250,11 @@ public class DerivedMetricsTests
         var inner = new Fake();
         inner.Values["grid|realpower"] = 2745;
         inner.Values["grid|voltage"] = 249.1;
-        var flow = Flow(Src("realpower"), Src("voltage"));
-        var src = new DerivedFlowValueSource(inner, flow);
+        var config = Configured(Src("realpower"), Src("voltage"));
+        var src = new DerivedFlowValueSource(inner, config);
         Assert.False(src.TryGetValue("grid", "current", out _));
 
-        flow.Nodes[0].Sources.Add(Derived("current"));
+        config.EnergyFlow.Nodes[0].Sources.Add(Derived("current"));
 
         Assert.True(src.TryGetValue("grid", "current", out var amps));
         Assert.Equal(2745 / 249.1, amps, 6);
@@ -261,13 +266,51 @@ public class DerivedMetricsTests
         var inner = new Fake();
         inner.Values["grid|realpower"] = 2745;
         inner.Values["grid|voltage"] = 249.1;
-        var flow = Flow(Src("realpower"), Src("voltage"), Derived("current"));
-        var src = new DerivedFlowValueSource(inner, flow);
+        var config = Configured(Src("realpower"), Src("voltage"), Derived("current"));
+        var src = new DerivedFlowValueSource(inner, config);
         Assert.True(src.TryGetValue("grid", "current", out _));
 
-        flow.Nodes[0].Sources.RemoveAll(DerivedMetrics.IsDerived);
+        config.EnergyFlow.Nodes[0].Sources.RemoveAll(DerivedMetrics.IsDerived);
 
         Assert.False(src.TryGetValue("grid", "current", out _));
+    }
+
+    /// <summary>
+    /// Saving from the GUI does not mutate the hierarchy — it REPLACES it:
+    /// <c>config.EnergyFlow = reloaded.EnergyFlow</c> in the save handler, and the same in the Kubernetes
+    /// config watcher. A source holding the EnergyFlowConfig it was given at startup therefore reads a
+    /// dead object from the first save onwards, and every calculated binding stops resolving with no error
+    /// anywhere — the editor shows the row, the row shows a dash, and only a restart fixes it.
+    /// </summary>
+    [Fact]
+    public void TheHierarchyBeingReplacedOnSaveIsFollowed()
+    {
+        var inner = new Fake();
+        inner.Values["grid|realpower"] = 6746;
+        inner.Values["grid|voltage"] = 246.4;
+        var config = Configured(Src("realpower"), Src("voltage"));
+        var src = new DerivedFlowValueSource(inner, config);
+        Assert.False(src.TryGetValue("grid", "current", out _));
+
+        // What a save does: a freshly loaded document's section assigned over the live one.
+        config.EnergyFlow = Flow(Src("realpower"), Src("voltage"), Derived("current", "split"));
+
+        Assert.True(src.TryGetValue("grid", "current", out var amps));
+        Assert.Equal(6746 / 246.4, amps, 6);
+    }
+
+    /// <summary>And the withheld report follows the same object, or it explains a node that no longer exists.</summary>
+    [Fact]
+    public void TheWithheldReportFollowsTheReplacedHierarchy()
+    {
+        var src = new DerivedFlowValueSource(new Fake(), Configured(Src("realpower"), Src("voltage")));
+        Assert.Empty(src.Withheld);
+
+        var config = Configured(Src("realpower"), Src("voltage"));
+        var live = new DerivedFlowValueSource(new Fake(), config);
+        config.EnergyFlow = Flow(Src("realpower"), Src("voltage"), Derived("current"));
+
+        Assert.Contains(live.Withheld, w => w.Node == "grid" && w.Metric == "current");
     }
 
     // --- Saying so before it runs ---------------------------------------------------------------------

@@ -1,3 +1,4 @@
+using rPDU2MQTT.Classes;
 using rPDU2MQTT.Models.Config;
 
 namespace rPDU2MQTT.Core.Flow;
@@ -15,13 +16,21 @@ namespace rPDU2MQTT.Core.Flow;
 public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics, IPeriodTotalsReady
 {
     private readonly IFlowValueSource inner;
-    private readonly EnergyFlowConfig? flow;
+    private readonly Config? cfg;
 
-    public DerivedFlowValueSource(IFlowValueSource inner, EnergyFlowConfig? flow)
+    public DerivedFlowValueSource(IFlowValueSource inner, Config? cfg)
     {
         this.inner = inner;
-        this.flow = flow;
+        this.cfg = cfg;
     }
+
+    /// <summary>
+    /// The hierarchy as it is now. Held as the root <see cref="Config"/>, never as the
+    /// <see cref="EnergyFlowConfig"/> inside it: saving from the GUI and reloading the CR both REPLACE that
+    /// object (<c>config.EnergyFlow = reloaded.EnergyFlow</c>), so a reference taken at startup goes stale
+    /// on the first save and every calculated binding silently stops resolving until a restart.
+    /// </summary>
+    private EnergyFlowConfig? Flow => cfg?.EnergyFlow;
 
     public bool TryGetValue(string nodeId, string metric, out double value)
     {
@@ -30,7 +39,7 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
 
         value = 0;
         // Asked of the config each time, not of a set built at startup: EnergyFlow applies live.
-        if (!DerivedMetrics.AsksFor(flow, nodeId, metric)) return false;
+        if (!DerivedMetrics.AsksFor(Flow, nodeId, metric)) return false;
         return Compute(nodeId, metric, out value, out _) is null;
     }
 
@@ -62,7 +71,7 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
         get
         {
             var list = new List<WithheldSource>((inner as IWithheldSources)?.Withheld ?? Array.Empty<WithheldSource>());
-            foreach (var key in DerivedMetrics.Keys(flow))
+            foreach (var key in DerivedMetrics.Keys(Flow))
             {
                 var split = key.Split('|');
                 if (split.Length != 2) continue;
