@@ -75,6 +75,12 @@ if (!/Sub Panel/.test(labels)) fail(`a node with no data was hidden as though it
 if (!/MPPT_1/.test(labels) || !/Solar/.test(labels))
   fail(`a zero chain feeding a live node was cut off: ${labels}`);
 
+// The one-click periods belong on every page with a time control, this one included.
+const periodNames = ['Today', 'Yesterday', 'This week', 'This month', 'This year'];
+const buttons = query(sec, 'button', true).map(b => b.textContent);
+const missing = periodNames.filter(n => !buttons.includes(n));
+if (missing.length) fail(`the Flow page has no ${missing.join(', ')} button — the date box is not a period`);
+
 // Turning it off brings everything back.
 cb.checked = false;
 cb.onchange({});
