@@ -18,8 +18,8 @@
 		     Stay on the 2.x line: 3.x is a breaking major that AspNetCore.OpenApi 10 cannot consume — its own
 		     source generator assigns IOpenApiMediaType.Example, read-only in 3.x, so the build fails inside
 		     generated code (#227). Dependabot is told to skip the major; revisit when ASP.NET ships against 3.x. -->
-		<PackageReference Include="Microsoft.OpenApi" Version="2.12.0" />
-		<PackageReference Include="Scalar.AspNetCore" Version="2.16.19" />
+		<PackageReference Include="Microsoft.OpenApi" Version="2.12.2" />
+		<PackageReference Include="Scalar.AspNetCore" Version="2.16.20" />
 	</ItemGroup>
 
 	<ItemGroup>
