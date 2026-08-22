@@ -5,10 +5,10 @@ import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel } from '../flow-vocabulary.js';
-import { historyControl, historyQuery, historyNote } from '../history-control.js';
+import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
+import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -94,6 +94,7 @@ export function addFlowSection(nav: any, sections: any) {
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what: any) => {
+    periods.mark(null);
     // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
@@ -104,6 +105,18 @@ export function addFlowSection(nav: any, sections: any) {
     }
     load();
   });
+  // One click for the periods people actually ask for, as on the Energy and Trends pages. A period is a
+  // question about energy — "how much yesterday" — so it answers in energy rather than leaving a power
+  // reading under a heading about a month.
+  const periods = periodRow((key: PeriodKey) => {
+    const { day, days } = periodWindow(key);
+    hist.set(day, days);
+    if (metricSel.value !== 'energytoday') { metricSel.value = 'energytoday'; showDayNote(); }
+    periods.mark(key);
+    hadDay = true;
+    load();
+  });
+  sec.appendChild(periods.row);
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
@@ -203,8 +216,10 @@ export function addFlowSection(nav: any, sections: any) {
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
-    // ...and finally honour the unmetered-remainder view switch.
-    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...then honour the unmetered-remainder view switch...
+    const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...and finally drop the branches carrying nothing, if that switch is on.
+    const folded = applyHideEmptyPref(shown.nodes, shown.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -315,26 +330,49 @@ export function addFlowSection(nav: any, sections: any) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
+    /// Where each ribbon actually meets each bar, in the order they are drawn.
+    ///
+    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
+    /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
+    /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
+    /// its bar, and its children get pulled to the middle of a bar they never reach.
+    const attachments = () => {
+      const at = new Map<any, { from: number; to: number }>();
+      const outOff: Record<string, number> = {}, inOff: Record<string, number> = {};
+      [...links]
+        .sort((a: any, b: any) =>
+          (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+          (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0))
+        .forEach((l: any) => {
+          const sp = pos[l.source], tp = pos[l.target];
+          if (!sp || !tp) return;
+          const h = l.known === false || l.value * pxPerUnit < 1.5 ? 1.5 : l.value * pxPerUnit;
+          const so = outOff[l.source] || 0, to = inOff[l.target] || 0;
+          at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
+          outOff[l.source] = so + h;
+          inOff[l.target] = to + h;
+        });
+      return at;
+    };
+
     const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
     for (const c of relaxOrder) {
       const cn = cols[c];
       if (!cn || !cn.length) continue;
+      const at = attachments();
       let w = 0, s = 0;
       cn.forEach((n: any) => {
-        const sp = pos[n.id];
-        if (!sp) return;
-        const mid = sp.y + sp.h / 2;
-        // Both sides, not just what it feeds.
+        // Both sides, not just what it feeds, and each side measured where the ribbon lands.
         (outgoing[n.id] || []).forEach((l: any) => {
-          const tp = pos[l.target];
-          if (!tp) return;
-          s += ((tp.y + tp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.to - a.from) * linkW(l);
           w += linkW(l);
         });
         (incoming[n.id] || []).forEach((l: any) => {
-          const fp = pos[l.source];
-          if (!fp) return;
-          s += ((fp.y + fp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.from - a.to) * linkW(l);
           w += linkW(l);
         });
       });
@@ -728,10 +766,11 @@ export function addFlowSection(nav: any, sections: any) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram.
+    // Three switches deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
-      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
+      + 'saved by them.'));
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target).

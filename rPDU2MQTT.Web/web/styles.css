@@ -914,3 +914,8 @@
   .ov-peak { margin-left: auto; font-weight: 400; color: var(--faint); letter-spacing: 0; }
   .ov-strip .ov-value { font-size: 22px; }
   .ov-strip .spark-hit { cursor: crosshair; }
+
+  /* A credential field and its show/hide button. */
+  .reveal-wrap { display:flex; gap:6px; align-items:center; }
+  .reveal-wrap input { flex:1; min-width:0; }
+  .reveal-btn { flex:none; }

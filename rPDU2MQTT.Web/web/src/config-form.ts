@@ -156,7 +156,8 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
-    f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
+    // A masked field with no way to read it back is how a mistyped credential survives three attempts.
+    f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
     // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
     if (node.notEditableReason) {
       const why = document.createElement('div');
@@ -268,13 +269,17 @@ function renderList(node: any, arr: any[], path: string[]) {
 // value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
 // plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
 // (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
-type NavItem = { schema: string, child?: boolean } | { tool: (nav: any, sections: any) => any, child?: boolean };
+/// `after` names the schema section a tool belongs to. Without it a tool lands at the END of its group,
+/// and `child: true` then indents it under whatever schema section happened to sort last — which is how
+/// "HA Energy Mapping" ended up hanging off EmonCMS.
+type NavItem = { schema: string, child?: boolean }
+  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string };
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
-  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
@@ -301,6 +306,25 @@ function navGroup(nav: any, title: string) {
   header.onclick = () => wrap.classList.toggle('collapsed');
   wrap.append(header, items); nav.appendChild(wrap);
   return items;
+}
+
+// A credential field with a show/hide button. Hidden by default — it is a credential — but readable while
+// it is being entered, because a value you cannot see is a value you cannot check against the one you
+// copied.
+function revealWrap(input: any) {
+  const wrap = el('div', { class: 'reveal-wrap' });
+  const eye = btn('Show');
+  eye.type = 'button';
+  eye.className = 'small reveal-btn';
+  eye.title = 'Show this value';
+  eye.onclick = () => {
+    const hidden = input.type === 'password';
+    input.type = hidden ? 'text' : 'password';
+    eye.textContent = hidden ? 'Hide' : 'Show';
+    eye.title = hidden ? 'Hide this value' : 'Show this value';
+  };
+  wrap.append(input, eye);
+  return wrap;
 }
 
 // Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
@@ -376,8 +400,12 @@ function renderConfigSection(node: any, nav: any, sections: any) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
-      let props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p: any) => p.key !== 'EnergyDashboard') : node.properties;
+      // The Energy Dashboard's settings — its URL and long-lived token above all — are rendered here, on
+      // the Home Assistant page, because that is where anyone looks for them: the status board reports the
+      // sync as "Home Assistant — Failing", and this is the page it names. The HA Energy Mapping page keeps
+      // its own copies of the two connection fields, bound to this same object, because it cannot test a
+      // connection it has no way to enter.
+      let props = node.properties;
       // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
       // removed here rather than duplicated: two switches bound to one value would disagree the moment one
       // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
@@ -443,7 +471,13 @@ export function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
-  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
+  NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
+    // A tool that names its parent section sits directly after it; everything else keeps to the end.
+    const after = 'after' in it ? it.after : undefined;
+    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
+    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
+    else navGroups[i].items.push(it);
+  }));
 
   // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
   const overview = addOverviewSection(nav, sections);

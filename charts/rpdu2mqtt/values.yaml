@@ -102,6 +102,12 @@ credentials:
   oidcClientSecret: ""
   # REST API key (RPDU2MQTT_API_KEY) enabling the API's write/control endpoints (config.Api.ApiKey).
   apiKey: ""
+  # Password for the GUI's built-in login (RPDU2MQTT_GUI_PASSWORD), when Gui.Auth is on.
+  guiPassword: ""
+  # Home Assistant long-lived access token (RPDU2MQTT_HASS_TOKEN) for the Energy Dashboard sync.
+  hassToken: ""
+  # Password for the shared cache, when it needs one (RPDU2MQTT_CACHE_PASSWORD).
+  cachePassword: ""
 
 serviceAccount:
   create: true

@@ -1961,6 +1961,61 @@ function applyUnmeasuredPref(nodes       , links       )                        
   };
 }
 
+/// Hide the branches that are carrying nothing. On by default: a rack of switched-off outlets is most of
+/// the diagram and none of the information.
+let hideEmpty = (() => { try { return localStorage.getItem('rpdu-flow-hide-empty') !== '0'; } catch { return true; } })();
+
+function setHideEmpty(on         ) {
+  hideEmpty = on;
+  try { localStorage.setItem('rpdu-flow-hide-empty', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading zero when nothing downstream of them is carrying anything either.
+///
+/// A node with NO value is left alone. "0 A" and "no data" are different statements: the first is a
+/// measurement, the second is a gap in the model — nothing measures that node — and hiding it by default
+/// would bury exactly the sort of thing this diagram exists to surface.
+///
+/// The test is downstream only. A zero node still on a live supply path stays, so the solar chain after
+/// dark — MPPTs at 0 feeding an aggregate at 0 feeding a live inverter — is drawn as the connected thing
+/// it is. A zero node with nothing live below it is a switched-off outlet, and that is what goes.
+function applyHideEmptyPref(nodes       , links       )                                 {
+  if (!hideEmpty) return { nodes, links };
+
+  const carrying = (n     ) => n.value != null && Math.abs(n.value) > 0;
+  const byId = new Map             (nodes.map((n     ) => [n.id, n]));
+  const out = new Map                  ();
+  links.forEach((l     ) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
+
+  // Memoised so a wide fan-out is walked once, and cycle-safe because a node in progress answers false
+  // rather than recursing back into itself.
+  const feedsSomethingLive = new Map                 ();
+  const walking = new Set        ();
+  const live = (id        )          => {
+    if (feedsSomethingLive.has(id)) return feedsSomethingLive.get(id) ;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && carrying(n)) || live(t);
+    });
+    walking.delete(id);
+    feedsSomethingLive.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id        ) => {
+    const n = byId.get(id);
+    if (!n) return false;
+    return n.value == null || carrying(n) || live(id);
+  };
+
+  return {
+    nodes: nodes.filter((n     ) => keep(n.id)),
+    links: links.filter((l     ) => keep(l.source) && keep(l.target)),
+  };
+}
+
 /// The "Unmeasured load" view switch, shown wherever the group chips are.
 function unmeasuredToggle(onToggle            )              {
   const lbl = el('label', {
@@ -1999,6 +2054,7 @@ function groupToggles(onToggle            , drawn = true)                     {
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
+    row.appendChild(hideEmptyToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
   }
@@ -2023,6 +2079,22 @@ function groupToggles(onToggle            , drawn = true)                     {
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+
+/// The "Hide empty" view switch. Per-viewer, like the others here.
+function hideEmptyToggle(onToggle            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Hide branches reading zero — switched-off outlets and anything they feed. Nodes with NO data '
+      + 'stay: nothing measures those, which is a gap in the model rather than an empty branch. A view '
+      + 'setting only; no total changes.',
+  });
+  const cb      = el('input', { type: 'checkbox' });
+  cb.checked = hideEmpty;
+  cb.onchange = () => { setHideEmpty(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Hide empty'));
+  return lbl;
+}
 
 // ── node-templates.ts ───────────────────────────────────────────
 // Ready-made device templates, and the two panels that import them (MQTT Import, and the Nodes page).
@@ -2997,6 +3069,7 @@ function addFlowSection(nav     , sections     ) {
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what     ) => {
+    periods.mark(null);
     // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
@@ -3007,6 +3080,18 @@ function addFlowSection(nav     , sections     ) {
     }
     load();
   });
+  // One click for the periods people actually ask for, as on the Energy and Trends pages. A period is a
+  // question about energy — "how much yesterday" — so it answers in energy rather than leaving a power
+  // reading under a heading about a month.
+  const periods = periodRow((key           ) => {
+    const { day, days } = periodWindow(key);
+    hist.set(day, days);
+    if (metricSel.value !== 'energytoday') { metricSel.value = 'energytoday'; showDayNote(); }
+    periods.mark(key);
+    hadDay = true;
+    load();
+  });
+  sec.appendChild(periods.row);
   sec.appendChild(hist.row);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
@@ -3106,8 +3191,10 @@ function addFlowSection(nav     , sections     ) {
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
-    // ...and finally honour the unmetered-remainder view switch.
-    const folded = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...then honour the unmetered-remainder view switch...
+    const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
+    // ...and finally drop the branches carrying nothing, if that switch is on.
+    const folded = applyHideEmptyPref(shown.nodes, shown.links);
     const toggles = groupToggles(redrawBoth);
     if (toggles) wrap.appendChild(toggles);
     const links = folded.links;
@@ -3217,26 +3304,49 @@ function addFlowSection(nav     , sections     ) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
+    /// Where each ribbon actually meets each bar, in the order they are drawn.
+    ///
+    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
+    /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
+    /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
+    /// its bar, and its children get pulled to the middle of a bar they never reach.
+    const attachments = () => {
+      const at = new Map                                   ();
+      const outOff                         = {}, inOff                         = {};
+      [...links]
+        .sort((a     , b     ) =>
+          (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
+          (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0))
+        .forEach((l     ) => {
+          const sp = pos[l.source], tp = pos[l.target];
+          if (!sp || !tp) return;
+          const h = l.known === false || l.value * pxPerUnit < 1.5 ? 1.5 : l.value * pxPerUnit;
+          const so = outOff[l.source] || 0, to = inOff[l.target] || 0;
+          at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
+          outOff[l.source] = so + h;
+          inOff[l.target] = to + h;
+        });
+      return at;
+    };
+
     const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
     for (const c of relaxOrder) {
       const cn = cols[c];
       if (!cn || !cn.length) continue;
+      const at = attachments();
       let w = 0, s = 0;
       cn.forEach((n     ) => {
-        const sp = pos[n.id];
-        if (!sp) return;
-        const mid = sp.y + sp.h / 2;
-        // Both sides, not just what it feeds.
+        // Both sides, not just what it feeds, and each side measured where the ribbon lands.
         (outgoing[n.id] || []).forEach((l     ) => {
-          const tp = pos[l.target];
-          if (!tp) return;
-          s += ((tp.y + tp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.to - a.from) * linkW(l);
           w += linkW(l);
         });
         (incoming[n.id] || []).forEach((l     ) => {
-          const fp = pos[l.source];
-          if (!fp) return;
-          s += ((fp.y + fp.h / 2) - mid) * linkW(l);
+          const a = at.get(l);
+          if (!a) return;
+          s += (a.from - a.to) * linkW(l);
           w += linkW(l);
         });
       });
@@ -3630,10 +3740,11 @@ function addFlowSection(nav     , sections     ) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Two switches deliberately not gathered here: "Unmeasured load" and "Animate flow" sit on the diagram.
+    // Three switches deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change what the diagram '
-      + 'shows rather than what is configured, and they are per-browser — nothing here is saved by them.'));
+      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
+      + 'saved by them.'));
   };
 
   // --- Hierarchy editor: a layered, left→right arrow graph (energy flows source → target).
@@ -7282,7 +7393,8 @@ function renderNode(node     , obj     , container     , path           = []) {
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = scalarInput(node, obj);
-    f.appendChild(node.type === 'bool' ? switchWrap(input) : input);
+    // A masked field with no way to read it back is how a mistyped credential survives three attempts.
+    f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
     // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
     if (node.notEditableReason) {
       const why = document.createElement('div');
@@ -7394,13 +7506,16 @@ function renderList(node     , arr       , path          ) {
 // value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
 // plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
 // (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
+/// `after` names the schema section a tool belongs to. Without it a tool lands at the END of its group,
+/// and `child: true` then indents it under whatever schema section happened to sort last — which is how
+/// "HA Energy Mapping" ended up hanging off EmonCMS.
 
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true }] },
-  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true }] },
+  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
@@ -7427,6 +7542,25 @@ function navGroup(nav     , title        ) {
   header.onclick = () => wrap.classList.toggle('collapsed');
   wrap.append(header, items); nav.appendChild(wrap);
   return items;
+}
+
+// A credential field with a show/hide button. Hidden by default — it is a credential — but readable while
+// it is being entered, because a value you cannot see is a value you cannot check against the one you
+// copied.
+function revealWrap(input     ) {
+  const wrap = el('div', { class: 'reveal-wrap' });
+  const eye = btn('Show');
+  eye.type = 'button';
+  eye.className = 'small reveal-btn';
+  eye.title = 'Show this value';
+  eye.onclick = () => {
+    const hidden = input.type === 'password';
+    input.type = hidden ? 'text' : 'password';
+    eye.textContent = hidden ? 'Hide' : 'Show';
+    eye.title = hidden ? 'Hide this value' : 'Show this value';
+  };
+  wrap.append(input, eye);
+  return wrap;
 }
 
 // Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
@@ -7502,8 +7636,12 @@ function renderConfigSection(node     , nav     , sections     ) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // EnergyDashboard has its own "HA Energy Mapping" tab, so don't also render it in the HA form.
-      let props = node.key === 'HomeAssistant' ? (node.properties || []).filter((p     ) => p.key !== 'EnergyDashboard') : node.properties;
+      // The Energy Dashboard's settings — its URL and long-lived token above all — are rendered here, on
+      // the Home Assistant page, because that is where anyone looks for them: the status board reports the
+      // sync as "Home Assistant — Failing", and this is the page it names. The HA Energy Mapping page keeps
+      // its own copies of the two connection fields, bound to this same object, because it cannot test a
+      // connection it has no way to enter.
+      let props = node.properties;
       // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
       // removed here rather than duplicated: two switches bound to one value would disagree the moment one
       // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
@@ -7569,7 +7707,13 @@ function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
-  NAV_GROUPS.forEach((g, i) => navGroups[i].items.push(...g.items));
+  NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
+    // A tool that names its parent section sits directly after it; everything else keeps to the end.
+    const after = 'after' in it ? it.after : undefined;
+    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
+    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
+    else navGroups[i].items.push(it);
+  }));
 
   // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
   const overview = addOverviewSection(nav, sections);

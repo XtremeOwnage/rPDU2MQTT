@@ -107,6 +107,61 @@ export function applyUnmeasuredPref(nodes: any[], links: any[]): { nodes: any[];
   };
 }
 
+/// Hide the branches that are carrying nothing. On by default: a rack of switched-off outlets is most of
+/// the diagram and none of the information.
+export let hideEmpty = (() => { try { return localStorage.getItem('rpdu-flow-hide-empty') !== '0'; } catch { return true; } })();
+
+export function setHideEmpty(on: boolean) {
+  hideEmpty = on;
+  try { localStorage.setItem('rpdu-flow-hide-empty', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading zero when nothing downstream of them is carrying anything either.
+///
+/// A node with NO value is left alone. "0 A" and "no data" are different statements: the first is a
+/// measurement, the second is a gap in the model — nothing measures that node — and hiding it by default
+/// would bury exactly the sort of thing this diagram exists to surface.
+///
+/// The test is downstream only. A zero node still on a live supply path stays, so the solar chain after
+/// dark — MPPTs at 0 feeding an aggregate at 0 feeding a live inverter — is drawn as the connected thing
+/// it is. A zero node with nothing live below it is a switched-off outlet, and that is what goes.
+export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  if (!hideEmpty) return { nodes, links };
+
+  const carrying = (n: any) => n.value != null && Math.abs(n.value) > 0;
+  const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+  const out = new Map<string, string[]>();
+  links.forEach((l: any) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
+
+  // Memoised so a wide fan-out is walked once, and cycle-safe because a node in progress answers false
+  // rather than recursing back into itself.
+  const feedsSomethingLive = new Map<string, boolean>();
+  const walking = new Set<string>();
+  const live = (id: string): boolean => {
+    if (feedsSomethingLive.has(id)) return feedsSomethingLive.get(id)!;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && carrying(n)) || live(t);
+    });
+    walking.delete(id);
+    feedsSomethingLive.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id: string) => {
+    const n = byId.get(id);
+    if (!n) return false;
+    return n.value == null || carrying(n) || live(id);
+  };
+
+  return {
+    nodes: nodes.filter((n: any) => keep(n.id)),
+    links: links.filter((l: any) => keep(l.source) && keep(l.target)),
+  };
+}
+
 /// The "Unmeasured load" view switch, shown wherever the group chips are.
 export function unmeasuredToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
@@ -145,6 +200,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
   const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
+    row.appendChild(hideEmptyToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
   }
@@ -169,3 +225,19 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+
+/// The "Hide empty" view switch. Per-viewer, like the others here.
+export function hideEmptyToggle(onToggle: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Hide branches reading zero — switched-off outlets and anything they feed. Nodes with NO data '
+      + 'stay: nothing measures those, which is a gap in the model rather than an empty branch. A view '
+      + 'setting only; no total changes.',
+  });
+  const cb: any = el('input', { type: 'checkbox' });
+  cb.checked = hideEmpty;
+  cb.onchange = () => { setHideEmpty(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Hide empty'));
+  return lbl;
+}

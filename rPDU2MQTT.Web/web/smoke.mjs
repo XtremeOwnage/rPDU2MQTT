@@ -430,5 +430,42 @@ for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}
        + 'collapses every toggle. Add :not(.switch), or raise the switch selector above it.');
 }
 
+// The Energy Dashboard's token is set on the Home Assistant page. It used to be filtered out of this form
+// in favour of its own page, while the status board reported the sync as "Home Assistant — Failing" — so
+// the page the fault named was the one page without the field.
+{
+  const haLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Home Assistant');
+  if (!haLink) fail('no Home Assistant page');
+  haLink.click();
+  await new Promise(r => setTimeout(r, 120));
+  const ha = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+  const labels = query(ha, 'div', true).concat(query(ha, 'label', true)).map(e => (e.textContent || '').trim());
+  for (const want of ['Token', 'Url']) {
+    if (!labels.includes(want)) fail(`the Energy Dashboard's ${want} is not on the Home Assistant page`);
+  }
+
+  // …and it is a credential: masked in the browser, with a way to read back what was pasted.
+  const tokenField = query(ha, 'div', true).find(d => (d.dataset?.path || '').endsWith('EnergyDashboard.Token'));
+  if (!tokenField) fail('the token field has no path to identify it');
+  const box = query(tokenField, 'input', true)[0];
+  if (box?.type !== 'password') fail(`the Home Assistant token renders as ${box?.type} — it is a credential`);
+  const eye = query(tokenField, 'button', true).find(b => /Show|Hide/.test(b.textContent || ''));
+  if (!eye) fail('a masked credential has no way to be read back');
+  eye.onclick({});
+  if (box.type !== 'text') fail('the reveal button does not reveal');
+  eye.onclick({});
+  if (box.type !== 'password') fail('the reveal button does not hide again');
+}
+
+// A tool page belongs under the section it configures. Appended to the end of its group and marked as a
+// child, "HA Energy Mapping" indented under whichever schema section sorted last — EmonCMS.
+{
+  const links = query(getEl('nav'), 'a', true).map(a => a.dataset.label);
+  const mapping = links.indexOf('HA Energy Mapping');
+  if (mapping < 1) fail('HA Energy Mapping is not in the nav');
+  if (links[mapping - 1] !== 'Home Assistant')
+    fail(`HA Energy Mapping is nested under ${links[mapping - 1]}, not Home Assistant`);
+}
+
 console.log(`smoke: build() rendered ${linkText.length} nav links across ${groups.length} groups; `
   + `Flow + Nodes editors OK; change tracking, palette (${cmdItems.length} pages) and theme OK`);
