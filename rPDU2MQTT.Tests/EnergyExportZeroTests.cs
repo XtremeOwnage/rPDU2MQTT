@@ -64,6 +64,66 @@ public class EnergyExportZeroTests
             .ToDictionary(kv => kv.Key, kv => JsonDocument.Parse(kv.Value).RootElement.Clone());
     }
 
+    /// <summary>Several passes through ONE integration, so its high-water marks carry across them.</summary>
+    private static async Task<List<Dictionary<string, JsonElement>>> ExportSequence(params Dictionary<string, double>[] passes)
+    {
+        var cfg = Configured();
+        var publisher = new Captured();
+        var results = new List<Dictionary<string, JsonElement>>();
+        MqttIntegration? integration = null;
+
+        foreach (var live in passes)
+        {
+            var source = new Fixed(live);
+            integration ??= new MqttIntegration(cfg, publisher, source);
+            var pass = ExportPass.Build([new PduSnapshot("pdu", DateTime.UtcNow, new PduData())], cfg, source);
+            publisher.Sent.Clear();
+            await integration.SendAsync(pass, CancellationToken.None);
+            results.Add(publisher.Sent
+                .Where(kv => !kv.Key.Contains("/config") && !string.IsNullOrWhiteSpace(kv.Value))
+                .ToDictionary(kv => kv.Key, kv => JsonDocument.Parse(kv.Value).RootElement.Clone()));
+        }
+        return results;
+    }
+
+    private static JsonElement Node(Dictionary<string, JsonElement> sent, string id)
+        => sent.Values.Single(v => v.GetProperty("id").GetString() == id);
+
+    /// <summary>
+    /// A roll-up sums the links whose flow is known, so a contributor going stale makes the parent's total
+    /// smaller with nothing wrong at the meter. Publishing that dip into a total_increasing sensor records
+    /// the whole counter as one period's usage (#403).
+    /// </summary>
+    [Fact]
+    public async Task ALifetimeCounterIsNotPublishedGoingBackwards()
+    {
+        var sent = await ExportSequence(
+            new() { ["solar|realpower"] = 4200, ["solar|energy"] = 14616.54 },
+            new() { ["solar|realpower"] = 4200, ["solar|energy"] = 9800.00 },
+            new() { ["solar|realpower"] = 4200, ["solar|energy"] = 14620.00 });
+
+        Assert.Equal(14616.54, Node(sent[0], "solar").GetProperty("energy").GetDouble(), 3);
+
+        var dipped = Node(sent[1], "solar").GetProperty("energy");
+        Assert.True(dipped.ValueKind == JsonValueKind.Null,
+            $"a lifetime counter went backwards to {dipped} — to a total_increasing sensor that is a meter "
+          + "reset, and the next reading is recorded as a whole counter's worth of usage");
+
+        // …and it publishes again by itself once the reading passes where it was.
+        Assert.Equal(14620.00, Node(sent[2], "solar").GetProperty("energy").GetDouble(), 3);
+    }
+
+    /// <summary>Power is a rate, not a counter: it falls all the time and must keep being published.</summary>
+    [Fact]
+    public async Task PowerIsNotGuarded()
+    {
+        var sent = await ExportSequence(
+            new() { ["solar|realpower"] = 4200 },
+            new() { ["solar|realpower"] = 120 });
+
+        Assert.Equal(120, Node(sent[1], "solar").GetProperty("power").GetDouble());
+    }
+
     /// <summary>Power is measured, energy is not. The energy field must say so, not say zero.</summary>
     [Fact]
     public async Task NoEnergyReading_IsNotPublishedAsZero()
