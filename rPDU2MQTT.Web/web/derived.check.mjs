@@ -107,6 +107,50 @@ if (sums(row) !== 'power ÷ apparent power') fail(`power factor is not offered f
 const rows = await rowsFor([mqtt('realpower'), mqtt('voltage'), derived('energy')]);
 if (!rows.some(r => /cannot be calculated/.test(r))) fail('a calculated energy binding was accepted silently');
 
+// --- An edit inside the sheet is an unsaved edit ----------------------------------------------------
+// The controls in the node editor write straight into the config object, and most of them returned without
+// telling the dirty tracker. The save bar stayed silent until something else refreshed it — closing the
+// sheet and reopening it — so editing a binding and looking at the save bar said nothing had changed
+// (#401).
+{
+  const config = {
+    History: { Enabled: false },
+    EnergyFlow: { Nodes: [{ Id: 'grid', Label: 'Grid', Kind: 'grid', Sources: [mqtt('realpower')] }], Links: [] },
+  };
+  const { sandbox, getEl } = makeDom({
+    bodies: (url) => url.includes('/api/flow/derivations') ? derivations
+      : url.includes('/api/schema') ? schema
+      : url.includes('/api/config') ? config
+      : url.includes('/api/instances') ? { ok: true, instances: [] }
+      : { ok: true },
+  });
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'app.js' });
+  await new Promise(r => setTimeout(r, 60));
+
+  query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Nodes')?.click();
+  await new Promise(r => setTimeout(r, 200));
+  const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+  query(sec, 'button', true).find(b => b.textContent === 'Edit')?.click();
+  await new Promise(r => setTimeout(r, 200));
+
+  const count = () => (getEl('save-count')?.textContent || '');
+  if (!/^0 unsaved|^$/.test(count())) fail(`the save bar is already counting edits before one was made: ${count()}`);
+
+  // The node's own Name: its handler assigns and returns, like most controls in this sheet. (The topic
+  // field is a poor test — its handler re-renders for other reasons and refreshes the tracker in passing.)
+  const name = query(sandbox.document.body, 'input', true).find(i => i.value === 'Grid');
+  if (!name) fail('no Name field in the open sheet');
+  name.value = 'Grid Meter';
+  name.dispatch('change', {});
+  await new Promise(r => setTimeout(r, 60));
+
+  // "0 unsaved changes" contains "unsaved change": the count has to be a number greater than zero.
+  if (!/^[1-9]\d* unsaved change/.test(count()))
+    fail(`an edit in the open sheet was not counted until the sheet was closed: "${count()}"`);
+}
+
 console.log('derived: a calculated binding states the sum it will actually do, prefers an exact relation '
   + 'over one that assumes a power factor of 1 and says so when it cannot, names the pairs that would work '
-  + 'when it has none, and refuses a metric no relation covers');
+  + 'when it has none, and refuses a metric no relation covers; an edit inside the sheet counts as an '
+  + 'unsaved change straight away');

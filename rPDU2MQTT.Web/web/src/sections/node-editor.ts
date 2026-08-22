@@ -25,6 +25,17 @@ export function overlay(title: string, onClose?: () => void): { body: any, close
   const x = btn('Close');
   head.appendChild(x);
   const body = el('div');
+  // Every edit inside a sheet reports itself, once, here.
+  //
+  // The controls in this file write straight into the config object and most of them returned without
+  // telling the dirty tracker, so the save bar stayed silent until something else happened to refresh it —
+  // closing the sheet, or a control that did remember. Editing a topic and looking at the save bar said
+  // nothing had changed. Adding refreshDirty() to two dozen handlers fixes today's controls and not
+  // tomorrow's; `change` bubbles, so one listener on the sheet covers every control it will ever contain.
+  //
+  // refreshDirty() diffs the whole document, so it does not matter which control fired: what changed is
+  // read off the document rather than reported by the handler.
+  body.addEventListener('change', () => refreshDirty());
   panel.append(head, body);
   back.appendChild(panel);
   document.body.appendChild(back);
