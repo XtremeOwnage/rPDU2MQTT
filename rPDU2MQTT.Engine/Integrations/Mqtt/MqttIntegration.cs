@@ -33,6 +33,10 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     // the tag filter now excludes.
     private readonly HashSet<string> clearedDuplicates = new();
     private readonly HashSet<string> retiredByFilter = new();
+    /// <summary>What has already been published for each lifetime counter, so none of them goes backwards.</summary>
+    private readonly Core.Flow.CumulativeExport cumulative = new();
+    /// <summary>Keys already reported as withheld, so a stuck contributor is said once and not every pass.</summary>
+    private readonly HashSet<string> saidWithheld = new();
 
     public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null)
     {
@@ -125,7 +129,10 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             // The sensor this feeds is state_class total_increasing, and to Home Assistant a series that
             // drops to zero is a meter reset: the next real reading is taken as a delta from zero and an
             // entire lifetime counter lands on one day's bar.
-            double? energy = FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null;
+            // …and never a figure below one already published: a roll-up dips whenever a contributor goes
+            // stale, because the sum only covers the links that are known.
+            double? energy = cumulative.Publish($"{node.Id}|energy",
+                FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
             // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
@@ -133,8 +140,9 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 .ToList();
 
             // The in-direction (charge/export) energy, when this node declares one and a fresh value exists.
-            double? energyIn = energyInNodes.Contains(node.Id) && live is not null
-                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null;
+            double? energyIn = cumulative.Publish($"{node.Id}|energy_in",
+                energyInNodes.Contains(node.Id) && live is not null
+                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
 
             // Today's total. Null — not 0 — when nothing determines it.
             double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
@@ -193,7 +201,9 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             var total = FlowGroups.Total(graph, g);
             if (total.Value is not { } gpower) continue;
 
-            var genergy = FlowGroups.Total(energyGraph, g).Value ?? 0;
+            // Null, not 0, and never below what was published before — the group's Energy sensor is the
+            // same state_class total_increasing as a tier's.
+            double? genergy = cumulative.Publish($"group:{g.Id}|energy", FlowGroups.Total(energyGraph, g).Value);
             var groupNode = new FlowNode(total.Id, total.Label, total.Kind, gpower);
             var gtopic = FlowExport.Topic(groupNode, graph, cfg.MQTT.ParentTopic, flow);
 
@@ -220,6 +230,18 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             var gdoc = FlowExport.DiscoveryDocument(groupNode, null, gtopic, energyGraph.Units, graph.Units, availability);
             await publisher.PublishAsync(gconfig, gdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
         }
+
+        // A counter held back is said once, when it starts, and once when it recovers. Silence is what let a
+        // roll-up publish a smaller total for a week without anyone knowing it had.
+        foreach (var (key, reason) in cumulative.Withheld)
+            if (saidWithheld.Add(key))
+                Log.Warning($"Holding back {key}: {reason}");
+        foreach (var key in saidWithheld.ToList())
+            if (!cumulative.Withheld.Any(w => w.Key == key))
+            {
+                Log.Information($"{key} is being published again — it has passed the figure it dipped below.");
+                saidWithheld.Remove(key);
+            }
 
         return published;
     }

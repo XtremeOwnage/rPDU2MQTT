@@ -896,6 +896,30 @@ EnergyFlow:
 > `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/crds/rpduconfig.yaml` once and it
 > will not happen again, for this or any future type.
 
+### Lifetime counters never go backwards
+
+The `energy` and `energy_in` fields feed sensors declared `state_class: total_increasing`. Home Assistant
+reads a decrease in such a series as a meter reset and records the next reading as a delta from zero, so a
+single dip writes a whole counter into one period.
+
+A roll-up dips without anything being wrong at the meter: a parent's total is the sum of the links whose
+flow is *known*, so a contributor going stale makes the parent smaller. That figure is the energy of the
+part that happened to be reporting, not the node's energy.
+
+So a value below one already published is **withheld**, and logged once:
+
+```
+Holding back main_panel|energy: 9800 is below the 14616.54 already published. …
+```
+
+The sensor holds its last good value until the reading passes that figure again, which happens by itself
+when the missing contributor comes back — logged as `… is being published again`. A counter that genuinely
+restarts (a replaced meter) stays withheld until it passes its old peak or the bridge restarts; that is the
+safer way round, because the alternative rewrites statistics that cannot be recovered.
+
+`energy_today` is not guarded: it re-bases every period by design, and that reset is one Home Assistant
+handles correctly.
+
 ### Repairing Home Assistant statistics
 
 A tier's `energy` field feeds a sensor declared `state_class: total_increasing`. Home Assistant reads a
