@@ -108,7 +108,24 @@ export function makeEl(tag = 'div') {
     _on: {},
     addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
     removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
-    dispatch(type, ev) { (this._on[type] || []).forEach(f => f(ev)); },
+    // Events that bubble, do — and stopPropagation stops them, or a handler that guards against its own
+    // ancestor (the diagram's "click the canvas to unfocus") would be undone by the ancestor it guarded
+    // against. Only the DOM's own bubbling events are listed: mouseenter/mouseleave do not bubble, and
+    // pretending they did would make a hover test pass where a pointer never reached the element.
+    dispatch(type, ev) {
+      const BUBBLES = ['change', 'input', 'click', 'keydown', 'keyup', 'submit', 'focusin', 'focusout'];
+      let stopped = false;
+      const e = ev && typeof ev === 'object' ? ev : {};
+      const inner = e.stopPropagation;
+      e.stopPropagation = function () { stopped = true; if (typeof inner === 'function') inner.call(this); };
+      for (let node = this; node; node = node.parent) {
+        // Both ways of listening, as the DOM does: the `on<type>` property and addEventListener.
+        const prop = node['on' + type];
+        if (typeof prop === 'function') prop.call(node, e);
+        (node._on?.[type] || []).slice().forEach(f => f(e));
+        if (stopped || !BUBBLES.includes(type)) break;
+      }
+    },
     click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() { }, stopPropagation() { } }); },
     focus() { }, select() { }, setSelectionRange() { },
     querySelector(s) { return query(this, s, false); },
