@@ -114,6 +114,98 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
     }
 
     /// <summary>
+    /// The whole window in one request, rather than the interface's default of one request per instant.
+    ///
+    /// <para>
+    /// That default calls <see cref="ValuesAtAsync"/> once per step, so a day of five-minute steps was 289
+    /// requests to Home Assistant for one chart. The Trends page caps a series build at 60 seconds, which
+    /// is what the operator would meet first: not a slow chart, but no history.
+    /// </para>
+    /// <para>
+    /// The history endpoint already takes a range and a set of entities, so the whole thing is one call.
+    /// Each step takes the last state at or before it — a reading holds until the next one — and a
+    /// non-numeric state ("unavailable") is a gap rather than a zero.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
+    {
+        var perStep = steps.Select(_ => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)).ToList();
+        var result = perStep.Cast<IReadOnlyDictionary<string, double>>().ToList();
+
+        var ed = cfg.HASS.EnergyDashboard;
+        if (string.IsNullOrWhiteSpace(ed.Url) || string.IsNullOrWhiteSpace(ed.Token) || nodeIds.Count == 0 || steps.Count == 0)
+            return result;
+
+        var entityOf = nodeIds.ToDictionary(id => EntityFor(id, metric), id => id, StringComparer.OrdinalIgnoreCase);
+        var ordered = steps.Select(s => DateTime.SpecifyKind(s, DateTimeKind.Utc)).ToList();
+
+        // One interval before the first step: a step takes the last state at or before it, and the state
+        // that answers the first one was usually set before the window began.
+        var span = ordered.Count > 1 ? ordered[^1] - ordered[0] : TimeSpan.FromSeconds(Math.Max(1, cfg.History.ToleranceSeconds));
+        var lead = ordered.Count > 1 ? TimeSpan.FromTicks(span.Ticks / (ordered.Count - 1)) : span;
+        var from = ordered.Min() - lead;
+        var to = ordered.Max();
+
+        var url = $"{ed.Url!.TrimEnd('/')}/api/history/period/{Uri.EscapeDataString(from.ToString("o", CultureInfo.InvariantCulture))}"
+                + $"?filter_entity_id={Uri.EscapeDataString(string.Join(',', entityOf.Keys))}"
+                + $"&end_time={Uri.EscapeDataString(to.ToString("o", CultureInfo.InvariantCulture))}"
+                + "&minimal_response&no_attributes";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new("Bearer", ed.Token);
+            var response = await http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.Warning($"Flow history: Home Assistant answered {(int)response.StatusCode} for {entityOf.Count} entity/entities over {steps.Count} step(s).");
+                return result;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return result;
+
+            foreach (var series in doc.RootElement.EnumerateArray())
+            {
+                if (series.ValueKind != JsonValueKind.Array || series.GetArrayLength() == 0) continue;
+                var entity = series[0].TryGetProperty("entity_id", out var e) ? e.GetString() : null;
+                if (entity is null || !entityOf.TryGetValue(entity, out var node)) continue;
+
+                var points = new List<(DateTime At, double Value)>();
+                foreach (var point in series.EnumerateArray())
+                {
+                    if (!point.TryGetProperty("state", out var st)
+                        || !double.TryParse(st.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
+                        || !double.IsFinite(v)) continue;
+                    var when = point.TryGetProperty("last_changed", out var lc) ? lc.GetString()
+                             : point.TryGetProperty("last_updated", out var lu) ? lu.GetString() : null;
+                    if (!DateTime.TryParse(when, CultureInfo.InvariantCulture,
+                            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var ts)) continue;
+                    points.Add((ts, v));
+                }
+                if (points.Count == 0) continue;
+                points.Sort((a, b) => a.At.CompareTo(b.At));
+
+                // Both walked once, in time order, rather than searching the points per step.
+                var order = Enumerable.Range(0, ordered.Count).OrderBy(i => ordered[i]).ToList();
+                var cursor = 0;
+                double? held = null;
+                foreach (var i in order)
+                {
+                    while (cursor < points.Count && points[cursor].At <= ordered[i]) held = points[cursor++].Value;
+                    if (held is { } h) perStep[i][node] = h;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warning($"Flow history: could not reach Home Assistant at {ed.Url} ({ex.Message}).");
+        }
+        return result;
+    }
+
+    /// <summary>
     /// The entity a node's value is recorded under — the same unique_id the discovery export publishes, so
     /// the two cannot drift.
     /// </summary>
