@@ -46,6 +46,59 @@ internal static class EmonCmsWire
     /// A null value is a gap EmonCMS records where the feed had no data, and it appears in the array
     /// alongside real points. Taking the last element regardless would report a gap as a reading.
     /// </remarks>
+    /// <summary>
+    /// One value per requested instant, from a single range payload.
+    ///
+    /// <para>
+    /// A feed read is <c>[[unix_ms, value], …]</c> ascending. Reading a whole window once and walking it
+    /// against the instants replaces a request per instant: a day of five-minute steps is 289 of them, and
+    /// EmonCMS was answering that as 289 requests per node.
+    /// </para>
+    /// <para>
+    /// Each instant takes the last point at or before it, which is the same rule as
+    /// <see cref="PointAt"/> — a reading holds until the next one. Null where no point precedes the instant,
+    /// because a feed that starts mid-window has nothing to say about the part before it.
+    /// </para>
+    /// </summary>
+    public static double?[] Series(string json, IReadOnlyList<long> atUnixMs)
+    {
+        var answers = new double?[atUnixMs.Count];
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return answers;
+
+            // The payload is ascending, but a feed is not a contract: sorted here so a walk is safe.
+            var points = new List<(long At, double Value)>();
+            foreach (var point in doc.RootElement.EnumerateArray())
+            {
+                if (point.ValueKind != JsonValueKind.Array) continue;
+                var parts = point.EnumerateArray().ToList();
+                if (parts.Count < 2) continue;
+                if (!parts[0].TryGetInt64(out var ts)) continue;
+                if (parts[1].ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) continue;
+
+                var raw = parts[1].ValueKind == JsonValueKind.String ? parts[1].GetString() : parts[1].ToString();
+                if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v)) continue;
+                points.Add((ts, v));
+            }
+            points.Sort((a, b) => a.At.CompareTo(b.At));
+            if (points.Count == 0) return answers;
+
+            // The instants are asked for in order too, so both are walked once rather than searched per step.
+            var order = Enumerable.Range(0, atUnixMs.Count).OrderBy(i => atUnixMs[i]).ToList();
+            var cursor = 0;
+            double? held = null;
+            foreach (var i in order)
+            {
+                while (cursor < points.Count && points[cursor].At <= atUnixMs[i]) held = points[cursor++].Value;
+                answers[i] = held;
+            }
+            return answers;
+        }
+        catch (JsonException) { return answers; }
+    }
+
     public static double? PointAt(string json, long atUnixMs)
     {
         try

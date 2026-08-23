@@ -43,6 +43,69 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
             : $"{baseUrl} · {list.Count} feed(s), but none named '{key}' — a read for '{wanted}' finds nothing");
     }
 
+    /// <summary>
+    /// The whole window in one read per feed, rather than the interface's default of one read per instant.
+    ///
+    /// <para>
+    /// That default calls <see cref="ValuesAtAsync"/> once per step, and this reader makes a request per
+    /// node, so a day of five-minute steps on thirty nodes was 8,670 sequential requests. The Trends page
+    /// caps a series build at 60 seconds, so what the operator saw was not a slow chart: it was no history
+    /// at all, on a backend that had every reading asked for.
+    /// </para>
+    /// <para>
+    /// EmonCMS answers a range from the same endpoint — start, end and an interval — so the whole window
+    /// costs one request per node.
+    /// </para>
+    /// </summary>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, double>>> SeriesAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, IReadOnlyList<DateTime> steps, CancellationToken ct)
+    {
+        var empty = steps.Select(_ => (IReadOnlyDictionary<string, double>)new Dictionary<string, double>()).ToList();
+        var baseUrl = (cfg.EmonCMS.Url ?? "").TrimEnd('/');
+        var key = cfg.EmonCMS.ApiKey ?? "";
+        if (baseUrl.Length == 0 || nodeIds.Count == 0 || steps.Count == 0) return empty;
+
+        var list = await FeedsAsync(baseUrl, key, ct);
+        if (list.Count == 0) return empty;
+
+        var at = steps.Select(s => new DateTimeOffset(DateTime.SpecifyKind(s, DateTimeKind.Utc)).ToUnixTimeMilliseconds()).ToList();
+        var start = at.Min();
+        var end = at.Max();
+        // A point per step at most: asking for a finer interval than the steps only moves more of the feed
+        // across the wire to be thrown away here.
+        var interval = steps.Count > 1
+            ? Math.Max(1, (int)Math.Round((end - start) / 1000.0 / (steps.Count - 1)))
+            : Math.Max(1, cfg.History.ToleranceSeconds);
+        // A step takes the last point at or before it, so the read starts one interval early — otherwise
+        // the first step of every window is empty for want of a point that exists just outside it.
+        var from = start - (long)interval * 1000L;
+
+        var perStep = steps.Select(_ => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)).ToList();
+        foreach (var node in nodeIds)
+        {
+            var wanted = MetricsHelper.EmonCmsFlowInputName(node, node, "", metric, cfg);
+            if (!list.TryGetValue(wanted, out var id)
+                && !list.TryGetValue($"{node}_{metric}", out id)
+                && !list.TryGetValue(node, out id)) continue;
+
+            var url = $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(id)}&start={from}&end={end}"
+                    + $"&interval={interval}&apikey={Uri.EscapeDataString(key)}";
+            try
+            {
+                var response = await http.GetAsync(url, ct);
+                if (!response.IsSuccessStatusCode) continue;
+                var values = EmonCmsWire.Series(await response.Content.ReadAsStringAsync(ct), at);
+                for (var i = 0; i < values.Length; i++)
+                    if (values[i] is { } v) perStep[i][node] = v;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Debug($"Flow history: EmonCMS feed {id} for '{node}' over {steps.Count} step(s) — {ex.Message}");
+            }
+        }
+        return perStep.Cast<IReadOnlyDictionary<string, double>>().ToList();
+    }
+
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {
