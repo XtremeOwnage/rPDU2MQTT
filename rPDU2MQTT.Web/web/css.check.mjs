@@ -18,6 +18,18 @@ if (stickyHeader && /overflow\s*:\s*hidden/.test(tableRule[0]))
 if (!/table\.ld thead tr:first-child th:first-child\s*\{[^}]*border-top-left-radius/.test(css))
   fail('the table lost its rounded corners along with overflow:hidden');
 
+// Any box that scrolls around a table with a sticky header becomes that header's containing block, so the
+// header parks INSIDE the table over its first row. #395 was `overflow:hidden` on the table itself; the
+// bindings-scroll box that fixed the node editor's width re-created it exactly. A scroll container around
+// `table.ld` has to unstick the header.
+const scrollBoxes = [...css.matchAll(/\.([a-z-]+)\s*\{[^}]*overflow(-x)?:\s*auto[^}]*\}/g)].map(m => m[1]);
+for (const box of scrollBoxes) {
+  const wrapsTable = new RegExp(`\\.${box}[^{]*table\\.ld`).test(css);
+  if (!wrapsTable) continue;
+  const unsticks = new RegExp(`\\.${box}[^{]*table\\.ld th\\s*\\{[^}]*position:\\s*static`).test(css);
+  if (!unsticks) fail(`.${box} scrolls around table.ld without unsticking its header — it will sit on row 1`);
+}
+
 // A phone fits about one and a half of the app bar's three groups. Without a breakpoint the brand's
 // nowrap text overflowed its shrunk box and ran underneath the status pills, and the build string
 // (v0.0.0-feat-gui-enhancements-395.1185+71ed512) was still asking for its full width (#395).
@@ -28,5 +40,5 @@ if (!/\.brand-name\s*\{[^}]*text-overflow/.test(phone[1]))
 if (!/pill-mono\s*\{[^}]*display: *none/.test(phone[1]))
   fail('the build string is still asking for its full width on a phone');
 
-console.log('css: a sticky table header is not trapped inside its own table, the corners are still round, '
-  + 'and the app bar gives way on a phone');
+console.log('css: a sticky table header is not trapped inside its own table nor inside a box that scrolls '
+  + 'around it, the corners are still round, and the app bar gives way on a phone');
