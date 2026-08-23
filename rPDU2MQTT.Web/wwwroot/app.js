@@ -3976,8 +3976,10 @@ let pickerSeq = 0;
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 function overlay(title        , onClose             )                                   {
   const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
-  // 75% of the viewport, not a fixed 860px: the node editor's widest row is a table of bindings.
-  const panel = el('div', { style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'max(min(75vw, 1600px), min(860px, 92vw))', maxHeight: '80vh', overflow: 'auto' } });
+  // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
+  // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
+  // the screen actually has. Vertical scrolling only: the table below manages its own width.
+  const panel = el('div', { class: 'sheet-panel', style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(94vw, 1900px)', maxHeight: '86vh', overflowY: 'auto', overflowX: 'hidden' } });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -4335,6 +4337,12 @@ function renderNodeEditor(node     , links       , cand                  , reren
     : { out: 'Out', in: 'In', split: 'Split: + out / − in' };
 
   const sources        = ensure(node, 'Sources', []);
+  // A column every row fills with an em dash is width spent saying "not applicable" eleven times. Counter
+  // means something only for energy, Invert only for a signed metric — so they appear when a binding on
+  // THIS node uses them.
+  const metricOf = (s     ) => String(s.Metric || 'realpower').toLowerCase();
+  const usesCounter = sources.some((s     ) => metricOf(s) === 'energy');
+  const usesInvert = sources.some((s     ) => SIGNED_METRICS.includes(metricOf(s)));
   if (sources.length) {
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
@@ -4343,7 +4351,8 @@ function renderNodeEditor(node     , links       , cand                  , reren
       Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
       Current: LIVE_HINT,
     };
-    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), 'Counter', 'Unit', 'Source', 'Details', 'Scale', 'Invert', 'Current', ''].forEach(h => {
+    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), ...(usesCounter ? ['Counter'] : []),
+      'Unit', 'Source', 'Details', 'Scale', ...(usesInvert ? ['Invert'] : []), 'Current', ''].forEach(h => {
       const th = el('th', { text: h });
       if (colHint[h]) th.title = colHint[h];
       head.appendChild(th);
@@ -4402,7 +4411,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
       }
 
       // Does this counter run forever, or does the device reset it every day?
-      {
+      if (usesCounter) {
         const cell = el('td');
         if (metric === 'energy') {
           const accSel = el('select', { style: { width: 'auto' } });
@@ -4563,6 +4572,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
 
       // Sign only means anything where the value has a direction — power and current, not voltage/energy.
       const invCell = el('td', { style: { textAlign: 'center' } });
+      // Built either way so `setScale` keeps its reference; appended only when the column is there.
       if (SIGNED_METRICS.includes(metric)) {
         const inv = el('input', { type: 'checkbox' })                    ;
         inv.checked = (src.Scale ?? 1) < 0;
@@ -4572,7 +4582,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
       } else {
         invCell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Sign has no meaning for this metric.' }));
       }
-      tr.appendChild(invCell);
+      if (usesInvert) tr.appendChild(invCell);
 
       // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
       const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: '…' });
@@ -4585,7 +4595,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
       body.appendChild(tr);
     });
     tbl.appendChild(body);
-    box.appendChild(tbl);
+    // The table scrolls itself when it still cannot fit. Scrolling the whole sheet took the title and the
+    // Close button with it, and left the Remove buttons off the right-hand edge with nothing to say so.
+    box.appendChild(el('div', { class: 'bindings-scroll' }, tbl));
 
     // Live "Current" value for every binding.
     if (liveCells.length) {

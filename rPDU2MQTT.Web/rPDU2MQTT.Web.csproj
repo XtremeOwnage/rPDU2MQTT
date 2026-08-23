@@ -97,6 +97,8 @@
 		<!-- Clicking a tile has to chart the nodes that tile's figure came from, not whatever Trends was
 		     showing — an answer about different nodes is worse than no link. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/drilldown.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- The bindings table carries its own width, and a column nothing on the node uses is not a column. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nodesheet.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- "Hide empty" must clear switched-off outlets without hiding a node nothing measures, or cutting a
 		     zero chain off the live thing it feeds. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hideempty.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
