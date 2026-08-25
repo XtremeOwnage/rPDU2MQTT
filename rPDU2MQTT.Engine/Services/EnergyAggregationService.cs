@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Services;
 /// Derives energy (kWh) from the power readings already being collected, for nodes that report power but
 /// no cumulative energy — a CT clamp, an inverter's live wattage.
 /// </summary>
-public sealed class EnergyAggregationService : BackgroundService, IFlowValueSource, Core.Flow.IPeriodTotalsReady
+public sealed class EnergyAggregationService : BackgroundService, IFlowValueSource, Core.Flow.IPeriodTotalsReady, Core.Flow.IPeriodTotalsOrigin
 {
     private const string PowerMetric = "realpower";
     private const string EnergyMetric = "energy";
@@ -87,8 +87,28 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     {
         states = new Dictionary<string, EnergyState>(store.Load(), StringComparer.OrdinalIgnoreCase);
         loaded = true;
+        CarriedOverNodes = states.Count;
+        // Nothing carried over means every daily figure starts here, whatever the clock says the day is.
+        AccumulatingSinceUtc = DateTime.UtcNow;
+        if (Periods && CarriedOverNodes == 0)
+            Log.Warning($"Daily energy totals did not carry over: the {StoreKind} store held nothing. "
+                      + "Today's figures accumulate from now, not from the period boundary — which is what "
+                      + "a restart on an ephemeral store does every time it happens.");
         return states.Count;
     }
+
+    /// <summary>How many node states came back from the store, and when today's figures really start.</summary>
+    public int CarriedOverNodes { get; private set; }
+
+    public DateTime AccumulatingSinceUtc { get; private set; } = DateTime.UtcNow;
+
+    /// <summary>Where those totals live, named so the fix for losing them is obvious.</summary>
+    public string StoreKind => store.GetType().Name switch
+    {
+        "RedisEnergyStore" => "cache",
+        "FileEnergyStore" => "file",
+        _ => "memory",
+    };
 
     /// <summary>
     /// Whether the carried-over totals are in yet. Until they are, every daily figure derived from them is

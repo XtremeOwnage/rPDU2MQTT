@@ -13,7 +13,7 @@ namespace rPDU2MQTT.Core.Flow;
 /// whenever there is one — a device that reports amps is always believed over arithmetic about amps.
 /// </para>
 /// </summary>
-public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics, IPeriodTotalsReady
+public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources, IFlowValueDiagnostics, IPeriodTotalsReady, IPeriodTotalsOrigin
 {
     private readonly IFlowValueSource inner;
     private readonly Config? cfg;
@@ -92,6 +92,10 @@ public sealed class DerivedFlowValueSource : IFlowValueSource, IWithheldSources,
         => (inner as IFlowValueDiagnostics)?.ReportedKeys ?? Array.Empty<(string, string)>();
 
     public bool PeriodTotalsReady => (inner as IPeriodTotalsReady)?.PeriodTotalsReady ?? true;
+
+    public int CarriedOverNodes => (inner as IPeriodTotalsOrigin)?.CarriedOverNodes ?? 0;
+    public DateTime AccumulatingSinceUtc => (inner as IPeriodTotalsOrigin)?.AccumulatingSinceUtc ?? DateTime.UtcNow;
+    public string StoreKind => (inner as IPeriodTotalsOrigin)?.StoreKind ?? "memory";
 
     private static bool Empty(out FlowReading reading) { reading = default; return false; }
 }

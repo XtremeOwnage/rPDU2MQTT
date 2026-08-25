@@ -26,6 +26,7 @@ let board = { ok: true, cards: [
   { id: 'mqtt', level: 'good', title: 'MQTT', state: 'Connected', detail: '' },
   { id: 'prom', level: 'good', title: 'Prometheus', state: 'Scraped', detail: '' },
 ] };
+let period = { ok: true, period: { tracked: true, carriedOver: 4, accumulatingSinceUtc: null, store: 'cache' } };
 let live = { ok: true, values: [
   { node: 'battery', metric: 'soc', value: 74 },
   { node: 'battery', metric: 'voltage', value: 53.4 },
@@ -42,6 +43,7 @@ const day = { ok: true, units: 'W', stepSeconds: 900,
 
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
+    if (url.includes('/api/time')) return period;
     if (url.includes('/api/flow/live')) return live;
     if (url.includes('/api/status/board')) return board;
     if (url.includes('/api/flow/series')) return day;
@@ -81,6 +83,10 @@ if (!/47\.7 kWh/.test(text())) fail(`the house's own use is not the balance of t
 // The battery: how full, in the place people look for it.
 if (!/74%/.test(text())) fail('the battery percentage is not shown');
 
+// Totals that carried over are the day's totals, and say so.
+if (!/since the day rolled over/.test(text())) fail('a carried-over total does not say it covers the day');
+if (query(sec, '.ov-alert', true).length) fail('a healthy carry-over is raising an alert');
+
 // The pack's voltage, which is how a sagging battery is told from a full one — the percentage never says it.
 if (!/53\.4 V/.test(text())) fail(`the battery voltage is not shown: ${text().slice(0, 300)}`);
 
@@ -109,6 +115,21 @@ for (const s of strips)
 // Everything healthy is one line, not a wall of green cards.
 if (query(sec, '.ov-alert', true).length) fail('a healthy system is raising alerts');
 if (!/All 2 components healthy/.test(text())) fail(`a healthy system does not say so: ${text().slice(0, 200)}`);
+
+// --- The totals did not carry over --------------------------------------------------------------------
+// A restart with nothing in the store starts today's figures again. "0 kWh since the day rolled over" is
+// then a claim about a day nobody measured — indistinguishable, on a tile, from a genuine zero.
+period = { ok: true, period: { tracked: true, carriedOver: 0, accumulatingSinceUtc: '2026-08-24T19:40:00Z', store: 'file' } };
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').click();
+await new Promise(r => setTimeout(r, 400));
+
+if (/since the day rolled over/.test(text()))
+  fail('the figures claim to cover the day after the totals restarted with the process');
+if (!/did not carry over/.test(text())) fail(`the tiles do not say what they actually cover: ${text().slice(0, 400)}`);
+const warned = query(sec, '.ov-note', true).find(a => /restarted with the process/.test(a.textContent));
+if (!warned) fail('nothing says the totals restarted');
+if (!/file inside the container/.test(warned.textContent))
+  fail(`the warning does not say where the totals were kept: ${warned.textContent}`);
 
 // --- Something is wrong -----------------------------------------------------------------------------
 board = { ok: true, cards: [
@@ -142,4 +163,5 @@ if (solarFigures !== 1) fail(`solar's figure appears ${solarFigures} times — t
 
 console.log('overview: the landing page is what the system is doing; home is the balance of what was '
   + 'measured; a measured zero is a zero and an unmeasured figure is a dash; the battery says how full it '
-  + 'is or why it cannot; health is one line until something is wrong, and then it is a card');
+  + 'is or why it cannot; health is one line until something is wrong, and then it is a card; and today\'s '
+  + 'figures say so when they cover only part of the day');

@@ -118,6 +118,28 @@ export function addOverviewSection(nav: any, sections: any) {
   };
 
   let lastDay: any = null;
+  /// What the daily figures actually cover. A restart with nothing in the store starts them again, and a
+  /// tile reading "0 kWh since the day rolled over" is then a claim about a day nobody measured.
+  let origin: { carriedOver: number; accumulatingSinceUtc?: string; store?: string } | null = null;
+  const sinceLabel = () => {
+    if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return 'since the day rolled over';
+    const from = new Date(origin.accumulatingSinceUtc);
+    return `only since ${from.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — totals did not carry over`;
+  };
+  /// Said once, above the figures it applies to, rather than repeated on each of them.
+  const originNote = () => {
+    if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return null;
+    const where = origin.store === 'file' ? 'a file inside the container'
+      : origin.store === 'cache' ? 'the shared cache' : 'memory';
+    return el('div', { class: 'ov-note warn' },
+      el('span', { class: 'ov-alert-icon', text: '⚠' }),
+      el('div', {},
+        el('div', { class: 'ov-alert-title', text: 'Today’s totals restarted with the process' }),
+        el('div', { class: 'desc', text:
+          `Nothing carried over from ${where}, so the figures below cover only since `
+          + `${new Date(origin.accumulatingSinceUtc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}, `
+          + 'not the whole day. Trends reads the history backend and still shows the full day.' })));
+  };
 
   const drawDay = () => {
     dayRow.innerHTML = '';
@@ -251,7 +273,9 @@ export function addOverviewSection(nav: any, sections: any) {
       ...(eLoad === undefined ? {} : { load: eLoad }),
     });
 
-    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), 'since the day rolled over', solarIds));
+    const note = originNote();
+    if (note) todayRow.appendChild(note);
+    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
     if (gridIds.length) todayRow.appendChild(tile('grid', '⚡', 'Grid imported', fmtKwh(eGridOut), eGridIn ? `${fmtKwh(eGridIn)} exported` : 'nothing exported', gridIds));
     todayRow.appendChild(tile('home', '⌂', 'Home used', fmtKwh(eHome), eHome == null ? 'no measured sources' : 'everything the house drew', []));
     const pct = selfSufficiencyPct(eHome, eGridOut);
@@ -265,6 +289,7 @@ export function addOverviewSection(nav: any, sections: any) {
     stamp.textContent = 'loading…';
     try {
       const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energytoday')]);
+      try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || []) as any[];
       const battIds = idsOfKind(nodes, 'battery'), gridIds = idsOfKind(nodes, 'grid');
