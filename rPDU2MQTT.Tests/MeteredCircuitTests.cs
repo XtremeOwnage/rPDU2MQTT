@@ -106,12 +106,18 @@ public class MeteredCircuitTests
     }
 
     /// <summary>
-    /// A measured child with children of ITS own is a pass-through, not a metered circuit: its reading may
-    /// be on one leg (an inverter bound to load_power while also charging a battery), so conservation
-    /// governs what reaches it rather than its own figure.
+    /// A measured sub-panel reports its OWN inlet, so that is what reaches it — even though it has
+    /// circuits of its own hanging off it.
+    ///
+    /// <para>
+    /// Live, an inverter reading 6.97 kW was pushing 2.9 kW and 4.1 kW into two panels metering 1.04 kW and
+    /// 1.47 kW, so each panel's bar was drawn at nearly three times its own reading and its circuits became
+    /// a thin band at the top of a mostly empty bar. Having children of its own does not make a panel's
+    /// clamp less of a measurement.
+    /// </para>
     /// </summary>
     [Fact]
-    public void APassThroughChildIsNotTreatedAsAMeteredCircuit()
+    public void AMeasuredSubPanelReportsItsOwnInlet_EvenWithCircuitsBelowIt()
     {
         var cfg = new EnergyFlowConfig();
         cfg.Nodes.Add(new EnergyFlowNode { Id = "panel", Kind = "panel" });
@@ -122,10 +128,45 @@ public class MeteredCircuitTests
 
         var g = Build(cfg, new() { ["panel|realpower"] = 900, ["subpanel|realpower"] = 400, ["circuit|realpower"] = 30 });
 
-        // The sub-panel meters its own inlet, so what reaches it is decided by conservation from above.
-        Assert.Equal(900, Assert.Single(g.Links, l => l.Target == "subpanel").Value, 2);
-        // …while its own metered circuit still reports itself, and its surplus is named.
+        Assert.Equal(400, Assert.Single(g.Links, l => l.Target == "subpanel").Value, 2);
         Assert.Equal(30, Assert.Single(g.Links, l => l.Target == "circuit").Value, 2);
+        // Both surpluses are named rather than pushed onto whatever is metered below.
+        Assert.Equal(500, Assert.Single(g.Links, l => l.Target == "panel#unmeasured").Value, 2);
         Assert.Equal(370, Assert.Single(g.Links, l => l.Target == "subpanel#unmeasured").Value, 2);
+    }
+
+    /// <summary>
+    /// A producer down a single path keeps conservation: its reading is what it PUT OUT, and with one link
+    /// to send it down, all of it goes there. This is the inverter bound to <c>load_power</c> while also
+    /// charging a battery — its own figure covers one leg and cannot be what reaches the panel.
+    /// </summary>
+    [Fact]
+    public void AProducerDownOnePathKeepsConservation()
+    {
+        var cfg = new EnergyFlowConfig();
+        cfg.Nodes.Add(new EnergyFlowNode { Id = "solar", Kind = "solar" });
+        cfg.Nodes.Add(new EnergyFlowNode { Id = "inverter", Kind = "inverter" });
+        cfg.Nodes.Add(new EnergyFlowNode { Id = "panel", Kind = "panel" });
+        cfg.Links.Add(new EnergyFlowLink { From = "solar", To = "inverter" });
+        cfg.Links.Add(new EnergyFlowLink { From = "inverter", To = "panel" });
+
+        var g = Build(cfg, new() { ["solar|realpower"] = 8344, ["inverter|realpower"] = 2526, ["panel|realpower"] = 2526 });
+
+        Assert.Equal(8344, Assert.Single(g.Links, l => l.Target == "inverter").Value, 2);
+        Assert.DoesNotContain(g.Nodes, n => n.Id == "solar#unmeasured");
+    }
+
+    /// <summary>What a producer cannot account for is not called load on the thing producing it.</summary>
+    [Fact]
+    public void AProducersSurplusIsNamedAsOutput_NotAsLoad()
+    {
+        var cfg = Panel(("inverter", "inverter"), ("main", "panel"), ("sub", "panel"));
+        var g = Build(cfg, new() { ["inverter|realpower"] = 6970, ["main|realpower"] = 1040, ["sub|realpower"] = 1470 });
+
+        Assert.Equal(1040, Assert.Single(g.Links, l => l.Target == "main").Value, 2);
+        Assert.Equal(1470, Assert.Single(g.Links, l => l.Target == "sub").Value, 2);
+        var spare = Assert.Single(g.Nodes, n => n.Id == "inverter#unmeasured");
+        Assert.Equal(4460, spare.Value!.Value, 2);
+        Assert.Equal("Unaccounted output", spare.Label);
     }
 }
