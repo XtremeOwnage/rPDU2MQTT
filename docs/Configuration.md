@@ -968,6 +968,60 @@ each binding's value from the shared live cache the worker fills; the **"Test de
 one-off connection to check a binding before it's saved — use it sparingly if your gateway is single-client,
 since it briefly competes with the worker's poll.
 
+### Live sources from EmonCMS feeds
+
+If a circuit is already metered by something that posts to EmonCMS — an IotaWatt, an emonTx, an emonPi — the
+number is already sitting in a feed, and it can value a flow node directly. Set `Type: emoncms` on the
+binding and name the feed:
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - Id: server_rack
+      Label: Server rack
+      Sources:
+        - Type: emoncms
+          Metric: realpower
+          Feed: 2_power           # a feed name, 'tag/name', or its numeric id
+        - Type: emoncms
+          Metric: energy
+          Feed: 2_energy
+EmonCMS:
+  Url: http://emoncms.example.com
+  ApiKey: <a key that can read feeds>
+  Source:
+    PollIntervalSeconds: 30
+```
+
+**Naming the feed.** A bare name is resolved against the server's feed list, so the binding survives a
+re-provision that renumbers the feed. EmonCMS names are only unique *within a tag*, though — `energy` may
+well exist under both `solar` and `grid`. An ambiguous name is reported as ambiguous and reads as nothing
+rather than silently binding to whichever came back first; qualify it as `tag/name`, or use the numeric id.
+The Nodes editor's **Browse…** button lists the server's feeds with their current values and picks the right
+form for you.
+
+**What it needs.** Only `EmonCMS.Url` and an API key that can read feeds. `EmonCMS.Enabled` switches the
+*export* on and is not required here — reading a neighbouring EmonCMS you push nothing to is an ordinary
+setup. The poll itself only runs when something is actually bound to a feed.
+
+**One request per poll.** The whole poll is a single `/feed/list.json`, however many feeds are bound. That
+call also carries each feed's own timestamp, and **that** is what freshness is judged against — not the
+moment the poll ran. A dead IotaWatt leaves its last reading in the feed forever, and a node whose feed
+stopped updating goes to "no data" on its `StaleAfterSeconds` rather than propping the hierarchy up on a
+number that stopped being true overnight.
+
+Units, `Scale`, `Direction` (including `split`), `Accumulation` and the daily-counter audit all behave
+exactly as they do for an MQTT or Modbus binding — a feed's value is indistinguishable downstream from any
+other source. If EmonCMS records a unit for the feed it is converted to the metric's canonical unit on the
+way in; set the binding's own `Unit` to override a mislabelled feed.
+
+### Live sources from Home Assistant entities
+
+The same seam, pointed at an HA entity: `Type: homeassistant` with the entity id in the binding's
+`Settings.Entity`, read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access
+token. Useful when the thing measuring a circuit is already in Home Assistant through some other
+integration. An entity that is `unavailable` or non-numeric supplies nothing — never zero.
+
 ### Device templates (Nodes tab → "Import device template")
 
 Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:

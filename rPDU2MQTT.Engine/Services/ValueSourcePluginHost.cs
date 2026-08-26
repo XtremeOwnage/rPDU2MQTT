@@ -23,6 +23,10 @@ public sealed class ValueSourcePluginHost : BackgroundService
     // What each source was last told, so an unchanged config is not re-applied every tick.
     private readonly Dictionary<string, string> applied = new(StringComparer.OrdinalIgnoreCase);
 
+    // When each source was last reconciled, so a poller can be driven on its own cadence rather than only
+    // when its bindings change.
+    private readonly Dictionary<string, DateTime> lastRun = new(StringComparer.OrdinalIgnoreCase);
+
     public ValueSourcePluginHost(Config cfg, IntegrationRegistry registry)
     {
         this.cfg = cfg;
@@ -31,10 +35,13 @@ public sealed class ValueSourcePluginHost : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        // Five seconds rather than fifteen: the pass itself is a fingerprint comparison per source, and the
+        // tick is now also what paces a polling source — a source asking to be read every 5s should get 5s
+        // rather than the next multiple of the host's own cadence.
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         do
         {
-            try { await Reconcile(stoppingToken); }
+            try { await Reconcile(stoppingToken, DateTime.UtcNow); }
             catch (OperationCanceledException) { return; }
             catch (Exception ex) { Log.Error(ex, "Value-source plugin reconcile failed."); }
         }
@@ -42,7 +49,10 @@ public sealed class ValueSourcePluginHost : BackgroundService
     }
 
     /// <summary>One reconcile pass. Public so a test can drive it without a host.</summary>
-    public async Task Reconcile(CancellationToken ct)
+    public Task Reconcile(CancellationToken ct) => Reconcile(ct, DateTime.UtcNow);
+
+    /// <summary>Testable overload: decide what is due against an explicit "now".</summary>
+    public async Task Reconcile(CancellationToken ct, DateTime nowUtc)
     {
         foreach (var source in registry.All.OfType<IValueSourcePlugin>())
         {
@@ -51,13 +61,26 @@ public sealed class ValueSourcePluginHost : BackgroundService
             // Cheap change detection: a source that is already supplying the right bindings is left alone,
             // so a plugin's ReconcileAsync can be expensive (opening a connection, subscribing) without
             // that cost being paid every fifteen seconds.
-            var fingerprint = string.Join('␟', bindings.Select(b => $"{b.NodeId}|{b.Key()}|{b.Source.Topic}|{string.Join(',', b.Source.Settings.Select(kv => kv.Key + '=' + kv.Value))}"));
-            if (applied.TryGetValue(source.SourceType, out var last) && last == fingerprint) continue;
+            var fingerprint = string.Join('␟', bindings.Select(b => $"{b.NodeId}|{b.Key()}|{b.Source.Topic}|{b.Source.Feed}|{string.Join(',', b.Source.Settings.Select(kv => kv.Key + '=' + kv.Value))}"));
+            var unchanged = applied.TryGetValue(source.SourceType, out var last) && last == fingerprint;
+
+            // A poller reads by reconciling, so leaving it alone leaves its values frozen. It says how often
+            // it wants to be called and is called that often whether or not anything was edited; a
+            // subscriber (RefreshSeconds 0) still only hears about changes.
+            var due = source.RefreshSeconds > 0
+                   && (!lastRun.TryGetValue(source.SourceType, out var ran)
+                       || (nowUtc - ran).TotalSeconds >= source.RefreshSeconds);
+            if (unchanged && !due) continue;
 
             try
             {
                 await source.ReconcileAsync(cfg, bindings, ct);
                 applied[source.SourceType] = fingerprint;
+                lastRun[source.SourceType] = nowUtc;
+
+                // Only worth a line when something actually changed — a poller reconciles on every cadence
+                // and would otherwise write the same sentence to the log all day.
+                if (unchanged) continue;
                 Log.Information($"Value source '{source.SourceType}': {bindings.Count} binding(s) across "
                               + $"{bindings.Select(b => b.NodeId).Distinct(StringComparer.OrdinalIgnoreCase).Count()} node(s).");
             }

@@ -38,6 +38,21 @@ public interface IValueSourcePlugin : IFlowValueSource
     /// </summary>
     /// <param name="bindings">Every binding of this type, with the node id each belongs to.</param>
     Task ReconcileAsync(Config cfg, IReadOnlyList<SourceBinding> bindings, CancellationToken ct);
+
+    /// <summary>
+    /// How often to call <see cref="ReconcileAsync"/> again even when nothing about the bindings changed,
+    /// in seconds. Zero — the default — means only on a change.
+    ///
+    /// <para>
+    /// A source that <i>subscribes</i> takes its bindings up once and is then fed by the far end, so calling
+    /// it again would only re-do work. A source that <b>polls</b> has no such push: reconciling is how it
+    /// reads, and with nothing asking it to read again its values are frozen at whatever they were the last
+    /// time a binding was edited. That is what happened to the Home Assistant entity source — one fetch at
+    /// startup, then the same numbers for the life of the process — so a poller now says its cadence and the
+    /// host honours it.
+    /// </para>
+    /// </summary>
+    int RefreshSeconds => 0;
 }
 
 /// <summary>One node's binding to a plugin-supplied source.</summary>

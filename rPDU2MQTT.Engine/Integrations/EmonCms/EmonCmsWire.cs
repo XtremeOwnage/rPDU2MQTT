@@ -17,6 +17,56 @@ namespace rPDU2MQTT.Integrations.EmonCms;
 /// </summary>
 internal static class EmonCmsWire
 {
+    /// <summary>
+    /// EmonCMS <c>/feed/list.json</c> in full: every feed with its current value and timestamp.
+    ///
+    /// <para>
+    /// This one call is what makes reading feeds cost a single request no matter how many are bound. The
+    /// per-feed endpoints (<c>feed/value.json</c>, <c>feed/timevalue.json</c>) would be a request each, and
+    /// <c>feed/fetch.json</c> answers with bare values and no timestamps — with no timestamp there is no way
+    /// to tell a feed that stopped an hour ago from one being written right now, and the whole point of a
+    /// staleness rule is to be able to.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<EmonCmsFeed> FeedStates(string json)
+    {
+        var found = new List<EmonCmsFeed>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return found;
+            foreach (var feed in doc.RootElement.EnumerateArray())
+            {
+                if (feed.ValueKind != JsonValueKind.Object) continue;
+                var id = Text(feed, "id");
+                var name = Text(feed, "name");
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name)) continue;
+
+                found.Add(new EmonCmsFeed(id, name, Text(feed, "tag"), Text(feed, "unit"),
+                    Number(feed, "value"),
+                    Number(feed, "time") is { } t and >= 0 ? DateTimeOffset.FromUnixTimeSeconds((long)t).UtcDateTime : null));
+            }
+        }
+        catch (JsonException) { /* an unreadable list means no feeds, not a crash */ }
+        return found;
+    }
+
+    /// <summary>A string property, however EmonCMS chose to type it. Empty when absent or null.</summary>
+    private static string Text(JsonElement obj, string name)
+        => obj.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+            ? (v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : v.ToString())
+            : "";
+
+    /// <summary>A numeric property, quoted or not. Null when absent, null, or not a finite number.</summary>
+    private static double? Number(JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        var raw = v.ValueKind == JsonValueKind.String ? v.GetString() : v.ToString();
+        return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && double.IsFinite(d)
+            ? d : null;
+    }
+
     /// <summary>EmonCMS <c>/feed/list.json</c>: feed name -> id.</summary>
     public static IReadOnlyDictionary<string, string> Feeds(string json)
     {
