@@ -86,6 +86,28 @@ public class EmonCMSConfig
 
     [Description("Automatically create and maintain EmonCMS feeds from the exported inputs. (Http transport; needs a read/write API key.)")]
     public EmonCmsFeedsConfig Feeds { get; set; } = new();
+
+    /// <summary>Reading EmonCMS the other way round — feeds as live values for energy-flow nodes.</summary>
+    [Description("Read EmonCMS feeds back as live values for energy-flow nodes (bind a node's source with Type 'emoncms').")]
+    public EmonCmsSourceConfig Source { get; set; } = new();
+}
+
+/// <summary>
+/// EmonCMS read as a <i>source</i>: a flow node valued from a feed's current reading.
+///
+/// <para>
+/// There is nothing to switch on here. A binding with <c>Type: emoncms</c> is the switch — the poll runs
+/// when something is bound to it and not otherwise, the same rule the MQTT and Modbus ingests follow. The
+/// server it reads is the one this section already describes (<c>Url</c>, <c>ApiKey</c>), because an
+/// operator who has EmonCMS configured has configured it once.
+/// </para>
+/// </summary>
+public class EmonCmsSourceConfig
+{
+    [DefaultValue(30)]
+    [Range(5, 3600, ErrorMessage = "PollIntervalSeconds must be between 5 and 3600.")]
+    [Description("How often to read the bound feeds' current values, in seconds. One request per poll however many feeds are bound.")]
+    public int PollIntervalSeconds { get; set; } = 30;
 }
 
 /// <summary>

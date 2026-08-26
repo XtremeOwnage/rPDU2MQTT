@@ -213,6 +213,13 @@ public static class ServiceConfiguration
         // IFlowValueSource, so building it built them, which needed it, and startup simply hung.
         var haSource = new Integrations.HomeAssistant.HomeAssistantValueSource(cfg);
         services.AddSingleton<Core.Integrations.IIntegration>(haSource);
+        // EmonCMS read as a source. Separate from the EmonCMS destination integration on purpose: they are
+        // switched on by different things — the destination by EmonCMS.Enabled, this by something actually
+        // being bound to a feed — and one card saying "Exporting" would say nothing about whether the reads
+        // are working.
+        services.AddSingleton(sp => new Integrations.EmonCms.EmonCmsValueSource(
+            cfg, auditor: sp.GetService<Core.Flow.IPeriodAuditor>()));
+        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>());
         // The two built-in ingests are integrations too — the SAME instances the flow already reads, so the
         // registry, the banner and the health board describe the thing that is actually running.
         services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
@@ -230,6 +237,7 @@ public static class ServiceConfiguration
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 liveValues,
                 haSource,
+                sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(),
                 // LAST on purpose: the composite takes the first source with a fresh reading, so a node
                 // with a real energy binding uses that and the derived total only fills a gap.
                 .. pluginSources,
@@ -242,7 +250,7 @@ public static class ServiceConfiguration
                     : [])])
             : new Core.Flow.CompositeFlowValueSource(
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues,
-                 haSource, .. pluginSources,
+                 haSource, sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(), .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
                      : [])]), cfg));

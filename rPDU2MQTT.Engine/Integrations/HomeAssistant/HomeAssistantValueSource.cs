@@ -41,6 +41,13 @@ public sealed class HomeAssistantValueSource : IIntegration, IValueSourcePlugin,
     public string SourceType => "homeassistant";
     public string SourceTypeLabel => "Home Assistant entity";
 
+    /// <summary>
+    /// Read every thirty seconds. Without a cadence the host only called this when a binding changed, so an
+    /// entity was fetched once and then held that value for the life of the process — a frozen number that
+    /// looked exactly like a working one.
+    /// </summary>
+    public int RefreshSeconds => 30;
+
     /// <summary>On when something is actually bound to it — this costs a request per poll, so it does not
     /// run because Home Assistant happens to be configured for something else.</summary>
     public bool Enabled(Config c) => SourceBindings.For(c, SourceType).Count > 0;

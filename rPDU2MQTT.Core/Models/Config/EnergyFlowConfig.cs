@@ -257,8 +257,8 @@ public class EnergyFlowNode
 public class EnergyFlowSource
 {
     [DefaultValue("mqtt")]
-    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps).")]
-    [AllowedValues("mqtt", "modbus", "derived")]
+    [Description("Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps).")]
+    [AllowedValues("mqtt", "modbus", "emoncms", "homeassistant", "derived")]
     public string Type { get; set; } = "mqtt";
 
     [DefaultValue("realpower")]
@@ -359,6 +359,22 @@ public class EnergyFlowSource
     [Description("For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped).")]
     [AllowedValues("big", "little")]
     public string WordOrder { get; set; } = "big";
+
+    // --- Type 'emoncms' ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Which EmonCMS feed this binding reads: its numeric id, or its name.
+    ///
+    /// <para>
+    /// A name is resolved against the server's feed list, so the binding survives a re-provision that hands
+    /// the feed a new id. Names are not unique across EmonCMS tags — <c>solar/energy</c> and
+    /// <c>grid/energy</c> are both "energy" — so a name may be qualified with its tag as
+    /// <c>tag/name</c>. An unqualified name that matches feeds under more than one tag is reported as
+    /// ambiguous and read as nothing, rather than silently picking one of them.
+    /// </para>
+    /// </summary>
+    [Description("For Type 'emoncms': the feed to read — its numeric id (e.g. 945), or its name (e.g. '1_power'). Qualify a name with its tag as 'tag/name' when the same name exists under several tags.")]
+    public string? Feed { get; set; }
 
     // --- Plugin-supplied source types --------------------------------------------------------------
 

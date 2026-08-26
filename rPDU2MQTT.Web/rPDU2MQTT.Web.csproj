@@ -51,6 +51,7 @@
 			<GuiSource Include="web\mobile.check.mjs" />
 			<GuiSource Include="web\sparkline.check.mjs" />
 			<GuiSource Include="web\drilldown.check.mjs" />
+			<GuiSource Include="web\emoncms.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -105,6 +106,9 @@
 		<!-- A binding worked out from other bindings can be complete in itself and still produce nothing, so
 		     the row has to say what it is still waiting for. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/derived.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- An EmonCMS binding names a feed on someone else's server, so a typo produces a row that looks
+		     complete and a node that never has a value. The row has to check the name and say. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncms.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
 		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

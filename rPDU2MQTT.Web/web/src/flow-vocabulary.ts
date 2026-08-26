@@ -38,7 +38,9 @@ export const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind |
 // The built-in source types, and their labels. A plugin's type is appended from the schema at render
 // time (see sourceTypes()), so contributing one needs no edit here.
 export const BUILTIN_SOURCE_TYPES: [string, string][] = [
-  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'], ['derived', 'Calculated'],
+  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'],
+  ['emoncms', 'EmonCMS feed'], ['homeassistant', 'Home Assistant entity'],
+  ['derived', 'Calculated'],
 ];
 
 

@@ -7,7 +7,7 @@
 
 rPDU2MQTT is a small, container-friendly .NET service. It started as a bridge for Vertiv/Geist rack PDUs (it still is one, and a good one), but that turned out to be a single tier of a much bigger picture. The job now is the whole chain: every producer, every panel, every circuit and every device, measured wherever it can be measured, joined into one hierarchy, and rolled up so each tier's number is the sum of what's beneath it.
 
-Data comes in over **MQTT**, **Modbus TCP** and the PDUs' own HTTP API; it goes out to **MQTT**, **Home Assistant** (auto-discovery, including the Energy Dashboard), **Prometheus** and **EmonCMS**. There's a built-in GUI for wiring it all up, and a **Helm chart + CRD** for Kubernetes.
+Data comes in over **MQTT**, **Modbus TCP**, **EmonCMS feeds**, **Home Assistant entities** and the PDUs' own HTTP API; it goes out to **MQTT**, **Home Assistant** (auto-discovery, including the Energy Dashboard), **Prometheus** and **EmonCMS**. There's a built-in GUI for wiring it all up, and a **Helm chart + CRD** for Kubernetes.
 
 > New to these PDUs? See this [blog post on metered/switched PDUs](https://static.xtremeownage.com/blog/2024/metered-switch-pdu/) for background on the units and their capabilities.
 
@@ -75,8 +75,8 @@ Should you use it? That's up to you. I built it for me, but made it public and t
 ### The energy flow
 
 - **Whole-house hierarchy** — define the tiers (panels → strings → MPPTs → inverter → transfer switch → load centers → circuits → devices) and how they feed each other; every tier rolls up the ones beneath it, per metric.
-- **Any source per node** — bind a node's power/energy/current/… to an **MQTT topic** (Solar Assistant, ESPHome, Tasmota, anything already on your broker), a **Modbus TCP register** (inverters, meters, PLCs), a PDU outlet, or a fixed value.
-- **Browse instead of guess** — autocomplete over the topics actually on your broker (with the metric and unit inferred from the payload), and a Modbus explorer that reads a block of registers and shows each decoding so you can pick the right one.
+- **Any source per node** — bind a node's power/energy/current/… to an **MQTT topic** (Solar Assistant, ESPHome, Tasmota, anything already on your broker), a **Modbus TCP register** (inverters, meters, PLCs), an **EmonCMS feed** (IotaWatt, emonTx — anything already posting there), a **Home Assistant entity**, a PDU outlet, or a fixed value.
+- **Browse instead of guess** — autocomplete over the topics actually on your broker (with the metric and unit inferred from the payload), a Modbus explorer that reads a block of registers and shows each decoding, and a feed picker that lists what EmonCMS actually holds with its latest reading.
 - **Untracked consumption** — a residual node reports what a measured parent's metered children don't account for, the way Home Assistant's energy dashboard does.
 - **Sankey flow view** — the live diagram, editable by dragging, with per-tier MQTT export and Home Assistant Energy Dashboard sync.
 - **Device templates** — ready-made node/register sets for known hardware (EG4 inverters, meters, …) to import and adjust.

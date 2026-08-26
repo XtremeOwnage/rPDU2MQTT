@@ -666,6 +666,16 @@ spec:
                             description: Process id_num for 'Source feed', used for virtual feeds (default 53).
                         description: EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs → process dropdown).
                     description: Automatically create and maintain EmonCMS feeds from the exported inputs. (Http transport; needs a read/write API key.)
+                  Source:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      PollIntervalSeconds:
+                        type: integer
+                        description: How often to read the bound feeds' current values, in seconds. One request per poll however many feeds are bound.
+                        minimum: 5
+                        maximum: 3600
+                    description: Read EmonCMS feeds back as live values for energy-flow nodes (bind a node's source with Type 'emoncms').
                 description: EmonCMS exporter
               Logging:
                 type: object
@@ -905,7 +915,7 @@ spec:
                             properties:
                               Type:
                                 type: string
-                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
                                 enum:
@@ -981,6 +991,9 @@ spec:
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
+                              Feed:
+                                type: string
+                                description: "For Type 'emoncms': the feed to read — its numeric id (e.g. 945), or its name (e.g. '1_power'). Qualify a name with its tag as 'tag/name' when the same name exists under several tags."
                               Settings:
                                 type: object
                                 x-kubernetes-preserve-unknown-fields: true
@@ -998,7 +1011,7 @@ spec:
                             properties:
                               Type:
                                 type: string
-                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
+                                description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
                                 enum:
@@ -1074,6 +1087,9 @@ spec:
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
+                              Feed:
+                                type: string
+                                description: "For Type 'emoncms': the feed to read — its numeric id (e.g. 945), or its name (e.g. '1_power'). Qualify a name with its tag as 'tag/name' when the same name exists under several tags."
                               Settings:
                                 type: object
                                 x-kubernetes-preserve-unknown-fields: true

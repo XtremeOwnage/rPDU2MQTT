@@ -977,7 +977,9 @@ const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node
 // The built-in source types, and their labels. A plugin's type is appended from the schema at render
 // time (see sourceTypes()), so contributing one needs no edit here.
 const BUILTIN_SOURCE_TYPES                     = [
-  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'], ['derived', 'Calculated'],
+  ['mqtt', 'MQTT topic'], ['modbus', 'Modbus TCP'],
+  ['emoncms', 'EmonCMS feed'], ['homeassistant', 'Home Assistant entity'],
+  ['derived', 'Calculated'],
 ];
 
 /// Every source type on offer: the built-ins, plus whatever the server says a plugin contributed.
@@ -4137,6 +4139,121 @@ function openTopicPicker(current        , onPick                         ) {
   const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } load(); }, 5000);
 }
 
+/// Every feed on the EmonCMS server, fetched once per page and shared by every binding's picker.
+///
+/// One request rather than one per row: a node with eight bindings would otherwise ask the server for the
+/// same list eight times the moment its editor opened.
+let emonFeeds                        = null;
+function emonCmsFeeds(force = false)                 {
+  if (force || !emonFeeds) {
+    // The route wraps a handler's answer as { ok, result }, so the feeds are one level in.
+    emonFeeds = api('/api/integrations/emoncms-source/feeds', { method: 'POST' })
+      .then(r => (r.body?.result?.feeds || [])         )
+      .catch(() => []         );
+  }
+  return emonFeeds;
+}
+
+/// Pick a feed off the server rather than typing a name from another browser tab.
+function openEmonCmsPicker(current        , onPick                     ) {
+  const { body, close } = overlay('Browse EmonCMS feeds');
+  body.appendChild(el('div', { class: 'desc', text: 'Feeds on the EmonCMS server this bridge is configured for, with their latest value. Picking one stores its name — or its id, when the name is not unique.' }));
+
+  const bar = el('div', { class: 'ld-toolbar' });
+  const search = el('input', { type: 'search', value: current || '', placeholder: 'filter by name or tag…', style: { width: '320px' } })                    ;
+  const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+  bar.append(search, status);
+  body.appendChild(bar);
+
+  const tbl = el('table', { class: 'ld' });
+  const head = el('tr');
+  ['Tag', 'Feed', 'Latest', 'Updated', ''].forEach(h => head.appendChild(el('th', { text: h })));
+  tbl.appendChild(el('thead', {}, head));
+  const tbody = el('tbody');
+  tbl.appendChild(tbody);
+  body.appendChild(tbl);
+
+  const draw = (feeds       ) => {
+    const q = search.value.trim().toLowerCase();
+    const shown = feeds.filter(f => !q || (f.name || '').toLowerCase().includes(q) || (f.tag || '').toLowerCase().includes(q));
+    // A name that exists under several tags cannot be stored as a bare name, so the row that offers it
+    // stores the id instead — the ambiguity is settled here rather than reported later as a missing value.
+    const counts = new Map                ();
+    feeds.forEach(f => counts.set(f.name, (counts.get(f.name) || 0) + 1));
+
+    status.textContent = `${shown.length} of ${feeds.length} feed(s)`;
+    tbody.innerHTML = '';
+    shown.slice(0, 300).forEach(f => {
+      const tr = el('tr');
+      tr.appendChild(el('td', { text: f.tag || '—' }));
+      tr.appendChild(el('td', {}, el('code', { text: f.name })));
+      tr.appendChild(el('td', { class: 'num', text: f.value != null ? formatNum(f.value) + (f.unit ? ' ' + f.unit : '') : '—' }));
+      tr.appendChild(el('td', { class: 'desc', text: f.at ? new Date(f.at).toLocaleString() : 'never' }));
+      const use = btn('Use', 'primary');
+      if ((counts.get(f.name) || 0) > 1) use.title = `Several feeds are called “${f.name}”, so this stores its id (${f.id}).`;
+      use.onclick = () => { onPick(f); close(); };
+      tr.appendChild(el('td', {}, use));
+      tbody.appendChild(tr);
+    });
+    if (!feeds.length)
+      tbody.appendChild(el('tr', {}, el('td', { colspan: '5', class: 'desc',
+        text: 'No feeds came back. Check that EmonCMS.Url and an API key that can read feeds are set, then use Test on the EmonCMS feeds card.' })));
+  };
+
+  emonCmsFeeds().then(draw);
+  search.oninput = () => emonCmsFeeds().then(draw);
+}
+
+/// The Source and Details cells for an EmonCMS binding: which feed, and what it currently reads.
+function emonCmsSourceEditor(src     , onChange            )             {
+  const feedIn = el('input', { type: 'text', value: src.Feed || '', placeholder: 'feed name or id', style: { width: '220px' } })                    ;
+  feedIn.title = 'The feed to read: its name (e.g. 1_power), tag/name when the name is not unique, or its numeric id.';
+  feedIn.onchange = () => { src.Feed = feedIn.value.trim() || undefined; onChange(); redraw(); };
+
+  const browse = btn('Browse…');
+  browse.title = 'List the feeds on the EmonCMS server and pick one.';
+  browse.onclick = () => openEmonCmsPicker(feedIn.value.trim(), f => {
+    // Stored by name where the name identifies it, so the binding survives a re-provision that renumbers
+    // the feed; by id only where a name would be ambiguous.
+    emonCmsFeeds().then(all => {
+      const dupes = all.filter(o => o.name === f.name).length > 1;
+      feedIn.value = dupes ? String(f.id) : f.name;
+      src.Feed = feedIn.value;
+      onChange();
+      redraw();
+    });
+  });
+
+  // What the named feed reads right now, so a wrong name is obvious here instead of as a blank node later.
+  const detail = el('div', { class: 'desc', style: { margin: '0' }, text: '' });
+  const redraw = () => {
+    const wanted = (src.Feed || '').trim();
+    if (!wanted) { detail.textContent = 'No feed chosen — this binding will supply nothing.'; detail.style.color = 'var(--muted)'; return; }
+    emonCmsFeeds().then(all => {
+      const matches = all.filter(f => String(f.id) === wanted || f.name === wanted || `${f.tag}/${f.name}` === wanted);
+      if (!matches.length) {
+        detail.style.color = 'var(--bad)';
+        detail.textContent = all.length
+          ? `No feed on the server is called “${wanted}”.`
+          : 'Could not list the server’s feeds, so this name cannot be checked here.';
+        return;
+      }
+      if (matches.length > 1) {
+        detail.style.color = 'var(--bad)';
+        detail.textContent = `“${wanted}” names ${matches.length} feeds (${matches.map(f => `${f.tag}/${f.name}`).join(', ')}). Use its tag, or its id.`;
+        return;
+      }
+      const f = matches[0];
+      detail.style.color = 'var(--muted)';
+      detail.textContent = (f.value != null ? `${formatNum(f.value)}${f.unit ? ' ' + f.unit : ''}` : 'no value logged yet')
+        + (f.at ? ` · ${new Date(f.at).toLocaleString()}` : '');
+    });
+  };
+  redraw();
+
+  return [el('td', {}, feedIn, ' ', browse), el('td', {}, detail)];
+}
+
 /// The Modbus explorer: read a block of registers off the device and pick the one that looks right.
 function openModbusExplorer(src     , onPick            ) {
   const conns        = (state.data?.Modbus?.Connections) || [];
@@ -4491,7 +4608,21 @@ function renderNodeEditor(node     , links       , cand                  , reren
           title: 'A calculated value has no source of its own — it is worked out from this node’s other bindings.',
         })));
       }
-      else if (type !== 'mqtt' && type !== 'modbus' && !sourceEditorFor(type)) {
+      else if (type === 'emoncms') {
+        // Source = which feed; Details = what that feed currently reads, so a mapping can be checked
+        // against the server before it is wired into the flow.
+        const [srcCell, detailCell] = emonCmsSourceEditor(src, () => refreshDirty());
+        tr.appendChild(srcCell);
+        tr.appendChild(detailCell);
+      }
+      else if (sourceEditorFor(type)) {
+        // A type that registered a bespoke editor. This used to fall through to the MQTT branch and draw a
+        // topic box, so registering one had no effect at all.
+        const [srcCell, detailCell] = sourceEditorFor(type) (src, () => refreshDirty());
+        tr.appendChild(srcCell);
+        tr.appendChild(detailCell);
+      }
+      else if (type !== 'mqtt' && type !== 'modbus') {
         const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
         tr.appendChild(srcCell);
         tr.appendChild(detailCell);
