@@ -1887,6 +1887,113 @@ function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 
 // Device templates and the panels that import them live in node-templates.ts.
 
+// ── ribbons.ts ──────────────────────────────────────────────────
+// How a ribbon gets from one bar to the next.
+//
+// A ribbon is a filled band, not a stroked line: it has a thickness that means something (the value), and
+// the animated stream clips against its outline. So each routing has to produce a closed outline rather
+// than a centre line — which is also why this is worth having on its own, testable, away from the 600-line
+// render.
+//
+// Every routing here obeys the same contract: the band leaves the source bar at x1 spanning
+// [sTop, sTop + h], and arrives at the target bar at x2 spanning [tTop, tTop + h]. Whatever happens in
+// between is the routing's business.
+
+/// One ribbon's geometry: where it starts, where it ends, and how thick it is.
+
+const r2 = (n        ) => Math.round(n * 100) / 100;
+
+/// The closed outline of a ribbon, as an SVG path.
+function ribbonOutline(style             , b      )         {
+  switch (style) {
+    case 'ortho': return orthoBand(b, 0);
+    case 'ortho-round': return orthoBand(b, cornerRadius(b));
+    default: return curvedBand(b);
+  }
+}
+
+/// The line a stream of particles travels down the middle of the band, at fraction `f` across it.
+///
+/// It has to follow the same route as the outline or the particles swim outside their own ribbon — the
+/// stream is clipped to the band, so a mismatched lane simply disappears where it leaves.
+function lanePath(style             , b      , f        )         {
+  const sY = b.sTop + b.h * f, tY = b.tTop + b.h * f;
+  if (style === 'curved') {
+    const xc = (b.x1 + b.x2) / 2;
+    return `M${r2(b.x1)},${r2(sY)} C${r2(xc)},${r2(sY)} ${r2(xc)},${r2(tY)} ${r2(b.x2)},${r2(tY)}`;
+  }
+  // The grid routings share one elbow; a lane runs down the middle of it at its own offset.
+  const xc = elbowX(b);
+  const r = style === 'ortho-round' ? Math.min(cornerRadius(b), Math.abs(tY - sY) / 2) : 0;
+  return polyline([[b.x1, sY], [xc, sY], [xc, tY], [b.x2, tY]], r);
+}
+
+/// The original: one smooth band from source to target.
+function curvedBand({ x1, sTop, x2, tTop, h }      )         {
+  const xc = (x1 + x2) / 2;
+  return `M${r2(x1)},${r2(sTop)} C${r2(xc)},${r2(sTop)} ${r2(xc)},${r2(tTop)} ${r2(x2)},${r2(tTop)} `
+       + `L${r2(x2)},${r2(tTop + h)} C${r2(xc)},${r2(tTop + h)} ${r2(xc)},${r2(sTop + h)} ${r2(x1)},${r2(sTop + h)} Z`;
+}
+
+/// Where the single vertical run sits, kept far enough from both bars to leave a horizontal run either side.
+function elbowX(b      )         {
+  const mid = (b.x1 + b.x2) / 2;
+  const margin = Math.min(b.h, (b.x2 - b.x1) / 3);
+  return Math.min(Math.max(mid, b.x1 + margin), b.x2 - margin);
+}
+
+/// How much corner to round: as much as the turn and the runs allow, which on a long gentle turn is a lot.
+function cornerRadius(b      )         {
+  const drop = Math.abs((b.tTop + b.h / 2) - (b.sTop + b.h / 2));
+  const xc = elbowX(b);
+  return Math.max(0, Math.min(drop / 2, xc - b.x1, b.x2 - xc));
+}
+
+/// A band routed out, across and back in — two bends, never more.
+///
+/// The two sides of the band are the centre line offset by half its thickness. Which side of the vertical
+/// run each offset lands on depends on which way the run goes: offsetting both the same way makes the
+/// outline cross itself, and the ribbon renders as a bow tie.
+function orthoBand(b      , r        )         {
+  const { x1, sTop, x2, tTop, h } = b;
+  const k = h / 2;
+  const c1 = sTop + k, c2 = tTop + k;
+
+  // Too little rise to turn into: a straight band, which is what the eye expects anyway.
+  if (Math.abs(c2 - c1) <= 1)
+    return `M${r2(x1)},${r2(sTop)} L${r2(x2)},${r2(tTop)} L${r2(x2)},${r2(tTop + h)} L${r2(x1)},${r2(sTop + h)} Z`;
+
+  const xc = elbowX(b);
+  const down = c2 > c1 ? 1 : -1;
+  // Travelling left to right, the left-hand side of a downward run is its right edge, and of an upward run
+  // its left edge. Hence the sign.
+  const nearX = xc + down * k, farX = xc - down * k;
+
+  const upper = polyline([[x1, c1 - k], [nearX, c1 - k], [nearX, c2 - k], [x2, c2 - k]], r);
+  const lower = polyline([[x2, c2 + k], [farX, c2 + k], [farX, c1 + k], [x1, c1 + k]], r);
+  // The two sides, joined by the flat caps that sit against each bar.
+  return `${upper} L${r2(x2)},${r2(c2 + k)} ${lower.replace(/^M/, 'L')} Z`;
+}
+
+/// A polyline of right-angle turns, with each corner optionally rounded by `r`.
+///
+/// Rounding is per corner and never eats more than half of either leg, so a short run keeps a sharp turn
+/// rather than collapsing into a curve that overshoots the next one.
+function polyline(pts            , r        )         {
+  let d = `M${r2(pts[0][0])},${r2(pts[0][1])}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
+    const inLen = Math.hypot(cx - px, cy - py), outLen = Math.hypot(nx - cx, ny - cy);
+    const rr = Math.min(r, inLen / 2, outLen / 2);
+    if (rr <= 0.5) { d += ` L${r2(cx)},${r2(cy)}`; continue; }
+    const ax = cx - ((cx - px) / inLen) * rr, ay = cy - ((cy - py) / inLen) * rr;
+    const bx = cx + ((nx - cx) / outLen) * rr, by = cy + ((ny - cy) / outLen) * rr;
+    d += ` L${r2(ax)},${r2(ay)} Q${r2(cx)},${r2(cy)} ${r2(bx)},${r2(by)}`;
+  }
+  const last = pts[pts.length - 1];
+  return d + ` L${r2(last[0])},${r2(last[1])}`;
+}
+
 // ── flow-view.ts ────────────────────────────────────────────────
 // How much of the flow chart to draw: the unmetered-remainder and animation switches (browser-local).
 
@@ -2065,6 +2172,51 @@ function unmeasuredToggle(onToggle            )              {
   return lbl;
 }
 
+/// How the ribbons are routed between bars.
+///
+/// The default is the curved band this diagram has always drawn. The other two route on a grid instead:
+/// out horizontally, one vertical run, back in horizontally — at most two bends, never a staircase. On a
+/// dense hierarchy that reads more like a wiring diagram than a river, which is easier to follow when what
+/// you want to know is which circuit goes where rather than how much is moving.
+
+const RIBBON_KEY = 'rpdu-flow-ribbon';
+const RIBBON_STYLES                                  = [
+  ['curved', 'Curved ribbons', 'The default: each ribbon sweeps from source to target as one smooth band.'],
+  ['ortho', 'Right angles', 'Route on a grid — out, across, in. Two bends at most, so a ribbon never staircases.'],
+  ['ortho-round', 'Rounded angles', 'The same grid routing, with the corners rounded as far as the turn allows.'],
+];
+
+let ribbonStyle              = (() => {
+  try {
+    const v = localStorage.getItem(RIBBON_KEY);
+    return RIBBON_STYLES.some(([id]) => id === v) ? v                : 'curved';
+  } catch { return 'curved'; }
+})();
+
+function setRibbonStyle(v             ) {
+  ribbonStyle = v;
+  try { localStorage.setItem(RIBBON_KEY, v); } catch { /* private mode: this session only */ }
+}
+
+/// The routing picker, beside the other switches that change how the diagram is drawn.
+function ribbonStyleSelect(onChange            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'How ribbons are routed between nodes. A view setting only — it changes nothing about the values.',
+  });
+  const sel      = el('select', { style: { width: 'auto' } });
+  RIBBON_STYLES.forEach(([id, label, why]) => {
+    const opt = el('option', { value: id, text: label });
+    opt.title = why;
+    sel.appendChild(opt);
+  });
+  sel.value = ribbonStyle;
+  sel.onchange = () => { setRibbonStyle(sel.value); onChange(); };
+  lbl.append(document.createTextNode('Routing'), sel);
+  return lbl;
+}
+
 /// The "Animate flow" view switch. Purely local: a per-viewer preference.
 function animateToggle(onToggle            )              {
   const lbl = el('label', {
@@ -2091,6 +2243,7 @@ function groupToggles(onToggle            , drawn = true)                     {
     row.appendChild(hideEmptyToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
+    row.appendChild(ribbonStyleSelect(onToggle));
   }
   if (!groups.length) return drawn ? row : null;
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
@@ -3465,10 +3618,11 @@ function addFlowSection(nav     , sections     ) {
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
+      const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
-      const ribbonPath = `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`;
+      const band = { x1, sTop, x2, tTop, h };
+      const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
@@ -3495,9 +3649,8 @@ function addFlowSection(nav     , sections     ) {
 
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
-          const sY = sTop + h * f, tY = tTop + h * f;
           const stream = svgEl('path', {
-            d: `M${x1},${sY} C${xc},${sY} ${xc},${tY} ${x2},${tY}`,
+            d: lanePath(ribbonStyle, band, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',

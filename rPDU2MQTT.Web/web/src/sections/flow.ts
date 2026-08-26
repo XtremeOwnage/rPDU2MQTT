@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
+import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -457,10 +457,11 @@ export function addFlowSection(nav: any, sections: any) {
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
+      const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
-      const ribbonPath = `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`;
+      const band = { x1, sTop, x2, tTop, h };
+      const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
@@ -487,9 +488,8 @@ export function addFlowSection(nav: any, sections: any) {
 
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
-          const sY = sTop + h * f, tY = tTop + h * f;
           const stream = svgEl('path', {
-            d: `M${x1},${sY} C${xc},${sY} ${xc},${tY} ${x2},${tY}`,
+            d: lanePath(ribbonStyle, band, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',

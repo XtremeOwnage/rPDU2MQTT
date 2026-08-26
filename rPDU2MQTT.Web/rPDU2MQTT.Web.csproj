@@ -53,6 +53,7 @@
 			<GuiSource Include="web\drilldown.check.mjs" />
 			<GuiSource Include="web\emoncms.check.mjs" />
 			<GuiSource Include="web\units.check.mjs" />
+			<GuiSource Include="web\ribbons.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -113,6 +114,9 @@
 		<!-- A reading is shown at a scale a person reads: watts step to kW past a thousand, and a unit with
 		     no ladder is left alone. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/units.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- A ribbon is a filled outline, so a routing that offsets both sides the same way does not merely
+		     look odd: the outline crosses itself and the band renders as a bow tie. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/ribbons.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
 		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
