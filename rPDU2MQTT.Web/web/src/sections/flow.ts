@@ -1,5 +1,5 @@
 // The Sankey: the energy hierarchy drawn as ribbons for one metric at one moment.
-import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
+import { activate, api, attachZoom, btn, el, ensure, formatMeasure, formatNum, instanceSelector, navLink, svgEl, toast, withInstance } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
@@ -491,7 +491,7 @@ export function addFlowSection(nav: any, sections: any) {
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       lab.textContent = unknownNode ? `${n.label} · no data`
-        : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
+        : `${n.label} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -518,14 +518,14 @@ export function addFlowSection(nav: any, sections: any) {
         }
         // Two different discrepancies wear the same marker, and they need different sentences.
         explain(n.derivation === 'measured'
-          ? `This node reports ${formatNum(reading)} ${units}, but ${formatNum(reading + n.imbalance)} ${units} `
-            + `passes through it — ${formatNum(n.imbalance)} ${units} more than it accounts for. Its sensor is `
+          ? `This node reports ${formatMeasure(reading, units)}, but ${formatMeasure(reading + n.imbalance, units)} `
+            + `passes through it — ${formatMeasure(n.imbalance, units)} more than it accounts for. Its sensor is `
             + 'probably measuring one leg rather than the whole node (an inverter bound to its AC-load output '
             + 'while it also charges a battery), or a source is scaled wrongly. The bar is drawn to the '
             + 'throughput so the ribbons fit; the label is the reading.'
-          : `This node passes ${formatNum(reading)} ${units} to what it feeds, but only `
-            + `${formatNum(reading - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
-            + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
+          : `This node passes ${formatMeasure(reading, units)} to what it feeds, but only `
+            + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
+            + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (metricSel.value === 'energy'
               ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
@@ -539,7 +539,7 @@ export function addFlowSection(nav: any, sections: any) {
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
-          unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
+          unknownNode ? 'no data' : formatMeasure(nodeValue(n.id), units),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
         // Provenance sits with the value, not in a legend somewhere else.
         if (!unknownNode && n.derivation && n.derivation !== 'measured')
@@ -548,18 +548,18 @@ export function addFlowSection(nav: any, sections: any) {
               ? 'inferred — nothing measures this; conservation leaves one path it could have come by'
               : 'summed from what it feeds'));
         if (n.imbalance != null)
-          rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
+          rows.push(el('div', { class: 'nh-warn', text: `${formatMeasure(n.imbalance, units)} more leaves than arrives` }));
         // A sensor on one leg of a bidirectional device.
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
-            text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
+            text: `its sensor covers this leg; ${formatMeasure(n.throughput, units)} passes through the node` }));
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;
           rows.push(el('div', { class: 'nh-head', text: title }));
           ls.forEach((l: any) => rows.push(el('div', { class: 'nh-row' },
             el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
-            el('span', { class: 'nh-num', text: l.known === false ? '—' : `${formatNum(l.value)} ${units}`.trim() }))));
+            el('span', { class: 'nh-num', text: l.known === false ? '—' : formatMeasure(l.value, units) }))));
         };
         side('Fed by', incoming[n.id] || [], (l: any) => l.source);
         side('Feeds', outgoing[n.id] || [], (l: any) => l.target);

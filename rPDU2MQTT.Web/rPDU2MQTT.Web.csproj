@@ -52,6 +52,7 @@
 			<GuiSource Include="web\sparkline.check.mjs" />
 			<GuiSource Include="web\drilldown.check.mjs" />
 			<GuiSource Include="web\emoncms.check.mjs" />
+			<GuiSource Include="web\units.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -109,6 +110,9 @@
 		<!-- An EmonCMS binding names a feed on someone else's server, so a typo produces a row that looks
 		     complete and a node that never has a value. The row has to check the name and say. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncms.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- A reading is shown at a scale a person reads: watts step to kW past a thousand, and a unit with
+		     no ladder is left alone. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/units.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
 		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

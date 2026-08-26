@@ -25,6 +25,38 @@ export function btn(label: string, cls?: string): any { return el('button', { cl
 
 export function formatNum(v: any) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
 
+// Units that step by a thousand, smallest first. Only the ones where a reading realistically crosses the
+// boundary: a diagram reading "6,744 W" is four digits of precision nobody asked for, while amps and volts
+// stay put because 1,000 A is not a number this measures.
+const UNIT_STEPS: string[][] = [
+  ['W', 'kW', 'MW', 'GW'],
+  ['Wh', 'kWh', 'MWh', 'GWh'],
+  ['VA', 'kVA', 'MVA'],
+  ['var', 'kvar', 'Mvar'],
+];
+
+/// A reading with its unit, stepped up so the number stays readable: 6744 W -> "6.74 kW".
+///
+/// Scaling only ever goes UP from the unit given, and only past 1,000 — a 250 W load stays in watts rather
+/// than becoming "0.25 kW", and a unit with no ladder (A, V, Hz, %) is left exactly as it is. Three
+/// significant figures on a scaled value: the extra digits were never meaningful at kilowatt scale, and
+/// keeping them is what made the labels wide enough to crowd the diagram.
+export function formatMeasure(value: any, units?: string): string {
+  const u = (units || '').trim();
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `${formatNum(value)} ${u}`.trim();
+
+  const ladder = UNIT_STEPS.find(l => l.some(x => x === u));
+  const start = ladder ? ladder.indexOf(u) : -1;
+  if (start < 0) return `${formatNum(value)} ${u}`.trim();
+
+  let v = value, i = start;
+  while (Math.abs(v) >= 1000 && i < ladder!.length - 1) { v /= 1000; i++; }
+  // Unscaled values keep the caller's existing precision; a scaled one gets three significant figures.
+  if (i === start) return `${formatNum(v)} ${u}`.trim();
+  const digits = Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2;
+  return `${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${ladder![i]}`;
+}
+
 // SVG element helper (separate namespace from el()).
 export function svgEl(tag: string, attrs?: any): any {
   const e: any = document.createElementNS('http://www.w3.org/2000/svg', tag);

@@ -57,6 +57,38 @@ function btn(label        , cls         )      { return el('button', { class: 's
 
 function formatNum(v     ) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : String(v); }
 
+// Units that step by a thousand, smallest first. Only the ones where a reading realistically crosses the
+// boundary: a diagram reading "6,744 W" is four digits of precision nobody asked for, while amps and volts
+// stay put because 1,000 A is not a number this measures.
+const UNIT_STEPS             = [
+  ['W', 'kW', 'MW', 'GW'],
+  ['Wh', 'kWh', 'MWh', 'GWh'],
+  ['VA', 'kVA', 'MVA'],
+  ['var', 'kvar', 'Mvar'],
+];
+
+/// A reading with its unit, stepped up so the number stays readable: 6744 W -> "6.74 kW".
+///
+/// Scaling only ever goes UP from the unit given, and only past 1,000 — a 250 W load stays in watts rather
+/// than becoming "0.25 kW", and a unit with no ladder (A, V, Hz, %) is left exactly as it is. Three
+/// significant figures on a scaled value: the extra digits were never meaningful at kilowatt scale, and
+/// keeping them is what made the labels wide enough to crowd the diagram.
+function formatMeasure(value     , units         )         {
+  const u = (units || '').trim();
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `${formatNum(value)} ${u}`.trim();
+
+  const ladder = UNIT_STEPS.find(l => l.some(x => x === u));
+  const start = ladder ? ladder.indexOf(u) : -1;
+  if (start < 0) return `${formatNum(value)} ${u}`.trim();
+
+  let v = value, i = start;
+  while (Math.abs(v) >= 1000 && i < ladder .length - 1) { v /= 1000; i++; }
+  // Unscaled values keep the caller's existing precision; a scaled one gets three significant figures.
+  if (i === start) return `${formatNum(v)} ${u}`.trim();
+  const digits = Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2;
+  return `${v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${ladder [i]}`;
+}
+
 // SVG element helper (separate namespace from el()).
 function svgEl(tag        , attrs      )      {
   const e      = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -3467,7 +3499,7 @@ function addFlowSection(nav     , sections     ) {
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       lab.textContent = unknownNode ? `${n.label} · no data`
-        : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
+        : `${n.label} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -3494,14 +3526,14 @@ function addFlowSection(nav     , sections     ) {
         }
         // Two different discrepancies wear the same marker, and they need different sentences.
         explain(n.derivation === 'measured'
-          ? `This node reports ${formatNum(reading)} ${units}, but ${formatNum(reading + n.imbalance)} ${units} `
-            + `passes through it — ${formatNum(n.imbalance)} ${units} more than it accounts for. Its sensor is `
+          ? `This node reports ${formatMeasure(reading, units)}, but ${formatMeasure(reading + n.imbalance, units)} `
+            + `passes through it — ${formatMeasure(n.imbalance, units)} more than it accounts for. Its sensor is `
             + 'probably measuring one leg rather than the whole node (an inverter bound to its AC-load output '
             + 'while it also charges a battery), or a source is scaled wrongly. The bar is drawn to the '
             + 'throughput so the ribbons fit; the label is the reading.'
-          : `This node passes ${formatNum(reading)} ${units} to what it feeds, but only `
-            + `${formatNum(reading - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
-            + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
+          : `This node passes ${formatMeasure(reading, units)} to what it feeds, but only `
+            + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
+            + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (metricSel.value === 'energy'
               ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
@@ -3515,7 +3547,7 @@ function addFlowSection(nav     , sections     ) {
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
-          unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
+          unknownNode ? 'no data' : formatMeasure(nodeValue(n.id), units),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
         // Provenance sits with the value, not in a legend somewhere else.
         if (!unknownNode && n.derivation && n.derivation !== 'measured')
@@ -3524,18 +3556,18 @@ function addFlowSection(nav     , sections     ) {
               ? 'inferred — nothing measures this; conservation leaves one path it could have come by'
               : 'summed from what it feeds'));
         if (n.imbalance != null)
-          rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
+          rows.push(el('div', { class: 'nh-warn', text: `${formatMeasure(n.imbalance, units)} more leaves than arrives` }));
         // A sensor on one leg of a bidirectional device.
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
-            text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
+            text: `its sensor covers this leg; ${formatMeasure(n.throughput, units)} passes through the node` }));
 
         const side = (title        , ls       , other                    ) => {
           if (!ls.length) return;
           rows.push(el('div', { class: 'nh-head', text: title }));
           ls.forEach((l     ) => rows.push(el('div', { class: 'nh-row' },
             el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
-            el('span', { class: 'nh-num', text: l.known === false ? '—' : `${formatNum(l.value)} ${units}`.trim() }))));
+            el('span', { class: 'nh-num', text: l.known === false ? '—' : formatMeasure(l.value, units) }))));
         };
         side('Fed by', incoming[n.id] || [], (l     ) => l.source);
         side('Feeds', outgoing[n.id] || [], (l     ) => l.target);

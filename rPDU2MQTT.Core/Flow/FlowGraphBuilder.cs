@@ -236,6 +236,17 @@ public static class FlowGraphBuilder
         // A 'none' node never infers a value.
         static bool Inert(string m) => m is "none" or "static";
 
+        // Does this node's reading describe power arriving to be shared out among circuits that meter
+        // themselves? A panel, a PDU or a metered circuit does: it measures its own inlet, and what its
+        // metered children draw is their business.
+        //
+        // Named kinds only. A producer (solar, grid, battery, inverter) reports what it PUTS OUT, which
+        // has to leave down the links it has — 750 W of solar feeding one outlet puts 750 W on that link,
+        // and a shortfall there is a gap in the topology rather than load. An unclassified node says
+        // nothing either way, so it keeps conservation too; set its Kind to say what it is.
+        bool Distributes(string id)
+            => kind.TryGetValue(id, out var k) && k is "panel" or "pdu" or "outlet" or "load";
+
         // Which unmeasured feeders may supply what a node still needs after its measured feeders are counted.
         var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in flow.Nodes)
@@ -304,6 +315,37 @@ public static class FlowGraphBuilder
                     var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
                     var spare = Math.Max(0, produced - trackedDraw);
                     return Mode(to) == "untracked" ? spare / untracked.Count : DemandShare(to, path);
+                }
+
+                // A metered circuit draws what its own clamp says, not a share of its parent scaled to
+                // make the total add up. That scaling replaced a measurement with arithmetic: a 1,418 W
+                // sub-panel feeding a 1.8 W circuit and a 1.2 W circuit drew the water heater at 845 W —
+                // a figure nothing reported, 477x its own reading, and a ribbon that dwarfed the panel.
+                // What the parent carries beyond its metered circuits is unmeasured load, named as such
+                // below rather than pushed onto whichever circuits happen to be metered.
+                //
+                // Only TERMINAL children qualify. A measured child with children of its own is a
+                // pass-through whose reading may be on one leg — the inverter bound to load_power while
+                // also charging a battery — so conservation, not its reading, governs what reaches it.
+                //
+                // Only where the parent DISTRIBUTES. A producer's reading is its output, and all of it
+                // leaves down the links it has, so conservation still governs: 750 W of solar feeding one
+                // outlet puts 750 W on that link, and a shortfall there is a gap in the topology, not
+                // load on the panel.
+                var metered = Distributes(from)
+                    ? kids.Where(c => leaf.ContainsKey(c) && !outgoing.ContainsKey(c)).ToList()
+                    : new List<string>();
+                if (metered.Count > 0)
+                {
+                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path);
+                    if (Inert(Mode(to))) return 0;
+
+                    // Whatever the metered circuits leave is divided among the children nothing measures.
+                    var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
+                    if (estimated.Count == 0) return 0;
+                    var spare = Math.Max(0, produced - metered.Sum(c => DemandShare(c, path)));
+                    var demand = estimated.Sum(c => Need(c, path));
+                    return demand > 0 ? spare * Need(to, path) / demand : spare / estimated.Count;
                 }
 
                 if (kids.Count <= 1) return produced;
