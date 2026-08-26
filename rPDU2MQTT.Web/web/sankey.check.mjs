@@ -76,6 +76,7 @@ async function render(graph, want = 'path') {
   query(ge('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
   await new Promise(r => setTimeout(r, 50));
   if (want === 'rect') return query(ge('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+  if (want === 'text') return query(ge('sections'), 'text', true).filter(t => t.attrs && t.attrs['data-node']);
   return query(ge('sections'), 'path', true).filter(p => p.attrs['fill-opacity'] !== undefined);
 }
 
@@ -281,6 +282,45 @@ const overlaps = Math.max(...mainKids) > Math.min(...subKids) && Math.max(...sub
 if (overlaps)
   fail('a panel\'s circuits are split around the other panel\'s — the circuits that feed a rack PDU were '
      + 'pulled away from their own siblings, so their ribbons cross the chart');
+
+// --- A bar taller than the flow it passes on carries its name beside its ribbons ----------------------
+//
+// Ribbons leave a bar at its TOP and stack downward, and the label is drawn to the right of the bar among
+// them. A panel receiving 1,120 W and passing 180 W onward — the rest being unmetered load the operator has
+// switched off — put its own name in the empty space below every ribbon it draws, reading as a panel
+// stranded at the bottom of the chart away from its own children.
+const lopsidedGraph = {
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'inverter', label: 'Inverter', kind: 'inverter', value: 1120 },
+    { id: 'panel', label: 'Main Panel', kind: 'panel', value: 1120 },
+    { id: 'a', label: 'Circuit A', kind: 'load', value: 120 },
+    { id: 'b', label: 'Circuit B', kind: 'load', value: 60 },
+  ],
+  links: [
+    { source: 'inverter', target: 'panel', value: 1120 },
+    { source: 'panel', target: 'a', value: 120 },
+    { source: 'panel', target: 'b', value: 60 },
+  ],
+};
+const lopsided = await render(lopsidedGraph, 'rect');
+
+const panelBar = lopsided.find(x => x.attrs['data-node'] === 'panel');
+if (!panelBar) fail('no panel bar drawn');
+const barTop = Number(panelBar.attrs.y), barH = Number(panelBar.attrs.height);
+const lopsidedText = await render(lopsidedGraph, 'text');
+const panelLabel = lopsidedText.find(t => t.attrs['data-node'] === 'panel');
+if (!panelLabel) fail('the panel bar has no label');
+const ly = Number(panelLabel.attrs.y);
+
+// The bar has to be tall enough for what it RECEIVES — that part is honest and stays.
+if (!(barH > 100)) fail(`the panel bar should be sized for the 1,120 W it receives, got ${barH}px`);
+// …but its name belongs beside the ribbons it SENDS, which occupy the top ~16% of it (180 W of 1,120 W).
+// Half-way down the bar — where the label used to go — is below every one of them.
+const bandBottom = barTop + barH * 0.25;
+if (ly > bandBottom)
+  fail(`the panel's label (y=${ly}) is drawn below the ribbons it sends (which end around y=${Math.round(bandBottom)} `
+     + `on a bar spanning ${barTop}..${Math.round(barTop + barH)}), stranding its name in empty space`);
 
 // --- Where a column sits against a much larger parent ------------------------------------------------
 // A ribbon leaves a bar at its top and stacks downward, so a 3,012 W panel whose drawn children total

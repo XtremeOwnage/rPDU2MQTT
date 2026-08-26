@@ -285,6 +285,24 @@ export function addFlowSection(nav: any, sections: any) {
     const pos: any = {};
     // Every node's label needs a full text line, whatever its bar height.
     const labelRow = 15;
+
+    /// Where a node's name is drawn: beside the ribbons it actually sends, not the middle of its bar.
+    ///
+    /// The label sits to the RIGHT of the bar, among the outgoing ribbons, and those stack from the bar's
+    /// TOP. A bar taller than the flow it passes on therefore puts its own name in the empty space below
+    /// every ribbon it draws: a 1.12 kW panel passing 340 W onward (the rest being unmetered load the
+    /// operator has switched off) had "Main Panel" a hundred pixels below the four circuits it feeds, and
+    /// read as a panel stranded at the bottom of the chart away from its own children.
+    ///
+    /// A node whose bar is full — every node in an ordinary chain — is unaffected, and a node that feeds
+    /// nothing keeps its bar's centre because there is no band to prefer.
+    const labelY = (id: string, p: any) => {
+      const outs = (outgoing[id] || []).filter((l: any) => l.known !== false && (l.value || 0) > 0);
+      if (!outs.length) return p.y + p.h / 2;
+      const band = Math.min(p.h, outs.reduce((sum: number, l: any) => sum + l.value, 0) * pxPerUnit);
+      // Never so close to the top edge that the text is clipped by the bar above it.
+      return p.y + Math.max(band, Math.min(p.h, labelRow)) / 2;
+    };
     // A link's pull on the layout.
     const wFloor = maxTotal / 1000;
     const linkW = (l: any) => Math.max(l.value || 0, wFloor);
@@ -508,7 +526,7 @@ export function addFlowSection(nav: any, sections: any) {
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
-        x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
+        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
