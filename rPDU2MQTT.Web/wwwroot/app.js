@@ -3321,17 +3321,48 @@ function addFlowSection(nav     , sections     ) {
     // the bottom of its own group.
     const remainder = (id        ) => (id || '').includes('#unmeasured') ? 1 : 0;
 
-    // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
-    cols.forEach((cn, c) => {
-      if (c === 0) cn.sort((a     , b     ) => remainder(a.id) - remainder(b.id) || nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a     , b     ) => (bary(a.id) - bary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
-      placeColumn(cn, c);
-    });
-    // Backward: right-to-left, order each column by what it feeds.
-    for (let c = cols.length - 2; c >= 0; c--) {
-      if (!cols[c]) continue;
-      cols[c].sort((a     , b     ) => (obary(a.id) - obary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
-      placeColumn(cols[c], c);
+    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN
+    // — a falsy comparator result, so the whole column fell through to "biggest first" and lost the
+    // grouping the other pass had just established. Two unknowns have to TIE, not compare as nonsense:
+    // that is what put a sub-panel's minisplit in the middle of the main panel's circuits, and left a
+    // panel's own remainder at the far bottom of the chart with a ribbon crossing everything to reach it.
+    const cmp = (x        , y        ) => x === y ? 0 : x - y;
+
+    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest
+    // first. Spelled once so the two directions cannot drift apart.
+    const tieBreak = (a     , b     ) => (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id));
+
+    // Sweep both ways until the order settles.
+    //
+    // One pass each way is not enough, because a column is ordered against its neighbour's CURRENT
+    // positions and the neighbour may still move. Live: the circuits were ordered while the sub-panel sat
+    // above the main panel, then the panels swapped — leaving each panel's circuits split around the
+    // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
+    // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
+    // moved.
+    const orderOf = () => cols.map(cn => (cn || []).map((n     ) => n.id).join(',')).join('|');
+    for (let sweep = 0; sweep < 4; sweep++) {
+      const before = orderOf();
+      // Forward: roots stack by size, downstream columns follow their feeders.
+      cols.forEach((cn, c) => {
+        if (c === 0) { if (sweep === 0) cn.sort((a     , b     ) => tieBreak(a, b)); }
+        else cn.sort((a     , b     ) => cmp(bary(a.id), bary(b.id)) || tieBreak(a, b));
+        placeColumn(cn, c);
+      });
+      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never
+      // across families. Which parent a node hangs off decides where it sits; what it feeds only decides
+      // the order among its own siblings.
+      //
+      // Leading with what a node feeds is what tore each panel's circuits apart: the two circuits that go
+      // on to feed rack PDUs were pulled to the top of the column by them, while their four siblings —
+      // having nothing downstream to be pulled by — fell to the bottom, with the other panel's circuits
+      // stacked in between and ribbons crossing the whole chart. Siblings first, then their order.
+      for (let c = cols.length - 2; c >= 0; c--) {
+        if (!cols[c]) continue;
+        cols[c].sort((a     , b     ) => cmp(bary(a.id), bary(b.id)) || cmp(obary(a.id), obary(b.id)) || tieBreak(a, b));
+        placeColumn(cols[c], c);
+      }
+      if (orderOf() === before) break;
     }
     // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.
     let bottom = padTop;

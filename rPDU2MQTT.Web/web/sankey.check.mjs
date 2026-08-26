@@ -223,6 +223,65 @@ if (y2('pdu_1#unmeasured') < Math.max(...['kube01', 'kube05', 'nas'].map(y2)))
 if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(y2)))
   fail("Rack-PDU-2's remainder is drawn above its own measured siblings");
 
+// --- Two parents whose children are NOT all terminal --------------------------------------------------
+//
+// The case above has every child terminal, so nothing downstream pulls on any of them and grouping by
+// feeder is the only thing deciding the order. Live, two of a panel's six circuits went on to feed rack
+// PDUs — and ordering by what a node FEEDS pulled exactly those two to the top of the column, while their
+// four siblings, with nothing downstream to be pulled by, fell to the bottom. The other panel's circuits
+// stacked in between, and every one of the split family's ribbons crossed the chart to reach it.
+const mixed = await render({
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'inverter', label: 'Inverter', kind: 'inverter', value: 2340 },
+    { id: 'main', label: 'Main Panel', kind: 'panel', value: 1090 },
+    { id: 'sub', label: 'Sub Panel', kind: 'panel', value: 1250 },
+    // Main's circuits: two of them feed something further, four do not.
+    { id: 'living', label: 'Livingroom Circuit', kind: 'load', value: 591 },
+    { id: 'bedroom', label: 'Master Bedroom Circuit', kind: 'load', value: 98.54 },
+    { id: 'freezer', label: 'deep_freezer', kind: 'load', value: 126.1 },
+    { id: 'fridge', label: 'fridge', kind: 'load', value: 97 },
+    // Sub's circuits: all terminal.
+    { id: 'minisplit', label: 'Office Minisplit', kind: 'load', value: 113.91 },
+    { id: 'light', label: 'Light Circuit', kind: 'load', value: 76.11 },
+    { id: 'heater', label: 'Hot Water Heater', kind: 'load', value: 1.81 },
+    { id: 'utility', label: 'Utility Room', kind: 'load', value: 0.76 },
+    // What the two non-terminal circuits feed.
+    { id: 'pdu_a', label: 'Rack-PDU-1', kind: 'pdu', value: 311 },
+    { id: 'pdu_b', label: 'Rack-PDU-2', kind: 'pdu', value: 317 },
+    { id: 'fan', label: 'bedroom_fan', kind: 'load', value: 98.54 },
+  ],
+  links: [
+    { source: 'inverter', target: 'main', value: 1090 },
+    { source: 'inverter', target: 'sub', value: 1250 },
+    { source: 'main', target: 'living', value: 591 },
+    { source: 'main', target: 'bedroom', value: 98.54 },
+    { source: 'main', target: 'freezer', value: 126.1 },
+    { source: 'main', target: 'fridge', value: 97 },
+    { source: 'sub', target: 'minisplit', value: 113.91 },
+    { source: 'sub', target: 'light', value: 76.11 },
+    { source: 'sub', target: 'heater', value: 1.81 },
+    { source: 'sub', target: 'utility', value: 0.76 },
+    { source: 'living', target: 'pdu_a', value: 311 },
+    { source: 'living', target: 'pdu_b', value: 317 },
+    { source: 'bedroom', target: 'fan', value: 98.54 },
+  ],
+}, 'rect');
+
+const y3 = (id) => {
+  const r = mixed.find(x => x.attrs['data-node'] === id);
+  if (!r) fail(`no node drawn for ${id}`);
+  return Number(r.attrs.y);
+};
+const mainKids = ['living', 'bedroom', 'freezer', 'fridge'].map(y3);
+const subKids = ['minisplit', 'light', 'heater', 'utility'].map(y3);
+
+// Each panel's circuits occupy one contiguous band, whichever panel ends up on top.
+const overlaps = Math.max(...mainKids) > Math.min(...subKids) && Math.max(...subKids) > Math.min(...mainKids);
+if (overlaps)
+  fail('a panel\'s circuits are split around the other panel\'s — the circuits that feed a rack PDU were '
+     + 'pulled away from their own siblings, so their ribbons cross the chart');
+
 // --- Where a column sits against a much larger parent ------------------------------------------------
 // A ribbon leaves a bar at its top and stacks downward, so a 3,012 W panel whose drawn children total
 // ~640 W carries all of them in the top fifth of its bar. Relaxing the children toward the panel's CENTRE
