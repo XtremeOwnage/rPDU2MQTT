@@ -494,15 +494,17 @@ export function addFlowSection(nav: any, sections: any) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    /// Give every ribbon sharing a corridor its own vertical lane, side by side like a cable bundle.
+    /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
     ///
-    /// Without this each band turns half of its OWN thickness from the middle of the corridor, so a thick
-    /// ribbon and a thin one turn at different places and their corners interlock — the diagram grows a
-    /// row of notches that look like puzzle pieces. Packed into lanes they turn in step.
+    /// Both halves of that are the rule, and neither works alone. Letting each band turn half of its own
+    /// thickness from the middle puts a thick ribbon's corners in a different place from a thin one's, and
+    /// their corners interlock — a row of notches reading as puzzle pieces. Giving each band a lane of its
+    /// own instead spreads the turns across the whole corridor, and the column of ribbons comes out as a
+    /// staircase. One axis and one width is the only arrangement where every vertical edge in a corridor
+    /// falls on one of two lines.
     ///
-    /// Lanes run in the reverse of the ribbons' stacking order — the topmost ribbon turns furthest right —
-    /// which is the order that keeps a ribbon's horizontal run from cutting through a neighbour's vertical
-    /// one. Reverse it and every pair crosses.
+    /// A band thicker than the run narrows through the turn and widens again after it; a thinner one does
+    /// the reverse. That is the price of the rule, and it is the rule that was asked for.
     const laneOf = new Map<any, { laneX: number; laneW: number }>();
     {
       const corridors = new Map<string, any[]>();
@@ -514,19 +516,10 @@ export function addFlowSection(nav: any, sections: any) {
       });
       for (const [key, list] of corridors) {
         const [left, right] = key.split('|').map(Number);
-        const width = right - left;
-        // Bottom-most ribbon first, so the topmost ends up in the rightmost lane.
-        const order = [...list].sort((a: any, b: any) => (pos[b.target].y) - (pos[a.target].y));
-        const widths = order.map((l: any) => ribbonH(l));
-        const total = widths.reduce((x: number, y: number) => x + y, 0);
-        // A bundle wider than the corridor is squeezed to fit: the runs pinch rather than overlap.
-        const scale = total > width * 0.9 ? (width * 0.9) / total : 1;
-        let x = (left + right) / 2 - (total * scale) / 2;
-        order.forEach((l: any, i: number) => {
-          const w = widths[i] * scale;
-          laneOf.set(l, { laneX: x + w / 2, laneW: w });
-          x += w;
-        });
+        // A quarter of the corridor, bounded either side so it is neither a hairline nor a slab.
+        const laneW = Math.max(12, Math.min(40, (right - left) * 0.25));
+        const laneX = (left + right) / 2;
+        list.forEach((l: any) => laneOf.set(l, { laneX, laneW }));
       }
     }
 

@@ -137,11 +137,13 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
   }
 }
 
-// --- Rule 3: ribbons sharing a corridor turn in their own lane ----------------------------------------
+// --- Rule 3: every vertical run in a corridor is collinear ---------------------------------------------
 //
-// A right-angle band turns half its OWN thickness from the middle of the corridor, so a thick ribbon and a
-// thin one turn in different places and their corners interlock — the diagram grows a row of notches that
-// read as puzzle pieces. Each ribbon gets a lane of its own instead, packed side by side.
+// Both halves of this are the rule. Letting each band turn half of its OWN thickness from the middle puts
+// a thick ribbon's corners in a different place from a thin one's and they interlock — a row of notches
+// that read as puzzle pieces. Giving each band a lane of its own instead spreads the turns across the
+// corridor and the column comes out as a staircase. One axis and one width is the only arrangement where
+// every vertical edge in a corridor falls on one of two lines.
 {
   const { ribbons } = await render('ortho');
   const corridors = new Map();
@@ -149,25 +151,23 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
     const pts = [...r.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
     const xs = pts.map(p => p[0]);
     const x1 = Math.min(...xs), x2 = Math.max(...xs);
-    // The turn's own x range: the values that are neither bar edge.
     const lane = [...new Set(xs.filter(x => Math.abs(x - x1) > 0.5 && Math.abs(x - x2) > 0.5))].sort((a, b) => a - b);
     if (lane.length < 2) return;                        // a straight band has no turn to place
     const key = `${Math.round(x1)}->${Math.round(x2)}`;
     if (!corridors.has(key)) corridors.set(key, []);
     corridors.get(key).push({ src: r.src, dst: r.dst, from: lane[0], to: lane[lane.length - 1] });
   });
-  for (const [key, list] of corridors)
-    for (let i = 0; i < list.length; i++)
-      for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j];
-        const overlap = Math.min(a.to, b.to) - Math.max(a.from, b.from);
-        if (overlap > 0.5)
-          fail(`"${a.src}->${a.dst}" turns at x ${a.from.toFixed(1)}..${a.to.toFixed(1)} and `
-             + `"${b.src}->${b.dst}" at ${b.from.toFixed(1)}..${b.to.toFixed(1)} in the corridor ${key} — `
-             + `they share ${overlap.toFixed(1)}px of lane, so their corners interlock`);
-      }
-  if (!corridors.size) fail('no right-angle ribbon actually turned, so lanes went untested');
+  if (!corridors.size) fail('no right-angle ribbon actually turned, so the rule went untested');
+  for (const [key, list] of corridors) {
+    const first = list[0];
+    list.forEach(r => {
+      if (Math.abs(r.from - first.from) > 0.5 || Math.abs(r.to - first.to) > 0.5)
+        fail(`in the corridor ${key}, "${first.src}->${first.dst}" turns at x ${first.from.toFixed(1)}..${first.to.toFixed(1)} `
+           + `but "${r.src}->${r.dst}" turns at ${r.from.toFixed(1)}..${r.to.toFixed(1)} — their vertical runs are not `
+           + `collinear, so the column reads as a staircase`);
+    });
+  }
 }
 
 console.log('nocross: on a seven-circuit main panel beside a two-circuit sub-panel, every column keeps '
-  + `${MIN_GAP}px between its bars and no two ribbons crossing the same gap swap order — in all three routings, and every right-angle ribbon turns in a lane of its own`);
+  + `${MIN_GAP}px between its bars and no two ribbons crossing the same gap swap order — in all three routings, and every right-angle ribbon in a corridor turns on the same vertical line`);
