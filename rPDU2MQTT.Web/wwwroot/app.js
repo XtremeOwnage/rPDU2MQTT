@@ -3436,7 +3436,11 @@ function addFlowSection(nav     , sections     ) {
     const cols        = [];
     nodes.forEach((n     ) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
-    const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
+    // The vertical gap between two bars in a column. It is a readability floor, not decoration: a node
+    // carries a name and a figure on one 11px line, and two bars closer than this put one row's text
+    // against the next row's bar.
+    const gap = 14;
+    const W = 960, padTop = 22, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -3455,23 +3459,9 @@ function addFlowSection(nav     , sections     ) {
     // Every node's label needs a full text line, whatever its bar height.
     const labelRow = 15;
 
-    /// Where a node's name is drawn: beside the ribbons it actually sends, not the middle of its bar.
-    ///
-    /// The label sits to the RIGHT of the bar, among the outgoing ribbons, and those stack from the bar's
-    /// TOP. A bar taller than the flow it passes on therefore puts its own name in the empty space below
-    /// every ribbon it draws: a 1.12 kW panel passing 340 W onward (the rest being unmetered load the
-    /// operator has switched off) had "Main Panel" a hundred pixels below the four circuits it feeds, and
-    /// read as a panel stranded at the bottom of the chart away from its own children.
-    ///
-    /// A node whose bar is full — every node in an ordinary chain — is unaffected, and a node that feeds
-    /// nothing keeps its bar's centre because there is no band to prefer.
-    const labelY = (id        , p     ) => {
-      const outs = (outgoing[id] || []).filter((l     ) => l.known !== false && (l.value || 0) > 0);
-      if (!outs.length) return p.y + p.h / 2;
-      const band = Math.min(p.h, outs.reduce((sum        , l     ) => sum + l.value, 0) * pxPerUnit);
-      // Never so close to the top edge that the text is clipped by the bar above it.
-      return p.y + Math.max(band, Math.min(p.h, labelRow)) / 2;
-    };
+    /// Where a node's name is drawn: the middle of its bar, which is also the middle of the ribbons it
+    /// sends now that a node's stack of them is centred on the bar rather than hung from its top.
+    const labelY = (id        , p     ) => p.y + p.h / 2;
     // A link's pull on the layout.
     const wFloor = maxTotal / 1000;
     const linkW = (l     ) => Math.max(l.value || 0, wFloor);
@@ -3550,6 +3540,23 @@ function addFlowSection(nav     , sections     ) {
     // Then slide each column bodily down to meet what it feeds.
     /// Where each ribbon actually meets each bar, in the order they are drawn.
     ///
+    /// How thick a ribbon is drawn: its value, or a hairline where there is nothing to scale.
+    const ribbonH = (l     ) => (l.known === false || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
+
+    /// Where a node's ribbons begin stacking on its bar.
+    ///
+    /// They used to stack from the TOP. A bar is as tall as what passes THROUGH the node, so a node that
+    /// carries more than it hands on keeps every one of its ribbons in the top slice of its own bar: an
+    /// inverter reading 12.1 kW but sending 3.3 kW to two panels attached all of it in the top quarter of a
+    /// 520px bar. Everything downstream is then pulled up there with it — which is how a sub-panel ended up
+    /// sitting in the middle of the other panel's fan, with all of its own ribbons crossing that fan to
+    /// reach its circuits. Centred, the ribbons sit where the bar is.
+    const stackStart = (id        , side              ) => {
+      const list = ((side === 'out' ? outgoing[id] : incoming[id]) || [])         ;
+      const total = list.reduce((sum        , l     ) => sum + ribbonH(l), 0);
+      return Math.max(0, ((pos[id]?.h ?? 0) - total) / 2);
+    };
+
     /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
     /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
     /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
@@ -3564,8 +3571,9 @@ function addFlowSection(nav     , sections     ) {
         .forEach((l     ) => {
           const sp = pos[l.source], tp = pos[l.target];
           if (!sp || !tp) return;
-          const h = l.known === false || l.value * pxPerUnit < 1.5 ? 1.5 : l.value * pxPerUnit;
-          const so = outOff[l.source] || 0, to = inOff[l.target] || 0;
+          const h = ribbonH(l);
+          const so = outOff[l.source] ?? stackStart(l.source, 'out');
+          const to = inOff[l.target] ?? stackStart(l.target, 'in');
           at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
           outOff[l.source] = so + h;
           inOff[l.target] = to + h;
@@ -3573,38 +3581,79 @@ function addFlowSection(nav     , sections     ) {
       return at;
     };
 
-    const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
-    for (const c of relaxOrder) {
-      const cn = cols[c];
-      if (!cn || !cn.length) continue;
-      const at = attachments();
-      let w = 0, s = 0;
-      cn.forEach((n     ) => {
-        // Both sides, not just what it feeds, and each side measured where the ribbon lands.
-        (outgoing[n.id] || []).forEach((l     ) => {
-          const a = at.get(l);
-          if (!a) return;
-          s += (a.to - a.from) * linkW(l);
-          w += linkW(l);
-        });
-        (incoming[n.id] || []).forEach((l     ) => {
-          const a = at.get(l);
-          if (!a) return;
-          s += (a.from - a.to) * linkW(l);
-          w += linkW(l);
-        });
-      });
-      if (!w) continue;
-      // Never above the top margin, and never so far down that the column leaves the canvas.
-      const top = Math.min(...cn.map((n     ) => pos[n.id].y));
-      const foot = Math.max(...cn.map((n     ) => pos[n.id].y + pos[n.id].h));
-      const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
+    /// The row a node occupies: its bar, or a full line of text where the bar is shorter than one.
+    const rowOf = (id        ) => Math.max(pos[id].h, labelRow);
 
-      // Only rescue a column that has genuinely come adrift; leave a well-placed one alone.
-      const reach = Math.max(8, (foot - top) / 2);
-      if (Math.abs(shift) < reach) continue;
-      cn.forEach((n     ) => { pos[n.id].y += shift; });
+    /// Push a column apart until no two rows are closer than `gap`, keeping the settled order.
+    ///
+    /// Moving nodes individually is what makes crossings avoidable, and it is also what lets two of them
+    /// land on top of each other — so every move is followed by this. Order is never changed here: the
+    /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
+    const separate = (cn       ) => {
+      let y = padTop;
+      cn.forEach((n     ) => {
+        if (pos[n.id].y < y) pos[n.id].y = y;
+        y = pos[n.id].y + rowOf(n.id) + gap;
+      });
+      // Ran off the bottom: walk back up, which can only compress the slack this pass introduced.
+      const foot = y - gap;
+      if (foot > padTop + usableH) {
+        let limit = foot - (foot - (padTop + usableH));
+        for (let i = cn.length - 1; i >= 0; i--) {
+          const id = cn[i].id;
+          if (pos[id].y + rowOf(id) > limit) pos[id].y = limit - rowOf(id);
+          limit = pos[id].y - gap;
+        }
+        let top = padTop;   // and never above the top margin
+        cn.forEach((n     ) => {
+          if (pos[n.id].y < top) pos[n.id].y = top;
+          top = pos[n.id].y + rowOf(n.id) + gap;
+        });
+      }
+    };
+
+    /// Slide each node in a column onto the centre of the ribbons it exchanges with its neighbour.
+    ///
+    /// Whole columns used to move as one, which cannot fix a mismatch INSIDE a column — and that is where
+    /// the crossings were: a sub-panel's bar sat above some of the main panel's own circuits, so every
+    /// ribbon it sent had to cut across them to reach its children. Each bar now settles against the
+    /// ribbons it actually carries.
+    const relaxColumn = (c        , side              ) => {
+      const cn = cols[c];
+      if (!cn || !cn.length) return;
+      const at = attachments();
+      cn.forEach((n     ) => {
+        // A node that feeds something is placed by WHAT IT FEEDS; one that feeds nothing, by its feeder.
+        // Letting both sides pull every node makes them fight and neither wins: an inverter's two ribbons
+        // are contiguous on its bar, while the panels they land on have to sit far enough apart for their
+        // own circuits — so a panel dragged back towards the inverter ends up in the middle of the other
+        // panel's fan. Ribbons are allowed to diverge; bars are not allowed to overlap someone else's.
+        const feeds = ((outgoing[n.id] || [])         ).length > 0;
+        if (side === 'out' ? !feeds : feeds) return;
+        const links = ((side === 'out' ? outgoing[n.id] : incoming[n.id]) || [])
+          .map((l     ) => at.get(l)).filter(Boolean);
+        if (!links.length) return;
+        // The MIDDLE of the band its ribbons reach, against the middle of the band they leave from — not
+        // their flow-weighted centre. Weighting by flow lets one dominant ribbon pin the node in place
+        // while its small siblings sprawl: a 2 kW panel whose seven circuits span 190px never moved,
+        // because its 612 W ribbon was already straight, and the sub-panel below it ended up sitting in
+        // the middle of that fan with every one of its own ribbons cutting through it.
+        const theirs = links.map((a     ) => side === 'out' ? a.to : a.from);
+        const mine = links.map((a     ) => side === 'out' ? a.from : a.to);
+        const mid = (xs          ) => (Math.min(...xs) + Math.max(...xs)) / 2;
+        pos[n.id].y += mid(theirs) - mid(mine);
+      });
+      separate(cn);
+    };
+
+    // Sweep both ways a few times: a column settles against neighbours that are themselves still settling,
+    // so one pass is never enough. This converges quickly and the separation step keeps every pass legal.
+    for (let pass = 0; pass < 6; pass++) {
+      for (let c = cols.length - 2; c >= 0; c--) relaxColumn(c, 'out');
+      for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
     }
+    cols.forEach((cn       ) => { if (cn && cn.length) separate(cn); });
+    bottom = Math.max(bottom, ...cols.filter(Boolean).flatMap((cn       ) => cn.map((n     ) => pos[n.id].y + rowOf(n.id))));
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
@@ -3614,7 +3663,12 @@ function addFlowSection(nav     , sections     ) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands).
+    // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
+    nodes.forEach((n     ) => {
+      if (!pos[n.id]) return;
+      pos[n.id].outOff = stackStart(n.id, 'out');
+      pos[n.id].inOff = stackStart(n.id, 'in');
+    });
     let flowClipSeq = 0;
     links.sort((a     , b     ) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||

@@ -283,12 +283,13 @@ if (overlaps)
   fail('a panel\'s circuits are split around the other panel\'s — the circuits that feed a rack PDU were '
      + 'pulled away from their own siblings, so their ribbons cross the chart');
 
-// --- A bar taller than the flow it passes on carries its name beside its ribbons ----------------------
+// --- A bar taller than the flow it passes on carries its name among its ribbons -----------------------
 //
-// Ribbons leave a bar at its TOP and stack downward, and the label is drawn to the right of the bar among
-// them. A panel receiving 1,120 W and passing 180 W onward — the rest being unmetered load the operator has
-// switched off — put its own name in the empty space below every ribbon it draws, reading as a panel
-// stranded at the bottom of the chart away from its own children.
+// The label is drawn to the right of the bar, among the outgoing ribbons. A panel receiving 1,120 W and
+// passing 180 W onward — the rest being unmetered load the operator has switched off — has ribbons
+// covering a sixth of its own bar, so where that sixth sits decides whether its name lands beside them or
+// in empty space. Asserted against where the ribbons ACTUALLY attach rather than against an assumption
+// about it: this check first went in believing they hang from the bar's top, which stopped being true.
 const lopsidedGraph = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
@@ -315,17 +316,28 @@ const ly = Number(panelLabel.attrs.y);
 
 // The bar has to be tall enough for what it RECEIVES — that part is honest and stays.
 if (!(barH > 100)) fail(`the panel bar should be sized for the 1,120 W it receives, got ${barH}px`);
-// …but its name belongs beside the ribbons it SENDS, which occupy the top ~16% of it (180 W of 1,120 W).
-// Half-way down the bar — where the label used to go — is below every one of them.
-const bandBottom = barTop + barH * 0.25;
-if (ly > bandBottom)
-  fail(`the panel's label (y=${ly}) is drawn below the ribbons it sends (which end around y=${Math.round(bandBottom)} `
-     + `on a bar spanning ${barTop}..${Math.round(barTop + barH)}), stranding its name in empty space`);
+
+// Where its outgoing ribbons actually meet the bar, read off the ribbons themselves.
+const outbound = await render(lopsidedGraph, 'path');
+const leftEdge = Number(panelBar.attrs.x) + 12;                      // the bar's right side, where they leave
+const attachYs = outbound
+  .filter(p => p.attrs['data-src'] === 'panel' && p.attrs.d)
+  .flatMap(p => [...p.attrs.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)]
+    .filter(m => Math.abs(Number(m[1]) - leftEdge) < 1)
+    .map(m => Number(m[2])));
+if (!attachYs.length) fail('could not find where the panel\'s ribbons meet its bar');
+const bandTop = Math.min(...attachYs), bandFoot = Math.max(...attachYs);
+
+if (ly < bandTop - 1 || ly > bandFoot + 1)
+  fail(`the panel's label (y=${ly}) is outside the band its ribbons occupy (${bandTop}..${bandFoot}) `
+     + `on a bar spanning ${barTop}..${Math.round(barTop + barH)}, stranding its name in empty space`);
 
 // --- Where a column sits against a much larger parent ------------------------------------------------
-// A ribbon leaves a bar at its top and stacks downward, so a 3,012 W panel whose drawn children total
-// ~640 W carries all of them in the top fifth of its bar. Relaxing the children toward the panel's CENTRE
-// aimed at a point no ribbon touches and pushed the column 141px down the canvas (#404 follow-up).
+// A 3,012 W panel whose drawn children total ~640 W carries all of them in a fifth of its bar, so where
+// that fifth sits is what the children have to line up with. The children must meet the ribbons, wherever
+// on the bar they leave from — relaxing them toward a point no ribbon touches pushed the column 141px down
+// the canvas (#404 follow-up), and the same mistake read the other way would hold them at a top the
+// ribbons no longer leave from.
 {
   const bigParent = {
     ok: true, metric: 'realpower', units: 'W',
@@ -355,14 +367,26 @@ if (ly > bandBottom)
   query(dom.getEl('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
   await new Promise(r => setTimeout(r, 200));
 
-  const bars = Object.fromEntries(query(dom.getEl('sections'), 'rect', true)
-    .filter(r => r.attrs['data-node'])
-    .map(r => [r.attrs['data-node'], Math.round(+r.attrs.y)]));
-
-  // The panel's own bar starts at the top margin, and so does the first child its ribbons reach.
+  const rects = query(dom.getEl('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+  const bars = Object.fromEntries(rects.map(r => [r.attrs['data-node'], Math.round(+r.attrs.y)]));
   if (bars.pdu1 == null || bars.panel == null) fail(`the diagram did not draw: ${JSON.stringify(bars)}`);
-  if (bars.pdu1 > bars.panel + 30)
-    fail(`the children hang ${bars.pdu1 - bars.panel}px below a parent whose ribbons all leave its top`);
+
+  // Where the panel's ribbons actually leave it, read off the ribbons rather than assumed.
+  const panelRect = rects.find(r => r.attrs['data-node'] === 'panel');
+  const edge = Number(panelRect.attrs.x) + 12;
+  const leaveYs = query(dom.getEl('sections'), 'path', true)
+    .filter(p => p.attrs && p.attrs['data-src'] === 'panel' && p.attrs.d)
+    .flatMap(p => [...p.attrs.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)]
+      .filter(m => Math.abs(Number(m[1]) - edge) < 1)
+      .map(m => Number(m[2])));
+  if (!leaveYs.length) fail('could not find where the panel\'s ribbons leave its bar');
+
+  // The first child sits where the first ribbon leaves — not at a top the ribbons never touch, and not
+  // a third of the canvas below them.
+  const firstLeave = Math.min(...leaveYs);
+  if (Math.abs(bars.pdu1 - firstLeave) > 30)
+    fail(`the first child is at ${bars.pdu1} while the first ribbon leaves the panel at ${Math.round(firstLeave)} `
+       + `— ${Math.abs(Math.round(bars.pdu1 - firstLeave))}px apart, so the ribbons sweep across the canvas`);
   if (bars.pdu2 < bars.pdu1) fail('the children are out of order');
 }
 
