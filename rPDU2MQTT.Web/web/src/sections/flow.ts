@@ -504,18 +504,8 @@ export function addFlowSection(nav: any, sections: any) {
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
-    /// A node's colour is what the node IS, not which column it landed in.
-    ///
-    /// Colouring by column index meant the hue shifted at every hop — blue, green, amber, pink, lime —
-    /// for no reason a reader could name, and a ribbon spanning two columns graded between two unrelated
-    /// hues. Six kinds, one muted value each, so the same kind is the same colour wherever it appears and
-    /// a grid feed never comes out lime.
-    const KIND_TINT: Record<string, string> = {
-      grid: '#5b8dd9', solar: '#d9a441', battery: '#5aab6b', inverter: '#4b9c96',
-      panel: '#c08a4a', pdu: '#6a83a6', outlet: '#7d8798', load: '#9a6fb0',
-      unmeasured: '#5d6672',
-    };
-    const tintOf = (id: string) => KIND_TINT[byId[id]?.kind] ?? '#6c8899';
+    const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+    const tintOf = (id: string) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
@@ -549,13 +539,6 @@ export function addFlowSection(nav: any, sections: any) {
       }
     }
 
-    /// Where each ribbon sits in the fan leaving its source, and how many siblings it has.
-    const fanOf = new Map<any, { i: number; n: number }>();
-    Object.keys(outgoing).forEach((id: string) => {
-      const kids = [...(outgoing[id] || [])].sort((a: any, b: any) => (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0));
-      kids.forEach((l: any, i: number) => fanOf.set(l, { i, n: kids.length }));
-    });
-
     // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
     nodes.forEach((n: any) => {
       if (!pos[n.id]) return;
@@ -575,37 +558,14 @@ export function addFlowSection(nav: any, sections: any) {
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const fan = fanOf.get(l) ?? { i: 0, n: 1 };
-      const color = fanShade(tintOf(l.source), fan.i, fan.n);
-      // A ribbon carries its source's colour into its target's, blended along the way, rather than
-      // changing hue at the seam where two bands meet.
-      const toColor = fanShade(tintOf(l.target), fan.i, fan.n);
-      let paint = color;
-      if (toColor !== color) {
-        const gid = `fg${flowClipSeq++}`;
-        const grad = svgEl('linearGradient', {
-          id: gid, gradientUnits: 'userSpaceOnUse', x1, y1: 0, x2, y2: 0,
-        });
-        // Ramped across the whole length. Holding it flat at each end was meant to keep a ribbon reading
-        // as its own node's colour where it meets the bar, but the flat parts were a third of the ribbon
-        // each — so anything but the middle of the diagram showed one solid colour and no gradient at all.
-        [[0, color], [1, toColor]].forEach(([at, c]) =>
-          grad.appendChild(svgEl('stop', { offset: `${(at as number) * 100}%`, 'stop-color': c as string })));
-        svg.appendChild(grad);
-        paint = `url(#${gid})`;
-      }
+      const color = tintOf(l.source);
       const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
-        fill: unknownLink ? 'var(--muted)' : paint,
+        fill: unknownLink ? 'var(--muted)' : color,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
-        //
-        // 0.3 was chosen when overlapping ribbons stacked as paint, where anything higher turned every
-        // crossing into a dark slab. They screen now, so the ceiling is gone — and at 0.3 a ribbon on this
-        // background renders as (85,62,34), near enough to black that there is no colour there to blend.
-        // At 0.62 it reads as its own colour and two crossing still land at (220,171,84) rather than white.
-        'fill-opacity': unknownLink ? '0.45' : idleLink ? '0.7' : '0.62',
+        'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         class: 'flow-ribbon',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
         'data-src': l.source, 'data-dst': l.target,

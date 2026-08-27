@@ -129,27 +129,3 @@ function polyline(pts: number[][], r: number): string {
   const last = pts[pts.length - 1];
   return d + ` L${r2(last[0])},${r2(last[1])}`;
 }
-
-/// Mix two colours. Accepts #rgb and #rrggbb, which is what the palette uses.
-export function mixHex(a: string, b: string, t: number): string {
-  const parse = (h: string) => {
-    const raw = h.replace('#', '');
-    const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw;
-    return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16));
-  };
-  const [r1, g1, b1] = parse(a), [r2, g2, b2] = parse(b);
-  const part = (x: number, y: number) =>
-    Math.max(0, Math.min(255, Math.round(x + (y - x) * t))).toString(16).padStart(2, '0');
-  return `#${part(r1, r2)}${part(g1, g2)}${part(b1, b2)}`;
-}
-
-/// The shade one ribbon takes within the fan leaving a node.
-///
-/// Every ribbon out of a node used to be the identical colour, so where two of them ran side by side down
-/// the same corridor the only thing separating them was the hard edge between two bands of the same fill.
-/// A fan of twelve outlets came out as a stack of stripes. Spreading the siblings across a range of the
-/// node's own colour lets them read as one graded sweep, and still says which node they came from.
-export function fanShade(color: string, index: number, count: number): string {
-  if (count < 2) return color;
-  return mixHex(color, '#ffffff', (index / (count - 1)) * 0.26);
-}

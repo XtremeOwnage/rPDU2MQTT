@@ -467,19 +467,6 @@
 
   /* The moving stream along a flow ribbon. Only drawn for links that carry a known, non-zero value, so
      motion always means measured throughput. Respects a reduced-motion preference. */
-  /* Where ribbons overlap they have to blend, not stack.
-     Every vertical run in a corridor is collinear, so seven bands share one strip of the canvas. Alpha
-     compositing turns each overlap into its own muddier shade with a hard edge at every boundary — a
-     patchwork rather than a flow. Screen blending adds them as light instead, which is what the eye reads
-     as two ribbons passing through each other on a dark ground. The light theme has the opposite ground,
-     so it multiplies. The svg isolates so the blend stops at its own edge and does not reach the page. */
-  .sankey-svg { isolation: isolate; }
-  .flow-ribbon { mix-blend-mode: screen; }
-  :root[data-theme="light"] .flow-ribbon { mix-blend-mode: multiply; }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme]) .flow-ribbon { mix-blend-mode: multiply; }
-  }
-
   .flow-stream { animation: rpdu-flow 3s linear infinite; }
   @keyframes rpdu-flow { to { stroke-dashoffset: -40; } }
   @media (prefers-reduced-motion: reduce) { .flow-stream { animation: none; } }
