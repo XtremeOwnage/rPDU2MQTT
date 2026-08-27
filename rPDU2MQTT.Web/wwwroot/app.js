@@ -1935,44 +1935,52 @@ function curvedBand({ x1, sTop, x2, tTop, h }      )         {
        + `L${r2(x2)},${r2(tTop + h)} C${r2(xc)},${r2(tTop + h)} ${r2(xc)},${r2(sTop + h)} ${r2(x1)},${r2(sTop + h)} Z`;
 }
 
-/// Where the single vertical run sits, kept far enough from both bars to leave a horizontal run either side.
+/// How wide the vertical run is.
+///
+/// It wants to be the band's own thickness — that is what makes the turn constant-width, and it is right
+/// whenever there is room. There often is not: a 4.6 kW band is 324px thick in a 163px column gap, and a
+/// run that wide cannot sit between the two bars at all. It is capped to most of the corridor, so a very
+/// thick ribbon pinches at its turn rather than hanging out of the side of a panel.
+function runWidth(b      )         {
+  return Math.max(1.5, Math.min(b.h, (b.x2 - b.x1) * 0.8));
+}
+
+/// Where the vertical run sits: mid-corridor, pulled in far enough that the whole run fits between the bars.
 function elbowX(b      )         {
+  const half = runWidth(b) / 2;
   const mid = (b.x1 + b.x2) / 2;
-  const margin = Math.min(b.h, (b.x2 - b.x1) / 3);
-  return Math.min(Math.max(mid, b.x1 + margin), b.x2 - margin);
+  return Math.min(Math.max(mid, b.x1 + half), b.x2 - half);
 }
 
 /// How much corner to round: as much as the turn and the runs allow, which on a long gentle turn is a lot.
 function cornerRadius(b      )         {
-  const drop = Math.abs((b.tTop + b.h / 2) - (b.sTop + b.h / 2));
+  const drop = Math.abs(b.tTop - b.sTop);
+  const half = runWidth(b) / 2;
   const xc = elbowX(b);
-  return Math.max(0, Math.min(drop / 2, xc - b.x1, b.x2 - xc));
+  return Math.max(0, Math.min(drop / 2, xc - half - b.x1, b.x2 - xc - half));
 }
 
-/// A band routed out, across and back in — two bends, never more.
+/// A band routed out, across and back in — two bends a side, never more.
 ///
-/// The two sides of the band are the centre line offset by half its thickness. Which side of the vertical
-/// run each offset lands on depends on which way the run goes: offsetting both the same way makes the
-/// outline cross itself, and the ribbon renders as a bow tie.
+/// The two edges turn on opposite sides of the vertical run, a run's width apart, which is what gives the
+/// turn its thickness. Which edge takes which side depends on the direction of travel: put both on the
+/// same side and the outline crosses itself and the ribbon renders as a bow tie; put them on the same x
+/// and the run has no width at all, so a long drop draws as two rectangles with nothing joining them.
 function orthoBand(b      , r        )         {
   const { x1, sTop, x2, tTop, h } = b;
-  const k = h / 2;
-  const c1 = sTop + k, c2 = tTop + k;
 
-  // Too little rise to turn into: a straight band, which is what the eye expects anyway.
-  if (Math.abs(c2 - c1) <= 1)
+  // Nothing to step over: a straight band, which is what the eye expects anyway.
+  if (Math.abs(tTop - sTop) <= 1)
     return `M${r2(x1)},${r2(sTop)} L${r2(x2)},${r2(tTop)} L${r2(x2)},${r2(tTop + h)} L${r2(x1)},${r2(sTop + h)} Z`;
 
-  const xc = elbowX(b);
-  const down = c2 > c1 ? 1 : -1;
-  // Travelling left to right, the left-hand side of a downward run is its right edge, and of an upward run
-  // its left edge. Hence the sign.
-  const nearX = xc + down * k, farX = xc - down * k;
+  const xc = elbowX(b), half = runWidth(b) / 2;
+  const down = tTop > sTop ? 1 : -1;
+  const nearX = xc + down * half, farX = xc - down * half;
 
-  const upper = polyline([[x1, c1 - k], [nearX, c1 - k], [nearX, c2 - k], [x2, c2 - k]], r);
-  const lower = polyline([[x2, c2 + k], [farX, c2 + k], [farX, c1 + k], [x1, c1 + k]], r);
+  const upper = polyline([[x1, sTop], [nearX, sTop], [nearX, tTop], [x2, tTop]], r);
+  const lower = polyline([[x2, tTop + h], [farX, tTop + h], [farX, sTop + h], [x1, sTop + h]], r);
   // The two sides, joined by the flat caps that sit against each bar.
-  return `${upper} L${r2(x2)},${r2(c2 + k)} ${lower.replace(/^M/, 'L')} Z`;
+  return `${upper} L${r2(x2)},${r2(tTop + h)} ${lower.replace(/^M/, 'L')} Z`;
 }
 
 /// A polyline of right-angle turns, with each corner optionally rounded by `r`.

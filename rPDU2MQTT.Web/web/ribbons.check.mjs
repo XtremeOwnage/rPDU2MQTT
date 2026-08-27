@@ -122,6 +122,9 @@ const BANDS = {
   level:     { x1: 0, sTop: 100, x2: 200, tTop: 100, h: 40 },
   shallow:   { x1: 0, sTop: 100, x2: 200, tTop: 112, h: 40 },
   hairline:  { x1: 0, sTop: 40, x2: 200, tTop: 260, h: 1.5 },
+  // Thicker than the gap is wide, which is ordinary: a 4.6 kW band is 324px in a 163px column gap.
+  thickDown: { x1: 0, sTop: 20, x2: 163, tTop: 120, h: 324 },
+  thickUp:   { x1: 0, sTop: 120, x2: 163, tTop: 20, h: 324 },
 };
 
 for (const style of ['ortho', 'ortho-round']) {
@@ -150,10 +153,24 @@ for (const style of ['ortho', 'ortho-round']) {
     const fold = selfIntersects(pts);
     if (fold) fail(`${style}/${name} folds over itself at ${JSON.stringify(fold)}: ${d}`);
 
-    // It has to actually span the bars it connects, or the ribbon detaches from its node.
+    // The vertical run has to have width, or the band is two rectangles with nothing joining them: the
+    // fill renders both ends and the link between them is invisible.
+    const turnXs = [...new Set(pts.slice(0, -1).map((p, i) =>
+      Math.abs(pts[i + 1][0] - p[0]) < 0.1 && Math.abs(p[0] - b.x1) > 0.1 && Math.abs(p[0] - b.x2) > 0.1
+        ? Math.round(p[0] * 10) / 10 : null).filter(v => v !== null))];
+    if (turnXs.length === 1)
+      fail(`${style}/${name} steps both edges at the same x (${turnXs[0]}), so its vertical run has no `
+         + `width and the two ends are joined by nothing: ${d}`);
+
+    // It has to span the bars it connects, and stay between them. Straying outside the corridor is what
+    // drew a black slab out of the side of a panel: the band's corner sat half a THICKNESS from the step,
+    // and a thick ribbon is easily thicker than the gap between two columns is wide.
     const xs = pts.map(p => p[0]);
     if (Math.min(...xs) > b.x1 + 0.1 || Math.max(...xs) < b.x2 - 0.1)
       fail(`${style}/${name} does not reach from ${b.x1} to ${b.x2}: ${d}`);
+    if (Math.min(...xs) < b.x1 - 0.1 || Math.max(...xs) > b.x2 + 0.1)
+      fail(`${style}/${name} leaves the corridor between the bars `
+         + `(spans ${Math.min(...xs)}..${Math.max(...xs)}, corridor is ${b.x1}..${b.x2}): ${d}`);
     const startsAt = pts.filter(p => Math.abs(p[0] - b.x1) < 0.1).map(p => p[1]).sort((m, n) => m - n);
     if (Math.abs(startsAt[0] - b.sTop) > 0.1 || Math.abs(startsAt[startsAt.length - 1] - (b.sTop + b.h)) > 0.1)
       fail(`${style}/${name} leaves the source bar at ${JSON.stringify(startsAt)} rather than ${b.sTop}..${b.sTop + b.h}: ${d}`);
