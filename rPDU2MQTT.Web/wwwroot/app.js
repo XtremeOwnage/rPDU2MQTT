@@ -3776,7 +3776,12 @@ function addFlowSection(nav     , sections     ) {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : paint,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
-        'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
+        //
+        // 0.3 was chosen when overlapping ribbons stacked as paint, where anything higher turned every
+        // crossing into a dark slab. They screen now, so the ceiling is gone — and at 0.3 a ribbon on this
+        // background renders as (85,62,34), near enough to black that there is no colour there to blend.
+        // At 0.62 it reads as its own colour and two crossing still land at (220,171,84) rather than white.
+        'fill-opacity': unknownLink ? '0.45' : idleLink ? '0.7' : '0.62',
         class: 'flow-ribbon',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
         'data-src': l.source, 'data-dst': l.target,
