@@ -523,6 +523,13 @@ export function addFlowSection(nav: any, sections: any) {
       }
     }
 
+    /// Where each ribbon sits in the fan leaving its source, and how many siblings it has.
+    const fanOf = new Map<any, { i: number; n: number }>();
+    Object.keys(outgoing).forEach((id: string) => {
+      const kids = [...(outgoing[id] || [])].sort((a: any, b: any) => (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0));
+      kids.forEach((l: any, i: number) => fanOf.set(l, { i, n: kids.length }));
+    });
+
     // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
     nodes.forEach((n: any) => {
       if (!pos[n.id]) return;
@@ -542,10 +549,11 @@ export function addFlowSection(nav: any, sections: any) {
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const color = colors[colMemo[l.source] % colors.length];
+      const fan = fanOf.get(l) ?? { i: 0, n: 1 };
+      const color = fanShade(colors[colMemo[l.source] % colors.length], fan.i, fan.n);
       // A ribbon carries its source's colour into its target's, blended along the way, rather than
       // changing hue at the seam where two bands meet.
-      const toColor = colors[colMemo[l.target] % colors.length];
+      const toColor = fanShade(colors[colMemo[l.target] % colors.length], fan.i, fan.n);
       let paint = color;
       if (toColor !== color) {
         const gid = `fg${flowClipSeq++}`;

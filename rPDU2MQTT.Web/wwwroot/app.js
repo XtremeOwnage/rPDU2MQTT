@@ -1996,11 +1996,12 @@ function polyline(pts            , r        )         {
   for (let i = 1; i < pts.length - 1; i++) {
     const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
     const inLen = Math.hypot(cx - px, cy - py), outLen = Math.hypot(nx - cx, ny - cy);
-    // A leg shared with the next corner can only give up half of itself; the first and last legs end at a
-    // bar rather than at another corner, so they can give up all of theirs. Halving every leg regardless
-    // left the outer corners barely rounded while the run between them had radius to spare.
-    const inBudget = i === 1 ? inLen : inLen / 2;
-    const outBudget = i === pts.length - 2 ? outLen : outLen / 2;
+    // A leg shared with the next corner can only give up half of itself. The first and last legs end at a
+    // bar rather than at another corner, so they can give more — but not everything: a corner that eats a
+    // whole leg leaves no straight run at all and the ribbon reads as one continuous bend rather than a
+    // line with rounded corners. Three fifths keeps the curve generous and the line still a line.
+    const inBudget = i === 1 ? inLen * 0.6 : inLen / 2;
+    const outBudget = i === pts.length - 2 ? outLen * 0.6 : outLen / 2;
     const rr = Math.min(r, inBudget, outBudget);
     if (rr <= 0.5) { d += ` L${r2(cx)},${r2(cy)}`; continue; }
     const ax = cx - ((cx - px) / inLen) * rr, ay = cy - ((cy - py) / inLen) * rr;
@@ -2009,6 +2010,30 @@ function polyline(pts            , r        )         {
   }
   const last = pts[pts.length - 1];
   return d + ` L${r2(last[0])},${r2(last[1])}`;
+}
+
+/// Mix two colours. Accepts #rgb and #rrggbb, which is what the palette uses.
+function mixHex(a        , b        , t        )         {
+  const parse = (h        ) => {
+    const raw = h.replace('#', '');
+    const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw;
+    return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16));
+  };
+  const [r1, g1, b1] = parse(a), [r2, g2, b2] = parse(b);
+  const part = (x        , y        ) =>
+    Math.max(0, Math.min(255, Math.round(x + (y - x) * t))).toString(16).padStart(2, '0');
+  return `#${part(r1, r2)}${part(g1, g2)}${part(b1, b2)}`;
+}
+
+/// The shade one ribbon takes within the fan leaving a node.
+///
+/// Every ribbon out of a node used to be the identical colour, so where two of them ran side by side down
+/// the same corridor the only thing separating them was the hard edge between two bands of the same fill.
+/// A fan of twelve outlets came out as a stack of stripes. Spreading the siblings across a range of the
+/// node's own colour lets them read as one graded sweep, and still says which node they came from.
+function fanShade(color        , index        , count        )         {
+  if (count < 2) return color;
+  return mixHex(color, '#ffffff', (index / (count - 1)) * 0.45);
 }
 
 // ── flow-view.ts ────────────────────────────────────────────────
@@ -3701,6 +3726,13 @@ function addFlowSection(nav     , sections     ) {
       }
     }
 
+    /// Where each ribbon sits in the fan leaving its source, and how many siblings it has.
+    const fanOf = new Map                               ();
+    Object.keys(outgoing).forEach((id        ) => {
+      const kids = [...(outgoing[id] || [])].sort((a     , b     ) => (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0));
+      kids.forEach((l     , i        ) => fanOf.set(l, { i, n: kids.length }));
+    });
+
     // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
     nodes.forEach((n     ) => {
       if (!pos[n.id]) return;
@@ -3720,10 +3752,11 @@ function addFlowSection(nav     , sections     ) {
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const color = colors[colMemo[l.source] % colors.length];
+      const fan = fanOf.get(l) ?? { i: 0, n: 1 };
+      const color = fanShade(colors[colMemo[l.source] % colors.length], fan.i, fan.n);
       // A ribbon carries its source's colour into its target's, blended along the way, rather than
       // changing hue at the seam where two bands meet.
-      const toColor = colors[colMemo[l.target] % colors.length];
+      const toColor = fanShade(colors[colMemo[l.target] % colors.length], fan.i, fan.n);
       let paint = color;
       if (toColor !== color) {
         const gid = `fg${flowClipSeq++}`;

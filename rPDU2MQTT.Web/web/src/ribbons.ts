@@ -114,11 +114,12 @@ function polyline(pts: number[][], r: number): string {
   for (let i = 1; i < pts.length - 1; i++) {
     const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
     const inLen = Math.hypot(cx - px, cy - py), outLen = Math.hypot(nx - cx, ny - cy);
-    // A leg shared with the next corner can only give up half of itself; the first and last legs end at a
-    // bar rather than at another corner, so they can give up all of theirs. Halving every leg regardless
-    // left the outer corners barely rounded while the run between them had radius to spare.
-    const inBudget = i === 1 ? inLen : inLen / 2;
-    const outBudget = i === pts.length - 2 ? outLen : outLen / 2;
+    // A leg shared with the next corner can only give up half of itself. The first and last legs end at a
+    // bar rather than at another corner, so they can give more — but not everything: a corner that eats a
+    // whole leg leaves no straight run at all and the ribbon reads as one continuous bend rather than a
+    // line with rounded corners. Three fifths keeps the curve generous and the line still a line.
+    const inBudget = i === 1 ? inLen * 0.6 : inLen / 2;
+    const outBudget = i === pts.length - 2 ? outLen * 0.6 : outLen / 2;
     const rr = Math.min(r, inBudget, outBudget);
     if (rr <= 0.5) { d += ` L${r2(cx)},${r2(cy)}`; continue; }
     const ax = cx - ((cx - px) / inLen) * rr, ay = cy - ((cy - py) / inLen) * rr;
@@ -127,4 +128,28 @@ function polyline(pts: number[][], r: number): string {
   }
   const last = pts[pts.length - 1];
   return d + ` L${r2(last[0])},${r2(last[1])}`;
+}
+
+/// Mix two colours. Accepts #rgb and #rrggbb, which is what the palette uses.
+export function mixHex(a: string, b: string, t: number): string {
+  const parse = (h: string) => {
+    const raw = h.replace('#', '');
+    const full = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw;
+    return [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16));
+  };
+  const [r1, g1, b1] = parse(a), [r2, g2, b2] = parse(b);
+  const part = (x: number, y: number) =>
+    Math.max(0, Math.min(255, Math.round(x + (y - x) * t))).toString(16).padStart(2, '0');
+  return `#${part(r1, r2)}${part(g1, g2)}${part(b1, b2)}`;
+}
+
+/// The shade one ribbon takes within the fan leaving a node.
+///
+/// Every ribbon out of a node used to be the identical colour, so where two of them ran side by side down
+/// the same corridor the only thing separating them was the hard edge between two bands of the same fill.
+/// A fan of twelve outlets came out as a stack of stripes. Spreading the siblings across a range of the
+/// node's own colour lets them read as one graded sweep, and still says which node they came from.
+export function fanShade(color: string, index: number, count: number): string {
+  if (count < 2) return color;
+  return mixHex(color, '#ffffff', (index / (count - 1)) * 0.45);
 }
