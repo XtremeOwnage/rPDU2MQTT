@@ -12,7 +12,12 @@
 export type RibbonStyle = 'curved' | 'ortho' | 'ortho-round';
 
 /// One ribbon's geometry: where it starts, where it ends, and how thick it is.
-export type Band = { x1: number; sTop: number; x2: number; tTop: number; h: number };
+export type Band = {
+  x1: number; sTop: number; x2: number; tTop: number; h: number;
+  /// The centre of this ribbon's own vertical lane, and how wide that lane is. Supplied by the renderer,
+  /// which is the only thing that can see the other ribbons sharing the corridor. Absent for a lone band.
+  laneX?: number; laneW?: number;
+};
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -55,13 +60,14 @@ function curvedBand({ x1, sTop, x2, tTop, h }: Band): string {
 /// run that wide cannot sit between the two bars at all. It is capped to most of the corridor, so a very
 /// thick ribbon pinches at its turn rather than hanging out of the side of a panel.
 function runWidth(b: Band): number {
+  if (b.laneW != null) return Math.max(1.5, b.laneW);
   return Math.max(1.5, Math.min(b.h, (b.x2 - b.x1) * 0.8));
 }
 
 /// Where the vertical run sits: mid-corridor, pulled in far enough that the whole run fits between the bars.
 function elbowX(b: Band): number {
   const half = runWidth(b) / 2;
-  const mid = (b.x1 + b.x2) / 2;
+  const mid = b.laneX ?? (b.x1 + b.x2) / 2;
   return Math.min(Math.max(mid, b.x1 + half), b.x2 - half);
 }
 

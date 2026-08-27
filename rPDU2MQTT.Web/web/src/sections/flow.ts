@@ -494,6 +494,42 @@ export function addFlowSection(nav: any, sections: any) {
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
+    /// Give every ribbon sharing a corridor its own vertical lane, side by side like a cable bundle.
+    ///
+    /// Without this each band turns half of its OWN thickness from the middle of the corridor, so a thick
+    /// ribbon and a thin one turn at different places and their corners interlock — the diagram grows a
+    /// row of notches that look like puzzle pieces. Packed into lanes they turn in step.
+    ///
+    /// Lanes run in the reverse of the ribbons' stacking order — the topmost ribbon turns furthest right —
+    /// which is the order that keeps a ribbon's horizontal run from cutting through a neighbour's vertical
+    /// one. Reverse it and every pair crosses.
+    const laneOf = new Map<any, { laneX: number; laneW: number }>();
+    {
+      const corridors = new Map<string, any[]>();
+      links.forEach((l: any) => {
+        const s2 = pos[l.source], t2 = pos[l.target];
+        if (!s2 || !t2) return;
+        const key = `${s2.x + nodeW}|${t2.x}`;
+        (corridors.get(key) ?? corridors.set(key, []).get(key)!).push(l);
+      });
+      for (const [key, list] of corridors) {
+        const [left, right] = key.split('|').map(Number);
+        const width = right - left;
+        // Bottom-most ribbon first, so the topmost ends up in the rightmost lane.
+        const order = [...list].sort((a: any, b: any) => (pos[b.target].y) - (pos[a.target].y));
+        const widths = order.map((l: any) => ribbonH(l));
+        const total = widths.reduce((x: number, y: number) => x + y, 0);
+        // A bundle wider than the corridor is squeezed to fit: the runs pinch rather than overlap.
+        const scale = total > width * 0.9 ? (width * 0.9) / total : 1;
+        let x = (left + right) / 2 - (total * scale) / 2;
+        order.forEach((l: any, i: number) => {
+          const w = widths[i] * scale;
+          laneOf.set(l, { laneX: x + w / 2, laneW: w });
+          x += w;
+        });
+      }
+    }
+
     // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
     nodes.forEach((n: any) => {
       if (!pos[n.id]) return;
@@ -514,7 +550,7 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
-      const band = { x1, sTop, x2, tTop, h };
+      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
