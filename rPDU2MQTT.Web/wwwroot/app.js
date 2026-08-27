@@ -3763,9 +3763,10 @@ function addFlowSection(nav     , sections     ) {
         const grad = svgEl('linearGradient', {
           id: gid, gradientUnits: 'userSpaceOnUse', x1, y1: 0, x2, y2: 0,
         });
-        // Held flat at each end so a ribbon still reads as its own node's colour where it meets the bar,
-        // and turns over in the middle where nothing is attached to it.
-        [[0, color], [0.28, color], [0.72, toColor], [1, toColor]].forEach(([at, c]) =>
+        // Ramped across the whole length. Holding it flat at each end was meant to keep a ribbon reading
+        // as its own node's colour where it meets the bar, but the flat parts were a third of the ribbon
+        // each — so anything but the middle of the diagram showed one solid colour and no gradient at all.
+        [[0, color], [1, toColor]].forEach(([at, c]) =>
           grad.appendChild(svgEl('stop', { offset: `${(at          ) * 100}%`, 'stop-color': c           })));
         svg.appendChild(grad);
         paint = `url(#${gid})`;
