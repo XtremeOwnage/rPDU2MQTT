@@ -151,5 +151,5 @@ export function mixHex(a: string, b: string, t: number): string {
 /// node's own colour lets them read as one graded sweep, and still says which node they came from.
 export function fanShade(color: string, index: number, count: number): string {
   if (count < 2) return color;
-  return mixHex(color, '#ffffff', (index / (count - 1)) * 0.45);
+  return mixHex(color, '#ffffff', (index / (count - 1)) * 0.26);
 }

@@ -504,7 +504,18 @@ export function addFlowSection(nav: any, sections: any) {
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
-    const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+    /// A node's colour is what the node IS, not which column it landed in.
+    ///
+    /// Colouring by column index meant the hue shifted at every hop — blue, green, amber, pink, lime —
+    /// for no reason a reader could name, and a ribbon spanning two columns graded between two unrelated
+    /// hues. Six kinds, one muted value each, so the same kind is the same colour wherever it appears and
+    /// a grid feed never comes out lime.
+    const KIND_TINT: Record<string, string> = {
+      grid: '#5b8dd9', solar: '#d9a441', battery: '#5aab6b', inverter: '#4b9c96',
+      panel: '#c08a4a', pdu: '#6a83a6', outlet: '#7d8798', load: '#9a6fb0',
+      unmeasured: '#5d6672',
+    };
+    const tintOf = (id: string) => KIND_TINT[byId[id]?.kind] ?? '#6c8899';
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
@@ -565,10 +576,10 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const fan = fanOf.get(l) ?? { i: 0, n: 1 };
-      const color = fanShade(colors[colMemo[l.source] % colors.length], fan.i, fan.n);
+      const color = fanShade(tintOf(l.source), fan.i, fan.n);
       // A ribbon carries its source's colour into its target's, blended along the way, rather than
       // changing hue at the seam where two bands meet.
-      const toColor = fanShade(colors[colMemo[l.target] % colors.length], fan.i, fan.n);
+      const toColor = fanShade(tintOf(l.target), fan.i, fan.n);
       let paint = color;
       if (toColor !== color) {
         const gid = `fg${flowClipSeq++}`;
@@ -649,7 +660,7 @@ export function addFlowSection(nav: any, sections: any) {
       const unknownNode = !known(n.id);
       const rect = svgEl('rect', {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
-        fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
+        fill: unknownNode ? 'var(--muted)' : tintOf(n.id),
         'fill-opacity': unknownNode ? '0.45' : '1',
         'data-node': n.id,
       });
