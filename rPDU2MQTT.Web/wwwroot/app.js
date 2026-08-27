@@ -1954,6 +1954,9 @@ function elbowX(b      )         {
 }
 
 /// How much corner to round: as much as the turn and the runs allow, which on a long gentle turn is a lot.
+///
+/// The two corners share the vertical run between them, so neither may take more than half of it. The
+/// horizontal runs either side are theirs alone.
 function cornerRadius(b      )         {
   const drop = Math.abs(b.tTop - b.sTop);
   const half = runWidth(b) / 2;
@@ -1993,7 +1996,12 @@ function polyline(pts            , r        )         {
   for (let i = 1; i < pts.length - 1; i++) {
     const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
     const inLen = Math.hypot(cx - px, cy - py), outLen = Math.hypot(nx - cx, ny - cy);
-    const rr = Math.min(r, inLen / 2, outLen / 2);
+    // A leg shared with the next corner can only give up half of itself; the first and last legs end at a
+    // bar rather than at another corner, so they can give up all of theirs. Halving every leg regardless
+    // left the outer corners barely rounded while the run between them had radius to spare.
+    const inBudget = i === 1 ? inLen : inLen / 2;
+    const outBudget = i === pts.length - 2 ? outLen : outLen / 2;
+    const rr = Math.min(r, inBudget, outBudget);
     if (rr <= 0.5) { d += ` L${r2(cx)},${r2(cy)}`; continue; }
     const ax = cx - ((cx - px) / inLen) * rr, ay = cy - ((cy - py) / inLen) * rr;
     const bx = cx + ((nx - cx) / outLen) * rr, by = cy + ((ny - cy) / outLen) * rr;
@@ -3713,11 +3721,27 @@ function addFlowSection(nav     , sections     ) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
+      // A ribbon carries its source's colour into its target's, blended along the way, rather than
+      // changing hue at the seam where two bands meet.
+      const toColor = colors[colMemo[l.target] % colors.length];
+      let paint = color;
+      if (toColor !== color) {
+        const gid = `fg${flowClipSeq++}`;
+        const grad = svgEl('linearGradient', {
+          id: gid, gradientUnits: 'userSpaceOnUse', x1, y1: 0, x2, y2: 0,
+        });
+        // Held flat at each end so a ribbon still reads as its own node's colour where it meets the bar,
+        // and turns over in the middle where nothing is attached to it.
+        [[0, color], [0.28, color], [0.72, toColor], [1, toColor]].forEach(([at, c]) =>
+          grad.appendChild(svgEl('stop', { offset: `${(at          ) * 100}%`, 'stop-color': c           })));
+        svg.appendChild(grad);
+        paint = `url(#${gid})`;
+      }
       const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
-        fill: unknownLink ? 'var(--muted)' : color,
+        fill: unknownLink ? 'var(--muted)' : paint,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.

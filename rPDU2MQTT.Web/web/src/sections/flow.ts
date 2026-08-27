@@ -543,11 +543,27 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = colors[colMemo[l.source] % colors.length];
+      // A ribbon carries its source's colour into its target's, blended along the way, rather than
+      // changing hue at the seam where two bands meet.
+      const toColor = colors[colMemo[l.target] % colors.length];
+      let paint = color;
+      if (toColor !== color) {
+        const gid = `fg${flowClipSeq++}`;
+        const grad = svgEl('linearGradient', {
+          id: gid, gradientUnits: 'userSpaceOnUse', x1, y1: 0, x2, y2: 0,
+        });
+        // Held flat at each end so a ribbon still reads as its own node's colour where it meets the bar,
+        // and turns over in the middle where nothing is attached to it.
+        [[0, color], [0.28, color], [0.72, toColor], [1, toColor]].forEach(([at, c]) =>
+          grad.appendChild(svgEl('stop', { offset: `${(at as number) * 100}%`, 'stop-color': c as string })));
+        svg.appendChild(grad);
+        paint = `url(#${gid})`;
+      }
       const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
-        fill: unknownLink ? 'var(--muted)' : color,
+        fill: unknownLink ? 'var(--muted)' : paint,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.

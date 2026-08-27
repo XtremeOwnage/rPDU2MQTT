@@ -72,6 +72,9 @@ function elbowX(b: Band): number {
 }
 
 /// How much corner to round: as much as the turn and the runs allow, which on a long gentle turn is a lot.
+///
+/// The two corners share the vertical run between them, so neither may take more than half of it. The
+/// horizontal runs either side are theirs alone.
 function cornerRadius(b: Band): number {
   const drop = Math.abs(b.tTop - b.sTop);
   const half = runWidth(b) / 2;
@@ -111,7 +114,12 @@ function polyline(pts: number[][], r: number): string {
   for (let i = 1; i < pts.length - 1; i++) {
     const [px, py] = pts[i - 1], [cx, cy] = pts[i], [nx, ny] = pts[i + 1];
     const inLen = Math.hypot(cx - px, cy - py), outLen = Math.hypot(nx - cx, ny - cy);
-    const rr = Math.min(r, inLen / 2, outLen / 2);
+    // A leg shared with the next corner can only give up half of itself; the first and last legs end at a
+    // bar rather than at another corner, so they can give up all of theirs. Halving every leg regardless
+    // left the outer corners barely rounded while the run between them had radius to spare.
+    const inBudget = i === 1 ? inLen : inLen / 2;
+    const outBudget = i === pts.length - 2 ? outLen : outLen / 2;
+    const rr = Math.min(r, inBudget, outBudget);
     if (rr <= 0.5) { d += ` L${r2(cx)},${r2(cy)}`; continue; }
     const ax = cx - ((cx - px) / inLen) * rr, ay = cy - ((cy - py) / inLen) * rr;
     const bx = cx + ((nx - cx) / outLen) * rr, by = cy + ((ny - cy) / outLen) * rr;
