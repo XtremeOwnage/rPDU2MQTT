@@ -290,9 +290,15 @@ export function addFlowSection(nav: any, sections: any) {
     // Every node's label needs a full text line, whatever its bar height.
     const labelRow = 15;
 
-    /// Where a node's name is drawn: the middle of its bar, which is also the middle of the ribbons it
-    /// sends now that a node's stack of them is centred on the bar rather than hung from its top.
-    const labelY = (id: string, p: any) => p.y + p.h / 2;
+    /// Where a node's name is drawn: the middle of the ribbons it sends.
+    ///
+    /// Usually that is the middle of the bar. It is not for a node that passes on much less than it
+    /// receives — a panel whose unmetered load is switched off — and the label sits to the right of the
+    /// bar among those outgoing ribbons, so it follows them rather than the bar.
+    const labelY = (id: string, p: any) => {
+      const out = stackTotal(id, 'out');
+      return out > 0 ? p.y + stackStart(id) + out / 2 : p.y + p.h / 2;
+    };
     // A link's pull on the layout.
     const wFloor = maxTotal / 1000;
     const linkW = (l: any) => Math.max(l.value || 0, wFloor);
@@ -382,10 +388,19 @@ export function addFlowSection(nav: any, sections: any) {
     /// 520px bar. Everything downstream is then pulled up there with it — which is how a sub-panel ended up
     /// sitting in the middle of the other panel's fan, with all of its own ribbons crossing that fan to
     /// reach its circuits. Centred, the ribbons sit where the bar is.
-    const stackStart = (id: string, side: 'out' | 'in') => {
-      const list = ((side === 'out' ? outgoing[id] : incoming[id]) || []) as any[];
-      const total = list.reduce((sum: number, l: any) => sum + ribbonH(l), 0);
-      return Math.max(0, ((pos[id]?.h ?? 0) - total) / 2);
+    const stackTotal = (id: string, side: 'out' | 'in') =>
+      (((side === 'out' ? outgoing[id] : incoming[id]) || []) as any[])
+        .reduce((sum: number, l: any) => sum + ribbonH(l), 0);
+
+    const stackStart = (id: string) => {
+      // ONE offset for both sides, from whichever side carries more.
+      //
+      // Centring each side on the bar independently lines up their CENTRES, not their tops — so a node
+      // passing on a little less than it receives had its outgoing stack start a few pixels lower than its
+      // incoming one, and the top edge of a chain stepped down at every node. Sharing the offset lines up
+      // the tops, which is what makes a run of ribbons carrying the same power read as one flat band.
+      const larger = Math.max(stackTotal(id, 'out'), stackTotal(id, 'in'));
+      return Math.max(0, ((pos[id]?.h ?? 0) - larger) / 2);
     };
 
     /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
@@ -403,8 +418,8 @@ export function addFlowSection(nav: any, sections: any) {
           const sp = pos[l.source], tp = pos[l.target];
           if (!sp || !tp) return;
           const h = ribbonH(l);
-          const so = outOff[l.source] ?? stackStart(l.source, 'out');
-          const to = inOff[l.target] ?? stackStart(l.target, 'in');
+          const so = outOff[l.source] ?? stackStart(l.source);
+          const to = inOff[l.target] ?? stackStart(l.target);
           at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
           outOff[l.source] = so + h;
           inOff[l.target] = to + h;
@@ -533,8 +548,8 @@ export function addFlowSection(nav: any, sections: any) {
     // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
     nodes.forEach((n: any) => {
       if (!pos[n.id]) return;
-      pos[n.id].outOff = stackStart(n.id, 'out');
-      pos[n.id].inOff = stackStart(n.id, 'in');
+      pos[n.id].outOff = stackStart(n.id);
+      pos[n.id].inOff = stackStart(n.id);
     });
     let flowClipSeq = 0;
     links.sort((a: any, b: any) =>

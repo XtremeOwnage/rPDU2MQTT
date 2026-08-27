@@ -169,5 +169,24 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
   }
 }
 
+// --- Rule 4: a chain carrying one value has a flat top ------------------------------------------------
+//
+// A node's incoming and outgoing stacks used to be centred on its bar independently, which lines up their
+// CENTRES and not their tops. A node passing on a little less than it receives then started its outgoing
+// stack a few pixels lower than its incoming one, and the top edge of a chain stepped down at every node.
+{
+  const { ribbons } = await render('ortho');
+  const topOf = (src, dst) => {
+    const r = ribbons.find(x => x.src === src && x.dst === dst);
+    if (!r) fail(`no ribbon ${src} -> ${dst}`);
+    return Number(/^M(-?[\d.]+),(-?[\d.]+)/.exec(r.d)[2]);
+  };
+  // grid -> inverter -> main_panel all carry within a whisker of each other's top edge.
+  const chain = [['grid', 'inverter'], ['inverter', 'main_panel']].map(([a, b]) => topOf(a, b));
+  if (Math.abs(chain[0] - chain[1]) > 0.5)
+    fail(`the chain's top edge steps by ${Math.abs(chain[0] - chain[1]).toFixed(1)}px between `
+       + `grid->inverter (y=${chain[0]}) and inverter->main_panel (y=${chain[1]}) — it should run flat`);
+}
+
 console.log('nocross: on a seven-circuit main panel beside a two-circuit sub-panel, every column keeps '
-  + `${MIN_GAP}px between its bars and no two ribbons crossing the same gap swap order — in all three routings, and every right-angle ribbon in a corridor turns on the same vertical line`);
+  + `${MIN_GAP}px between its bars and no two ribbons crossing the same gap swap order — in all three routings, and every right-angle ribbon in a corridor turns on the same vertical line, with the top edge of a chain running flat`);
