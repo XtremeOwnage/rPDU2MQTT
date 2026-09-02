@@ -93,6 +93,35 @@ public sealed class RedisEnergyStore : IEnergyStore
         }
     }
 
+    /// <summary>The high-water marks, in their own hash — they have to survive a restart.</summary>
+    public IReadOnlyDictionary<string, double> LoadPeaks()
+    {
+        var peaks = new Dictionary<string, double>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var (k, v) in cache.HashGetAll(key + ":peaks"))
+                if (double.TryParse(v, System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var d)) peaks[k] = d;
+        }
+        catch (Exception ex)
+        {
+            Complain($"Could not read the published high-water marks from the cache ({ex.Message}). They start "
+                   + "empty, so a counter now reading below what was already published would be read downstream "
+                   + "as a meter reset.");
+        }
+        return peaks;
+    }
+
+    public void SavePeaks(IReadOnlyDictionary<string, double> peaks)
+    {
+        try
+        {
+            cache.HashSet(key + ":peaks", peaks.ToDictionary(kv => kv.Key,
+                kv => kv.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        catch (Exception ex) { Complain($"Could not write the high-water marks to the cache ({ex.Message})."); }
+    }
+
     // An unreachable cache fails on every pass; say it once per outage rather than filling the log.
     private void Complain(string message)
     {

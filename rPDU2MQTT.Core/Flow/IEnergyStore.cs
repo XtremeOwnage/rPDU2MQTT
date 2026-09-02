@@ -21,6 +21,26 @@ public interface IEnergyStore
 
     /// <summary>Persist the whole set. Called after a sampling pass; implementations may debounce.</summary>
     void Save(IReadOnlyDictionary<string, EnergyState> states);
+
+    /// <summary>
+    /// The highest figure already published for each export key — the high-water marks
+    /// <see cref="CumulativeExport"/> uses to keep a <c>total_increasing</c> sensor from going backwards.
+    ///
+    /// <para>
+    /// These have to outlive the process. The guard held them in memory only, so every restart re-baselined
+    /// it: the next pass published whatever the raw counter happened to read, and where that was below what
+    /// had already gone out, Home Assistant recorded a meter reset and re-counted the whole climb. On a
+    /// bridge that restarted seventeen times in a week, that turned a house using tens of kWh a day into
+    /// megawatt-hours.
+    /// </para>
+    /// <para>
+    /// Defaulted so a store that deliberately keeps nothing — the in-memory one — is unaffected.
+    /// </para>
+    /// </summary>
+    IReadOnlyDictionary<string, double> LoadPeaks() => new Dictionary<string, double>();
+
+    /// <summary>Persist the high-water marks. Called when one of them moves.</summary>
+    void SavePeaks(IReadOnlyDictionary<string, double> peaks) { }
 }
 
 /// <summary>Keeps the totals in memory only. Deliberately loses them on restart — see <see cref="IEnergyStore"/>.</summary>
