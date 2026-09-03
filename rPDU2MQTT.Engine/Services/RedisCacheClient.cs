@@ -50,6 +50,17 @@ public sealed class RedisCacheClient : ICacheClient, IDisposable
         catch (Exception ex) { health.Failed(ex.Message); throw; }
     }
 
+    public void HashSetField(string key, string field, string value)
+    {
+        try
+        {
+            var db = Db ?? throw new InvalidOperationException("cache is not connected");
+            db.HashSet(key, field, value);   // HSET: merges, and leaves every other field where it is
+            health.Succeeded();
+        }
+        catch (Exception ex) { health.Failed(ex.Message); throw; }
+    }
+
     public void HashSet(string key, IReadOnlyDictionary<string, string> fields)
     {
         try

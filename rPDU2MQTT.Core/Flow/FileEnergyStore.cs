@@ -83,10 +83,16 @@ public sealed class FileEnergyStore : IEnergyStore
         }
     }
 
-    public void SavePeaks(IReadOnlyDictionary<string, double> peaks)
+    public void SavePeak(string key, double value)
     {
-        try { File.WriteAllText(PeaksPath, JsonSerializer.Serialize(peaks)); }
-        catch (Exception ex) { warn?.Invoke($"Could not write the high-water marks to {PeaksPath} ({ex.Message})."); }
+        // A file has no per-field write, so the merge happens here: read what is on disk, change the one
+        // mark, put it back. Never write only the mark that moved — that would drop every other one.
+        try
+        {
+            var all = new Dictionary<string, double>(LoadPeaks()) { [key] = value };
+            File.WriteAllText(PeaksPath, JsonSerializer.Serialize(all));
+        }
+        catch (Exception ex) { warn?.Invoke($"Could not write the high-water mark for '{key}' to {PeaksPath} ({ex.Message})."); }
     }
 
     private string PeaksPath => Path.Combine(Path.GetDirectoryName(path) ?? ".",

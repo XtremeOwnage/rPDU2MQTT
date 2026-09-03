@@ -39,8 +39,8 @@ public interface IEnergyStore
     /// </summary>
     IReadOnlyDictionary<string, double> LoadPeaks() => new Dictionary<string, double>();
 
-    /// <summary>Persist the high-water marks. Called when one of them moves.</summary>
-    void SavePeaks(IReadOnlyDictionary<string, double> peaks) { }
+    /// <summary>Persist one high-water mark, as it moves. Others are left exactly as they are.</summary>
+    void SavePeak(string key, double value) { }
 }
 
 /// <summary>Keeps the totals in memory only. Deliberately loses them on restart — see <see cref="IEnergyStore"/>.</summary>

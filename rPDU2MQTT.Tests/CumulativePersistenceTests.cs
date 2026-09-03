@@ -24,9 +24,9 @@ public class CumulativePersistenceTests
         public IReadOnlyDictionary<string, EnergyState> Load() => new Dictionary<string, EnergyState>();
         public void Save(IReadOnlyDictionary<string, EnergyState> states) { }
         public IReadOnlyDictionary<string, double> LoadPeaks() => Peaks;
-        public void SavePeaks(IReadOnlyDictionary<string, double> peaks)
+        public void SavePeak(string key, double value)
         {
-            Peaks = new Dictionary<string, double>(peaks);
+            Peaks[key] = value;      // one field, exactly as a real store does
             Writes++;
         }
     }
@@ -85,5 +85,23 @@ public class CumulativePersistenceTests
         var after = new CumulativeExport(disk);
         Assert.Null(after.Publish("solar|energy", 20));     // held
         Assert.Equal(160, after.Publish("grid|energy", 160)); // still climbing, still published
+    }
+
+    /// <summary>
+    /// One mark moving must not disturb another. The first version of this wrote the WHOLE set every time,
+    /// which on Redis meant deleting and rebuilding a fifty-field hash to change one of them — and where
+    /// two replicas each hold a partial view, whichever wrote last erased what the other knew.
+    /// </summary>
+    [Fact]
+    public void AMarkThatMovesLeavesTheOthersAlone()
+    {
+        var disk = new Disk();
+        disk.Peaks["written_by_someone_else|energy"] = 999;
+
+        var guard = new CumulativeExport(disk);
+        guard.Publish("solar|energy", 42);
+
+        Assert.Equal(999, disk.Peaks["written_by_someone_else|energy"]);
+        Assert.Equal(42, disk.Peaks["solar|energy"]);
     }
 }

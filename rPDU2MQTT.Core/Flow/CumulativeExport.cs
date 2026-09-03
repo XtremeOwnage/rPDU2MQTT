@@ -73,7 +73,7 @@ public sealed class CumulativeExport
         withheld.TryRemove(key, out _);
         var moved = !known || v > high;
         peak[key] = v;
-        if (moved) store?.SavePeaks(peak);
+        if (moved) store?.SavePeak(key, v);
         return v;
     }
 
