@@ -34,15 +34,21 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     private readonly HashSet<string> clearedDuplicates = new();
     private readonly HashSet<string> retiredByFilter = new();
     /// <summary>What has already been published for each lifetime counter, so none of them goes backwards.</summary>
-    private readonly Core.Flow.CumulativeExport cumulative = new();
+    private readonly Core.Flow.CumulativeExport cumulative;
     /// <summary>Keys already reported as withheld, so a stuck contributor is said once and not every pass.</summary>
     private readonly HashSet<string> saidWithheld = new();
 
-    public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null)
+    /// <param name="store">
+    /// Where the published high-water marks live. Without one they are held in memory and every restart
+    /// re-baselines them, which is read downstream as a meter reset — see <see cref="Core.Flow.CumulativeExport"/>.
+    /// </param>
+    public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null,
+                           Core.Flow.IEnergyStore? store = null)
     {
         this.cfg = cfg;
         this.publisher = publisher;
         this.live = live;
+        cumulative = store is null ? new() : new(store);
     }
 
     public string Id => "mqtt-energyflow";

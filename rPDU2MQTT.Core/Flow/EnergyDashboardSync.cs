@@ -128,6 +128,33 @@ public static class EnergyDashboardSync
 
     /// <summary>Every energy stat entity_id referenced by an <c>energy_sources</c> entry (ours or HA's) — used
     /// to tell our entries apart from the user's own when merging, without matching on <c>type</c>.</summary>
+    /// <summary>The prefix every unique_id this bridge gives a flow tier's sensors carries.</summary>
+    public const string OwnedUniqueIdPrefix = "energyflow_";
+
+    /// <summary>
+    /// Is this <c>energy_sources</c> entry one we put there?
+    ///
+    /// <para>
+    /// Asking "does it reference a stat we are producing right now" is not the same question, and the gap
+    /// between them orphans entries permanently. When an entity id changes — a node renamed, or Home
+    /// Assistant registering a second entity and suffixing it <c>_2</c> — the entry we wrote last time
+    /// stops matching anything we currently produce, so it reads as the user's own and is kept forever.
+    /// The dashboard then carries a dead source beside the live one, and while both were alive it was
+    /// counting the same generation twice.
+    /// </para>
+    /// <para>
+    /// Ownership is a property of the entity, not of this pass: our sensors' unique_ids all begin with
+    /// <see cref="OwnedUniqueIdPrefix"/>, and Home Assistant's registry maps an entity id back to one.
+    /// A stat we cannot resolve at all is left alone — that is a stat about something else.
+    /// </para>
+    /// </summary>
+    public static bool IsOurs(JsonObject source, IReadOnlyDictionary<string, string> uniqueByEntity,
+                              IReadOnlySet<string> producedNow)
+        => StatsOf(source).Any(stat =>
+               producedNow.Contains(stat)
+               || (uniqueByEntity.TryGetValue(stat, out var uid)
+                   && uid.StartsWith(OwnedUniqueIdPrefix, StringComparison.OrdinalIgnoreCase)));
+
     public static IEnumerable<string> StatsOf(JsonObject source)
     {
         if ((string?)source["stat_energy_from"] is { Length: > 0 } from) yield return from;

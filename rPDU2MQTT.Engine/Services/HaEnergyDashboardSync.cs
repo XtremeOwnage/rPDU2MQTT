@@ -78,6 +78,14 @@ public sealed class HaEnergyDashboardSync
     /// devices is what retires a tier once it's excluded (grid/battery/inverter) or once it stops being a
     /// device, without ever touching an entity the user added themselves.
     /// </summary>
+    /// <summary>Home Assistant's registry the other way round: entity id -> unique_id.</summary>
+    private static Dictionary<string, string> Reverse(IReadOnlyDictionary<string, string> entityByUniqueId)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (uid, entity) in entityByUniqueId) map[entity] = uid;
+        return map;
+    }
+
     private HashSet<string> ManagedStats(IReadOnlyDictionary<string, string> entityByUniqueId)
     {
         var stats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -169,9 +177,10 @@ public sealed class HaEnergyDashboardSync
         // not by type), so a hand-added second grid/solar survives.
         var sources = BuildEnergySources(entityByUniqueId);
         var ourStats = sources.SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var uniqueByEntity = Reverse(entityByUniqueId);
         var keepSources = new JsonArray();
         foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
-            if (existing is JsonObject o && !EnergyDashboardSync.StatsOf(o).Any(ourStats.Contains))
+            if (existing is JsonObject o && !EnergyDashboardSync.IsOurs(o, uniqueByEntity, ourStats))
                 keepSources.Add(o.DeepClone());
         foreach (var src in sources)
             keepSources.Add(src.DeepClone());
@@ -201,9 +210,10 @@ public sealed class HaEnergyDashboardSync
                 entityByUniqueId[uid] = eid;
 
         var ourStats = BuildEnergySources(entityByUniqueId).SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var uniqueByEntity = Reverse(entityByUniqueId);
         var keepSources = new JsonArray();
         foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
-            if (existing is JsonObject o && !EnergyDashboardSync.StatsOf(o).Any(ourStats.Contains))
+            if (existing is JsonObject o && !EnergyDashboardSync.IsOurs(o, uniqueByEntity, ourStats))
                 keepSources.Add(o.DeepClone());
         prefs["energy_sources"] = keepSources;
 

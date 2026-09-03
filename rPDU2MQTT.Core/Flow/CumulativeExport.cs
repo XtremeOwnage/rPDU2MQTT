@@ -28,6 +28,25 @@ namespace rPDU2MQTT.Core.Flow;
 public sealed class CumulativeExport
 {
     private readonly ConcurrentDictionary<string, double> peak = new(StringComparer.Ordinal);
+    private readonly IEnergyStore? store;
+
+    public CumulativeExport() { }
+
+    /// <summary>
+    /// Backed by a store, so the marks survive a restart.
+    ///
+    /// <para>
+    /// Without one the guard is re-baselined every time the process starts: the first pass takes whatever
+    /// the raw counter reads as the new peak and publishes it, and where that sits below what has already
+    /// gone out, the consumer reads a meter reset and counts the whole climb again. That is the failure
+    /// this class exists to prevent, arriving through the back door.
+    /// </para>
+    /// </summary>
+    public CumulativeExport(IEnergyStore store)
+    {
+        this.store = store;
+        foreach (var (key, high) in store.LoadPeaks()) peak[key] = high;
+    }
 
     /// <summary>What was withheld and why, newest reason per key, for the diagnostics the GUI reads.</summary>
     private readonly ConcurrentDictionary<string, string> withheld = new(StringComparer.Ordinal);
@@ -40,8 +59,10 @@ public sealed class CumulativeExport
     {
         if (value is not { } v) return null;
 
-        var high = peak.GetOrAdd(key, v);
-        if (v < high)
+        // TryGetValue, not GetOrAdd: GetOrAdd inserts the key before the comparison below can tell a first
+        // sighting from an unchanged one, so nothing was ever recognised as moved and nothing was persisted.
+        var known = peak.TryGetValue(key, out var high);
+        if (known && v < high)
         {
             withheld[key] = $"{v:0.###} is below the {high:0.###} already published. A lifetime counter that "
                           + "goes backwards is read as a meter reset, and the next reading would be recorded "
@@ -50,7 +71,9 @@ public sealed class CumulativeExport
         }
 
         withheld.TryRemove(key, out _);
+        var moved = !known || v > high;
         peak[key] = v;
+        if (moved) store?.SavePeak(key, v);
         return v;
     }
 

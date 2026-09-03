@@ -64,4 +64,37 @@ public sealed class FileEnergyStore : IEnergyStore
                        + "accumulated in memory, but a restart will lose them.");
         }
     }
+    /// <summary>The high-water marks, in a file beside the totals — they have to survive a restart.</summary>
+    public IReadOnlyDictionary<string, double> LoadPeaks()
+    {
+        try
+        {
+            return File.Exists(PeaksPath)
+                ? JsonSerializer.Deserialize<Dictionary<string, double>>(File.ReadAllText(PeaksPath))
+                  ?? new Dictionary<string, double>()
+                : new Dictionary<string, double>();
+        }
+        catch (Exception ex)
+        {
+            warn?.Invoke($"Could not read the published high-water marks from {PeaksPath} ({ex.Message}). "
+                       + "They start empty, so a counter now reading below what was already published would be "
+                       + "read downstream as a meter reset.");
+            return new Dictionary<string, double>();
+        }
+    }
+
+    public void SavePeak(string key, double value)
+    {
+        // A file has no per-field write, so the merge happens here: read what is on disk, change the one
+        // mark, put it back. Never write only the mark that moved — that would drop every other one.
+        try
+        {
+            var all = new Dictionary<string, double>(LoadPeaks()) { [key] = value };
+            File.WriteAllText(PeaksPath, JsonSerializer.Serialize(all));
+        }
+        catch (Exception ex) { warn?.Invoke($"Could not write the high-water mark for '{key}' to {PeaksPath} ({ex.Message})."); }
+    }
+
+    private string PeaksPath => Path.Combine(Path.GetDirectoryName(path) ?? ".",
+        Path.GetFileNameWithoutExtension(path) + "-peaks.json");
 }

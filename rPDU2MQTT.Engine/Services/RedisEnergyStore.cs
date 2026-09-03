@@ -17,6 +17,26 @@ public interface ICacheClient
     void HashSet(string key, IReadOnlyDictionary<string, string> fields);
 
     /// <summary>
+    /// Set one field of a hash, leaving every other field alone.
+    ///
+    /// <para>
+    /// Wholesale replacement is right for a set one writer owns end to end, and wrong for anything written
+    /// a field at a time: it deletes and rebuilds every field to change one of them, and where two replicas
+    /// each hold a partial view it silently drops whatever the other one knew. The high-water marks are
+    /// written one at a time as each moves, so they get the per-field write Redis is for.
+    /// </para>
+    /// <para>
+    /// Defaulted by read-modify-write so an existing implementation keeps working; the real client overrides
+    /// it with a single HSET.
+    /// </para>
+    /// </summary>
+    void HashSetField(string key, string field, string value)
+    {
+        var all = new Dictionary<string, string>(HashGetAll(key), StringComparer.Ordinal) { [field] = value };
+        HashSet(key, all);
+    }
+
+    /// <summary>
     /// Is the cache actually answering? Needed because the Status board must tell the truth about a cache
     /// nothing happens to be using — energy aggregation is off by default, so without an active probe the
     /// card only ever reported the state of traffic that never occurred.
@@ -91,6 +111,35 @@ public sealed class RedisEnergyStore : IEnergyStore
             Complain($"Could not write the energy totals to the cache ({ex.Message}). They are still accumulating "
                    + "in memory, but a restart before it recovers will lose them.");
         }
+    }
+
+    /// <summary>The high-water marks, in their own hash — they have to survive a restart.</summary>
+    public IReadOnlyDictionary<string, double> LoadPeaks()
+    {
+        var peaks = new Dictionary<string, double>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var (k, v) in cache.HashGetAll(key + ":peaks"))
+                if (double.TryParse(v, System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var d)) peaks[k] = d;
+        }
+        catch (Exception ex)
+        {
+            Complain($"Could not read the published high-water marks from the cache ({ex.Message}). They start "
+                   + "empty, so a counter now reading below what was already published would be read downstream "
+                   + "as a meter reset.");
+        }
+        return peaks;
+    }
+
+    public void SavePeak(string peakKey, double value)
+    {
+        try
+        {
+            cache.HashSetField(key + ":peaks", peakKey,
+                value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex) { Complain($"Could not write the high-water mark for '{peakKey}' to the cache ({ex.Message})."); }
     }
 
     // An unreachable cache fails on every pass; say it once per outage rather than filling the log.
