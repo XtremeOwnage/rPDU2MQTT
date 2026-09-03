@@ -76,6 +76,7 @@ async function render(graph, want = 'path') {
   query(ge('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
   await new Promise(r => setTimeout(r, 50));
   if (want === 'rect') return query(ge('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+  if (want === 'text') return query(ge('sections'), 'text', true).filter(t => t.attrs && t.attrs['data-node']);
   return query(ge('sections'), 'path', true).filter(p => p.attrs['fill-opacity'] !== undefined);
 }
 
@@ -223,10 +224,120 @@ if (y2('pdu_1#unmeasured') < Math.max(...['kube01', 'kube05', 'nas'].map(y2)))
 if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(y2)))
   fail("Rack-PDU-2's remainder is drawn above its own measured siblings");
 
+// --- Two parents whose children are NOT all terminal --------------------------------------------------
+//
+// The case above has every child terminal, so nothing downstream pulls on any of them and grouping by
+// feeder is the only thing deciding the order. Live, two of a panel's six circuits went on to feed rack
+// PDUs — and ordering by what a node FEEDS pulled exactly those two to the top of the column, while their
+// four siblings, with nothing downstream to be pulled by, fell to the bottom. The other panel's circuits
+// stacked in between, and every one of the split family's ribbons crossed the chart to reach it.
+const mixed = await render({
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'inverter', label: 'Inverter', kind: 'inverter', value: 2340 },
+    { id: 'main', label: 'Main Panel', kind: 'panel', value: 1090 },
+    { id: 'sub', label: 'Sub Panel', kind: 'panel', value: 1250 },
+    // Main's circuits: two of them feed something further, four do not.
+    { id: 'living', label: 'Livingroom Circuit', kind: 'load', value: 591 },
+    { id: 'bedroom', label: 'Master Bedroom Circuit', kind: 'load', value: 98.54 },
+    { id: 'freezer', label: 'deep_freezer', kind: 'load', value: 126.1 },
+    { id: 'fridge', label: 'fridge', kind: 'load', value: 97 },
+    // Sub's circuits: all terminal.
+    { id: 'minisplit', label: 'Office Minisplit', kind: 'load', value: 113.91 },
+    { id: 'light', label: 'Light Circuit', kind: 'load', value: 76.11 },
+    { id: 'heater', label: 'Hot Water Heater', kind: 'load', value: 1.81 },
+    { id: 'utility', label: 'Utility Room', kind: 'load', value: 0.76 },
+    // What the two non-terminal circuits feed.
+    { id: 'pdu_a', label: 'Rack-PDU-1', kind: 'pdu', value: 311 },
+    { id: 'pdu_b', label: 'Rack-PDU-2', kind: 'pdu', value: 317 },
+    { id: 'fan', label: 'bedroom_fan', kind: 'load', value: 98.54 },
+  ],
+  links: [
+    { source: 'inverter', target: 'main', value: 1090 },
+    { source: 'inverter', target: 'sub', value: 1250 },
+    { source: 'main', target: 'living', value: 591 },
+    { source: 'main', target: 'bedroom', value: 98.54 },
+    { source: 'main', target: 'freezer', value: 126.1 },
+    { source: 'main', target: 'fridge', value: 97 },
+    { source: 'sub', target: 'minisplit', value: 113.91 },
+    { source: 'sub', target: 'light', value: 76.11 },
+    { source: 'sub', target: 'heater', value: 1.81 },
+    { source: 'sub', target: 'utility', value: 0.76 },
+    { source: 'living', target: 'pdu_a', value: 311 },
+    { source: 'living', target: 'pdu_b', value: 317 },
+    { source: 'bedroom', target: 'fan', value: 98.54 },
+  ],
+}, 'rect');
+
+const y3 = (id) => {
+  const r = mixed.find(x => x.attrs['data-node'] === id);
+  if (!r) fail(`no node drawn for ${id}`);
+  return Number(r.attrs.y);
+};
+const mainKids = ['living', 'bedroom', 'freezer', 'fridge'].map(y3);
+const subKids = ['minisplit', 'light', 'heater', 'utility'].map(y3);
+
+// Each panel's circuits occupy one contiguous band, whichever panel ends up on top.
+const overlaps = Math.max(...mainKids) > Math.min(...subKids) && Math.max(...subKids) > Math.min(...mainKids);
+if (overlaps)
+  fail('a panel\'s circuits are split around the other panel\'s — the circuits that feed a rack PDU were '
+     + 'pulled away from their own siblings, so their ribbons cross the chart');
+
+// --- A bar taller than the flow it passes on carries its name among its ribbons -----------------------
+//
+// The label is drawn to the right of the bar, among the outgoing ribbons. A panel receiving 1,120 W and
+// passing 180 W onward — the rest being unmetered load the operator has switched off — has ribbons
+// covering a sixth of its own bar, so where that sixth sits decides whether its name lands beside them or
+// in empty space. Asserted against where the ribbons ACTUALLY attach rather than against an assumption
+// about it: this check first went in believing they hang from the bar's top, which stopped being true.
+const lopsidedGraph = {
+  ok: true, metric: 'realpower', units: 'W',
+  nodes: [
+    { id: 'inverter', label: 'Inverter', kind: 'inverter', value: 1120 },
+    { id: 'panel', label: 'Main Panel', kind: 'panel', value: 1120 },
+    { id: 'a', label: 'Circuit A', kind: 'load', value: 120 },
+    { id: 'b', label: 'Circuit B', kind: 'load', value: 60 },
+  ],
+  links: [
+    { source: 'inverter', target: 'panel', value: 1120 },
+    { source: 'panel', target: 'a', value: 120 },
+    { source: 'panel', target: 'b', value: 60 },
+  ],
+};
+const lopsided = await render(lopsidedGraph, 'rect');
+
+const panelBar = lopsided.find(x => x.attrs['data-node'] === 'panel');
+if (!panelBar) fail('no panel bar drawn');
+const barTop = Number(panelBar.attrs.y), barH = Number(panelBar.attrs.height);
+const lopsidedText = await render(lopsidedGraph, 'text');
+const panelLabel = lopsidedText.find(t => t.attrs['data-node'] === 'panel');
+if (!panelLabel) fail('the panel bar has no label');
+const ly = Number(panelLabel.attrs.y);
+
+// The bar has to be tall enough for what it RECEIVES — that part is honest and stays.
+if (!(barH > 100)) fail(`the panel bar should be sized for the 1,120 W it receives, got ${barH}px`);
+
+// Where its outgoing ribbons actually meet the bar, read off the ribbons themselves.
+const outbound = await render(lopsidedGraph, 'path');
+const leftEdge = Number(panelBar.attrs.x) + 12;                      // the bar's right side, where they leave
+const attachYs = outbound
+  .filter(p => p.attrs['data-src'] === 'panel' && p.attrs.d)
+  .flatMap(p => [...p.attrs.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)]
+    .filter(m => Math.abs(Number(m[1]) - leftEdge) < 1)
+    .map(m => Number(m[2])));
+if (!attachYs.length) fail('could not find where the panel\'s ribbons meet its bar');
+const bandTop = Math.min(...attachYs), bandFoot = Math.max(...attachYs);
+
+if (ly < bandTop - 1 || ly > bandFoot + 1)
+  fail(`the panel's label (y=${ly}) is outside the band its ribbons occupy (${bandTop}..${bandFoot}) `
+     + `on a bar spanning ${barTop}..${Math.round(barTop + barH)}, stranding its name in empty space`);
+
 // --- Where a column sits against a much larger parent ------------------------------------------------
-// A ribbon leaves a bar at its top and stacks downward, so a 3,012 W panel whose drawn children total
-// ~640 W carries all of them in the top fifth of its bar. Relaxing the children toward the panel's CENTRE
-// aimed at a point no ribbon touches and pushed the column 141px down the canvas (#404 follow-up).
+// A 3,012 W panel whose drawn children total ~640 W carries all of them in a fifth of its bar, so where
+// that fifth sits is what the children have to line up with. The children must meet the ribbons, wherever
+// on the bar they leave from — relaxing them toward a point no ribbon touches pushed the column 141px down
+// the canvas (#404 follow-up), and the same mistake read the other way would hold them at a top the
+// ribbons no longer leave from.
 {
   const bigParent = {
     ok: true, metric: 'realpower', units: 'W',
@@ -256,14 +367,26 @@ if (y2('pdu_2#unmeasured') < Math.max(...['r730xd', 'edgerouter', 'crs504'].map(
   query(dom.getEl('nav'), 'a', true).find(a => a.dataset.label === 'Flow').click();
   await new Promise(r => setTimeout(r, 200));
 
-  const bars = Object.fromEntries(query(dom.getEl('sections'), 'rect', true)
-    .filter(r => r.attrs['data-node'])
-    .map(r => [r.attrs['data-node'], Math.round(+r.attrs.y)]));
-
-  // The panel's own bar starts at the top margin, and so does the first child its ribbons reach.
+  const rects = query(dom.getEl('sections'), 'rect', true).filter(r => r.attrs['data-node']);
+  const bars = Object.fromEntries(rects.map(r => [r.attrs['data-node'], Math.round(+r.attrs.y)]));
   if (bars.pdu1 == null || bars.panel == null) fail(`the diagram did not draw: ${JSON.stringify(bars)}`);
-  if (bars.pdu1 > bars.panel + 30)
-    fail(`the children hang ${bars.pdu1 - bars.panel}px below a parent whose ribbons all leave its top`);
+
+  // Where the panel's ribbons actually leave it, read off the ribbons rather than assumed.
+  const panelRect = rects.find(r => r.attrs['data-node'] === 'panel');
+  const edge = Number(panelRect.attrs.x) + 12;
+  const leaveYs = query(dom.getEl('sections'), 'path', true)
+    .filter(p => p.attrs && p.attrs['data-src'] === 'panel' && p.attrs.d)
+    .flatMap(p => [...p.attrs.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)]
+      .filter(m => Math.abs(Number(m[1]) - edge) < 1)
+      .map(m => Number(m[2])));
+  if (!leaveYs.length) fail('could not find where the panel\'s ribbons leave its bar');
+
+  // The first child sits where the first ribbon leaves — not at a top the ribbons never touch, and not
+  // a third of the canvas below them.
+  const firstLeave = Math.min(...leaveYs);
+  if (Math.abs(bars.pdu1 - firstLeave) > 30)
+    fail(`the first child is at ${bars.pdu1} while the first ribbon leaves the panel at ${Math.round(firstLeave)} `
+       + `— ${Math.abs(Math.round(bars.pdu1 - firstLeave))}px apart, so the ribbons sweep across the canvas`);
   if (bars.pdu2 < bars.pdu1) fail('the children are out of order');
 }
 

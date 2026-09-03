@@ -236,6 +236,19 @@ public static class FlowGraphBuilder
         // A 'none' node never infers a value.
         static bool Inert(string m) => m is "none" or "static";
 
+        // What a node's leftover should be CALLED. Power a panel carries beyond its metered circuits is
+        // load nobody is metering; power an inverter or the grid puts out beyond what the modelled paths
+        // account for is output going somewhere this hierarchy does not describe. Same arithmetic, and
+        // calling the second one "load" on the thing producing it reads as a fault that is not there.
+        bool Produces(string id)
+            => kind.TryGetValue(id, out var k) && k is "solar" or "grid" or "battery" or "inverter";
+
+        // A node whose reading is power arriving to be shared out among things that meter themselves: a
+        // panel, a PDU, a metered circuit. Named kinds only — an unclassified node says nothing either way
+        // and keeps conservation down a single path; set its Kind to say what it is.
+        bool Distributes(string id)
+            => kind.TryGetValue(id, out var k) && k is "panel" or "pdu" or "outlet" or "load";
+
         // Which unmeasured feeders may supply what a node still needs after its measured feeders are counted.
         var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in flow.Nodes)
@@ -304,6 +317,49 @@ public static class FlowGraphBuilder
                     var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
                     var spare = Math.Max(0, produced - trackedDraw);
                     return Mode(to) == "untracked" ? spare / untracked.Count : DemandShare(to, path);
+                }
+
+                // A metered circuit draws what its own clamp says, not a share of its parent scaled to
+                // make the total add up. That scaling replaced a measurement with arithmetic: a 1,418 W
+                // sub-panel feeding a 1.8 W circuit and a 1.2 W circuit drew the water heater at 845 W —
+                // a figure nothing reported, 477x its own reading, and a ribbon that dwarfed the panel.
+                // What the parent carries beyond its metered circuits is unmeasured load, named as such
+                // below rather than pushed onto whichever circuits happen to be metered.
+                //
+                // Only TERMINAL children qualify. A measured child with children of its own is a
+                // pass-through whose reading may be on one leg — the inverter bound to load_power while
+                // also charging a battery — so conservation, not its reading, governs what reaches it.
+                //
+                // Only where there is something to apportion. Down a SINGLE path conservation is sound and
+                // is the only thing that can be said: 750 W of solar feeding one outlet puts 750 W on that
+                // link, and a shortfall against the outlet's own reading is a gap in the topology. It is
+                // the splitting across several children that must not overwrite their meters — including
+                // children that are themselves panels, which is where this bit hardest: an inverter
+                // reading 6.97 kW pushed 2.9 kW and 4.1 kW into two panels metering 1.04 kW and 1.47 kW,
+                // so each panel's bar was drawn nearly three times its own reading.
+                // …and, for a node that DISTRIBUTES, even when there is only one child: a 1,040 W panel
+                // feeding one circuit metered at 90 W is the same overwrite with one child instead of six.
+                // Out of a PRODUCER down a single path, conservation is still the only thing that can be
+                // said, so that case keeps it.
+                var metered = kids.Count > 1 || Distributes(from)
+                    ? kids.Where(leaf.ContainsKey).ToList()
+                    : new List<string>();
+                if (metered.Count > 0)
+                {
+                    var meteredDraw = metered.Sum(c => DemandShare(c, path));
+                    // What the parent emits is still the ceiling: a link cannot carry more than its source
+                    // produces, so meters asking for more than there is are scaled to fit.
+                    var fit = meteredDraw > produced && meteredDraw > 0 ? produced / meteredDraw : 1.0;
+
+                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path) * fit;
+                    if (Inert(Mode(to))) return 0;
+
+                    // Whatever the metered children leave is divided among the ones nothing measures.
+                    var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
+                    if (estimated.Count == 0) return 0;
+                    var spare = Math.Max(0, produced - meteredDraw * fit);
+                    var demand = estimated.Sum(c => Need(c, path));
+                    return demand > 0 ? spare * Need(to, path) / demand : spare / estimated.Count;
                 }
 
                 if (kids.Count <= 1) return produced;
@@ -403,7 +459,7 @@ public static class FlowGraphBuilder
             if (total <= 0 || gap <= 1 || gap <= total * 0.02) continue;
 
             var uid = id + "#unmeasured";
-            label[uid] = "Unmeasured load";
+            label[uid] = Produces(id) ? "Unaccounted output" : "Unmeasured load";
             kind[uid] = "unmeasured";
             leaf[uid] = gap;
             unmeasured.Add(new FlowLink(id, uid, gap, true));

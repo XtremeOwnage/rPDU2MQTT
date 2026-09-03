@@ -177,6 +177,52 @@ export function unmeasuredToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
+/// How the ribbons are routed between bars.
+///
+/// The default is the curved band this diagram has always drawn. The other two route on a grid instead:
+/// out horizontally, one vertical run, back in horizontally — at most two bends, never a staircase. On a
+/// dense hierarchy that reads more like a wiring diagram than a river, which is easier to follow when what
+/// you want to know is which circuit goes where rather than how much is moving.
+export type RibbonStyle = 'curved' | 'ortho' | 'ortho-round';
+
+const RIBBON_KEY = 'rpdu-flow-ribbon';
+const RIBBON_STYLES: [RibbonStyle, string, string][] = [
+  ['curved', 'Curved ribbons', 'The default: each ribbon sweeps from source to target as one smooth band.'],
+  ['ortho', 'Right angles', 'Route on a grid — out, across, in. Two bends at most, so a ribbon never staircases.'],
+  ['ortho-round', 'Rounded angles', 'The same grid routing, with the corners rounded as far as the turn allows.'],
+];
+
+export let ribbonStyle: RibbonStyle = (() => {
+  try {
+    const v = localStorage.getItem(RIBBON_KEY);
+    return RIBBON_STYLES.some(([id]) => id === v) ? v as RibbonStyle : 'curved';
+  } catch { return 'curved'; }
+})();
+
+export function setRibbonStyle(v: RibbonStyle) {
+  ribbonStyle = v;
+  try { localStorage.setItem(RIBBON_KEY, v); } catch { /* private mode: this session only */ }
+}
+
+/// The routing picker, beside the other switches that change how the diagram is drawn.
+export function ribbonStyleSelect(onChange: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'How ribbons are routed between nodes. A view setting only — it changes nothing about the values.',
+  });
+  const sel: any = el('select', { style: { width: 'auto' } });
+  RIBBON_STYLES.forEach(([id, label, why]) => {
+    const opt = el('option', { value: id, text: label });
+    opt.title = why;
+    sel.appendChild(opt);
+  });
+  sel.value = ribbonStyle;
+  sel.onchange = () => { setRibbonStyle(sel.value); onChange(); };
+  lbl.append(document.createTextNode('Routing'), sel);
+  return lbl;
+}
+
 /// The "Animate flow" view switch. Purely local: a per-viewer preference.
 export function animateToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
@@ -203,6 +249,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
     row.appendChild(hideEmptyToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
+    row.appendChild(ribbonStyleSelect(onToggle));
   }
   if (!groups.length) return drawn ? row : null;
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));

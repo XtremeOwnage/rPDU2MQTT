@@ -32,6 +32,7 @@ const MODULES = [
   'energy-diagram.ts',
   'flow-banners.ts',
   'flow-focus.ts',
+  'ribbons.ts',
   'flow-view.ts',
   'node-templates.ts',
   'palette.ts',

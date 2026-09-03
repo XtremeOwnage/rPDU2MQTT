@@ -80,7 +80,7 @@ const flowSection = () => query(getEl('sections'), '.section', true)
 if (!flowSection()) fail('could not find the Flow section');
 
 const labels = () => query(flowSection(), 'text', true).map(t => t.textContent).join(' ');
-if (!labels().includes('7,080')) fail(`the live view did not render: ${labels().slice(0, 120)}`);
+if (!labels().includes('7.08 kW')) fail(`the live view did not render: ${labels().slice(0, 120)}`);
 
 // Which of the two you are looking at, said in one place. An empty date reads as "not set yet" as easily
 // as "now", and a diagram of last Tuesday looks exactly like a diagram of this second.
@@ -116,7 +116,7 @@ await new Promise(r => setTimeout(r, 300));
 if (at.value !== '2026-08-02') fail(`the previous-day arrow did not step the date: ${at.value}`);
 
 // The diagram is the past one...
-if (!labels().includes('1,234')) fail('the diagram did not switch to the historical values');
+if (!labels().includes('1.23 kW')) fail('the diagram did not switch to the historical values');
 // ...and the page says so, rather than looking exactly like the live view.
 const shown = query(flowSection(), 'span', true).map(s => s.textContent).join(' ');
 if (!/showing .* from prometheus/.test(shown)) fail(`the page does not say it is showing a past moment: ${shown.slice(0, 160)}`);
@@ -125,8 +125,8 @@ if (!/showing .* from prometheus/.test(shown)) fail(`the page does not say it is
 // chosen date shows live figures labelled as that date.
 pushLive(live);
 await new Promise(r => setTimeout(r, 100));
-if (labels().includes('7,080')) fail('a live update replaced the historical view');
-if (!labels().includes('1,234')) fail('the historical view was lost');
+if (labels().includes('7.08 kW')) fail('a live update replaced the historical view');
+if (!labels().includes('1.23 kW')) fail('the historical view was lost');
 
 // An optional time: blank means the end of the day, so the day's totals are complete.
 const instantOf = (u) => Date.parse(decodeURIComponent(u).match(/at=([^&]+)/)[1]);
@@ -202,7 +202,7 @@ const liveBtn = query(flowSection(), 'button', true).find(b => b.textContent ===
 if (!liveBtn) fail('no Live control to return to now');
 liveBtn.click();
 await new Promise(r => setTimeout(r, 300));
-if (!labels().includes('7,080')) fail('Live did not return to the current values');
+if (!labels().includes('7.08 kW')) fail('Live did not return to the current values');
 if (badge().textContent !== 'LIVE') fail('returning to live left the page badged as historical');
 if (/showing .* from/.test(query(flowSection(), 'span', true).map(s => s.textContent).join(' ')))
   fail('the historical note survived returning to live');

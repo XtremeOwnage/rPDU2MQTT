@@ -1,5 +1,5 @@
 // The Sankey: the energy hierarchy drawn as ribbons for one metric at one moment.
-import { api, btn, el, ensure, formatNum, svgEl, attachZoom, activate, toast, instanceSelector, withInstance, navLink } from '../helpers.js';
+import { activate, api, attachZoom, btn, el, ensure, formatMeasure, formatNum, instanceSelector, navLink, svgEl, toast, withInstance } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, explodeExpandedGroups, ensureGroupState, groupToggles, flowGroups } from '../flow-view.js';
+import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -267,7 +267,11 @@ export function addFlowSection(nav: any, sections: any) {
     nodes.forEach((n: any) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
 
-    const W = 960, padTop = 22, gap = 8, nodeW = 12, usableH = 520;
+    // The vertical gap between two bars in a column. It is a readability floor, not decoration: a node
+    // carries a name and a figure on one 11px line, and two bars closer than this put one row's text
+    // against the next row's bar.
+    const gap = 14;
+    const W = 960, padTop = 22, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -285,6 +289,16 @@ export function addFlowSection(nav: any, sections: any) {
     const pos: any = {};
     // Every node's label needs a full text line, whatever its bar height.
     const labelRow = 15;
+
+    /// Where a node's name is drawn: the middle of the ribbons it sends.
+    ///
+    /// Usually that is the middle of the bar. It is not for a node that passes on much less than it
+    /// receives — a panel whose unmetered load is switched off — and the label sits to the right of the
+    /// bar among those outgoing ribbons, so it follows them rather than the bar.
+    const labelY = (id: string, p: any) => {
+      const out = stackTotal(id, 'out');
+      return out > 0 ? p.y + stackStart(id) + out / 2 : p.y + p.h / 2;
+    };
     // A link's pull on the layout.
     const wFloor = maxTotal / 1000;
     const linkW = (l: any) => Math.max(l.value || 0, wFloor);
@@ -313,17 +327,48 @@ export function addFlowSection(nav: any, sections: any) {
     // the bottom of its own group.
     const remainder = (id: string) => (id || '').includes('#unmeasured') ? 1 : 0;
 
-    // Forward: roots stack by size, downstream columns follow their feeders (groups children, avoids crossings).
-    cols.forEach((cn, c) => {
-      if (c === 0) cn.sort((a: any, b: any) => remainder(a.id) - remainder(b.id) || nodeValue(b.id) - nodeValue(a.id));
-      else cn.sort((a: any, b: any) => (bary(a.id) - bary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
-      placeColumn(cn, c);
-    });
-    // Backward: right-to-left, order each column by what it feeds.
-    for (let c = cols.length - 2; c >= 0; c--) {
-      if (!cols[c]) continue;
-      cols[c].sort((a: any, b: any) => (obary(a.id) - obary(b.id)) || (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id)));
-      placeColumn(cols[c], c);
+    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN
+    // — a falsy comparator result, so the whole column fell through to "biggest first" and lost the
+    // grouping the other pass had just established. Two unknowns have to TIE, not compare as nonsense:
+    // that is what put a sub-panel's minisplit in the middle of the main panel's circuits, and left a
+    // panel's own remainder at the far bottom of the chart with a ribbon crossing everything to reach it.
+    const cmp = (x: number, y: number) => x === y ? 0 : x - y;
+
+    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest
+    // first. Spelled once so the two directions cannot drift apart.
+    const tieBreak = (a: any, b: any) => (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id));
+
+    // Sweep both ways until the order settles.
+    //
+    // One pass each way is not enough, because a column is ordered against its neighbour's CURRENT
+    // positions and the neighbour may still move. Live: the circuits were ordered while the sub-panel sat
+    // above the main panel, then the panels swapped — leaving each panel's circuits split around the
+    // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
+    // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
+    // moved.
+    const orderOf = () => cols.map(cn => (cn || []).map((n: any) => n.id).join(',')).join('|');
+    for (let sweep = 0; sweep < 4; sweep++) {
+      const before = orderOf();
+      // Forward: roots stack by size, downstream columns follow their feeders.
+      cols.forEach((cn, c) => {
+        if (c === 0) { if (sweep === 0) cn.sort((a: any, b: any) => tieBreak(a, b)); }
+        else cn.sort((a: any, b: any) => cmp(bary(a.id), bary(b.id)) || tieBreak(a, b));
+        placeColumn(cn, c);
+      });
+      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never
+      // across families. Which parent a node hangs off decides where it sits; what it feeds only decides
+      // the order among its own siblings.
+      //
+      // Leading with what a node feeds is what tore each panel's circuits apart: the two circuits that go
+      // on to feed rack PDUs were pulled to the top of the column by them, while their four siblings —
+      // having nothing downstream to be pulled by — fell to the bottom, with the other panel's circuits
+      // stacked in between and ribbons crossing the whole chart. Siblings first, then their order.
+      for (let c = cols.length - 2; c >= 0; c--) {
+        if (!cols[c]) continue;
+        cols[c].sort((a: any, b: any) => cmp(bary(a.id), bary(b.id)) || cmp(obary(a.id), obary(b.id)) || tieBreak(a, b));
+        placeColumn(cols[c], c);
+      }
+      if (orderOf() === before) break;
     }
     // Re-place left-to-right in the settled order so every column shares one top edge and the offsets reset.
     let bottom = padTop;
@@ -332,6 +377,32 @@ export function addFlowSection(nav: any, sections: any) {
     // Then slide each column bodily down to meet what it feeds.
     /// Where each ribbon actually meets each bar, in the order they are drawn.
     ///
+    /// How thick a ribbon is drawn: its value, or a hairline where there is nothing to scale.
+    const ribbonH = (l: any) => (l.known === false || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
+
+    /// Where a node's ribbons begin stacking on its bar.
+    ///
+    /// They used to stack from the TOP. A bar is as tall as what passes THROUGH the node, so a node that
+    /// carries more than it hands on keeps every one of its ribbons in the top slice of its own bar: an
+    /// inverter reading 12.1 kW but sending 3.3 kW to two panels attached all of it in the top quarter of a
+    /// 520px bar. Everything downstream is then pulled up there with it — which is how a sub-panel ended up
+    /// sitting in the middle of the other panel's fan, with all of its own ribbons crossing that fan to
+    /// reach its circuits. Centred, the ribbons sit where the bar is.
+    const stackTotal = (id: string, side: 'out' | 'in') =>
+      (((side === 'out' ? outgoing[id] : incoming[id]) || []) as any[])
+        .reduce((sum: number, l: any) => sum + ribbonH(l), 0);
+
+    const stackStart = (id: string) => {
+      // ONE offset for both sides, from whichever side carries more.
+      //
+      // Centring each side on the bar independently lines up their CENTRES, not their tops — so a node
+      // passing on a little less than it receives had its outgoing stack start a few pixels lower than its
+      // incoming one, and the top edge of a chain stepped down at every node. Sharing the offset lines up
+      // the tops, which is what makes a run of ribbons carrying the same power read as one flat band.
+      const larger = Math.max(stackTotal(id, 'out'), stackTotal(id, 'in'));
+      return Math.max(0, ((pos[id]?.h ?? 0) - larger) / 2);
+    };
+
     /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
     /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
     /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
@@ -346,8 +417,9 @@ export function addFlowSection(nav: any, sections: any) {
         .forEach((l: any) => {
           const sp = pos[l.source], tp = pos[l.target];
           if (!sp || !tp) return;
-          const h = l.known === false || l.value * pxPerUnit < 1.5 ? 1.5 : l.value * pxPerUnit;
-          const so = outOff[l.source] || 0, to = inOff[l.target] || 0;
+          const h = ribbonH(l);
+          const so = outOff[l.source] ?? stackStart(l.source);
+          const to = inOff[l.target] ?? stackStart(l.target);
           at.set(l, { from: sp.y + so + h / 2, to: tp.y + to + h / 2 });
           outOff[l.source] = so + h;
           inOff[l.target] = to + h;
@@ -355,48 +427,124 @@ export function addFlowSection(nav: any, sections: any) {
       return at;
     };
 
-    const relaxOrder = [...Array(cols.length).keys()].reverse().concat([...Array(cols.length).keys()]);
-    for (const c of relaxOrder) {
-      const cn = cols[c];
-      if (!cn || !cn.length) continue;
-      const at = attachments();
-      let w = 0, s = 0;
-      cn.forEach((n: any) => {
-        // Both sides, not just what it feeds, and each side measured where the ribbon lands.
-        (outgoing[n.id] || []).forEach((l: any) => {
-          const a = at.get(l);
-          if (!a) return;
-          s += (a.to - a.from) * linkW(l);
-          w += linkW(l);
-        });
-        (incoming[n.id] || []).forEach((l: any) => {
-          const a = at.get(l);
-          if (!a) return;
-          s += (a.from - a.to) * linkW(l);
-          w += linkW(l);
-        });
-      });
-      if (!w) continue;
-      // Never above the top margin, and never so far down that the column leaves the canvas.
-      const top = Math.min(...cn.map((n: any) => pos[n.id].y));
-      const foot = Math.max(...cn.map((n: any) => pos[n.id].y + pos[n.id].h));
-      const shift = Math.max(padTop - top, Math.min(s / w, Math.max(padTop, bottom) - foot));
+    /// The row a node occupies: its bar, or a full line of text where the bar is shorter than one.
+    const rowOf = (id: string) => Math.max(pos[id].h, labelRow);
 
-      // Only rescue a column that has genuinely come adrift; leave a well-placed one alone.
-      const reach = Math.max(8, (foot - top) / 2);
-      if (Math.abs(shift) < reach) continue;
-      cn.forEach((n: any) => { pos[n.id].y += shift; });
+    /// Push a column apart until no two rows are closer than `gap`, keeping the settled order.
+    ///
+    /// Moving nodes individually is what makes crossings avoidable, and it is also what lets two of them
+    /// land on top of each other — so every move is followed by this. Order is never changed here: the
+    /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
+    const separate = (cn: any[]) => {
+      let y = padTop;
+      cn.forEach((n: any) => {
+        if (pos[n.id].y < y) pos[n.id].y = y;
+        y = pos[n.id].y + rowOf(n.id) + gap;
+      });
+      // Ran off the bottom: walk back up, which can only compress the slack this pass introduced.
+      const foot = y - gap;
+      if (foot > padTop + usableH) {
+        let limit = foot - (foot - (padTop + usableH));
+        for (let i = cn.length - 1; i >= 0; i--) {
+          const id = cn[i].id;
+          if (pos[id].y + rowOf(id) > limit) pos[id].y = limit - rowOf(id);
+          limit = pos[id].y - gap;
+        }
+        let top = padTop;   // and never above the top margin
+        cn.forEach((n: any) => {
+          if (pos[n.id].y < top) pos[n.id].y = top;
+          top = pos[n.id].y + rowOf(n.id) + gap;
+        });
+      }
+    };
+
+    /// Slide each node in a column onto the centre of the ribbons it exchanges with its neighbour.
+    ///
+    /// Whole columns used to move as one, which cannot fix a mismatch INSIDE a column — and that is where
+    /// the crossings were: a sub-panel's bar sat above some of the main panel's own circuits, so every
+    /// ribbon it sent had to cut across them to reach its children. Each bar now settles against the
+    /// ribbons it actually carries.
+    const relaxColumn = (c: number, side: 'out' | 'in') => {
+      const cn = cols[c];
+      if (!cn || !cn.length) return;
+      const at = attachments();
+      cn.forEach((n: any) => {
+        // A node that feeds something is placed by WHAT IT FEEDS; one that feeds nothing, by its feeder.
+        // Letting both sides pull every node makes them fight and neither wins: an inverter's two ribbons
+        // are contiguous on its bar, while the panels they land on have to sit far enough apart for their
+        // own circuits — so a panel dragged back towards the inverter ends up in the middle of the other
+        // panel's fan. Ribbons are allowed to diverge; bars are not allowed to overlap someone else's.
+        const feeds = ((outgoing[n.id] || []) as any[]).length > 0;
+        if (side === 'out' ? !feeds : feeds) return;
+        const links = ((side === 'out' ? outgoing[n.id] : incoming[n.id]) || [])
+          .map((l: any) => at.get(l)).filter(Boolean);
+        if (!links.length) return;
+        // The MIDDLE of the band its ribbons reach, against the middle of the band they leave from — not
+        // their flow-weighted centre. Weighting by flow lets one dominant ribbon pin the node in place
+        // while its small siblings sprawl: a 2 kW panel whose seven circuits span 190px never moved,
+        // because its 612 W ribbon was already straight, and the sub-panel below it ended up sitting in
+        // the middle of that fan with every one of its own ribbons cutting through it.
+        const theirs = links.map((a: any) => side === 'out' ? a.to : a.from);
+        const mine = links.map((a: any) => side === 'out' ? a.from : a.to);
+        const mid = (xs: number[]) => (Math.min(...xs) + Math.max(...xs)) / 2;
+        pos[n.id].y += mid(theirs) - mid(mine);
+      });
+      separate(cn);
+    };
+
+    // Sweep both ways a few times: a column settles against neighbours that are themselves still settling,
+    // so one pass is never enough. This converges quickly and the separation step keeps every pass legal.
+    for (let pass = 0; pass < 6; pass++) {
+      for (let c = cols.length - 2; c >= 0; c--) relaxColumn(c, 'out');
+      for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
     }
+    cols.forEach((cn: any[]) => { if (cn && cn.length) separate(cn); });
+    bottom = Math.max(bottom, ...cols.filter(Boolean).flatMap((cn: any[]) => cn.map((n: any) => pos[n.id].y + rowOf(n.id))));
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
-    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, style: 'display:block' });
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
+    const tintOf = (id: string) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => clearFocus(svg));
     focusedNode = null;
 
-    // Ribbons (filled bezier bands).
+    /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
+    ///
+    /// Both halves of that are the rule, and neither works alone. Letting each band turn half of its own
+    /// thickness from the middle puts a thick ribbon's corners in a different place from a thin one's, and
+    /// their corners interlock — a row of notches reading as puzzle pieces. Giving each band a lane of its
+    /// own instead spreads the turns across the whole corridor, and the column of ribbons comes out as a
+    /// staircase. One axis and one width is the only arrangement where every vertical edge in a corridor
+    /// falls on one of two lines.
+    ///
+    /// A band thicker than the run narrows through the turn and widens again after it; a thinner one does
+    /// the reverse. That is the price of the rule, and it is the rule that was asked for.
+    const laneOf = new Map<any, { laneX: number; laneW: number }>();
+    {
+      const corridors = new Map<string, any[]>();
+      links.forEach((l: any) => {
+        const s2 = pos[l.source], t2 = pos[l.target];
+        if (!s2 || !t2) return;
+        const key = `${s2.x + nodeW}|${t2.x}`;
+        (corridors.get(key) ?? corridors.set(key, []).get(key)!).push(l);
+      });
+      for (const [key, list] of corridors) {
+        const [left, right] = key.split('|').map(Number);
+        // A quarter of the corridor, bounded either side so it is neither a hairline nor a slab.
+        const laneW = Math.max(12, Math.min(40, (right - left) * 0.25));
+        const laneX = (left + right) / 2;
+        list.forEach((l: any) => laneOf.set(l, { laneX, laneW }));
+      }
+    }
+
+    // Ribbons (filled bands). Each node's stack begins where the layout put it, not at the bar's top.
+    nodes.forEach((n: any) => {
+      if (!pos[n.id]) return;
+      pos[n.id].outOff = stackStart(n.id);
+      pos[n.id].inOff = stackStart(n.id);
+    });
     let flowClipSeq = 0;
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
@@ -408,15 +556,17 @@ export function addFlowSection(nav: any, sections: any) {
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
       const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x, xc = (x1 + x2) / 2;
+      const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const color = colors[colMemo[l.source] % colors.length];
-      const ribbonPath = `M${x1},${sTop} C${xc},${sTop} ${xc},${tTop} ${x2},${tTop} L${x2},${tTop + h} C${xc},${tTop + h} ${xc},${sTop + h} ${x1},${sTop + h} Z`;
+      const color = tintOf(l.source);
+      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
+      const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
         // A hairline at ribbon opacity is invisible; lift it so an idle branch still reads as connected.
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
+        class: 'flow-ribbon',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
         'data-src': l.source, 'data-dst': l.target,
       }));
@@ -438,9 +588,8 @@ export function addFlowSection(nav: any, sections: any) {
 
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
-          const sY = sTop + h * f, tY = tTop + h * f;
           const stream = svgEl('path', {
-            d: `M${x1},${sY} C${xc},${sY} ${xc},${tY} ${x2},${tY}`,
+            d: lanePath(ribbonStyle, band, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',
@@ -471,13 +620,13 @@ export function addFlowSection(nav: any, sections: any) {
       const unknownNode = !known(n.id);
       const rect = svgEl('rect', {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
-        fill: unknownNode ? 'var(--muted)' : colors[colMemo[n.id] % colors.length],
+        fill: unknownNode ? 'var(--muted)' : tintOf(n.id),
         'fill-opacity': unknownNode ? '0.45' : '1',
         'data-node': n.id,
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
-        x: p.x + nodeW + 6, y: p.y + p.h / 2, fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
+        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
@@ -491,7 +640,7 @@ export function addFlowSection(nav: any, sections: any) {
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       lab.textContent = unknownNode ? `${n.label} · no data`
-        : `${n.label} · ${formatNum(nodeValue(n.id))} ${units}${inferredNode ? ' · inferred' : ''}`;
+        : `${n.label} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -518,14 +667,14 @@ export function addFlowSection(nav: any, sections: any) {
         }
         // Two different discrepancies wear the same marker, and they need different sentences.
         explain(n.derivation === 'measured'
-          ? `This node reports ${formatNum(reading)} ${units}, but ${formatNum(reading + n.imbalance)} ${units} `
-            + `passes through it — ${formatNum(n.imbalance)} ${units} more than it accounts for. Its sensor is `
+          ? `This node reports ${formatMeasure(reading, units)}, but ${formatMeasure(reading + n.imbalance, units)} `
+            + `passes through it — ${formatMeasure(n.imbalance, units)} more than it accounts for. Its sensor is `
             + 'probably measuring one leg rather than the whole node (an inverter bound to its AC-load output '
             + 'while it also charges a battery), or a source is scaled wrongly. The bar is drawn to the '
             + 'throughput so the ribbons fit; the label is the reading.'
-          : `This node passes ${formatNum(reading)} ${units} to what it feeds, but only `
-            + `${formatNum(reading - n.imbalance)} ${units} arrives from its feeders — a shortfall of `
-            + `${formatNum(n.imbalance)} ${units}, which no supply accounts for.`
+          : `This node passes ${formatMeasure(reading, units)} to what it feeds, but only `
+            + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
+            + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (metricSel.value === 'energy'
               ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
@@ -539,7 +688,7 @@ export function addFlowSection(nav: any, sections: any) {
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
-          unknownNode ? 'no data' : `${formatNum(nodeValue(n.id))} ${units}`.trim(),
+          unknownNode ? 'no data' : formatMeasure(nodeValue(n.id), units),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
         // Provenance sits with the value, not in a legend somewhere else.
         if (!unknownNode && n.derivation && n.derivation !== 'measured')
@@ -548,18 +697,18 @@ export function addFlowSection(nav: any, sections: any) {
               ? 'inferred — nothing measures this; conservation leaves one path it could have come by'
               : 'summed from what it feeds'));
         if (n.imbalance != null)
-          rows.push(el('div', { class: 'nh-warn', text: `${formatNum(n.imbalance)} ${units} more leaves than arrives` }));
+          rows.push(el('div', { class: 'nh-warn', text: `${formatMeasure(n.imbalance, units)} more leaves than arrives` }));
         // A sensor on one leg of a bidirectional device.
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
-            text: `its sensor covers this leg; ${formatNum(n.throughput)} ${units} passes through the node` }));
+            text: `its sensor covers this leg; ${formatMeasure(n.throughput, units)} passes through the node` }));
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;
           rows.push(el('div', { class: 'nh-head', text: title }));
           ls.forEach((l: any) => rows.push(el('div', { class: 'nh-row' },
             el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
-            el('span', { class: 'nh-num', text: l.known === false ? '—' : `${formatNum(l.value)} ${units}`.trim() }))));
+            el('span', { class: 'nh-num', text: l.known === false ? '—' : formatMeasure(l.value, units) }))));
         };
         side('Fed by', incoming[n.id] || [], (l: any) => l.source);
         side('Feeds', outgoing[n.id] || [], (l: any) => l.target);
