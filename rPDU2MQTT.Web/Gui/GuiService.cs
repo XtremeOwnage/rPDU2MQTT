@@ -888,6 +888,12 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     nextRolloverUtc = next,
                     nextRolloverLocal = EnergyPeriod.Local(next, zone),
                     secondsUntilRollover = (int)Math.Max(0, (next - now).TotalSeconds),
+                    // Whether today's figures actually cover today. A restart with nothing in the store
+                    // starts them again, and a tile reading "0 kWh since the day rolled over" is then a
+                    // claim about a day that was never measured.
+                    carriedOver = (live as Core.Flow.IPeriodTotalsOrigin)?.CarriedOverNodes ?? 0,
+                    accumulatingSinceUtc = (live as Core.Flow.IPeriodTotalsOrigin)?.AccumulatingSinceUtc,
+                    store = (live as Core.Flow.IPeriodTotalsOrigin)?.StoreKind,
                 },
             }, ConfigSchema.Json);
         });

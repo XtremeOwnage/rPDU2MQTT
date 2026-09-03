@@ -896,6 +896,29 @@ EnergyFlow:
 > `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/crds/rpduconfig.yaml` once and it
 > will not happen again, for this or any future type.
 
+### Where today's totals are kept
+
+`EnergyFlow.Aggregation` accumulates each node's energy since the period boundary. That state has to
+outlive the process, or every restart starts the day again:
+
+| `Cache.Enabled` | Store | Survives a restart |
+| --- | --- | --- |
+| on | the shared cache (Valkey/Redis) | yes, if the cache persists — the chart's `valkey.persistence` is on by default |
+| off | `energy-totals.json` beside the binary | only if that path is on a volume, which the chart does not mount |
+
+In Kubernetes with the cache off, the file lives in the container's own filesystem, so **every rollout
+loses the day's totals**. On a deployment tracking a moving tag that is several times a day.
+
+When nothing carries over the bridge says so, once, at startup:
+
+```
+Daily energy totals did not carry over: the file store held nothing. Today's figures accumulate from
+now, not from the period boundary …
+```
+
+…and the Overview labels the figures `only since HH:MM — totals did not carry over` rather than "since the
+day rolled over". Trends is unaffected: it reads the history backend, which still holds the whole day.
+
 ### Lifetime counters never go backwards
 
 The `energy` and `energy_in` fields feed sensors declared `state_class: total_increasing`. Home Assistant

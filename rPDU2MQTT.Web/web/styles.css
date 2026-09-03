@@ -903,6 +903,11 @@
     display: flex; gap: 12px; align-items: flex-start; margin: 0 0 10px; padding: 12px 14px;
     border: 1px solid var(--line); border-radius: var(--r); background: var(--panel);
   }
+  /* A statement about the figures beside it, not a component's health — same shape, different region. */
+  .ov-note {
+    flex: 1 1 100%; display: flex; gap: 12px; align-items: flex-start; margin: 0 0 4px; padding: 12px 14px;
+    border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-bg);
+  }
   .ov-alert.bad { background: var(--bad-bg); border-color: var(--bad); }
   .ov-alert.warn { background: var(--warn-bg); border-color: var(--warn); }
   .ov-alert-icon { font-size: 20px; line-height: 1.2; }
