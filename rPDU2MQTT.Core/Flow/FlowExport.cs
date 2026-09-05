@@ -187,6 +187,37 @@ public static class FlowExport
     /// <c>value_json.energy</c> / <c>value_json.power</c> from the tier's exported MQTT topic. Publishing
     /// these makes the whole hierarchy — not just leaf outlets — visible to HA and linkable in the dashboard.
     /// </summary>
+    /// <summary>
+    /// What to call each direction, in the words of the thing being measured.
+    ///
+    /// <para>
+    /// The two directions are named relative to the NODE — <c>out</c> is energy leaving it, <c>in</c> is
+    /// energy arriving. That is the right model and the wrong label: for a grid, energy arriving at the grid
+    /// is what a person calls export, so a sensor named "Energy In" sits under "Energy exported to grid" in
+    /// Home Assistant's picker and reads as its own opposite. Named per kind, each sensor says what it is
+    /// and the picker can be read at a glance.
+    /// </para>
+    /// <para>
+    /// The unique_id is untouched, so an entity keeps its entity_id and its recorded statistics; only the
+    /// friendly name changes, and a name the operator has overridden in Home Assistant stays overridden.
+    /// </para>
+    /// </summary>
+    internal static string OutName(string kind, bool bidirectional) => (kind ?? "").ToLowerInvariant() switch
+    {
+        // Only worth distinguishing when there is another direction to confuse it with.
+        "grid" when bidirectional => "Imported",
+        "battery" when bidirectional => "Discharged",
+        _ => "Energy",
+    };
+
+    /// <summary>The in-direction: energy arriving at the node.</summary>
+    internal static string InName(string kind) => (kind ?? "").ToLowerInvariant() switch
+    {
+        "grid" => "Exported",
+        "battery" => "Charged",
+        _ => "Energy In",
+    };
+
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
         string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
         bool includeEnergyToday = false)
@@ -222,14 +253,14 @@ public static class FlowExport
             ["qos"] = 0,
             ["components"] = new JsonObject
             {
-                [$"{id}_energy"] = Sensor($"{id}_energy", "Energy", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy }}"),
+                [$"{id}_energy"] = Sensor($"{id}_energy", OutName(node.Kind, includeEnergyIn), "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy }}"),
                 [$"{id}_power"] = Sensor($"{id}_power", "Power", "power", "measurement", string.IsNullOrWhiteSpace(powerUnits) ? "W" : powerUnits, "{{ value_json.power }}"),
             },
         };
         // A bidirectional node (battery/grid) also carries its in-direction energy — charge / export.
         if (includeEnergyIn)
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
-                Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
+                Sensor($"{id}_energy_in", InName(node.Kind), "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_in }}");
         // Energy since local midnight.
         if (includeEnergyToday)
             doc["components"]!.AsObject()[$"{id}_energy_today"] =
