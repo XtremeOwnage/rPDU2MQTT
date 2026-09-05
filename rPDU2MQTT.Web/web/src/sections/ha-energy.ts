@@ -1,6 +1,7 @@
 // Home Assistant Energy Mapping (#128): the EnergyDashboard settings + manual sync/clear actions.
 import { api, btn, el, ensure, activate, toast, navLink } from '../helpers.js';
 import { state } from '../state.js';
+import { tagInput, knownTags } from '../tags.js';
 
 export function addHaEnergySection(nav: any, sections: any) {
   const link = navLink(nav, "HA Energy Mapping", "▮");
@@ -47,13 +48,29 @@ export function addHaEnergySection(nav: any, sections: any) {
     const exc: string[] = f.Exclude || [];
     const nodes: any[] = flow.Nodes || [];
 
-    const goSettings = () => (document.querySelector('nav a[data-label="Settings"]') as any)?.click();
+    // Edited here rather than linked away to: this is the page where the consequence is visible, and the
+    // filter has no home of its own — it is a field on the Configuration page among a hundred others.
+    const editor = () => {
+      const box = el('div', { style: { margin: '6px 0' } });
+      const f2 = ensure(ensure(state.data, 'EnergyFlow', {}), 'MqttExportTags', {});
+      const excArr = ensure(f2, 'Exclude', []);
+      const row = el('div', { class: 'field' });
+      row.appendChild(el('label', { text: 'Never export nodes tagged' }));
+      row.appendChild(tagInput(excArr, { strict: true, onChange: drawFilter }));
+      box.appendChild(row);
+      box.appendChild(el('div', { class: 'desc', text:
+        'Governs the whole MQTT export, which is how Home Assistant is fed — a node dropped here publishes '
+        + 'no sensor at all. Prometheus and EmonCMS keep their own lists, so a node kept out of Home '
+        + 'Assistant still reaches them. Save to apply.' }));
+      if (!knownTags().length)
+        box.appendChild(el('div', { class: 'desc', text: 'No tags defined yet — tag a node on the Nodes page first.' }));
+      return box;
+    };
 
     if (!inc.length && !exc.length) {
-      filterBox.appendChild(el('div', { class: 'desc' },
-        el('span', { text: 'Every node is exported — no tag filter is set. ' }),
-        el('a', { text: 'Energy Flow → Settings', onclick: goSettings }),
-        el('span', { text: ' can narrow it.' })));
+      filterBox.appendChild(el('h3', { text: 'What the export filter leaves out', style: { margin: '4px 0', fontSize: '15px' } }));
+      filterBox.appendChild(el('div', { class: 'desc', text: 'Every node is exported — no tag filter is set.' }));
+      filterBox.appendChild(editor());
       return;
     }
 
@@ -68,9 +85,9 @@ export function addHaEnergySection(nav: any, sections: any) {
     filterBox.appendChild(el('h3', { text: 'What the export filter leaves out', style: { margin: '4px 0', fontSize: '15px' } }));
     const line = el('div', { class: 'desc' });
     if (inc.length) line.appendChild(el('span', { text: `Only nodes tagged ${inc.join(', ')} are exported. ` }));
-    if (exc.length) line.appendChild(el('span', { text: `Nodes tagged ${exc.join(', ')} are never exported. ` }));
-    line.appendChild(el('a', { text: 'Change it', onclick: goSettings }));
+    if (exc.length) line.appendChild(el('span', { text: `Nodes tagged ${exc.join(', ')} are never exported.` }));
     filterBox.appendChild(line);
+    filterBox.appendChild(editor());
 
     if (!dropped.length) {
       filterBox.appendChild(el('div', { class: 'desc', text: 'No configured node is currently excluded.' }));

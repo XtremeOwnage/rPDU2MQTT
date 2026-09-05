@@ -78,9 +78,15 @@ const open = async (label) => {
   // Auto-tag rules reach PDUs and outlets, which have no Tags of their own; say so rather than imply the
   // list above is exhaustive.
   if (!/auto-tag rule/i.test(text)) fail('the page does not mention that auto-tag rules also feed the filter');
-  // And a way to change it, from where the consequence is visible.
-  if (!query(sec, 'a', true).some(a => /change it/i.test(a.textContent || '')))
-    fail('the page states the filter but offers no way to reach it');
+  // And a way to change it ON this page. A link to a page that does not carry the field is worse than
+  // nothing: it asserts the setting lives somewhere it does not.
+  const picker = query(sec, 'select', true)
+    .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'panel'));
+  if (!picker) fail('the page states the filter but gives no control to change it');
+  if (!/Prometheus and EmonCMS keep their own/i.test(text))
+    fail('the page does not say the filter governs this destination only');
+  if (query(sec, 'a', true).some(a => /change it/i.test(a.textContent || '')))
+    fail('the page still links away for the filter instead of carrying it');
 }
 
 // --- 2. With no filter set, the page says so plainly rather than staying silent ------------------------
@@ -90,6 +96,9 @@ const open = async (label) => {
   const text = sec.textContent || '';
   if (!/no tag filter is set|Every node is exported/i.test(text))
     fail('with no filter set the page says nothing about the filter at all');
+  // The control is there whether or not anything is excluded yet — that is how the first one gets added.
+  if (!query(sec, 'select', true).some(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'panel')))
+    fail('with no filter set there is no way to start one');
   if (/will not reach Home Assistant/i.test(text))
     fail('nothing is excluded, yet the page warns that something is');
   config.EnergyFlow.MqttExportTags = { Include: [], Exclude: ['local-only'] };
