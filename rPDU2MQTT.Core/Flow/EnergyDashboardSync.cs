@@ -112,13 +112,17 @@ public static class EnergyDashboardSync
 
                 // HA's grid source is FLAT: stat_energy_from = import, stat_energy_to = export, right on the
                 // object — NOT the flow_from/flow_to arrays older docs show (those are "extra keys" to the
-                // current schema, which is what save_prefs rejected). cost_adjustment_day is required; a signed
-                // power sensor goes in the top-level stat_rate.
+                // current schema, which is what save_prefs rejected). cost_adjustment_day is required.
+                //
+                // No stat_rate: save_prefs accepts one on a grid, and the dashboard then reads the power
+                // sensor as an energy figure — a grid reading -5110 W rendered as "-5,110 kWh exported" and
+                // was carried into the balance and the self-sufficiency gauge (22,642%). Solar takes one,
+                // and a battery takes its own through power_config, which HA mirrors back to a top-level
+                // stat_rate itself. A grid has no such handling, so it is not given one.
                 case "grid" when !string.IsNullOrEmpty(outStat) || !string.IsNullOrEmpty(inStat):
                     var grid = new JsonObject { ["type"] = "grid", ["cost_adjustment_day"] = 0.0 };
                     if (!string.IsNullOrEmpty(outStat)) grid["stat_energy_from"] = outStat;
                     if (!string.IsNullOrEmpty(inStat)) grid["stat_energy_to"] = inStat;
-                    if (!string.IsNullOrEmpty(power)) grid["stat_rate"] = power;
                     sources.Add(grid);
                     break;
             }

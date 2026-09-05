@@ -86,8 +86,12 @@ public class EnergyDashboardSourcesTests
         var batt = Assert.Single(sources, s => (string?)s["type"] == "battery");
         var pv = Assert.Single(sources, s => (string?)s["type"] == "solar");
 
-        // Grid/solar power is a top-level stat_rate; battery power is nested under power_config; SoC is stat_soc.
-        Assert.Equal("sensor.grid_power", (string?)grid["stat_rate"]);
+        // Solar power is a top-level stat_rate; battery power is nested under power_config; SoC is stat_soc.
+        //
+        // A grid gets NONE. save_prefs accepts one, and the dashboard then reads the power sensor as an
+        // energy figure: a grid reading -5110 W rendered as "-5,110 kWh exported", was subtracted in the
+        // grid balance and drove the self-sufficiency gauge to 22,642%.
+        Assert.False(grid.ContainsKey("stat_rate"));
         Assert.Equal("sensor.pv_power", (string?)pv["stat_rate"]);
         Assert.Equal("sensor.batt_power", (string?)batt["power_config"]!["stat_rate"]);
         Assert.Equal("sensor.batt_soc", (string?)batt["stat_soc"]);
