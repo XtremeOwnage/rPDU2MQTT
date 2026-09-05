@@ -66,8 +66,18 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
     private readonly IPeriodAuditor? auditor;
 
     /// <summary>Bindings whose readings are being dropped, so the GUI can say so where the number is missing.</summary>
-    public IReadOnlyCollection<WithheldSource> Withheld => withheld;
-    private volatile WithheldSource[] withheld = [];
+    /// <summary>
+    /// The audit's verdicts on this ingest's own topics.
+    ///
+    /// <para>
+    /// Read through on every call rather than snapshotted when a message happens to be audited. The audit is
+    /// restored from its store on startup, so it knows a counter is being withheld before this process has
+    /// seen a single message; a snapshot taken in the message path would report nothing until the publisher
+    /// next spoke, which for a daily counter is a long silence during which the page says all is well.
+    /// </para>
+    /// </summary>
+    public IReadOnlyCollection<WithheldSource> Withheld =>
+        auditor is null ? [] : [.. auditor.Withheld.Where(w => bindings.ContainsKey(w.Source))];
 
     public EnergyFlowMqttSourceService(MQTTServiceDependencies deps, ISnapshotSink<MeasurementSnapshot>? sink = null,
                                        IPeriodAuditor? auditor = null)
@@ -224,7 +234,6 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         try
         {
             var allowed = auditor.Allow(nodeId, source, direction, periodKey, value);
-            withheld = [.. auditor.Withheld];
             return allowed;
         }
         catch (Exception ex)
