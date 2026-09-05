@@ -117,8 +117,17 @@ public sealed class EmonCmsValueSource
     /// Bindings whose value is missing and why — a feed nobody can find, a name that matches several tags,
     /// a counter the period audit rejected. The GUI shows these where the number would have been.
     /// </summary>
+    /// <summary>
+    /// What this ingest is dropping. The period audit is shared with the MQTT and Modbus ingests, so only
+    /// the entries naming a feed this one actually audited are its own — taking the whole list reported
+    /// every other ingest's withheld bindings as EmonCMS's too.
+    /// </summary>
     public IReadOnlyCollection<WithheldSource> Withheld =>
-        [.. unresolved, .. ((IWithheldSources)latest).Withheld, .. (auditor?.Withheld ?? [])];
+        [.. unresolved, .. ((IWithheldSources)latest).Withheld,
+         .. (auditor?.Withheld ?? []).Where(w => audited.ContainsKey(w.Source))];
+
+    /// <summary>Every source label this ingest has handed to the audit, so it can recognise its own again.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> audited = new(StringComparer.Ordinal);
 
     public async Task ReconcileAsync(Config c, IReadOnlyList<SourceBinding> bound, CancellationToken ct)
     {
@@ -260,6 +269,7 @@ public sealed class EmonCmsValueSource
     /// <summary>Ask the audit's owner; an unreachable owner leaves the reading published, as elsewhere.</summary>
     private bool Audit(string nodeId, string source, string? direction, string periodKey, double value)
     {
+        audited[source] = 0;
         try { return auditor!.Allow(nodeId, source, direction, periodKey, value); }
         catch (Exception ex)
         {

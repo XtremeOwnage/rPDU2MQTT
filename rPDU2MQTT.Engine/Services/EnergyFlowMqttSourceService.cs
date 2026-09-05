@@ -224,7 +224,11 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
         try
         {
             var allowed = auditor.Allow(nodeId, source, direction, periodKey, value);
-            withheld = [.. auditor.Withheld];
+            // Only this ingest's own bindings. The audit is shared with the other ingests, so taking its
+            // whole list makes every EmonCMS or Modbus binding appear under MQTT as well — the operator
+            // sees each withheld reading once per ingest that consulted the audit, which is how "2 sources
+            // withheld" rendered as four rows. `bindings` is keyed by the topic the audit was told about.
+            withheld = [.. auditor.Withheld.Where(w => bindings.ContainsKey(w.Source))];
             return allowed;
         }
         catch (Exception ex)
