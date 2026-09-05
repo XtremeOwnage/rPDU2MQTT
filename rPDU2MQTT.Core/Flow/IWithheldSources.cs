@@ -5,7 +5,12 @@ namespace rPDU2MQTT.Core.Flow;
 /// <param name="Source">How to find it in the config — an MQTT topic, or a register on a connection.</param>
 /// <param name="Metric">The metric it would have fed.</param>
 /// <param name="Reason">Plain text, addressed to whoever has to fix it.</param>
-public readonly record struct WithheldSource(string Node, string Source, string Metric, string Reason);
+/// <param name="Integration">
+/// Which ingest is holding it back, as an <c>IIntegration.Id</c>. Stamped by the composite rather than by
+/// the ingest itself, which has no reason to know it is one of several. Empty when nothing said.
+/// </param>
+public readonly record struct WithheldSource(string Node, string Source, string Metric, string Reason,
+                                             string Integration = "");
 
 /// <summary>
 /// Reports readings the bridge is deliberately refusing to publish.

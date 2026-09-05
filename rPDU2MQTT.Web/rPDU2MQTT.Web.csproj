@@ -125,6 +125,8 @@
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
 		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- An alert that reports a count has to open onto what the count is of; the reason was already known. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/withheld-detail.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
 		     fine in Firefox and sat on top of the first row in Chrome. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
