@@ -130,8 +130,12 @@ public sealed class HaEnergyDashboardSync
         // clutter actually matters.)
         string? Resolve(string uid) => entityByUniqueId.TryGetValue(uid, out var e) ? e : null;
         return EnergyDashboardSync.BuildEnergySources(graph,
+            // The out direction prefers the named sensor, which only a bidirectional node publishes. On those,
+            // `energy` is now the total through the node and would put export into the dashboard's import
+            // figure; everywhere else `energy` IS the out direction and the named one does not exist.
             (id, dir) => dir == Core.Flow.EnergyDirection.Out
-                ? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
+                ? Resolve(FlowExport.EnergyOutUniqueId(id))
+                  ?? Resolve(native.TryGetValue(id, out var nativeUid) ? nativeUid : FlowExport.EnergyUniqueId(id))
                 : Resolve(FlowExport.EnergyInUniqueId(id)),
             powerFor: id => PowerStat(id, nativePower, entityByUniqueId),   // grid/battery real-time power
             socFor: id => Resolve(FlowExport.SocUniqueId(id)),              // battery state of charge

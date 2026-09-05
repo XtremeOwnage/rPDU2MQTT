@@ -150,6 +150,13 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 energyInNodes.Contains(node.Id) && live is not null
                 && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
 
+            // On a bidirectional node the roll-up above is one direction of two, so it is published under its
+            // own name and `energy` becomes what passed through the node either way. Both are monotonic, so
+            // the total is too. Nothing downstream sums `energy` across nodes — the roll-up is done inside
+            // the graph, on the out direction alone — so this stays out of the hierarchy's arithmetic.
+            double? energyOut = energyInNodes.Contains(node.Id) ? energy : null;
+            if (energyOut is { } eo) energy = eo + (energyIn ?? 0);
+
             // Today's total. Null — not 0 — when nothing determines it.
             double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
 
@@ -164,6 +171,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 value = netPower,    // retained for #164 back-compat (== power)
                 power = netPower,
                 energy,
+                energy_out = energyOut,
                 energy_in = energyIn,
                 energy_today = energyToday,
                 soc,
