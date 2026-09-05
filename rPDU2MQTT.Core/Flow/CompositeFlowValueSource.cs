@@ -49,6 +49,14 @@ public sealed class CompositeFlowValueSource : IFlowValueSource, IWithheldSource
     /// caller has to know which transport a binding happens to use — the reason a number is missing is the
     /// same question whichever wire it was meant to arrive on.
     /// </summary>
+    /// <summary>
+    /// Every withheld binding across the ingests, each stamped with the one holding it back. Without that,
+    /// a page showing "2 of 46 withheld" beside one integration cannot say which two are its own.
+    /// </summary>
     public IReadOnlyCollection<WithheldSource> Withheld =>
-        sources.OfType<IWithheldSources>().SelectMany(s => s.Withheld).ToList();
+        sources.OfType<IWithheldSources>()
+               .SelectMany(s => s.Withheld.Select(w => w.Integration.Length > 0 || s is not Integrations.IIntegration i
+                                                       ? w
+                                                       : w with { Integration = i.Id }))
+               .ToList();
 }

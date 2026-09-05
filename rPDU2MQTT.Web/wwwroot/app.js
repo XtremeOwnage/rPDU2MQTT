@@ -6122,13 +6122,41 @@ function addOverviewSection(nav     , sections     ) {
     battWrap.appendChild(card);
   };
 
+  /// Bindings the bridge is currently dropping, newest read from /api/flow/withheld.
+  let withheld        = [];
+
   /// One problem, said plainly and at a size that cannot be scrolled past.
-  const alertCard = (level        , title        , state        , detail        ) =>
-    el('div', { class: 'ov-alert ' + level },
-      el('span', { class: 'ov-alert-icon', text: level === 'bad' ? '⛔' : '⚠' }),
-      el('div', {},
-        el('div', { class: 'ov-alert-title', text: `${title} — ${state}` }),
-        el('div', { class: 'desc', text: detail || '' })));
+  ///
+  /// A count is not a diagnosis: "2 of 46 binding(s) withheld" says something is wrong and nothing about
+  /// what, and the reason was already known — it just lived on another page. Where the card is a source
+  /// holding readings back, it opens onto the bindings themselves, each with the reason it is being dropped.
+  const alertCard = (level        , title        , state        , detail        , id         ) => {
+    const mine = withheld.filter((w     ) => !id || !w.integration || w.integration === id);
+    const card = el('div', { class: 'ov-alert ' + level },
+      el('span', { class: 'ov-alert-icon', text: level === 'bad' ? '⛔' : '⚠' }));
+    const body = el('div', {},
+      el('div', { class: 'ov-alert-title', text: `${title} — ${state}` }),
+      el('div', { class: 'desc', text: detail || '' }));
+    card.appendChild(body);
+    if (!mine.length) return card;
+
+    const list = el('div', { class: 'ov-alert-detail' });
+    list.hidden = true;
+    mine.forEach((w     ) => {
+      const row = el('div', { class: 'ov-withheld' });
+      row.appendChild(el('strong', { text: `${w.node}${w.metric ? ' · ' + w.metric : ''}` }));
+      if (w.source) row.appendChild(el('code', { text: w.source }));
+      row.appendChild(el('div', { class: 'desc', text: w.reason || 'No reason given.' }));
+      list.appendChild(row);
+    });
+
+    const toggle = el('button', { class: 'ov-alert-more', type: 'button' })                     ;
+    const label = () => `${list.hidden ? 'Show' : 'Hide'} ${mine.length} withheld binding${mine.length === 1 ? '' : 's'}`;
+    toggle.textContent = label();
+    toggle.onclick = () => { list.hidden = !list.hidden; toggle.textContent = label(); };
+    body.append(toggle, list);
+    return card;
+  };
 
   const drawStatus = (body     ) => {
     const cards = (body && body.cards) || [];
@@ -6144,7 +6172,7 @@ function addOverviewSection(nav     , sections     ) {
       return;
     }
     wrong.sort((a     , b     ) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
-    wrong.forEach((c     ) => alerts.appendChild(alertCard(c.level, c.title, c.state, c.detail)));
+    wrong.forEach((c     ) => alerts.appendChild(alertCard(c.level, c.title, c.state, c.detail, c.id)));
   };
 
   let lastDay      = null;
@@ -6344,6 +6372,11 @@ function addOverviewSection(nav     , sections     ) {
       stamp.textContent = '';
       alerts.appendChild(alertCard('bad', 'Overview', 'could not load', err?.message || 'the request failed'));
     }
+    // The withheld list first: a card is drawn with its bindings already attached, not re-rendered later.
+    try {
+      const w = await api('/api/flow/withheld');
+      withheld = (w.body && w.body.ok && w.body.sources) || [];
+    } catch { withheld = []; }
     try { drawStatus((await api('/api/status/board')).body); } catch { /* the board has its own page */ }
     await loadDay();
   };

@@ -1819,7 +1819,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new
             {
                 ok = true,
-                sources = withheld.Select(w => new { node = w.Node, source = w.Source, metric = w.Metric, reason = w.Reason }),
+                sources = withheld.Select(w => new { node = w.Node, source = w.Source, metric = w.Metric, reason = w.Reason, integration = w.Integration }),
             }, ConfigSchema.Json);
         });
 
