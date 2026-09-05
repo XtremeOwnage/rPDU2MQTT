@@ -471,6 +471,14 @@ public static class FlowGraphBuilder
         {
             if (leaf.TryGetValue(id, out var measured)) return measured;
 
+            // A node whose own source has stopped reporting is unknown, not the sum of its children. Its
+            // links are already refused on the same grounds; the node's own figure has to be too, because
+            // children can meter the same energy from a different origin — a solar node's counter and its
+            // MPPTs' — and standing one in for the other moves the number without saying so. On a
+            // cumulative metric that is worse than a gap: the export keeps a high-water mark, latches the
+            // higher origin, and then withholds every later reading from the real counter.
+            if (Unavailable(id)) return null;
+
             var (inflow, outflow, anyIn, anyOut) = Sides(id);
             return anyIn || anyOut ? Math.Max(inflow, outflow) : null;
         }
