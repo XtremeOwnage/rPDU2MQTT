@@ -40,5 +40,24 @@ if (!/\.brand-name\s*\{[^}]*text-overflow/.test(phone[1]))
 if (!/pill-mono\s*\{[^}]*display: *none/.test(phone[1]))
   fail('the build string is still asking for its full width on a phone');
 
+// `el.hidden` only hides while nothing outranks the UA sheet's [hidden]{display:none}. Any author rule
+// setting display beats it, so a component styled `display:flex` keeps rendering however many times the
+// property is flipped — the Overview alert's disclosure shipped open and its Show/Hide did nothing (#418).
+// A DOM stub cannot catch this: it records the property and applies no CSS.
+const hiddenRule = /\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important/.test(css);
+if (!hiddenRule)
+  fail('no `[hidden] { display:none !important }` — any component that sets display will ignore el.hidden');
+
+// …and it has to come from a bare attribute selector, so it covers every element rather than the one
+// component that was noticed. A per-class override leaves the next one to be found by a user.
+const bareHidden = /(^|[\s{}])\[hidden\]\s*\{/m.test(css);
+if (!bareHidden) fail('the [hidden] rule is scoped to a selector — the next component to set display is unprotected');
+
+// Every element the code hides this way must be covered by it.
+const ts = await readFile(new URL('./src/sections/overview.ts', import.meta.url), 'utf8');
+if (/\.hidden\s*=/.test(ts) && !hiddenRule)
+  fail('overview.ts toggles .hidden but the stylesheet does not enforce it');
+
 console.log('css: a sticky table header is not trapped inside its own table nor inside a box that scrolls '
-  + 'around it, the corners are still round, and the app bar gives way on a phone');
+  + 'around it, the corners are still round, the app bar gives way on a phone, and [hidden] outranks any '
+  + 'component that sets display so el.hidden actually hides');

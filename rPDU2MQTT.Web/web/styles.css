@@ -78,6 +78,10 @@
   }
 
   * { box-sizing:border-box; }
+  /* The UA sheet hides [hidden] with display:none, but ANY author rule that sets display beats it — so a
+     component styled `display:flex` silently stops responding to el.hidden and its disclosure toggles a
+     property with no visible effect. Stated once, with the weight to survive whatever a component sets. */
+  [hidden] { display:none !important; }
   html { -webkit-text-size-adjust:100%; }
   body {
     margin:0; background:var(--bg); color:var(--fg);
