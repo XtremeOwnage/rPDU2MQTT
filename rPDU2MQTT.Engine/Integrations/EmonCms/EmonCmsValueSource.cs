@@ -124,10 +124,24 @@ public sealed class EmonCmsValueSource
     /// </summary>
     public IReadOnlyCollection<WithheldSource> Withheld =>
         [.. unresolved, .. ((IWithheldSources)latest).Withheld,
-         .. (auditor?.Withheld ?? []).Where(w => audited.ContainsKey(w.Source))];
+         .. (auditor?.Withheld ?? []).Where(Mine)];
 
-    /// <summary>Every source label this ingest has handed to the audit, so it can recognise its own again.</summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> audited = new(StringComparer.Ordinal);
+    /// <summary>
+    /// Is this the audit's verdict on one of THIS ingest's feeds?
+    ///
+    /// <para>
+    /// Decided from the bindings and the label this ingest writes, both of which exist the moment the config
+    /// is read. Remembering what it happened to audit during this run would answer the same question, and
+    /// answer it wrongly for the first poll after every restart: the audit itself is restored from the store
+    /// on startup, so its verdicts outlive the process, and a report derived from them has to as well.
+    /// </para>
+    /// </summary>
+    private bool Mine(WithheldSource w)
+        => w.Source.StartsWith(FeedLabelPrefix, StringComparison.Ordinal)
+           && bindings.Any(b => string.Equals(b.NodeId, w.Node, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>How this ingest names a feed to the audit. One definition, written and matched in one place.</summary>
+    private const string FeedLabelPrefix = "EmonCMS feed '";
 
     public async Task ReconcileAsync(Config c, IReadOnlyList<SourceBinding> bound, CancellationToken ct)
     {
@@ -237,7 +251,7 @@ public sealed class EmonCmsValueSource
             // makes this easy to get wrong — a kWh feed and a kWh/d feed sit side by side under nearly the
             // same name, and binding the cumulative one as 'period' would report a lifetime total as today.
             if (auditor is not null && PeriodCounterAudit.Applies(binding.Source)
-                && !Audit(binding.NodeId, $"EmonCMS feed '{feed.Name}'", binding.Source.Direction, periodKey, value))
+                && !Audit(binding.NodeId, $"{FeedLabelPrefix}{feed.Name}'", binding.Source.Direction, periodKey, value))
                 continue;
 
             // Judged against the feed's own timestamp, not this poll: a publisher that died leaves its last
@@ -269,7 +283,6 @@ public sealed class EmonCmsValueSource
     /// <summary>Ask the audit's owner; an unreachable owner leaves the reading published, as elsewhere.</summary>
     private bool Audit(string nodeId, string source, string? direction, string periodKey, double value)
     {
-        audited[source] = 0;
         try { return auditor!.Allow(nodeId, source, direction, periodKey, value); }
         catch (Exception ex)
         {

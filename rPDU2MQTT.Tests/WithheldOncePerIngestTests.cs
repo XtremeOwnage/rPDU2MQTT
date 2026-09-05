@@ -81,6 +81,38 @@ public class WithheldOncePerIngestTests
         Assert.Single(((IWithheldSources)emon).Withheld);
     }
 
+    /// <summary>
+    /// The audit is restored from its store on startup, so it knows a feed is being withheld before this
+    /// process has polled anything. A report derived from it must know that too — deciding ownership from
+    /// what happened to be audited during this run would say "nothing withheld" until the first poll after
+    /// every restart, which is the page going quiet exactly when someone is looking at it after a bounce.
+    /// </summary>
+    [Fact]
+    public void AFreshProcessReportsWhatTheRestoredAuditAlreadyKnows()
+    {
+        var audit = new SharedAudit();
+        // What Load() put back: this ingest's feed, and another ingest's topic.
+        audit.Held.Add(new WithheldSource("main_panel", "EmonCMS feed 'Main Panel Energy Daily'",
+                                          "energytoday", "did not reset at the rollover"));
+        audit.Held.Add(new WithheldSource("coffee_pot", "esphome/devices/coffee-pot/sensor/energy_d/state",
+                                          "energytoday", "did not reset at the rollover"));
+
+        var cfg = new Config();
+        cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode
+        {
+            Id = "main_panel",
+            Sources = [new EnergyFlowSource { Type = "emoncms", Metric = "energy", Accumulation = "period",
+                                              Feed = "Main Panel Energy Daily" }],
+        });
+        var emon = new EmonCmsValueSource(cfg, null, audit);
+        emon.Bind(SourceBindings.For(cfg, "emoncms"));
+        // No Apply(): nothing polled yet, exactly as a second after startup.
+
+        var reported = ((IWithheldSources)emon).Withheld;
+
+        Assert.Equal("EmonCMS feed 'Main Panel Energy Daily'", Assert.Single(reported).Source);
+    }
+
     [Fact]
     public void AnIngestThatAuditedNothing_ReportsNothingFromTheSharedAudit()
     {
