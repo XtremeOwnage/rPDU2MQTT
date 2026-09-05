@@ -103,10 +103,23 @@ if (!/nothing/.test(covered)) fail(`a rule matching no node is not called out: $
 const ruleChips = ruleRows.flatMap(r => query(r, '.tag-chip', true)).map(c => c.textContent.replace('\u2715', '').trim());
 if (!ruleChips.includes('rack-1')) fail(`the rule's tags are not chips: ${ruleChips.join(', ') || '(none)'}`);
 
-// Every tag the document defines, listed in one place with what carries it.
-const managerRows = query(nodesSec, 'tr', true)
+// Every tag the document defines, listed in one place with what carries it. That list is the Tags page
+// now (#424) rather than a panel at the foot of this one; the Nodes page points at it.
+if (!/Tags page/i.test(nodesSec.textContent || ''))
+  fail('the Nodes page does not point at where tags are managed');
+
+const tagsLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Tags');
+if (!tagsLink) fail('no Tags tab');
+tagsLink.click();
+await new Promise(r => setTimeout(r, 250));
+const tagsSec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+const managerRows = query(tagsSec, 'tr', true)
   .filter(r => query(r, 'input', true).some(i => ['rack-1', 'unused'].includes((i.value || '').trim())));
 if (managerRows.length !== 2) fail(`the tag manager does not list every defined tag (${managerRows.length} row(s))`);
+
+// Back to Nodes for what follows.
+nodesLink.click();
+await new Promise(r => setTimeout(r, 200));
 
 // A free-entry box completes from the tags that already exist.
 const dl = sandbox.document.getElementById('rpdu-known-tags');

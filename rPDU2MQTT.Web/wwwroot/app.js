@@ -776,9 +776,46 @@ function tagReferences()                                                        
   return out;
 }
 
+/// The declared vocabulary: tags given a name and a purpose up front, whether or not anything carries them.
+function declaredTags()                                           {
+  const flow = (state.data || {}).EnergyFlow || {};
+  return (flow.Tags || []).filter((t     ) => t && String(t.Name || '').trim());
+}
+
+/// What a tag was declared to be for, if anything said.
+function tagDescription(tag        )         {
+  const d = declaredTags().find(x => String(x.Name).trim().toLowerCase() === tag.trim().toLowerCase());
+  return (d && d.Description) || '';
+}
+
+/// Declare a tag. Returns false when one by that name already exists — same name twice is two tags that
+/// look identical and filter differently, which is the failure the whole picker exists to avoid.
+function declareTag(name        , description = '')          {
+  const n = (name || '').trim();
+  if (!n) return false;
+  const flow = (state.data || {}).EnergyFlow || ((state.data || {}).EnergyFlow = {});
+  const list = flow.Tags || (flow.Tags = []);
+  if (list.some((t     ) => String(t.Name || '').trim().toLowerCase() === n.toLowerCase())) return false;
+  list.push({ Name: n, Description: description });
+  return true;
+}
+
+/// Stop declaring a tag. What carries it is untouched — removeTag is the one that strips it off things.
+function undeclareTag(name        ) {
+  const flow = (state.data || {}).EnergyFlow || {};
+  if (!flow.Tags) return;
+  flow.Tags = flow.Tags.filter((t     ) => String(t.Name || '').trim().toLowerCase() !== name.trim().toLowerCase());
+}
+
 /// Every tag the document defines, in a stable order.
 function knownTags()           {
   const seen = new Map                ();
+  // Declared first: a tag defined before anything carries it has to appear in every picker, or it cannot
+  // be put to use from the place it was defined.
+  declaredTags().forEach(d => {
+    const k = String(d.Name || '').trim();
+    if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
+  });
   tagHolders().forEach(h => (h.list() || []).forEach(t => {
     const k = String(t || '').trim();
     if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
@@ -797,6 +834,9 @@ function tagUsage(tag        )                                              {
 
 /// Rename a tag everywhere it appears — definitions and filters alike.
 function renameTag(from        , to        ) {
+  declaredTags().forEach((d     ) => {
+    if (String(d.Name).trim().toLowerCase() === from.trim().toLowerCase()) d.Name = to.trim();
+  });
   const same = (t        ) => t.trim().toLowerCase() === from.trim().toLowerCase();
   const swap = (v                      ) => {
     if (!v) return undefined;
@@ -813,6 +853,7 @@ function renameTag(from        , to        ) {
 
 /// Remove a tag from everything that carries or names it.
 function removeTag(tag        ) {
+  undeclareTag(tag);
   const same = (t        ) => t.trim().toLowerCase() === tag.trim().toLowerCase();
   [...tagHolders(), ...tagReferences()].forEach((h     ) => {
     const current = h.list();
@@ -916,66 +957,6 @@ function tagInput(arr          , opts                  = {})              {
 
   draw();
   return wrap;
-}
-
-/// The "every tag, and what carries it" panel: rename or retire a tag across the whole config in one place.
-function renderTagManager(rerender            )              {
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Tags in use', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    text: 'Every tag this configuration defines, and what carries it. Renaming one here rewrites it on every '
-        + 'node, every rule and every destination filter at once — which is the only way a rename does not '
-        + 'quietly turn a working filter into one that matches nothing.',
-  }));
-
-  const tags = knownTags();
-  if (!tags.length) {
-    box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' }, text: 'No tags yet. Add one to a node below, or to a rule for PDUs and outlets.' }));
-    return box;
-  }
-
-  const t = el('table', { class: 'ld' });
-  const head = el('tr');
-  ['Tag', 'Carried by', 'Filtered on', ''].forEach(h => head.appendChild(el('th', { text: h })));
-  t.appendChild(el('thead', {}, head));
-  const tb = el('tbody');
-
-  tags.forEach(tag => {
-    const use = tagUsage(tag);
-    const tr = el('tr');
-
-    const name = el('input', { type: 'text', value: tag })                    ;
-    name.onchange = () => {
-      const next = name.value.trim();
-      if (!next || next === tag) { name.value = tag; return; }
-      renameTag(tag, next);
-      refreshDirty(); rerender();
-    };
-    tr.appendChild(el('td', {}, name));
-
-    tr.appendChild(el('td', {}, el('span', {
-      class: 'desc', style: { margin: '0' },
-      text: `${use.holders.length} node(s)/rule(s)`,
-      title: use.holders.join('\n') || 'nothing',
-    })));
-
-    tr.appendChild(el('td', {}, el('span', {
-      class: 'desc', style: { margin: '0' },
-      text: use.references.length ? use.references.join(', ') : '—',
-      title: use.references.length ? 'Destinations whose filter names this tag.' : 'No destination filter names this tag.',
-    })));
-
-    const del = btn('Remove', 'danger');
-    del.title = 'Take this tag off everything that carries it, and out of every filter that names it.';
-    del.onclick = () => { removeTag(tag); refreshDirty(); rerender(); };
-    tr.appendChild(el('td', {}, del));
-    tb.appendChild(tr);
-  });
-
-  t.appendChild(tb);
-  box.appendChild(t);
-  return box;
 }
 
 // ── flow-vocabulary.ts ──────────────────────────────────────────
@@ -5579,7 +5560,11 @@ function addNodesSection(nav     , sections     ) {
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
     ed.appendChild(renderAutoTagRules(flow, cand, render));
-    ed.appendChild(renderTagManager(render));
+    // The tag manager has a page of its own now — two editors for one list is two places to disagree.
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '18px 0 0' } },
+      el('span', { text: 'Tags are defined and managed on the ' }),
+      el('a', { text: 'Tags page', onclick: () => (document.querySelector('nav a[data-label="Tags"]')       )?.click() }),
+      el('span', { text: ' — what each is for, what carries it, and which destinations decide on it.' })));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
   };
 
@@ -5592,6 +5577,145 @@ function addNodesSection(nav     , sections     ) {
   link.onclick = () => { activate(link, sec); load(); };
   // The editor panel is mounted on <body>.
   nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
+}
+
+// ── sections/tags-page.ts ───────────────────────────────────────
+// Tags (#424): define them, see what carries them, and see what they decide.
+//
+// A tag is the only thing in this config that means nothing on its own — it matters because a destination
+// filter names it. So the page has to answer both halves at once: what wears this tag, and what does
+// wearing it do. Buried at the bottom of the Nodes page it answered neither, and a tag could not exist
+// until something already carried it, so a filter could never be set up ahead of the nodes it selects.
+
+function addTagsSection(nav     , sections     ) {
+  const link = navLink(nav, 'Tags', '#');
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+
+  const render = () => {
+    sec.innerHTML = '';
+    sec.appendChild(el('h2', { text: 'Tags' }));
+    sec.appendChild(el('div', {
+      class: 'desc',
+      text: 'A tag does nothing by itself — it matters because a destination filter names it. Below: every '
+          + 'tag, what carries it, and which destinations decide on it. Renaming one here rewrites it on '
+          + 'every node, rule and filter at once, which is the only way a rename does not quietly turn a '
+          + 'working filter into one that matches nothing.',
+    }));
+
+    // --- Define one -----------------------------------------------------------------------------------
+    const addBar = el('div', { class: 'ld-toolbar' });
+    const name = el('input', { type: 'text', placeholder: 'tag name' })                    ;
+    const desc = el('input', { type: 'text', placeholder: 'what it is for (optional)', style: { minWidth: '280px' } })                    ;
+    const add = btn('Define tag', 'primary');
+    const say = el('span', { class: 'desc', style: { margin: '0' } });
+    const commit = () => {
+      const n = name.value.trim();
+      if (!n) return;
+      if (!declareTag(n, desc.value.trim())) { say.textContent = `“${n}” already exists.`; return; }
+      name.value = ''; desc.value = ''; say.textContent = '';
+      refreshDirty(); render();
+    };
+    add.onclick = commit;
+    name.onkeydown = (ev     ) => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } };
+    desc.onkeydown = (ev     ) => { if (ev.key === 'Enter') { ev.preventDefault(); commit(); } };
+    addBar.append(name, desc, add, say);
+    sec.appendChild(addBar);
+    sec.appendChild(el('div', { class: 'desc', text:
+      'A tag defined here exists before anything carries it, so a filter can be set up ahead of the nodes '
+      + 'it will select. Typing one straight onto a node still works and still appears below.' }));
+
+    const tags = knownTags();
+    if (!tags.length) {
+      sec.appendChild(el('div', { class: 'desc', style: { marginTop: '12px' },
+        text: 'No tags yet. Define one above, or add one to a node on the Nodes page.' }));
+      return;
+    }
+
+    // --- What exists, what carries it, what decides on it ----------------------------------------------
+    const t = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''].forEach(h =>
+      head.appendChild(el('th', { text: h })));
+    t.appendChild(el('thead', {}, head));
+    const tb = el('tbody');
+
+    const declared = declaredTags().map(d => String(d.Name).trim().toLowerCase());
+
+    tags.forEach(tag => {
+      const use = tagUsage(tag);
+      const tr = el('tr');
+
+      const nm = el('input', { type: 'text', value: tag })                    ;
+      nm.onchange = () => {
+        const next = nm.value.trim();
+        if (!next || next === tag) { nm.value = tag; return; }
+        renameTag(tag, next);
+        refreshDirty(); render();
+      };
+      const nameCell = el('td', {}, nm);
+      // A tag nothing declared still works; saying so is how you tell a deliberate vocabulary from a typo
+      // that has quietly become part of the config.
+      if (!declared.includes(tag.toLowerCase()))
+        nameCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'not declared — in use only' }));
+      tr.appendChild(nameCell);
+
+      const dsc = el('input', { type: 'text', value: tagDescription(tag), placeholder: '—' })                    ;
+      dsc.onchange = () => {
+        const flow = ensure(state.data, 'EnergyFlow', {});
+        const list = ensure(flow, 'Tags', []);
+        const found = list.find((x     ) => String(x.Name || '').trim().toLowerCase() === tag.toLowerCase());
+        if (found) found.Description = dsc.value.trim();
+        else list.push({ Name: tag, Description: dsc.value.trim() });
+        refreshDirty(); render();
+      };
+      tr.appendChild(el('td', {}, dsc));
+
+      // Named, not counted: "3 node(s)/rule(s)" in a tooltip is the answer you have to go looking for.
+      const carried = el('td');
+      if (!use.holders.length) {
+        carried.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'nothing yet' }));
+      } else {
+        use.holders.slice(0, 6).forEach(h =>
+          carried.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: h })));
+        if (use.holders.length > 6)
+          carried.appendChild(el('div', { class: 'desc', style: { margin: '0' },
+            text: `…and ${use.holders.length - 6} more` }));
+      }
+      tr.appendChild(carried);
+
+      const decides = el('td');
+      if (!use.references.length) {
+        decides.appendChild(el('span', { class: 'desc', style: { margin: '0' },
+          text: 'none — this tag changes nothing' }));
+      } else {
+        use.references.forEach(r =>
+          decides.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: r })));
+      }
+      tr.appendChild(decides);
+
+      const del = btn('Remove', 'danger');
+      del.title = 'Take this tag off everything that carries it, out of every filter that names it, and out '
+                + 'of the declared list.';
+      del.onclick = () => {
+        if (use.references.length &&
+            !confirm(`“${tag}” is named by ${use.references.join(', ')}.\n\nRemoving it changes what those `
+                   + 'destinations send. Continue?')) return;
+        removeTag(tag); refreshDirty(); render();
+      };
+      tr.appendChild(el('td', {}, del));
+      tb.appendChild(tr);
+    });
+
+    t.appendChild(tb);
+    sec.appendChild(t);
+    sec.appendChild(el('div', { class: 'desc', style: { marginTop: '6px' },
+      text: 'Save (main button) to apply. A tag that no destination decides on is doing nothing yet — set '
+          + 'it on a destination’s Include or Exclude list to give it an effect.' }));
+  };
+
+  link.onclick = () => { render(); activate(link, sec); };
+  render();
 }
 
 // ── sections/energy-board.ts ────────────────────────────────────
@@ -8197,7 +8321,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.

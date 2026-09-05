@@ -52,6 +52,15 @@ public class EnergyFlowConfig
     [Description("Tags for derived nodes (PDUs and outlets), which have no entry of their own to carry them. Matched by node id with '*' as a wildcard, e.g. 'outlet:rack_pdu_1:*'.")]
     public List<AutoTagRule> AutoTags { get; set; } = new();
 
+    /// <summary>
+    /// Tags declared up front, with what each one is for. Optional: a tag typed onto a node still works and
+    /// still appears everywhere tags are listed. Declaring one lets it exist before anything carries it —
+    /// so a filter can be set up ahead of the nodes it will select — and gives it a description, which is
+    /// the only place the intent behind "local-only" can be written down rather than remembered.
+    /// </summary>
+    [Description("Tags declared up front, each with what it is for. Optional — a tag typed onto a node works without being declared. Declaring one lets it exist before anything carries it, and gives it a description.")]
+    public List<TagDefinition> Tags { get; set; } = new();
+
     [Description("Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.")]
     public List<EnergyFlowGroup> Groups { get; set; } = new();
 
@@ -102,6 +111,16 @@ public class EnergyFlowConfig
 /// (#groups). The members are unchanged — they keep their links and export individually; the group is an
 /// overlay plus a rolled-up total.
 /// </summary>
+/// <summary>A tag the configuration declares, and what it is for.</summary>
+public class TagDefinition
+{
+    [Description("The tag itself, as it is written on a node, a rule or a destination filter.")]
+    public string Name { get; set; } = "";
+
+    [Description("What this tag is for, in your own words. Shown wherever the tag is listed.")]
+    public string Description { get; set; } = "";
+}
+
 /// <summary>Tags applied to every derived node whose id matches a pattern.</summary>
 public class AutoTagRule
 {
