@@ -45,6 +45,7 @@
 			<GuiSource Include="web\contradiction.check.mjs" />
 			<GuiSource Include="web\tags.check.mjs" />
 			<GuiSource Include="web\discover.check.mjs" />
+			<GuiSource Include="web\accumulation.check.mjs" />
 			<GuiSource Include="web\energyshow.check.mjs" />
 			<GuiSource Include="web\history.check.mjs" />
 			<GuiSource Include="web\trends.check.mjs" />

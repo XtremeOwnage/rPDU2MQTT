@@ -301,7 +301,7 @@ public class EnergyFlowSource
     /// </para>
     /// </summary>
     [DefaultValue("lifetime")]
-    [Description("Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Solar Assistant mixes both: total/load_energy is lifetime, total/pv_energy resets at midnight.")]
+    [Description("Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Check the topic before choosing: a publisher can offer both kinds, and firmware changes which. A daily counter tagged 'lifetime' is read as a meter running backwards every midnight and stops being published; a lifetime counter tagged 'period' is republished every poll as if that whole total were today's.")]
     [AllowedValues("lifetime", "period")]
     public string Accumulation { get; set; } = "lifetime";
 

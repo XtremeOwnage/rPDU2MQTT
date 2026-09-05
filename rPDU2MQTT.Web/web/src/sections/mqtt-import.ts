@@ -62,10 +62,11 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   // Rows and their unit selectors, so the bulk controls can drive them without a re-render.
   let boxes: { reading: any, box: HTMLInputElement }[] = [];
   let unitSels: { reading: any, sel: HTMLSelectElement }[] = [];
+  let accSels: { reading: any, sel: HTMLSelectElement }[] = [];
 
   const render = (readings: any[]) => {
     list.innerHTML = '';
-    boxes = []; unitSels = [];
+    boxes = []; unitSels = []; accSels = [];
     if (!readings.length) {
       note.textContent = srcSel.value === 'discovery'
         ? 'No importable entities in the broker’s Home Assistant discovery. Publishers that announce nothing '
@@ -76,7 +77,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
     }
     const tbl = el('table', { class: 'ld' });
     const head = el('tr');
-    ['', 'Device', 'Reading', 'Metric', 'Unit', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
+    ['', 'Device', 'Reading', 'Metric', 'Unit', 'Counter', 'Topic'].forEach(h => head.appendChild(el('th', { text: h })));
     tbl.appendChild(el('thead', {}, head));
     const body = el('tbody');
     readings.forEach(r => {
@@ -110,6 +111,25 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
         if (!choices.length) unitCell.appendChild(el('div', { class: 'desc', style: { margin: '0' }, text: 'no units for this metric' }));
       }
       tr.appendChild(unitCell);
+
+      // Whether the counter runs forever or restarts each day. A daily "energy today" reading imported as a
+      // lifetime total is read as a meter running backwards every midnight, and the export withholds it from
+      // then on — a plug that resets at 0.9 kWh never climbs past its own best day again, so it goes quiet
+      // and stays quiet. One sample cannot tell the two apart, so the question is asked rather than guessed.
+      const accCell = el('td');
+      if (r.metric === 'energy') {
+        const accSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+        accSel.appendChild(el('option', { value: 'lifetime', text: 'lifetime' }));
+        accSel.appendChild(el('option', { value: 'period', text: 'resets daily' }));
+        r.accumulation = r.accumulation || 'lifetime';
+        accSel.value = r.accumulation;
+        accSel.onchange = () => { r.accumulation = accSel.value; };
+        accCell.appendChild(accSel);
+        accSels.push({ reading: r, sel: accSel });
+      } else {
+        accCell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: '—' }));
+      }
+      tr.appendChild(accCell);
 
       const topic = el('td');
       topic.appendChild(el('code', { text: r.topic, style: { color: 'var(--muted)' } }));
@@ -174,6 +194,18 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       row.append(el('span', { class: 'desc', style: { margin: '0' }, text: `all ${metric}:` }), sel);
     });
 
+    // One setter for every energy row: a houseful of smart plugs is usually all the same kind of counter.
+    if (readings.some(r => r.metric === 'energy')) {
+      const accAll = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+      accAll.appendChild(el('option', { value: 'lifetime', text: 'lifetime' }));
+      accAll.appendChild(el('option', { value: 'period', text: 'resets daily' }));
+      accAll.onchange = () => accSels.forEach(a => {
+        a.sel.value = accAll.value;
+        a.reading.accumulation = accAll.value;
+      });
+      row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'all energy counters:' }), accAll);
+    }
+
     return row;
   };
 
@@ -229,8 +261,9 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       let id = deviceId;
       const sources = readings.map(r => ({
         Type: 'mqtt', Topic: r.topic, Metric: r.metric,
-        // 'lifetime': the daily figure is derived from it.
-        Accumulation: r.metric === 'energy' ? 'lifetime' : undefined,
+        // What the row's Counter column says. 'lifetime' still the default: the daily figure is derived
+        // from it, and it is the right answer for most meters.
+        Accumulation: r.metric === 'energy' ? (r.accumulation || 'lifetime') : undefined,
         Unit: r.unit || undefined,
         JsonField: r.jsonField || undefined,
       }));
