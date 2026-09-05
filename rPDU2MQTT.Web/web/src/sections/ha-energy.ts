@@ -35,6 +35,67 @@ export function addHaEnergySection(nav: any, sections: any) {
   grid.append(url.f, token.f, etype.f, chkF);
   sec.appendChild(grid);
 
+  // What the export filter leaves out. Sync pushes what the MQTT export publishes, so a node the filter
+  // drops never becomes an HA sensor and cannot be mapped — which on this page looked like the sync
+  // quietly missing things, with nothing here even naming the filter.
+  const filterBox = el('div', { style: { margin: '14px 0' } });
+  const drawFilter = () => {
+    filterBox.innerHTML = '';
+    const flow = (state.data && state.data.EnergyFlow) || {};
+    const f = flow.MqttExportTags || {};
+    const inc: string[] = f.Include || [];
+    const exc: string[] = f.Exclude || [];
+    const nodes: any[] = flow.Nodes || [];
+
+    const goSettings = () => (document.querySelector('nav a[data-label="Settings"]') as any)?.click();
+
+    if (!inc.length && !exc.length) {
+      filterBox.appendChild(el('div', { class: 'desc' },
+        el('span', { text: 'Every node is exported — no tag filter is set. ' }),
+        el('a', { text: 'Energy Flow → Settings', onclick: goSettings }),
+        el('span', { text: ' can narrow it.' })));
+      return;
+    }
+
+    // An untagged node fails a populated include list; a node carrying an excluded tag is always out.
+    const tagsOf = (n: any): string[] => n.Tags || [];
+    const dropped = nodes.filter(n => {
+      const t = tagsOf(n).map((x: string) => String(x).trim().toLowerCase());
+      if (exc.some(e => t.includes(String(e).trim().toLowerCase()))) return true;
+      return inc.length > 0 && !inc.some(i => t.includes(String(i).trim().toLowerCase()));
+    });
+
+    filterBox.appendChild(el('h3', { text: 'What the export filter leaves out', style: { margin: '4px 0', fontSize: '15px' } }));
+    const line = el('div', { class: 'desc' });
+    if (inc.length) line.appendChild(el('span', { text: `Only nodes tagged ${inc.join(', ')} are exported. ` }));
+    if (exc.length) line.appendChild(el('span', { text: `Nodes tagged ${exc.join(', ')} are never exported. ` }));
+    line.appendChild(el('a', { text: 'Change it', onclick: goSettings }));
+    filterBox.appendChild(line);
+
+    if (!dropped.length) {
+      filterBox.appendChild(el('div', { class: 'desc', text: 'No configured node is currently excluded.' }));
+    } else {
+      filterBox.appendChild(el('div', { class: 'ov-note warn', style: { marginTop: '8px' } },
+        el('span', { class: 'ov-alert-icon', text: '⚠' }),
+        el('div', {},
+          el('div', { class: 'ov-alert-title', text: `${dropped.length} node${dropped.length === 1 ? '' : 's'} will not reach Home Assistant` }),
+          el('div', { class: 'desc', text: 'They publish no MQTT sensor, so Sync cannot map them and any entity they '
+                                         + 'already created in Home Assistant is retired.' }),
+          el('div', { style: { marginTop: '6px' } },
+            ...dropped.map((n: any) => el('div', { class: 'desc', style: { margin: '1px 0' },
+              text: `${n.Label || n.Id}  (${n.Id})${(n.Tags || []).length ? '  · ' + (n.Tags || []).join(', ') : '  · untagged'}` }))))));
+    }
+
+    // Derived PDU/outlet nodes carry no Tags of their own; their tags come from rules.
+    const rules: any[] = flow.AutoTags || [];
+    if (rules.length)
+      filterBox.appendChild(el('div', { class: 'desc', style: { marginTop: '6px' },
+        text: `${rules.length} auto-tag rule${rules.length === 1 ? '' : 's'} also tag PDUs and outlets, so the filter `
+            + 'applies to them too — they are not listed here because they come from what the bridge polls.' }));
+  };
+  drawFilter();
+  sec.appendChild(filterBox);
+
   const bar = el('div', { class: 'sec-actions' });
   const syncBtn = btn('Sync now', 'primary');
   const clearBtn = btn('Clear energy dashboard', 'danger');

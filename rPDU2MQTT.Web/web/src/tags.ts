@@ -160,6 +160,16 @@ export function tagInput(arr: string[], opts: TagInputOptions = {}): HTMLElement
 
     // Free entry, completing from the tags that already exist — this is where a tag is born.
     syncTagDatalist();
+    // A datalist completes what you type and shows nothing until you do, so a tag already in use looks
+    // like it has to be retyped from memory — and a second spelling of an existing tag is a filter that
+    // silently matches nothing. The existing ones are offered outright, beside the box that invents new.
+    if (known.length) {
+      const pick = el('select', { class: 'tag-pick' }) as HTMLSelectElement;
+      pick.appendChild(el('option', { value: '', text: `existing (${known.length})…` }));
+      known.forEach(k => pick.appendChild(el('option', { value: k, text: k })));
+      pick.onchange = () => { if (pick.value) add(pick.value); };
+      wrap.appendChild(pick);
+    }
     const input = el('input', {
       type: 'text', class: 'tag-new', placeholder: opts.placeholder || 'add tag…', list: DATALIST_ID,
     }) as HTMLInputElement;
