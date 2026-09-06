@@ -3385,6 +3385,14 @@ function addFlowSection(nav     , sections     ) {
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
   const draw = (graph     ) => {
+    // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
+    // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
+    // clamp the scroll position to the shrunken height, so a refresh threw the reader back to the top.
+    // Holding the height across the rebuild means the page never shrinks and nothing is clamped.
+    const held = (wrap       ).offsetHeight || 0;
+    if (held) wrap.style.minHeight = held + 'px';
+    // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
+    const paneW = Math.round(Number((sec       ).clientWidth) || Number((wrap       ).clientWidth) || 0);
     wrap.innerHTML = '';
     ensureGroupState();
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
@@ -3452,7 +3460,6 @@ function addFlowSection(nav     , sections     ) {
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
-    const paneW = Math.round(Number((wrap       ).clientWidth) || 0);
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
     const padTop = 22, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
@@ -3994,6 +4001,8 @@ function addFlowSection(nav     , sections     ) {
     hints.appendChild(fitBtn);
     hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
+    // The new content carries its own height now, so stop holding the old one.
+    wrap.style.minHeight = '';
   };
 
   // --- Settings: everything under EnergyFlow that isn't a node, a link or a group.

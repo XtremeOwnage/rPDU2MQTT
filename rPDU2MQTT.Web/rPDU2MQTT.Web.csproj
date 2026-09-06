@@ -58,6 +58,7 @@
 			<GuiSource Include="web\nocross.check.mjs" />
 			<GuiSource Include="web\flowwidth.check.mjs" />
 			<GuiSource Include="web\flowcontrols.check.mjs" />
+			<GuiSource Include="web\flowscroll.check.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 
@@ -128,6 +129,8 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowwidth.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The Flow page's controls pack onto shared lines rather than stacking down the page. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowcontrols.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- A refresh rebuilds the diagram without collapsing the page and losing the reader's place. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowscroll.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
 		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
