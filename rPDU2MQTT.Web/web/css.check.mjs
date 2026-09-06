@@ -68,6 +68,10 @@ if (!cap) fail('main has no max-width — an ultrawide screen would stretch ever
 if (Number(cap[1]) < 2400)
   fail(`main is capped at ${cap[1]}px, narrower than the 2400px the diagram lays out to — the difference `
      + 'becomes gutters');
+// An auto inline margin on a flex item absorbs the free space rather than letting flex-grow distribute it,
+// so the column stops short of its cap and the surplus sits either side of it as dead space.
+if (/margin\s*:\s*0\s+auto/.test(mainRule[2]))
+  fail('main has margin:0 auto inside a flex row — the free space becomes a gutter instead of column width');
 
 console.log('css: a sticky table header is not trapped inside its own table nor inside a box that scrolls '
   + 'around it, the corners are still round, the app bar gives way on a phone, and [hidden] outranks any '
