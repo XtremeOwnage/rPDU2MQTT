@@ -7,7 +7,7 @@ import { flowGroups } from '../flow-view.js';
 import { renderImportPanel } from '../node-templates.js';
 import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
-import { tagInput, renderTagManager } from '../tags.js';
+import { tagInput } from '../tags.js';
 
 export function flowCandidates(lastGraph: any, customNodes: any[]) {
   const cand = new Map<string, any>();
@@ -368,7 +368,11 @@ export function addNodesSection(nav: any, sections: any) {
     const cand = flowCandidates(lastGraph, customNodes);
     ed.appendChild(renderGroupManager(flow, cand, render));
     ed.appendChild(renderAutoTagRules(flow, cand, render));
-    ed.appendChild(renderTagManager(render));
+    // The tag manager has a page of its own now — two editors for one list is two places to disagree.
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '18px 0 0' } },
+      el('span', { text: 'Tags are defined and managed on the ' }),
+      el('a', { text: 'Tags page', onclick: () => (document.querySelector('nav a[data-label="Tags"]') as any)?.click() }),
+      el('span', { text: ' — what each is for, what carries it, and which destinations decide on it.' })));
     ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
   };
 

@@ -44,6 +44,7 @@ const MODULES = [
   'sections/flow.ts',
   'sections/node-editor.ts',
   'sections/nodes.ts',
+  'sections/tags-page.ts',
   'sections/energy-board.ts',
   'sections/overview.ts',
   'sections/mqtt-import.ts',

@@ -42,9 +42,46 @@ function tagReferences(): { list: () => string[] | undefined, set: (v: string[])
   return out;
 }
 
+/// The declared vocabulary: tags given a name and a purpose up front, whether or not anything carries them.
+export function declaredTags(): { Name: string, Description?: string }[] {
+  const flow = (state.data || {}).EnergyFlow || {};
+  return (flow.Tags || []).filter((t: any) => t && String(t.Name || '').trim());
+}
+
+/// What a tag was declared to be for, if anything said.
+export function tagDescription(tag: string): string {
+  const d = declaredTags().find(x => String(x.Name).trim().toLowerCase() === tag.trim().toLowerCase());
+  return (d && d.Description) || '';
+}
+
+/// Declare a tag. Returns false when one by that name already exists — same name twice is two tags that
+/// look identical and filter differently, which is the failure the whole picker exists to avoid.
+export function declareTag(name: string, description = ''): boolean {
+  const n = (name || '').trim();
+  if (!n) return false;
+  const flow = (state.data || {}).EnergyFlow || ((state.data || {}).EnergyFlow = {});
+  const list = flow.Tags || (flow.Tags = []);
+  if (list.some((t: any) => String(t.Name || '').trim().toLowerCase() === n.toLowerCase())) return false;
+  list.push({ Name: n, Description: description });
+  return true;
+}
+
+/// Stop declaring a tag. What carries it is untouched — removeTag is the one that strips it off things.
+export function undeclareTag(name: string) {
+  const flow = (state.data || {}).EnergyFlow || {};
+  if (!flow.Tags) return;
+  flow.Tags = flow.Tags.filter((t: any) => String(t.Name || '').trim().toLowerCase() !== name.trim().toLowerCase());
+}
+
 /// Every tag the document defines, in a stable order.
 export function knownTags(): string[] {
   const seen = new Map<string, string>();
+  // Declared first: a tag defined before anything carries it has to appear in every picker, or it cannot
+  // be put to use from the place it was defined.
+  declaredTags().forEach(d => {
+    const k = String(d.Name || '').trim();
+    if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
+  });
   tagHolders().forEach(h => (h.list() || []).forEach(t => {
     const k = String(t || '').trim();
     if (k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k);
@@ -63,6 +100,9 @@ export function tagUsage(tag: string): { holders: string[], references: string[]
 
 /// Rename a tag everywhere it appears — definitions and filters alike.
 export function renameTag(from: string, to: string) {
+  declaredTags().forEach((d: any) => {
+    if (String(d.Name).trim().toLowerCase() === from.trim().toLowerCase()) d.Name = to.trim();
+  });
   const same = (t: string) => t.trim().toLowerCase() === from.trim().toLowerCase();
   const swap = (v: string[] | undefined) => {
     if (!v) return undefined;
@@ -79,6 +119,7 @@ export function renameTag(from: string, to: string) {
 
 /// Remove a tag from everything that carries or names it.
 export function removeTag(tag: string) {
+  undeclareTag(tag);
   const same = (t: string) => t.trim().toLowerCase() === tag.trim().toLowerCase();
   [...tagHolders(), ...tagReferences()].forEach((h: any) => {
     const current = h.list();
@@ -188,64 +229,4 @@ export function tagInput(arr: string[], opts: TagInputOptions = {}): HTMLElement
 
   draw();
   return wrap;
-}
-
-/// The "every tag, and what carries it" panel: rename or retire a tag across the whole config in one place.
-export function renderTagManager(rerender: () => void): HTMLElement {
-  const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Tags in use', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    text: 'Every tag this configuration defines, and what carries it. Renaming one here rewrites it on every '
-        + 'node, every rule and every destination filter at once — which is the only way a rename does not '
-        + 'quietly turn a working filter into one that matches nothing.',
-  }));
-
-  const tags = knownTags();
-  if (!tags.length) {
-    box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' }, text: 'No tags yet. Add one to a node below, or to a rule for PDUs and outlets.' }));
-    return box;
-  }
-
-  const t = el('table', { class: 'ld' });
-  const head = el('tr');
-  ['Tag', 'Carried by', 'Filtered on', ''].forEach(h => head.appendChild(el('th', { text: h })));
-  t.appendChild(el('thead', {}, head));
-  const tb = el('tbody');
-
-  tags.forEach(tag => {
-    const use = tagUsage(tag);
-    const tr = el('tr');
-
-    const name = el('input', { type: 'text', value: tag }) as HTMLInputElement;
-    name.onchange = () => {
-      const next = name.value.trim();
-      if (!next || next === tag) { name.value = tag; return; }
-      renameTag(tag, next);
-      refreshDirty(); rerender();
-    };
-    tr.appendChild(el('td', {}, name));
-
-    tr.appendChild(el('td', {}, el('span', {
-      class: 'desc', style: { margin: '0' },
-      text: `${use.holders.length} node(s)/rule(s)`,
-      title: use.holders.join('\n') || 'nothing',
-    })));
-
-    tr.appendChild(el('td', {}, el('span', {
-      class: 'desc', style: { margin: '0' },
-      text: use.references.length ? use.references.join(', ') : '—',
-      title: use.references.length ? 'Destinations whose filter names this tag.' : 'No destination filter names this tag.',
-    })));
-
-    const del = btn('Remove', 'danger');
-    del.title = 'Take this tag off everything that carries it, and out of every filter that names it.';
-    del.onclick = () => { removeTag(tag); refreshDirty(); rerender(); };
-    tr.appendChild(el('td', {}, del));
-    tb.appendChild(tr);
-  });
-
-  t.appendChild(tb);
-  box.appendChild(t);
-  return box;
 }

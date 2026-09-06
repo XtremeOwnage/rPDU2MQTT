@@ -1128,6 +1128,19 @@ spec:
                             type: string
                           description: Tags to apply to every node the pattern matches. A tag never changes a reading — only what a view shows and what the exports may carry.
                     description: Tags for derived nodes (PDUs and outlets), which have no entry of their own to carry them. Matched by node id with '*' as a wildcard, e.g. 'outlet:rack_pdu_1:*'.
+                  Tags:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Name:
+                          type: string
+                          description: The tag itself, as it is written on a node, a rule or a destination filter.
+                        Description:
+                          type: string
+                          description: What this tag is for, in your own words. Shown wherever the tag is listed.
+                    description: Tags declared up front, each with what it is for. Optional — a tag typed onto a node works without being declared. Declaring one lets it exist before anything carries it, and gives it a description.
                   Groups:
                     type: array
                     items:
