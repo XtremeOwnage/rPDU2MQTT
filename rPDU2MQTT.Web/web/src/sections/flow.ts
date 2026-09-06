@@ -90,7 +90,7 @@ export function addFlowSection(nav: any, sections: any) {
         : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
   };
   metricSel.onchange = () => { load(); showDayNote(); };
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote); sec.appendChild(bar);
+  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote);
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what: any) => {
@@ -116,8 +116,12 @@ export function addFlowSection(nav: any, sections: any) {
     hadDay = true;
     load();
   });
-  sec.appendChild(periods.row);
-  sec.appendChild(hist.row);
+  // Each of these was its own full-width row with a margin under it, so five rows of controls stacked down
+  // the page while each used about a quarter of the line. They are one wrapping strip: side by side where
+  // there is room, folding onto more lines where there is not.
+  const controlsTop = el('div', { class: 'flow-controls' });
+  controlsTop.append(bar, periods.row, hist.row);
+  sec.appendChild(controlsTop);
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
@@ -220,8 +224,10 @@ export function addFlowSection(nav: any, sections: any) {
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
     const folded = applyHideEmptyPref(shown.nodes, shown.links);
+    const controls = el('div', { class: 'flow-controls' });
+    wrap.appendChild(controls);
     const toggles = groupToggles(redrawBoth);
-    if (toggles) wrap.appendChild(toggles);
+    if (toggles) controls.appendChild(toggles);
     const links = folded.links;
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
@@ -778,7 +784,7 @@ export function addFlowSection(nav: any, sections: any) {
     };
     let tagRow = tagToggles(nodes, svg, applyTag) as any;
     if (tagRow) {
-      wrap.appendChild(tagRow);
+      controls.appendChild(tagRow);
       // Re-apply across the live repaint, so the selection survives a push.
       if (activeTag) focusTag(svg, taggedById, activeTag);
     }
