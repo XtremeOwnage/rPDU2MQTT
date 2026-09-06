@@ -203,8 +203,13 @@
   }
   .nav-scrim { display:none; }
   main {
-    flex:1; min-width:0; padding:var(--sp-5) var(--sp-6) var(--sp-7);
-    max-width:1700px; margin:0 auto; width:100%;
+    flex:1; min-width:0; padding:var(--sp-5) var(--sp-5) var(--sp-7);
+    /* The cap was 1700px, so anything wider than that plus the sidebar was centred and the difference thrown
+       away as gutters — on a 2050px screen, ~145px of them either side of the content. Prose does not need
+       the cap: h2 + .desc is held to 74ch on its own. What the cap actually constrained was the wide things
+       — the diagram, which lays out to 2400px, and the tables. It matches the diagram now, so the container
+       is never narrower than what it holds. */
+    max-width:2400px; margin:0 auto; width:100%;
   }
 
   .nav-group-wrap + .nav-group-wrap { margin-top:var(--sp-1); }

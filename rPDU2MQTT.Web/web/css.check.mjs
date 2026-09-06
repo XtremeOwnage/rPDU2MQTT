@@ -58,6 +58,17 @@ const ts = await readFile(new URL('./src/sections/overview.ts', import.meta.url)
 if (/\.hidden\s*=/.test(ts) && !hiddenRule)
   fail('overview.ts toggles .hidden but the stylesheet does not enforce it');
 
+// The content column must not be narrower than the widest thing it holds. The diagram lays out to 2400px
+// (flowwidth.check.mjs), so a container capped below that centres it and gutters the difference — which is
+// the 1700px cap that put ~145px of dead space either side of the content on a 2050px screen.
+const mainRule = /(^|[\s},])main\s*\{([^}]*)\}/m.exec(css);
+if (!mainRule) fail('no main rule');
+const cap = /max-width\s*:\s*(\d+)px/.exec(mainRule[2]);
+if (!cap) fail('main has no max-width — an ultrawide screen would stretch every table across it');
+if (Number(cap[1]) < 2400)
+  fail(`main is capped at ${cap[1]}px, narrower than the 2400px the diagram lays out to — the difference `
+     + 'becomes gutters');
+
 console.log('css: a sticky table header is not trapped inside its own table nor inside a box that scrolls '
   + 'around it, the corners are still round, the app bar gives way on a phone, and [hidden] outranks any '
   + 'component that sets display so el.hidden actually hides');
