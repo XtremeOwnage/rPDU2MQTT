@@ -3441,7 +3441,14 @@ function addFlowSection(nav     , sections     ) {
     // carries a name and a figure on one 11px line, and two bars closer than this put one row's text
     // against the next row's bar.
     const gap = 14;
-    const W = 960, padTop = 22, nodeW = 12, usableH = 520;
+    // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
+    // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
+    // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
+    // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
+    // back to 960, so the geometry those checks pin is unchanged.
+    const paneW = Math.round(Number((wrap       ).clientWidth) || 0);
+    const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
+    const padTop = 22, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
