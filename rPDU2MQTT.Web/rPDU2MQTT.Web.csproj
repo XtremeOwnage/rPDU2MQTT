@@ -136,6 +136,8 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tagspage.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
 		     fine in Firefox and sat on top of the first row in Chrome. -->
+		<!-- The editing dialog on a phone: it must not clip what it cannot fit. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/phonedialog.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>
