@@ -90,11 +90,10 @@ function ends(d) {
   }
   const xs = pts.map(p => p[0]);
   const x1 = Math.min(...xs), x2 = Math.max(...xs);
-  const at = (x) => {
-    const ys = pts.filter(p => Math.abs(p[0] - x) < 0.5).map(p => p[1]);
-    return (Math.min(...ys) + Math.max(...ys)) / 2;      // the middle of the band's cap
-  };
-  return { x1, x2, from: at(x1), to: at(x2) };
+  const cap = (x) => pts.filter(p => Math.abs(p[0] - x) < 0.5).map(p => p[1]);
+  const at = (x) => { const ys = cap(x); return (Math.min(...ys) + Math.max(...ys)) / 2; };   // middle of the cap
+  const top = (x) => Math.min(...cap(x));               // the edge the eye follows along a chain
+  return { x1, x2, from: at(x1), to: at(x2), fromTop: top(x1), toTop: top(x2) };
 }
 
 for (const style of ['curved', 'ortho', 'ortho-round']) {
@@ -174,18 +173,36 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
 // A node's incoming and outgoing stacks used to be centred on its bar independently, which lines up their
 // CENTRES and not their tops. A node passing on a little less than it receives then started its outgoing
 // stack a few pixels lower than its incoming one, and the top edge of a chain stepped down at every node.
+//
+// The other half of the rule is the gap BETWEEN two bars. A column relaxed onto the middle of the band of
+// attachments it exchanges with its neighbour aims at a point that moves down every column: a parent's own
+// ribbons stack by flow, while the children they land on are spread by the row minimum and the gap, so the
+// children's band is always the taller of the two and its middle always the lower. Each column absorbed
+// one more step of that and the whole diagram tilted.
 {
-  const { ribbons } = await render('ortho');
-  const topOf = (src, dst) => {
-    const r = ribbons.find(x => x.src === src && x.dst === dst);
-    if (!r) fail(`no ribbon ${src} -> ${dst}`);
-    return Number(/^M(-?[\d.]+),(-?[\d.]+)/.exec(r.d)[2]);
-  };
-  // grid -> inverter -> main_panel all carry within a whisker of each other's top edge.
-  const chain = [['grid', 'inverter'], ['inverter', 'main_panel']].map(([a, b]) => topOf(a, b));
-  if (Math.abs(chain[0] - chain[1]) > 0.5)
-    fail(`the chain's top edge steps by ${Math.abs(chain[0] - chain[1]).toFixed(1)}px between `
-       + `grid->inverter (y=${chain[0]}) and inverter->main_panel (y=${chain[1]}) — it should run flat`);
+  // The chain that carries the supply down the diagram: every one of these links hands on everything the
+  // node below it receives, so the top edge has nothing to step around at any point along it.
+  const chain = [['grid', 'inverter'], ['inverter', 'main_panel'], ['main_panel', 'livingroom'],
+                 ['livingroom', 'pdu1']];
+  for (const style of ['curved', 'ortho', 'ortho-round']) {
+    const { ribbons } = await render(style);
+    const tops = chain.map(([src, dst]) => {
+      const r = ribbons.find(x => x.src === src && x.dst === dst);
+      if (!r) fail(`no ribbon ${src} -> ${dst}`);
+      return { src, dst, ...ends(r.d) };
+    });
+    // Across each ribbon: it arrives at the height it left at.
+    for (const t of tops)
+      if (Math.abs(t.toTop - t.fromTop) > 1)
+        fail(`${style}: ${t.src}->${t.dst} leaves at y=${t.fromTop.toFixed(1)} and arrives at `
+           + `y=${t.toTop.toFixed(1)} — a link carrying everything its target receives runs flat`);
+    // And through each bar: the next ribbon leaves where the last one arrived.
+    for (let i = 1; i < tops.length; i++)
+      if (Math.abs(tops[i].fromTop - tops[i - 1].toTop) > 1)
+        fail(`${style}: the top edge steps by ${(tops[i].fromTop - tops[i - 1].toTop).toFixed(1)}px across `
+           + `"${tops[i].src}" — ${tops[i - 1].src}->${tops[i - 1].dst} arrives at y=${tops[i - 1].toTop.toFixed(1)} `
+           + `and ${tops[i].src}->${tops[i].dst} leaves at y=${tops[i].fromTop.toFixed(1)}`);
+  }
 }
 
 console.log('nocross: on a seven-circuit main panel beside a two-circuit sub-panel, every column keeps '
