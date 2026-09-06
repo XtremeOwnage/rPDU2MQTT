@@ -3669,15 +3669,19 @@ function addFlowSection(nav     , sections     ) {
         const links = ((side === 'out' ? outgoing[n.id] : incoming[n.id]) || [])
           .map((l     ) => at.get(l)).filter(Boolean);
         if (!links.length) return;
-        // The MIDDLE of the band its ribbons reach, against the middle of the band they leave from — not
-        // their flow-weighted centre. Weighting by flow lets one dominant ribbon pin the node in place
-        // while its small siblings sprawl: a 2 kW panel whose seven circuits span 190px never moved,
-        // because its 612 W ribbon was already straight, and the sub-panel below it ended up sitting in
-        // the middle of that fan with every one of its own ribbons cutting through it.
+        // The TOP of the band its ribbons reach, against the top of the band they leave from — not their
+        // flow-weighted centre, and not the middle of either band. Weighting by flow lets one dominant
+        // ribbon pin the node in place while its small siblings sprawl: a 2 kW panel whose seven circuits
+        // span 190px never moved, because its 612 W ribbon was already straight, and the sub-panel below
+        // it ended up sitting in the middle of that fan with every one of its own ribbons cutting through
+        // it. Aiming at the middles fixed that and tilted the whole diagram instead: a node's own ribbons
+        // stack by flow, while the nodes they reach are spread by the row minimum and the gap, so the far
+        // band is the taller of the two and its middle sits lower. Every column absorbed one more step of
+        // that. The tops are the two points that carry the same quantity, so they are what line up.
         const theirs = links.map((a     ) => side === 'out' ? a.to : a.from);
         const mine = links.map((a     ) => side === 'out' ? a.from : a.to);
-        const mid = (xs          ) => (Math.min(...xs) + Math.max(...xs)) / 2;
-        pos[n.id].y += mid(theirs) - mid(mine);
+        const head = (xs          ) => Math.min(...xs);
+        pos[n.id].y += head(theirs) - head(mine);
       });
       separate(cn);
     };
