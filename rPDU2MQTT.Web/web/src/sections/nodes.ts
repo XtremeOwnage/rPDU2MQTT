@@ -325,7 +325,9 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     body.appendChild(tr);
   });
   tbl.appendChild(body);
-  box.appendChild(tbl);
+  // Scrolls within itself: a table wider than a phone widened the whole page, so the page scrolled sideways
+  // and a dialog opened over it landed off to one side.
+  box.appendChild(el('div', { class: 'nodes-scroll' }, tbl));
 
   // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
   syncNodeModal(editing.id ? customNodes.find((n: any) => n.Id === editing.id) : null, links, cand, editing, rerender);

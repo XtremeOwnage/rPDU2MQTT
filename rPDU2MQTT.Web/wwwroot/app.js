@@ -6274,11 +6274,14 @@ let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 function overlay(title        , onClose             )                                   {
-  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const back = el('div', { class: 'sheet-backdrop' });
   // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
   // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
   // the screen actually has. Vertical scrolling only: the table below manages its own width.
-  const panel = el('div', { class: 'sheet-panel', style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(94vw, 1900px)', maxHeight: '86vh', overflowY: 'auto', overflowX: 'hidden' } });
+  // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
+  // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
+  // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
+  const panel = el('div', { class: 'sheet-panel' });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -6400,7 +6403,7 @@ function openTopicPicker(current        , onPick                         ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const load = async () => {
     const b = await fetchTopics(search.value.trim(), 100, filterIn.value.trim() || '#');
@@ -6468,7 +6471,7 @@ function openEmonCmsPicker(current        , onPick                     ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const draw = (feeds       ) => {
     const q = search.value.trim().toLowerCase();
@@ -6581,7 +6584,7 @@ function openModbusExplorer(src     , onPick            ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const pick = (register        , dataType        ) => {
     src.Register = register;
@@ -6689,7 +6692,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   // No frame and no header of its own: this renders into a modal panel that already carries the node's name.
   const box = el('div', { class: 'node-editor' });
 
-  const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
+  // Laid out by class, so a phone can take it down to one column: two 150px columns of a label, a control
+  // and three lines of hint left each hint a word wide.
+  const grid = el('div', { class: 'node-editor-fields' });
 
   const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
   labIn.onchange = () => { node.Label = labIn.value.trim() || undefined; };
@@ -7506,7 +7511,9 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     body.appendChild(tr);
   });
   tbl.appendChild(body);
-  box.appendChild(tbl);
+  // Scrolls within itself: a table wider than a phone widened the whole page, so the page scrolled sideways
+  // and a dialog opened over it landed off to one side.
+  box.appendChild(el('div', { class: 'nodes-scroll' }, tbl));
 
   // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
   syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
@@ -17127,6 +17134,16 @@ async function checkUpdatesNow() {
 
 let saving = false;
 
+/// The page keeps the bar's height free at its foot, so the last thing on it can be scrolled up past the
+/// bar. On a phone the bar wraps to two or three rows and covered the bottom of every page — on the
+/// Balance page, the whole Home total, with no way to reach it but to save or discard first.
+function reserveForSaveBar() {
+  const bar      = document.getElementById('savebar');
+  const h = bar && !bar.classList.contains('is-hidden') ? Math.ceil(bar.offsetHeight || 0) : 0;
+  document.documentElement?.style?.setProperty?.('--savebar-h', h + 'px');
+}
+try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { /* no window: tests */ }
+
 function renderSaveBar() {
   const bar      = document.getElementById('savebar');
   const count      = document.getElementById('save-count');
@@ -17137,6 +17154,7 @@ function renderSaveBar() {
   const n = changes().length;
   bar.classList[n ? 'remove' : 'add']('is-hidden');
   if (count) count.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
+  reserveForSaveBar();
   if (note) note.classList[configWritable ? 'add' : 'remove']('is-hidden');
   if (save) {
     save.disabled = saving || !configWritable;

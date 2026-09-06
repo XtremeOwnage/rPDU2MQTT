@@ -290,6 +290,16 @@ async function checkUpdatesNow() {
 
 let saving = false;
 
+/// The page keeps the bar's height free at its foot, so the last thing on it can be scrolled up past the
+/// bar. On a phone the bar wraps to two or three rows and covered the bottom of every page — on the
+/// Balance page, the whole Home total, with no way to reach it but to save or discard first.
+function reserveForSaveBar() {
+  const bar: any = document.getElementById('savebar');
+  const h = bar && !bar.classList.contains('is-hidden') ? Math.ceil(bar.offsetHeight || 0) : 0;
+  document.documentElement?.style?.setProperty?.('--savebar-h', h + 'px');
+}
+try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { /* no window: tests */ }
+
 function renderSaveBar() {
   const bar: any = document.getElementById('savebar');
   const count: any = document.getElementById('save-count');
@@ -300,6 +310,7 @@ function renderSaveBar() {
   const n = changes().length;
   bar.classList[n ? 'remove' : 'add']('is-hidden');
   if (count) count.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
+  reserveForSaveBar();
   if (note) note.classList[configWritable ? 'add' : 'remove']('is-hidden');
   if (save) {
     save.disabled = saving || !configWritable;
