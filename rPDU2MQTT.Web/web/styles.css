@@ -730,6 +730,26 @@
   }
   .sheet-search:focus { box-shadow:none; }
 
+  /* The node editor's backdrop. Centred on a desktop; the phone rule below moves it to the top. */
+  .sheet-backdrop {
+    position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.55);
+  }
+
+  /* The node editor's own panel. Sized here rather than inline so a phone can be given other numbers. */
+  .sheet-panel {
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:14px;
+    width:min(94vw,1900px); max-height:86vh; overflow:auto;
+  }
+  /* A table inside it scrolls on its own, so the head and the buttons stay put while the columns move.
+     .bindings-scroll is the wrapper the bindings table has always been given; it carried no rule, so the
+     widest table in the editor overflowed a panel that then clipped it. */
+  .sheet-panel .sheet-scroll, .bindings-scroll { overflow-x:auto; }
+  /* A scroll container around table.ld becomes its sticky header's containing block, which parks the head
+     inside the table over row 1. Same rule the other scrollers here follow. */
+  .sheet-panel table.ld th, .bindings-scroll table.ld th { position:static; }
+
+
   .cmd-item {
     display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--r-sm);
     cursor:pointer; font-size:13.5px;
@@ -802,6 +822,17 @@
     /* The connection pills keep their dot — the colour is the whole message — and drop the word. */
     .appbar-status #st-live, .appbar-status #st-mqtt { font-size:0; padding:4px 6px; gap:0; }
     .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
+
+    /* Dialogs. A dialog centred in the viewport is pushed off it when the keyboard opens, so it sits at
+       the top. 94vw of a 390px screen spends 23px either side on scrim and 14px inside on padding — the
+       panel takes the screen instead, and the room it gives back goes to the fields. */
+    .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }
+    .sheet-panel { width:100%; max-height:92vh; padding:10px; border-radius:6px; }
+    .sheet { width:100%; max-height:92vh; }
+    /* Two columns of label and control do not fit; one does. */
+    .sheet-panel .grid { column-count:1; }
+    /* A control holding 420px on a phone pushes the row it is in off the side. */
+    .sheet-panel input, .sheet-panel select, .sheet-panel textarea { max-width:none; }
   }
 
   /* A tile's trend. Sized by the tile, not by the viewport: the plot is context for the number above it,
