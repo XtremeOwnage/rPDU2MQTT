@@ -203,8 +203,13 @@
   }
   .nav-scrim { display:none; }
   main {
-    flex:1; min-width:0; padding:var(--sp-5) var(--sp-6) var(--sp-7);
-    max-width:1700px; margin:0 auto; width:100%;
+    flex:1; min-width:0; padding:var(--sp-5) var(--sp-5) var(--sp-7);
+    /* Two things kept a band of dead space between the sidebar and the content. `margin:0 auto` on a flex
+       item makes auto margins absorb the free space instead of flex-grow distributing it, so the column
+       never grew and the surplus sat either side of it. And the 1700px cap was narrower than the diagram,
+       which lays out to 2400px, so the column could be the narrower of the two. Prose is unaffected either
+       way: h2 + .desc is held to 74ch on its own. */
+    max-width:2400px; width:100%;
   }
 
   .nav-group-wrap + .nav-group-wrap { margin-top:var(--sp-1); }
@@ -611,6 +616,12 @@
   .ld-toolbar label, .ld-inst { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; }
   .ld-inst select { width:auto; }
   .ld-count { color:var(--faint); font-size:12px; }
+
+  /* The Flow page's controls. Each row was a block with its own margin, so they stacked down the page while
+     each used a fraction of the line. As flex items they sit side by side where there is room and fold only
+     where there is not; the rows keep their own internal layout. */
+  .flow-controls { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2) var(--sp-5); margin:var(--sp-2) 0 var(--sp-3); }
+  .flow-controls > * { margin:0; }
   /* No `overflow:hidden` here, however tempting for the rounded corners: it makes the table its own scroll
      container, and a sticky <th> then resolves `top` against the TABLE instead of the viewport. Chrome
      parked the header 56px down inside the table, on top of the first row, on every table in the app;
