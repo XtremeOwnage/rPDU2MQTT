@@ -236,4 +236,104 @@ public class EnergyAggregationTests
 
         Assert.False(svc.TryGetValue("inverter", "energy", out _));
     }
+    private static Config DailyCounterConfig(string id, string? direction = null)
+    {
+        var c = PeriodConfig();
+        var node = new EnergyFlowNode { Id = id, Label = id };
+        node.Sources.Add(new EnergyFlowSource
+        {
+            Type = "mqtt", Topic = "sa/pv_energy", Metric = "energy", Accumulation = "period",
+            Direction = direction ?? "out",
+        });
+        c.EnergyFlow.Nodes.Add(node);
+        return c;
+    }
+
+    [Fact]
+    public void ADailyCounter_GivesTheNodeACumulativeTotalOfItsOwn()
+    {
+        // A counter declared 'period' gives a daily figure and no cumulative one, so the energy sources it
+        // feeds had no statistic to bind to. Its rises are real energy, so they add up to a lifetime total.
+        var live = new Fixed();
+        var svc = new EnergyAggregationService(DailyCounterConfig("solar"), live, new MemoryEnergyStore());
+        var t0 = new DateTime(2026, 9, 8, 8, 0, 0, DateTimeKind.Utc);
+
+        live.Values[("solar", EnergyPeriod.Metric)] = 10;      // first sighting only sets the mark
+        svc.Sample(TimeSpan.FromMinutes(2), t0);
+        live.Values[("solar", EnergyPeriod.Metric)] = 27.4;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(6));
+
+        Assert.True(svc.TryGetValue("solar", "energy", out var beforeMidnight));
+        Assert.Equal(17.4, beforeMidnight, 6);
+
+        // Midnight: the device zeroes it, and two low readings confirm the restart.
+        live.Values[("solar", EnergyPeriod.Metric)] = 0;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(17));
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(17).AddMinutes(2));
+        live.Values[("solar", EnergyPeriod.Metric)] = 5;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(22));
+
+        // The total carries across the rollover instead of being thrown away by it.
+        Assert.True(svc.TryGetValue("solar", "energy", out var after));
+        Assert.Equal(22.4, after, 6);
+    }
+
+    [Fact]
+    public void ADailyCountersReturnLane_GetsACumulativeTotalToo()
+    {
+        // A battery source needs both directions, so losing the charge lane loses the whole bucket.
+        var live = new Fixed();
+        var svc = new EnergyAggregationService(DailyCounterConfig("battery", "in"), live, new MemoryEnergyStore());
+        var t0 = new DateTime(2026, 9, 8, 8, 0, 0, DateTimeKind.Utc);
+        var inKey = FlowMetricKey.For(EnergyPeriod.Metric, "in");
+
+        live.Values[("battery", inKey)] = 1;
+        svc.Sample(TimeSpan.FromMinutes(2), t0);
+        live.Values[("battery", inKey)] = 3.4;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(3));
+
+        Assert.True(svc.TryGetValue("battery", FlowMetricKey.For("energy", "in"), out var charged));
+        Assert.Equal(2.4, charged, 6);
+    }
+
+    [Fact]
+    public void ALifetimeCountersReturnLane_KeepsTheSamePrecedenceAsItsSupplyLane()
+    {
+        // Both lanes take the same precedence: where the device keeps a real cumulative counter, that is the figure.
+        var cfg = PeriodConfig();
+        cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "grid" });
+        var live = new Fixed();
+        var svc = new EnergyAggregationService(cfg, live, new MemoryEnergyStore());
+        var t0 = new DateTime(2026, 9, 8, 8, 0, 0, DateTimeKind.Utc);
+        var inKey = FlowMetricKey.For("energy", "in");
+
+        live.Values[("grid", inKey)] = 100;
+        svc.Sample(TimeSpan.FromMinutes(2), t0);
+        live.Values[("grid", inKey)] = 121.9;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(3));
+
+        Assert.False(svc.TryGetValue("grid", inKey, out _));
+        // The daily figure for that lane is ours to give, and does come back.
+        Assert.True(svc.TryGetValue("grid", FlowMetricKey.For(EnergyPeriod.Metric, "in"), out var today));
+        Assert.Equal(21.9, today, 6);
+    }
+
+    [Fact]
+    public void ALifetimeCounter_StillKeepsItsOwnEpoch()
+    {
+        // A node whose device keeps a genuine lifetime counter still publishes that counter, not our re-based total.
+        var cfg = PeriodConfig();
+        cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "flexboss" });
+        var live = new Fixed();
+        var svc = new EnergyAggregationService(cfg, live, new MemoryEnergyStore());
+        var t0 = new DateTime(2026, 9, 8, 8, 0, 0, DateTimeKind.Utc);
+
+        live.Values[("flexboss", "energy")] = 740;
+        svc.Sample(TimeSpan.FromMinutes(2), t0);
+        live.Values[("flexboss", "energy")] = 752.5;
+        svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(6));
+
+        Assert.False(svc.TryGetValue("flexboss", "energy", out _));
+    }
+
 }

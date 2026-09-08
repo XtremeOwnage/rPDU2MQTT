@@ -311,12 +311,11 @@ public class EnergyFlowSource
     /// </list>
     ///
     /// <para>
-    /// This is not a detail you can ignore, and one publisher can do both: Solar Assistant's
-    /// <c>total/load_energy</c> and <c>total/grid_energy_in</c> are cumulative, while
-    /// <c>total/pv_energy</c> resets at midnight. Taking the "rise" of a resetting counter loses the day —
-    /// the counter drops to zero and climbs again unobserved, and the next reading measured against
-    /// yesterday's high-water mark yields a small fraction of the truth. Seen live: 2.76 kWh of solar
-    /// reported against 27.4 kWh actually generated.
+    /// It belongs to the topic, not the publisher: Solar Assistant's whole <c>total/…_energy</c> family
+    /// resets at midnight, and ESPHome's <c>energy_d</c> does while its <c>total_energy</c> does not. A
+    /// daily counter declared <c>lifetime</c> loses the day at every rollover, and its cumulative sensor is
+    /// then withheld as a meter running backwards, leaving Home Assistant's energy sources with no statistic
+    /// to read. A <c>lifetime</c> counter caught restarting is warned about once.
     /// </para>
     /// </summary>
     [DefaultValue("lifetime")]

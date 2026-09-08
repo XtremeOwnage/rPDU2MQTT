@@ -20,6 +20,9 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     private readonly TimeZoneInfo zone;
     private volatile Dictionary<string, EnergyState> states = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Nodes whose device zeroes its energy counter each day (<c>Accumulation: period</c>), so no cumulative reading exists for them.</summary>
+    private readonly HashSet<string> dailyCounters;
+
     public EnergyAggregationService(Config cfg, IFlowValueSource upstream, IEnergyStore store, Core.ISnapshotCache? snapshots = null)
     {
         this.cfg = cfg;
@@ -27,6 +30,12 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         this.store = store;
         this.snapshots = snapshots;
         zone = EnergyPeriod.Resolve(cfg.EnergyFlow.Aggregation.PeriodTimeZone, m => Log.Warning(m));
+        dailyCounters = cfg.EnergyFlow.Nodes
+            .Where(n => !string.IsNullOrWhiteSpace(n.Id))
+            .Where(n => n.AllSources().Any(s => FlowMetricKey.IsPeriod(s.Accumulation)
+                                                && string.Equals(s.Metric, EnergyMetric, StringComparison.OrdinalIgnoreCase)))
+            .Select(n => n.Id!.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private bool Integrating => cfg.EnergyFlow.Aggregation.Enabled;
@@ -49,29 +58,36 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     {
         value = 0;
 
-        // The return lane (battery charge / grid export) is a counter in its own right.
+        // The return lane (battery charge / grid export) is a counter in its own right, daily and lifetime alike.
         var key = nodeId;
         if (string.Equals(metric, PeriodInMetric, StringComparison.OrdinalIgnoreCase))
         {
             key = nodeId + FlowMetricKey.InSuffix;
             metric = EnergyPeriod.Metric;
         }
+        else if (string.Equals(metric, EnergyInMetric, StringComparison.OrdinalIgnoreCase))
+        {
+            key = nodeId + FlowMetricKey.InSuffix;
+            metric = EnergyMetric;
+        }
 
         var period = string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase);
         if (!period && !string.Equals(metric, EnergyMetric, StringComparison.OrdinalIgnoreCase))
             return false;
-        if (period ? !Periods : !Integrating)
-            return false;
 
         if (!states.TryGetValue(key, out var s) || s.LastSampleUtc == default)
+            return false;
+
+        // A total added from a real counter's rises is not an estimate; only one integrated from watts waits for integration.
+        if (period ? !Periods : !(Integrating || (s.LastCounterKWh is not null && Periods)))
             return false;
 
         // A period total is only meaningful once its baseline was captured.
         if (period && s.PeriodKey is null)
             return false;
 
-        // KWh on a counter-observed state is OUR re-based total.
-        if (!period && s.LastCounterKWh is not null)
+        // KWh on a counter-observed state is OUR re-based total; the device's own lifetime counter wins, and a daily counter has none.
+        if (!period && s.LastCounterKWh is not null && !dailyCounters.Contains(nodeId))
             return false;
 
         value = period ? s.PeriodKWh : s.KWh;
@@ -170,7 +186,13 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             // A node bound to a real cumulative energy source is re-based exactly as an outlet is.
             if (Periods && upstream.TryGetValue(id, EnergyMetric, out var counter))
             {
-                next[id] = EnergyIntegrator.Observe(Prev(next, id), counter, now, periodKey);
+                next[id] = ObserveLifetime(id, "energy", Prev(next, id), counter, now, periodKey);
+                sampled++;
+            }
+            // A daily counter's rises are just as real, so they add up to the cumulative total nothing else gives this node.
+            else if (Periods && upstream.TryGetValue(id, EnergyPeriod.Metric, out var daily))
+            {
+                next[id] = EnergyIntegrator.Observe(Prev(next, id), daily, now, periodKey);
                 sampled++;
             }
             // Nothing meters this node's energy, so derive it from power — but only when asked to.
@@ -181,13 +203,19 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             }
 
             // The return lane — a battery being charged, a grid being exported to.
+            var inId = id + FlowMetricKey.InSuffix;
             if (Periods && upstream.TryGetValue(id, EnergyInMetric, out var inCounter))
             {
-                var inId = id + FlowMetricKey.InSuffix;
-                next[inId] = EnergyIntegrator.Observe(Prev(next, inId), inCounter, now, periodKey);
+                next[inId] = ObserveLifetime(id, "energy (in)", Prev(next, inId), inCounter, now, periodKey);
                 sampled++;
 
                 // Now that both energy directions are known for this node.
+                AuditDirection(id, next, now);
+            }
+            else if (Periods && upstream.TryGetValue(id, PeriodInMetric, out var dailyIn))
+            {
+                next[inId] = EnergyIntegrator.Observe(Prev(next, inId), dailyIn, now, periodKey);
+                sampled++;
                 AuditDirection(id, next, now);
             }
         }
@@ -197,6 +225,23 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         states = next;
         if (sampled > 0) store.Save(next);
     }
+
+    /// <summary>Fold in a reading of a counter declared <c>lifetime</c>, warning once if it restarts — the mirror of <see cref="PeriodCounterAudit"/>.</summary>
+    private EnergyState ObserveLifetime(string id, string lane, EnergyState prev, double counter, DateTime now, string? periodKey)
+    {
+        var observed = EnergyIntegrator.Observe(prev, counter, now, periodKey);
+        if (prev.LastCounterKWh is { } was && observed.LastCounterKWh is { } mark && mark < was
+            && warnedReset.Add(id + "|" + lane))
+            Log.Warning($"Energy-flow: the {lane} counter on node '{id}' is declared 'lifetime' but restarted — it "
+                      + $"read {was:0.###} and is now {mark:0.###}. If the device zeroes it each day, set that source's "
+                      + "Accumulation to 'period': as it stands the cumulative sensor is withheld from every "
+                      + "reading below the highest day yet seen, which is what leaves Home Assistant's energy "
+                      + "sources unknown. If the meter really was replaced, nothing needs doing.");
+        return observed;
+    }
+
+    // Counters already reported as restarting, so a daily one says it once rather than nightly.
+    private readonly HashSet<string> warnedReset = new(StringComparer.OrdinalIgnoreCase);
 
     // Warned nodes, so a contradiction that persists is said once rather than every sampling pass.
     private readonly HashSet<string> warnedDirection = new(StringComparer.OrdinalIgnoreCase);
