@@ -4,9 +4,9 @@ using Xunit;
 namespace rPDU2MQTT.Tests;
 
 /// <summary>
-/// Counters the device resets each day, as opposed to cumulative ones. One publisher does both — Solar
-/// Assistant's <c>total/load_energy</c> is cumulative while <c>total/pv_energy</c> rolls over at midnight —
-/// so which it is cannot be inferred and has to be declared.
+/// Counters the device resets each day, as opposed to cumulative ones. One publisher does both — ESPHome's
+/// <c>energy_d</c> rolls over at midnight while its <c>total_energy</c> does not — so which it is cannot be
+/// inferred from the topic and has to be declared.
 /// </summary>
 public class PeriodAccumulationTests
 {

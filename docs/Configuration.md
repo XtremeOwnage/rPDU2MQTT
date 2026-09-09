@@ -838,12 +838,20 @@ Per-source settings:
 
 Notes:
 
-- **Check `Accumulation` on every energy source.** One publisher can do both: Solar Assistant's
-  `total/load_energy` and `total/grid_energy_in` are cumulative, while `total/pv_energy` rolls over at
-  midnight. Measuring the "rise" of a resetting counter loses the day — it drops to zero and climbs again
-  unobserved, and the next reading measured against yesterday's high-water mark gives a fraction of the
-  truth (seen live: 2.76 kWh of solar reported against 27.4 kWh actually generated). It cannot be inferred
-  from the topic, so it has to be declared.
+- **Check `Accumulation` on every energy source, and check it against the topic rather than the publisher.**
+  One publisher can do both, and which it does is not visible in the name: Solar Assistant's whole
+  `total/…_energy` family — `load_energy`, `pv_energy`, `grid_energy_in`/`_out`, `battery_energy_in`/`_out` —
+  resets at midnight, and ESPHome's `energy_d`/`daily_energy` sensors do too, while its `total_energy` does
+  not. The way to tell is to watch one across a rollover: a daily counter drops, a cumulative one doesn't.
+  Both mistakes cost you data, in opposite ways:
+  - A **daily counter declared `lifetime`** is the expensive one. Its rise is measured, so it loses the
+    whole day every midnight (seen live: 2.76 kWh of solar against 27.4 kWh actually generated) — and worse,
+    the export guard reads every subsequent reading as a meter running backwards and publishes *nothing*, so
+    the cumulative sensor sits at `unknown` and Home Assistant's grid/solar/battery sources have no
+    statistic to read. The bridge now says so in the log the first time it catches a `lifetime` counter
+    restarting.
+  - A **cumulative counter declared `period`** is caught by the daily-counter audit and withheld, because a
+    lifetime total displayed as "today" is a confident wrong figure.
 - A live reading **supersedes** the node's fixed `Value`, which stays as the fallback for anything you're
   modelling by hand. A live `0` is a real reading (solar at night), not a fall-back to `Value`.
 - Negative readings are clamped to `0` — a directed flow graph can't carry a negative, and it would
