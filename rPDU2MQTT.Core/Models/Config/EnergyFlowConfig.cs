@@ -311,8 +311,8 @@ public class EnergyFlowSource
     /// </list>
     ///
     /// <para>
-    /// It belongs to the topic, not the publisher: Solar Assistant's whole <c>total/…_energy</c> family
-    /// resets at midnight, and ESPHome's <c>energy_d</c> does while its <c>total_energy</c> does not. A
+    /// It belongs to the topic, not the publisher: ESPHome's <c>energy_d</c> resets at midnight while its
+    /// <c>total_energy</c> does not, and Solar Assistant's <c>total/…_energy</c> family is cumulative. A
     /// daily counter declared <c>lifetime</c> loses the day at every rollover, and its cumulative sensor is
     /// then withheld as a meter running backwards, leaving Home Assistant's energy sources with no statistic
     /// to read. A <c>lifetime</c> counter caught restarting is warned about once.

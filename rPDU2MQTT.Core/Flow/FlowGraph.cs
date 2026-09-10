@@ -32,9 +32,11 @@ public static class FlowDerivation
 /// What passes through the node, when that is more than its own reading covers. <see langword="null"/> when
 /// the reading covers it, the node is not measured, or there is not enough on both sides to tell.
 /// </param>
+/// <param name="Unreported">The node has its own source for this metric and it is not reporting, so its children's sum is not a stand-in for it.</param>
 public sealed record FlowNode(
     string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
-    string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null, double? Throughput = null)
+    string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null, double? Throughput = null,
+    bool Unreported = false)
 {
     /// <summary>A node the builder invented: a return lane (<c>…#in</c>) or unmetered remainder (<c>…#unmeasured</c>).</summary>
     public bool Synthetic => Id.Contains('#');
