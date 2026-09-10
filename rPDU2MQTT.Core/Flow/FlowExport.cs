@@ -31,6 +31,10 @@ public static class FlowExport
         var node = graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, id, StringComparison.OrdinalIgnoreCase));
         if (node?.Value is { } known) { value = known; return true; }
 
+        // The builder already refused to stand a roll-up in for this node's own silent meter; re-deriving one
+        // here undoes that and latches the children's epoch into the export's high-water mark.
+        if (node?.Unreported == true) { value = 0; return false; }
+
         // No value on the node: derive it from the links whose flow is known (the larger of in vs. out).
         double inflow = 0, outflow = 0;
         var anyKnown = false;

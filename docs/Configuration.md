@@ -839,10 +839,10 @@ Per-source settings:
 Notes:
 
 - **Check `Accumulation` on every energy source, and check it against the topic rather than the publisher.**
-  One publisher can do both, and which it does is not visible in the name: Solar Assistant's whole
-  `total/…_energy` family — `load_energy`, `pv_energy`, `grid_energy_in`/`_out`, `battery_energy_in`/`_out` —
-  resets at midnight, and ESPHome's `energy_d`/`daily_energy` sensors do too, while its `total_energy` does
-  not. The way to tell is to watch one across a rollover: a daily counter drops, a cumulative one doesn't.
+  One publisher can do both, and which it does is not visible in the name: ESPHome's `energy_d` /
+  `daily_energy` sensors reset at midnight while its `total_energy` does not, and Solar Assistant's
+  `total/…_energy` family is cumulative on current versions. Do not take either on trust — watch the topic
+  across a rollover, because a daily counter drops there and a cumulative one carries straight on.
   Both mistakes cost you data, in opposite ways:
   - A **daily counter declared `lifetime`** is the expensive one. Its rise is measured, so it loses the
     whole day every midnight (seen live: 2.76 kWh of solar against 27.4 kWh actually generated) — and worse,

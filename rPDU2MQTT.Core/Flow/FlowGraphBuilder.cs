@@ -546,7 +546,8 @@ public static class FlowGraphBuilder
             .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
                                        ValueOf(id), ImbalanceOf(id), DerivationOf(id),
-                                       tags.TryGetValue(id, out var t) ? t : null, ThroughputOf(id)))
+                                       tags.TryGetValue(id, out var t) ? t : null, ThroughputOf(id),
+                                       Unavailable(id)))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

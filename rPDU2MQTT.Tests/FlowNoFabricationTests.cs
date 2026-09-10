@@ -195,4 +195,77 @@ public class FlowNoFabricationTests
         Assert.Equal(120, graph.Nodes.Single(n => n.Id == "main").Value);
         Assert.True(graph.Links.Single(l => l.Source == "main").Known);
     }
+    private sealed class Stub : IFlowValueSource
+    {
+        public readonly Dictionary<(string, string), double> V = new();
+        public bool TryGetValue(string node, string metric, out double value) => V.TryGetValue((node, metric), out value);
+    }
+
+    [Fact]
+    public void ABoundNodeThatIsNotReporting_IsNotExportedAsItsChildrensSum()
+    {
+        // Live: the PV counter had not arrived yet after a restart, so the export summed the three MPPTs —
+        // whose totals this bridge integrated on a different epoch — and published 725.889 for a node whose
+        // own counter reads 183.5. The export keeps a high-water mark, so that one reading latched a figure
+        // the real counter cannot reach and the sensor published nothing for a day.
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode
+                {
+                    Id = "solar", Label = "Solar (PV)", Kind = "solar",
+                    Sources = { new EnergyFlowSource { Type = "mqtt", Metric = "energy", Topic = "sa/pv_energy" } },
+                },
+                new EnergyFlowNode { Id = "mppt1", Label = "MPPT_1" },
+                new EnergyFlowNode { Id = "mppt2", Label = "MPPT_2" },
+                new EnergyFlowNode { Id = "inverter", Label = "Inverter", Kind = "inverter" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "mppt1", To = "solar" },
+                new EnergyFlowLink { From = "mppt2", To = "solar" },
+                new EnergyFlowLink { From = "solar", To = "inverter" },
+            },
+        };
+
+        // The MPPTs have their integrated totals; solar's own counter is not reporting.
+        var live = new Stub();
+        live.V[("mppt1", "energy")] = 206.4;
+        live.V[("mppt2", "energy")] = 263.6;
+
+        var graph = FlowGraphBuilder.Build(new PduData(), flow, "energy", live);
+
+        Assert.Null(graph.Nodes.Single(n => n.Id == "solar").Value);
+        Assert.False(FlowExport.TryNodeValue(graph, "solar", out _));
+    }
+
+    [Fact]
+    public void ANodeWithNoSourceOfItsOwn_StillRollsUpItsChildren()
+    {
+        // The refusal is only for a node that has its own meter. An unbound tier is a roll-up by definition.
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "mppt1", Label = "MPPT_1" },
+                new EnergyFlowNode { Id = "mppt2", Label = "MPPT_2" },
+                new EnergyFlowNode { Id = "array", Label = "Array" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "mppt1", To = "array" },
+                new EnergyFlowLink { From = "mppt2", To = "array" },
+            },
+        };
+        var live = new Stub();
+        live.V[("mppt1", "energy")] = 206.4;
+        live.V[("mppt2", "energy")] = 263.6;
+
+        var graph = FlowGraphBuilder.Build(new PduData(), flow, "energy", live);
+
+        Assert.True(FlowExport.TryNodeValue(graph, "array", out var v));
+        Assert.Equal(470.0, v, 3);
+    }
+
 }
