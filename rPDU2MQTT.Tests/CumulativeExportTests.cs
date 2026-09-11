@@ -76,64 +76,66 @@ public class CumulativeExportTests
     [Fact]
     public void TheFirstReadingIsAlwaysPublished()
         => Assert.Equal(14_616.54, new CumulativeExport().Publish("grid|energy", 14_616.54));
-    private static readonly DateTime T0 = new(2026, 9, 9, 8, 0, 0, DateTimeKind.Utc);
-
+    /// <summary>
+    /// The 0.003 kWh dip that once cost 20 outlets their sensor. It is still withheld: a carve-out for
+    /// "small" decreases is what let the mark drift down, and a mark that drifts down is not a mark.
+    /// The right answer to save-ordering jitter is to stop the jitter, not to publish a decrease.
+    /// </summary>
     [Fact]
-    public void ADipInsideTheConsumersOwnResetThresholdIsPublished()
+    public void ASmallDipIsWithheldLikeAnyOther()
     {
-        // Live: 20 outlets went dark over a thousandth of a kWh. The mark is written on publish and the
-        // accumulated state on its own cadence, so a restart brings the value back a hair behind the mark.
-        // Home Assistant does not read a decrease that small as a reset, so withholding it bought nothing.
         var guard = new CumulativeExport();
-        guard.Publish("outlet:pdu_1:1|energy", 832.613, T0);
+        guard.Publish("outlet:pdu_1:1|energy", 832.613);
 
-        Assert.Equal(832.610, guard.Publish("outlet:pdu_1:1|energy", 832.610, T0.AddMinutes(1)));
-        Assert.Empty(guard.Withheld);
-    }
-
-    [Fact]
-    public void AMarkLeftBehindByADifferentSeriesReBaselinesInsteadOfWithholdingForever()
-    {
-        // Live: the solar mark latched at 725.889 — the MPPTs' integrated totals, summed in while the PV
-        // counter had not yet arrived — and the real counter reads 183.5. It can never climb back, so the
-        // sensor published nothing at all for as long as the mark stood.
-        var guard = new CumulativeExport();
-        guard.Publish("solar|energy", 725.889, T0);
-
-        // A stale contributor comes back; a re-based series never does. Inside the window it is still held.
-        Assert.Null(guard.Publish("solar|energy", 183.5, T0.AddHours(1)));
+        Assert.Null(guard.Publish("outlet:pdu_1:1|energy", 832.610));
         Assert.Single(guard.Withheld);
 
-        var due = T0.AddHours(1) + CumulativeExport.RebaselineAfter;
-        Assert.Equal(183.5, guard.Publish("solar|energy", 183.5, due));
+        // And the mark did not move down with it: the next honest reading still measures against 832.613.
+        Assert.Null(guard.Publish("outlet:pdu_1:1|energy", 832.612));
+        Assert.Equal(832.614, guard.Publish("outlet:pdu_1:1|energy", 832.614));
+    }
+
+    /// <summary>
+    /// Live on 2026-09-10: the solar mark stood at 725.889 and the dedicated PV counter read 183.5. The
+    /// six-hour re-baseline published that step down at 04:10, Home Assistant read a meter reset, and the
+    /// whole 183.5 kWh counter was booked as one hour of production. No elapsed time releases a mark.
+    /// </summary>
+    [Fact]
+    public void AMarkNeverReBaselinesOntoALowerSeriesHoweverLongItStaysDown()
+    {
+        var guard = new CumulativeExport();
+        guard.Publish("solar|energy", 725.889);
+
+        for (var i = 0; i < 500; i++)
+            Assert.Null(guard.Publish("solar|energy", 183.5 + i * 0.01));
+
+        Assert.Single(guard.Withheld);
+        Assert.Contains("725.889", guard.Withheld.Single().Reason);
+    }
+
+    /// <summary>A key held down does not hold back any other key.</summary>
+    [Fact]
+    public void WithholdingIsPerKey()
+    {
+        var guard = new CumulativeExport();
+        guard.Publish("solar|energy", 700);
+        guard.Publish("grid|energy", 10);
+
+        Assert.Null(guard.Publish("solar|energy", 183.5));
+        Assert.Equal(11, guard.Publish("grid|energy", 11));
+    }
+
+    /// <summary>Clearing the stored mark is the deliberate way to move one, and it is the only way.</summary>
+    [Fact]
+    public void ResetIsTheOnlyReBaseline()
+    {
+        var guard = new CumulativeExport();
+        guard.Publish("solar|energy", 725.889);
+        Assert.Null(guard.Publish("solar|energy", 183.5));
+
+        guard.Reset();
+
+        Assert.Equal(183.5, guard.Publish("solar|energy", 183.5));
         Assert.Empty(guard.Withheld);
-        // The mark came with it, so the series carries on from where it really is.
-        Assert.Equal(183.6, guard.Publish("solar|energy", 183.6, due.AddMinutes(1)));
     }
-
-    [Fact]
-    public void TheWindowStartsWhenTheReadingFirstWentDown_NotWhenItWasLastSeen()
-    {
-        var guard = new CumulativeExport();
-        guard.Publish("panel|energy", 1000, T0);
-        Assert.Null(guard.Publish("panel|energy", 400, T0.AddHours(1)));
-        Assert.Null(guard.Publish("panel|energy", 400, T0.AddHours(3)));
-
-        // The window runs from the first low reading, so a later one does not restart it.
-        Assert.Equal(400, guard.Publish("panel|energy", 400, T0.AddHours(1) + CumulativeExport.RebaselineAfter));
-    }
-
-    [Fact]
-    public void ARecoveryInsideTheWindowClearsTheClock()
-    {
-        // The stale-contributor case must not creep toward a re-baseline across separate outages.
-        var guard = new CumulativeExport();
-        guard.Publish("panel|energy", 1000, T0);
-        Assert.Null(guard.Publish("panel|energy", 400, T0.AddHours(5)));
-        Assert.Equal(1000, guard.Publish("panel|energy", 1000, T0.AddHours(5.5)));   // contributor came back
-
-        Assert.Null(guard.Publish("panel|energy", 400, T0.AddHours(6)));             // a fresh outage
-        Assert.Null(guard.Publish("panel|energy", 400, T0.AddHours(11)));            // still inside its own window
-    }
-
 }
