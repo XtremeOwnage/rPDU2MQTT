@@ -4,9 +4,10 @@ using System.Text.Json.Serialization;
 namespace rPDU2MQTT.Models.Config;
 
 /// <summary>
-/// Reads an <see cref="EmonCmsFeedTypeConfig"/> from either a bare string (the original v1 form,
-/// <c>Types: ["realpower", "energy"]</c>) or the full object form. Keeps existing persisted config
-/// loadable after the per-type rework (#163) instead of crashing on startup.
+/// Reads an <see cref="EmonCmsFeedTypeConfig"/> from either a bare string (the v1 form,
+/// <c>Types: ["realpower", "energy"]</c>) or the object form, filling anything absent from the type's
+/// own defaults. <c>Daily</c> and <c>DailyIntervalSeconds</c> are read and discarded: daily energy is a
+/// type of its own now.
 /// </summary>
 public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTypeConfig>
 {
@@ -14,6 +15,11 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
     private sealed class Dto
     {
         public string? Type { get; set; }
+        public bool? Enabled { get; set; }
+        public bool? CalculateWithEmonCms { get; set; }
+        public string? Prefix { get; set; }
+        public string? Suffix { get; set; }
+        public string? Units { get; set; }
         public EmonCmsFeedEngine? Engine { get; set; }
         public int? IntervalSeconds { get; set; }
         public bool? Daily { get; set; }
@@ -23,13 +29,17 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
     public override EmonCmsFeedTypeConfig Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.String)
-            return new EmonCmsFeedTypeConfig { Type = reader.GetString() ?? "realpower" };
+            return EmonCmsFeedTypeConfig.For(reader.GetString() ?? "realpower");
 
         var dto = JsonSerializer.Deserialize<Dto>(ref reader, options) ?? new Dto();
-        var cfg = new EmonCmsFeedTypeConfig { Engine = dto.Engine, IntervalSeconds = dto.IntervalSeconds };
-        if (!string.IsNullOrWhiteSpace(dto.Type)) cfg.Type = dto.Type!;
-        if (dto.Daily is { } d) cfg.Daily = d;
-        if (dto.DailyIntervalSeconds is { } di) cfg.DailyIntervalSeconds = di;
+        var cfg = EmonCmsFeedTypeConfig.For(string.IsNullOrWhiteSpace(dto.Type) ? "realpower" : dto.Type!);
+        if (dto.Enabled is { } e) cfg.Enabled = e;
+        if (dto.CalculateWithEmonCms is { } c) cfg.CalculateWithEmonCms = c;
+        if (dto.Prefix is not null) cfg.Prefix = dto.Prefix;
+        if (!string.IsNullOrWhiteSpace(dto.Suffix)) cfg.Suffix = dto.Suffix!;
+        if (!string.IsNullOrWhiteSpace(dto.Units)) cfg.Units = dto.Units!;
+        if (dto.Engine is { } en) cfg.Engine = en;
+        if (dto.IntervalSeconds is { } i) cfg.IntervalSeconds = i;
         return cfg;
     }
 
@@ -37,9 +47,12 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
         => JsonSerializer.Serialize(writer, new Dto
         {
             Type = value.Type,
+            Enabled = value.Enabled,
+            CalculateWithEmonCms = value.CalculateWithEmonCms,
+            Prefix = value.Prefix,
+            Suffix = value.Suffix,
+            Units = value.Units,
             Engine = value.Engine,
             IntervalSeconds = value.IntervalSeconds,
-            Daily = value.Daily,
-            DailyIntervalSeconds = value.DailyIntervalSeconds,
         }, options);
 }

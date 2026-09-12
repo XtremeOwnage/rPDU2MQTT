@@ -29,11 +29,13 @@ public class ConfigSchemaTests
         Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
         Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Null(t.Engine));   // inherit the Feeds-level default
 
-        var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30}]}}}""");
+        // Daily is read and dropped: daily energy is a type of its own now.
+        var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30,"Suffix":"_kwh"}]}}}""");
         var only = Assert.Single(obj.EmonCMS.Feeds.Types);
         Assert.Equal("energy", only.Type);
-        Assert.True(only.Daily);
         Assert.Equal(30, only.IntervalSeconds);
+        Assert.Equal("_kwh", only.Suffix);
+        Assert.True(only.Enabled);
     }
 
     [Fact]
@@ -47,8 +49,8 @@ public class ConfigSchemaTests
             "EmonCMS:\n  Feeds:\n    Types:\n      - Type: energy\n        Daily: true\n        IntervalSeconds: 30\n");
         var only = Assert.Single(obj.EmonCMS.Feeds.Types);
         Assert.Equal("energy", only.Type);
-        Assert.True(only.Daily);
         Assert.Equal(30, only.IntervalSeconds);
+        Assert.Equal("_energy", only.Suffix);
     }
 
     [Fact]

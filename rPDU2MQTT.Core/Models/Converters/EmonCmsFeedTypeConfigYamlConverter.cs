@@ -16,6 +16,11 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
     private sealed class Dto
     {
         public string? Type { get; set; }
+        public bool? Enabled { get; set; }
+        public bool? CalculateWithEmonCms { get; set; }
+        public string? Prefix { get; set; }
+        public string? Suffix { get; set; }
+        public string? Units { get; set; }
         public EmonCmsFeedEngine? Engine { get; set; }
         public int? IntervalSeconds { get; set; }
         public bool? Daily { get; set; }
@@ -29,14 +34,18 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
         if (parser.Current is Scalar)
         {
             var scalar = parser.Consume<Scalar>();
-            return new EmonCmsFeedTypeConfig { Type = string.IsNullOrWhiteSpace(scalar.Value) ? "realpower" : scalar.Value };
+            return EmonCmsFeedTypeConfig.For(string.IsNullOrWhiteSpace(scalar.Value) ? "realpower" : scalar.Value);
         }
 
         var dto = (Dto?)rootDeserializer(typeof(Dto)) ?? new Dto();
-        var cfg = new EmonCmsFeedTypeConfig { Engine = dto.Engine, IntervalSeconds = dto.IntervalSeconds };
-        if (!string.IsNullOrWhiteSpace(dto.Type)) cfg.Type = dto.Type!;
-        if (dto.Daily is { } d) cfg.Daily = d;
-        if (dto.DailyIntervalSeconds is { } di) cfg.DailyIntervalSeconds = di;
+        var cfg = EmonCmsFeedTypeConfig.For(string.IsNullOrWhiteSpace(dto.Type) ? "realpower" : dto.Type!);
+        if (dto.Enabled is { } e) cfg.Enabled = e;
+        if (dto.CalculateWithEmonCms is { } c) cfg.CalculateWithEmonCms = c;
+        if (dto.Prefix is not null) cfg.Prefix = dto.Prefix;
+        if (!string.IsNullOrWhiteSpace(dto.Suffix)) cfg.Suffix = dto.Suffix!;
+        if (!string.IsNullOrWhiteSpace(dto.Units)) cfg.Units = dto.Units!;
+        if (dto.Engine is { } en) cfg.Engine = en;
+        if (dto.IntervalSeconds is { } i) cfg.IntervalSeconds = i;
         return cfg;
     }
 
@@ -46,10 +55,13 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
         serializer(new Dto
         {
             Type = v.Type,
+            Enabled = v.Enabled,
+            CalculateWithEmonCms = v.CalculateWithEmonCms,
+            Prefix = v.Prefix,
+            Suffix = v.Suffix,
+            Units = v.Units,
             Engine = v.Engine,
             IntervalSeconds = v.IntervalSeconds,
-            Daily = v.Daily,
-            DailyIntervalSeconds = v.DailyIntervalSeconds,
         }, typeof(Dto));
     }
 }

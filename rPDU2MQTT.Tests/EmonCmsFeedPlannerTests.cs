@@ -21,6 +21,15 @@ public class EmonCmsFeedPlannerTests
         return data;
     }
 
+    /// <summary>A type at its shipped defaults, with any of them overridden.</summary>
+    private static EmonCmsFeedTypeConfig Typed(string type, int? interval = null, EmonCmsFeedEngine? engine = null)
+    {
+        var t = EmonCmsFeedTypeConfig.For(type);
+        if (interval is { } i) t.IntervalSeconds = i;
+        if (engine is { } e) t.Engine = e;
+        return t;
+    }
+
     private static Config Base()
     {
         var c = new Config();
@@ -38,8 +47,8 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"), ("voltage", "230"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower", IntervalSeconds = 10 });
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", IntervalSeconds = 10 });
+        config.EmonCMS.Feeds.Types.Add(Typed("realpower", 10));
+        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -54,31 +63,32 @@ public class EmonCmsFeedPlannerTests
     }
 
     [Fact]
-    public void BuildDesired_TypeEngineInheritsFeedsDefault_UnlessOverridden()
+    public void BuildDesired_TypeEngineInheritsFeedsDefault_ButIntervalIsAlwaysTheTypesOwn()
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
         var config = Base();
         config.EmonCMS.Feeds.Engine = EmonCmsFeedEngine.MySQL;          // Feeds-level default
-        config.EmonCMS.Feeds.IntervalSeconds = 20;
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });   // inherits -> MySQL, 20
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", Engine = EmonCmsFeedEngine.PHPFina, IntervalSeconds = 5 });
+        config.EmonCMS.Feeds.IntervalSeconds = 20;                      // no longer inherited by a type
+        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));   // inherits MySQL, keeps its own 10s
+        config.EmonCMS.Feeds.Types.Add(Typed("energy", 5, EmonCmsFeedEngine.PHPFina));
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
         var rp = d.Feeds.Single(x => x.Name.EndsWith("realpower"));
         Assert.Equal((int)EmonCmsFeedEngine.MySQL, rp.Engine);
-        Assert.Equal(20, rp.IntervalSeconds);
+        Assert.Equal(10, rp.IntervalSeconds);
         var en = d.Feeds.Single(x => x.Name.EndsWith("energy"));
         Assert.Equal((int)EmonCmsFeedEngine.PHPFina, en.Engine);
         Assert.Equal(5, en.IntervalSeconds);
     }
 
     [Fact]
-    public void BuildDesired_DailyEnergy_AddsADailyFeedAtItsOwnInterval()
+    public void BuildDesired_DailyEnergy_IsATypeOfItsOwn_DerivedFromTheEnergyCounter()
     {
         var data = OnePdu("o0", "Server A", ("energy", "12"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "energy", IntervalSeconds = 10, Daily = true, DailyIntervalSeconds = 86400 });
+        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
+        config.EmonCMS.Feeds.Types.Add(Typed("energy_d"));
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -86,9 +96,61 @@ public class EmonCmsFeedPlannerTests
         var daily = Assert.Single(d.Feeds, x => x.DataType == 2);
         Assert.Equal("rack_pdu_1_o0_energy_d", daily.Name);
         Assert.Equal(86400, daily.IntervalSeconds);
+
         var steps = Assert.Single(d.Inputs).Steps;
+        Assert.Equal(ProcessSlot.KwhAccumulator, steps[0].Process);
         Assert.Equal(ProcessSlot.KwhToKwhd, steps[1].Process);
         Assert.Equal("rack_pdu_1_o0_energy_d", steps[1].Feed);
+    }
+
+    /// <summary>A type switched off is not provisioned, and nothing derives it either.</summary>
+    [Fact]
+    public void BuildDesired_ADisabledType_GetsNoFeedAndNoStep()
+    {
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
+        var daily = Typed("energy_d");
+        daily.Enabled = false;
+        config.EmonCMS.Feeds.Types.Add(daily);
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.DoesNotContain(d.Feeds, x => x.Name.EndsWith("_energy_d"));
+        Assert.DoesNotContain(Assert.Single(d.Inputs).Steps, x => x.Process == ProcessSlot.KwhToKwhd);
+    }
+
+    /// <summary>With EmonCMS calculation off the reading is recorded as it arrives and nothing is derived.</summary>
+    [Fact]
+    public void BuildDesired_CalculationOff_LogsTheReadingInsteadOfAccumulatingIt()
+    {
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        var energy = Typed("energy", 10);
+        energy.CalculateWithEmonCms = false;
+        config.EmonCMS.Feeds.Types.Add(energy);
+        config.EmonCMS.Feeds.Types.Add(Typed("energy_d"));
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        var steps = Assert.Single(d.Inputs).Steps;
+        Assert.Equal(ProcessSlot.LogToFeed, Assert.Single(steps).Process);
+    }
+
+    /// <summary>The suffix is where the type appears in a feed name, and it is the operator's to choose.</summary>
+    [Fact]
+    public void BuildDesired_TheTypeSuffix_NamesTheFeed()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"));
+        var config = Base();
+        var power = Typed("realpower");
+        power.Prefix = "site_";
+        power.Suffix = "_bananas";
+        config.EmonCMS.Feeds.Types.Add(power);
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.Contains(d.Feeds, x => x.Name == "site_rack_pdu_1_o0_bananas");
     }
 
     [Fact]
@@ -96,7 +158,7 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });
+        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
         config.EmonCMS.Feeds.Virtual.Enabled = true;
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
@@ -106,14 +168,17 @@ public class EmonCmsFeedPlannerTests
         Assert.Equal("rack_pdu_1_o0_realpower", v.SourceFeed);
     }
 
+    /// <summary>The template alone decides whether a feed name is stable or follows the display name.</summary>
     [Fact]
-    public void BuildDesired_NonIdempotent_NamesStorageFeedsFromDisplayName_AndSkipsRedundantVirtuals()
+    public void BuildDesired_ADisplayNameTemplate_NamesStorageFeedsFromIt_AndSkipsRedundantVirtuals()
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
         var config = Base();
-        config.EmonCMS.Feeds.IdempotentNames = false;
-        config.EmonCMS.Feeds.Types.Add(new() { Type = "realpower" });
-        config.EmonCMS.Feeds.Virtual.Enabled = true;   // would collide with the (now friendly) storage name
+        config.EmonCMS.Feeds.StorageNameTemplate = "{name}";
+        var power = Typed("realpower");
+        power.Suffix = " {type}";                     // the same name the virtual template produces
+        config.EmonCMS.Feeds.Types.Add(power);
+        config.EmonCMS.Feeds.Virtual.Enabled = true;  // would collide with the (now friendly) storage name
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -164,4 +229,26 @@ public class EmonCmsFeedPlannerTests
     [InlineData("", "1", null)]
     public void LinkedFeedId_FindsTheLogToFeedTarget(string processList, string logProc, int? expected)
         => Assert.Equal(expected, EmonCmsFeedPlanner.LinkedFeedId(processList, logProc));
+
+    /// <summary>
+    /// A config written before the type carried its own suffix names its feeds with {type} in the template.
+    /// That placeholder is dropped and the suffix supplies it, so the names it already provisioned — and the
+    /// history behind them — stay exactly as they were.
+    /// </summary>
+    [Fact]
+    public void BuildDesired_ATemplateStillNamingTheType_ProducesTheSameNamesAsBefore()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
+        var config = Base();
+        config.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}_{type}";   // the pre-#436 default
+        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
+        config.EmonCMS.Feeds.Types.Add(Typed("energy"));
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_realpower");
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_energy");
+        Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("realpower_realpower") || x.Name.Contains("energy_energy"));
+    }
+
 }

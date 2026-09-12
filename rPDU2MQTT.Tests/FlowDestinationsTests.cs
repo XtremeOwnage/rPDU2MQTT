@@ -94,7 +94,7 @@ public class FlowDestinationsTests
     {
         var cfg = Configured();
         cfg.EmonCMS.Feeds.AutoConfigure = true;
-        cfg.EmonCMS.Feeds.Types = [new() { Type = "realpower" }, new() { Type = EnergyPeriod.Metric }];
+        cfg.EmonCMS.Feeds.Types = [EmonCmsFeedTypeConfig.For("realpower"), EmonCmsFeedTypeConfig.For(EnergyPeriod.Metric)];
 
         var desired = EmonCmsFeedPlanner.BuildDesired(new PduData(), cfg, FlowTiers.Graphs(new PduData(), cfg, Live()));
 
@@ -284,7 +284,7 @@ public class FlowDestinationsTests
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "wattsonly", Label = "Watts Only", Kind = "circuit" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "meter", Label = "Meter", Kind = "grid" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "both", Label = "Both", Kind = "inverter" });
-        c.EmonCMS.Feeds.Types = [new() { Type = "realpower" }, new() { Type = "energy", Daily = true }];
+        c.EmonCMS.Feeds.Types = [EmonCmsFeedTypeConfig.For("realpower"), EmonCmsFeedTypeConfig.For("energy"), EmonCmsFeedTypeConfig.For("energy_d")];
         return c;
     }
 

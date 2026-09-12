@@ -585,14 +585,29 @@ spec:
                               enum:
                               - ''
                               - realpower
-                              - apparentpower
                               - energy
                               - energy_d
+                              - apparentpower
                               - current
                               - voltage
                               - frequency
                               - powerfactor
-                              description: The measurement type this applies to (raw PDU type name, or 'energy_d' for the energy-flow daily totals).
+                              description: The measurement type this applies to.
+                            Enabled:
+                              type: boolean
+                              description: Build and maintain a feed for this type.
+                            CalculateWithEmonCms:
+                              type: boolean
+                              description: Let EmonCMS work this type out from the one a node does report, using its own processes — energy integrated from power, power from an energy counter, and the daily total from either. Applies to power, energy and daily energy; other types are recorded as they arrive.
+                            Prefix:
+                              type: string
+                              description: 'Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'
+                            Suffix:
+                              type: string
+                              description: 'Text placed after the feed name, which is where the type appears. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'
+                            Units:
+                              type: string
+                              description: The unit this feed is stored in.
                             Engine:
                               type: string
                               enum:
@@ -603,18 +618,10 @@ spec:
                               description: Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.
                             IntervalSeconds:
                               type: integer
-                              description: Sample interval in seconds for this type's feed. Blank inherits Feeds.IntervalSeconds.
+                              description: Sample interval in seconds for this type's feed.
                               minimum: 1
                               maximum: 86400
-                            Daily:
-                              type: boolean
-                              description: 'Also create a daily kWh/d feed (an extra processlist step: kWh→kWh/d). Typically only for the energy type.'
-                            DailyIntervalSeconds:
-                              type: integer
-                              description: Interval (seconds) for the daily kWh/d feed. Should be a day (86400), not the base interval.
-                              minimum: 1
-                              maximum: 86400
-                        description: The measurement types to build feeds for, each with its own engine, interval and processing.
+                        description: The supported measurement types. Each says whether it gets a feed, how that feed is named and stored, and whether EmonCMS derives it.
                       Engine:
                         type: string
                         enum:
@@ -628,15 +635,12 @@ spec:
                         description: Default sample interval in seconds for a fixed-interval feed, for types that don't set their own.
                         minimum: 1
                         maximum: 86400
-                      IdempotentNames:
-                        type: boolean
-                        description: Name storage feeds idempotently from stable ids (device/source/type) so they DON'T change when a source is renamed. Turn off to name them from the display name instead (renaming a source renames its feed).
                       Tag:
                         type: string
                         description: The EmonCMS tag (group) new feeds are filed under. Blank uses the input node name.
                       StorageNameTemplate:
                         type: string
-                        description: 'Template for the idempotent storage-feed name. Use only stable placeholders ({device}, {source}, {type}, {number}) so it never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'
+                        description: 'Template for the storage-feed name, without the type — each type appends its own suffix. Use only stable placeholders ({device}, {source}, {number}) so the name never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {units}.'
                       Virtual:
                         type: object
                         x-kubernetes-preserve-unknown-fields: true
