@@ -94,14 +94,14 @@ public class FlowDestinationsTests
     {
         var cfg = Configured();
         cfg.EmonCMS.Feeds.AutoConfigure = true;
-        cfg.EmonCMS.Feeds.Types = [EmonCmsFeedTypeConfig.For("realpower"), EmonCmsFeedTypeConfig.For(EnergyPeriod.Metric)];
+        foreach (var t in cfg.EmonCMS.Feeds.Types) t.Enabled = t.Type == "realpower" || t.Type == EnergyPeriod.Metric;
 
         var desired = EmonCmsFeedPlanner.BuildDesired(new PduData(), cfg, FlowTiers.Graphs(new PduData(), cfg, Live()));
 
         Assert.Contains(desired.Feeds, f => f.Name == "solar_realpower");
         Assert.Contains(desired.Feeds, f => f.Name == "solar_energy_d");
         Assert.Contains(desired.Inputs, i => i.InputName == "solar_realpower" && i.StorageFeed == "solar_realpower");
-        // A type nobody asked for gets no feed, exactly as for a PDU reading.
+        // A type switched off gets no feed, exactly as for a PDU reading.
         Assert.DoesNotContain(desired.Feeds, f => f.Name == "solar_energy");
     }
 
@@ -284,7 +284,7 @@ public class FlowDestinationsTests
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "wattsonly", Label = "Watts Only", Kind = "circuit" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "meter", Label = "Meter", Kind = "grid" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "both", Label = "Both", Kind = "inverter" });
-        c.EmonCMS.Feeds.Types = [EmonCmsFeedTypeConfig.For("realpower"), EmonCmsFeedTypeConfig.For("energy"), EmonCmsFeedTypeConfig.For("energy_d")];
+        foreach (var t in c.EmonCMS.Feeds.Types) t.Enabled = t.Type is "realpower" or "energy" or "energy_d";
         return c;
     }
 

@@ -15,8 +15,8 @@ const cfg = {
   EmonCMS: {
     Feeds: {
       Types: [
-        { Type: 'realpower', Enabled: true, CalculateWithEmonCms: true, Suffix: '_realpower', Units: 'W', IntervalSeconds: 10 },
-        { Type: 'energy_d', Enabled: true, CalculateWithEmonCms: true, Suffix: '_energy_d', Units: 'kWh', IntervalSeconds: 86400 },
+        { Type: 'realpower', Enabled: true, Calculation: 'PreferLocal', Suffix: '_realpower', Units: 'W', IntervalSeconds: 10 },
+        { Type: 'energy_d', Enabled: true, Calculation: 'ForceEmonCms', Suffix: '_energy_d', Units: 'kWh', IntervalSeconds: 86400 },
       ],
     },
   },

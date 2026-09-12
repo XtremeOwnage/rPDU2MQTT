@@ -21,10 +21,14 @@ public class EmonCmsFeedPlannerTests
         return data;
     }
 
-    /// <summary>A type at its shipped defaults, with any of them overridden.</summary>
-    private static EmonCmsFeedTypeConfig Typed(string type, int? interval = null, EmonCmsFeedEngine? engine = null)
+    /// <summary>
+    /// Switch a type on, with any of its defaults overridden. The list is fixed and always complete, so a
+    /// test says which types it wants by enabling them, not by building a list of its own.
+    /// </summary>
+    private static EmonCmsFeedTypeConfig Enable(Config c, string type, int? interval = null, EmonCmsFeedEngine? engine = null)
     {
-        var t = EmonCmsFeedTypeConfig.For(type);
+        var t = c.EmonCMS.Feeds.Types.Single(x => string.Equals(x.Type, type, StringComparison.OrdinalIgnoreCase));
+        t.Enabled = true;
         if (interval is { } i) t.IntervalSeconds = i;
         if (engine is { } e) t.Engine = e;
         return t;
@@ -38,7 +42,8 @@ public class EmonCmsFeedPlannerTests
         c.EmonCMS.Feeds.AutoConfigure = true;
         c.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}_{type}";
         c.EmonCMS.Feeds.Virtual.NameTemplate = "{name} {type}";
-        c.EmonCMS.Feeds.Types = new();
+        // Nothing on by default here: each test enables the types it is about.
+        foreach (var t in c.EmonCMS.Feeds.Types) t.Enabled = false;
         return c;
     }
 
@@ -47,8 +52,8 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"), ("voltage", "230"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(Typed("realpower", 10));
-        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
+        Enable(config, "realpower", 10);
+        Enable(config, "energy", 10);
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -69,8 +74,8 @@ public class EmonCmsFeedPlannerTests
         var config = Base();
         config.EmonCMS.Feeds.Engine = EmonCmsFeedEngine.MySQL;          // Feeds-level default
         config.EmonCMS.Feeds.IntervalSeconds = 20;                      // no longer inherited by a type
-        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));   // inherits MySQL, keeps its own 10s
-        config.EmonCMS.Feeds.Types.Add(Typed("energy", 5, EmonCmsFeedEngine.PHPFina));
+        Enable(config, "realpower");   // inherits MySQL, keeps its own 10s
+        Enable(config, "energy", 5, EmonCmsFeedEngine.PHPFina);
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -87,8 +92,8 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("energy", "12"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
-        config.EmonCMS.Feeds.Types.Add(Typed("energy_d"));
+        Enable(config, "energy", 10);
+        Enable(config, "energy_d");
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -109,10 +114,8 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("energy", "12"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(Typed("energy", 10));
-        var daily = Typed("energy_d");
-        daily.Enabled = false;
-        config.EmonCMS.Feeds.Types.Add(daily);
+        Enable(config, "energy", 10);
+        config.EmonCMS.Feeds.Types.Single(t => t.Type == "energy_d").Enabled = false;
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -120,21 +123,23 @@ public class EmonCmsFeedPlannerTests
         Assert.DoesNotContain(Assert.Single(d.Inputs).Steps, x => x.Process == ProcessSlot.KwhToKwhd);
     }
 
-    /// <summary>With EmonCMS calculation off the reading is recorded as it arrives and nothing is derived.</summary>
+    /// <summary>
+    /// Forcing the counter local decides how the counter is written, not what may be read from it: the
+    /// daily total is still EmonCMS's to work out, because it is the day boundary that is being deferred.
+    /// </summary>
     [Fact]
-    public void BuildDesired_CalculationOff_LogsTheReadingInsteadOfAccumulatingIt()
+    public void BuildDesired_ForcingTheCounterLocal_StillLetsEmonCmsDeriveTheDailyTotal()
     {
         var data = OnePdu("o0", "Server A", ("energy", "12"));
         var config = Base();
-        var energy = Typed("energy", 10);
-        energy.CalculateWithEmonCms = false;
-        config.EmonCMS.Feeds.Types.Add(energy);
-        config.EmonCMS.Feeds.Types.Add(Typed("energy_d"));
+        var energy = Enable(config, "energy", 10);
+        energy.Calculation = EmonCmsCalculation.ForceLocal;
+        Enable(config, "energy_d");
 
-        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+        var steps = Assert.Single(EmonCmsFeedPlanner.BuildDesired(data, config).Inputs).Steps;
 
-        var steps = Assert.Single(d.Inputs).Steps;
-        Assert.Equal(ProcessSlot.LogToFeed, Assert.Single(steps).Process);
+        Assert.Equal(ProcessSlot.LogToFeed, steps[0].Process);
+        Assert.Contains(steps, x => x.Process == ProcessSlot.KwhToKwhd);
     }
 
     /// <summary>The suffix is where the type appears in a feed name, and it is the operator's to choose.</summary>
@@ -143,10 +148,9 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
         var config = Base();
-        var power = Typed("realpower");
+        var power = Enable(config, "realpower");
         power.Prefix = "site_";
         power.Suffix = "_bananas";
-        config.EmonCMS.Feeds.Types.Add(power);
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -158,7 +162,7 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
+        Enable(config, "realpower");
         config.EmonCMS.Feeds.Virtual.Enabled = true;
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
@@ -175,9 +179,8 @@ public class EmonCmsFeedPlannerTests
         var data = OnePdu("o0", "Server A", ("realpower", "60"));
         var config = Base();
         config.EmonCMS.Feeds.StorageNameTemplate = "{name}";
-        var power = Typed("realpower");
+        var power = Enable(config, "realpower");
         power.Suffix = " {type}";                     // the same name the virtual template produces
-        config.EmonCMS.Feeds.Types.Add(power);
         config.EmonCMS.Feeds.Virtual.Enabled = true;  // would collide with the (now friendly) storage name
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
@@ -241,8 +244,8 @@ public class EmonCmsFeedPlannerTests
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
         var config = Base();
         config.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}_{type}";   // the pre-#436 default
-        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
-        config.EmonCMS.Feeds.Types.Add(Typed("energy"));
+        Enable(config, "realpower");
+        Enable(config, "energy");
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
@@ -262,15 +265,88 @@ public class EmonCmsFeedPlannerTests
     {
         var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
         var config = Base();
-        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
-        config.EmonCMS.Feeds.Types.Add(Typed("energy"));
-        config.EmonCMS.Feeds.Types.Add(Typed("frequency"));
-        config.EmonCMS.Feeds.Types.Add(Typed("voltage"));
+        Enable(config, "realpower");
+        Enable(config, "energy");
+        Enable(config, "frequency");
+        Enable(config, "voltage");
 
         var d = EmonCmsFeedPlanner.BuildDesired(data, config);
 
         Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("frequency") || x.Name.Contains("voltage"));
         Assert.DoesNotContain(d.Inputs, x => x.InputName.Contains("frequency") || x.InputName.Contains("voltage"));
         Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_realpower");
+    }
+
+    /// <summary>Prefer local keeps this bridge's counter as it arrives, rather than accumulating it.</summary>
+    [Fact]
+    public void BuildDesired_PreferLocal_LogsTheCounterItWasSent()
+    {
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        Enable(config, "energy", 10).Calculation = EmonCmsCalculation.PreferLocal;
+
+        var steps = Assert.Single(EmonCmsFeedPlanner.BuildDesired(data, config).Inputs).Steps;
+
+        Assert.Equal(ProcessSlot.LogToFeed, steps[0].Process);
+    }
+
+    /// <summary>Prefer EmonCMS hands the same counter to the accumulator instead.</summary>
+    [Fact]
+    public void BuildDesired_PreferEmonCms_AccumulatesTheCounterInstead()
+    {
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        Enable(config, "energy", 10).Calculation = EmonCmsCalculation.PreferEmonCms;
+
+        var steps = Assert.Single(EmonCmsFeedPlanner.BuildDesired(data, config).Inputs).Steps;
+
+        Assert.Equal(ProcessSlot.KwhAccumulator, steps[0].Process);
+    }
+
+    /// <summary>Forced local on a type the device does not send leaves the feed unwritten rather than derived.</summary>
+    [Fact]
+    public void BuildDesired_ForceLocal_DerivesNothingForAReadingThatNeverArrives()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"));
+        var config = Base();
+        Enable(config, "realpower");
+        Enable(config, "energy").Calculation = EmonCmsCalculation.ForceLocal;
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.DoesNotContain(d.Inputs.SelectMany(i => i.Steps), x => x.Process == ProcessSlot.PowerToKwh);
+    }
+
+    /// <summary>
+    /// Forcing EmonCMS on power leaves a watts-only outlet with no power feed at all: kWh to Power is the
+    /// only process that produces watts, and it needs an energy counter this outlet does not have. The day
+    /// boundary that makes forcing EmonCMS right for the daily total does not apply to a reading.
+    /// </summary>
+    [Fact]
+    public void BuildDesired_ForceEmonCmsOnPower_LeavesAWattsOnlyOutletWithNoPowerFeed()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"));
+        var config = Base();
+        Enable(config, "realpower").Calculation = EmonCmsCalculation.ForceEmonCms;
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.DoesNotContain(d.Inputs.SelectMany(i => i.Steps), x => x.Feed.EndsWith("_realpower"));
+    }
+
+    /// <summary>The daily total ships forced to EmonCMS, which owns the day boundary this bridge's clock does not.</summary>
+    [Fact]
+    public void BuildDesired_TheDailyTotal_IsForcedToEmonCmsByDefault()
+    {
+        Assert.Equal(EmonCmsCalculation.ForceEmonCms, EmonCmsFeedTypeConfig.For("energy_d").Calculation);
+
+        var data = OnePdu("o0", "Server A", ("energy", "12"));
+        var config = Base();
+        Enable(config, "energy");
+        Enable(config, "energy_d");
+
+        var steps = Assert.Single(EmonCmsFeedPlanner.BuildDesired(data, config).Inputs).Steps;
+
+        Assert.Contains(steps, x => x.Process == ProcessSlot.KwhToKwhd && x.Feed == "rack_pdu_1_o0_energy_d");
     }
 }

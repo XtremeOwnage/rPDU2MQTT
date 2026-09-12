@@ -26,13 +26,13 @@ public class ConfigSchemaTests
     {
         // v1 stored Types as bare strings; existing persisted config must still load (#163 rework).
         var legacy = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":["realpower","energy"]}}}""");
-        Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
+        Assert.Contains(legacy.EmonCMS.Feeds.Types, t => t.Type == "realpower");
+        Assert.Contains(legacy.EmonCMS.Feeds.Types, t => t.Type == "energy");
         Assert.All(legacy.EmonCMS.Feeds.Types, t => Assert.Null(t.Engine));   // inherit the Feeds-level default
 
         // Daily is read and dropped: daily energy is a type of its own now.
         var obj = ConfigSchema.FromJson("""{"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Daily":true,"IntervalSeconds":30,"Suffix":"_kwh"}]}}}""");
-        var only = Assert.Single(obj.EmonCMS.Feeds.Types);
-        Assert.Equal("energy", only.Type);
+        var only = Assert.Single(obj.EmonCMS.Feeds.Types, t => t.Type == "energy");
         Assert.Equal(30, only.IntervalSeconds);
         Assert.Equal("_kwh", only.Suffix);
         Assert.True(only.Enabled);
@@ -43,12 +43,12 @@ public class ConfigSchemaTests
     {
         var legacy = rPDU2MQTT.Startup.YamlConfigLoader.DeserializeString(
             "EmonCMS:\n  Feeds:\n    Types:\n      - realpower\n      - energy\n");
-        Assert.Equal(new[] { "realpower", "energy" }, legacy.EmonCMS.Feeds.Types.Select(t => t.Type));
+        Assert.Contains(legacy.EmonCMS.Feeds.Types, t => t.Type == "realpower");
+        Assert.Contains(legacy.EmonCMS.Feeds.Types, t => t.Type == "energy");
 
         var obj = rPDU2MQTT.Startup.YamlConfigLoader.DeserializeString(
             "EmonCMS:\n  Feeds:\n    Types:\n      - Type: energy\n        Daily: true\n        IntervalSeconds: 30\n");
-        var only = Assert.Single(obj.EmonCMS.Feeds.Types);
-        Assert.Equal("energy", only.Type);
+        var only = Assert.Single(obj.EmonCMS.Feeds.Types, t => t.Type == "energy");
         Assert.Equal(30, only.IntervalSeconds);
         Assert.Equal("_energy", only.Suffix);
     }
@@ -391,5 +391,45 @@ public class ConfigSchemaTests
         Assert.Contains("MQTT:", yaml);
         Assert.Contains("HomeAssistant:", yaml);
         Assert.Contains("homelab", yaml);
+    }
+
+    /// <summary>
+    /// The rig's saved config lists realpower, energy, voltage, frequency and current — no energy_d, which
+    /// did not exist when it was written. The list is fixed and the GUI offers no Add, so a type missing
+    /// from the document is a type nobody can ever reach. Every supported one is present after a load.
+    /// </summary>
+    [Fact]
+    public void EmonCmsFeedTypes_ATypeMissingFromASavedConfig_IsFilledInFromItsDefaults()
+    {
+        var cfg = ConfigSchema.FromJson("""
+            {"EmonCMS":{"Feeds":{"Types":[
+              {"Type":"realpower"},{"Type":"energy","Daily":true},
+              {"Type":"voltage"},{"Type":"frequency"},{"Type":"current"}]}}}
+            """);
+
+        var types = cfg.EmonCMS.Feeds.Types;
+        Assert.Equal(EmonCmsFeedsConfig.Supported, types.Select(t => t.Type).ToList());
+
+        var daily = Assert.Single(types, t => t.Type == "energy_d");
+        Assert.True(daily.Enabled);
+        Assert.Equal(EmonCmsCalculation.ForceEmonCms, daily.Calculation);   // EmonCMS owns the day boundary
+        Assert.Equal("_energy_d", daily.Suffix);
+        Assert.Equal("kWh", daily.Units);
+        Assert.Equal(86400, daily.IntervalSeconds);   // a day, not the 10s base interval
+    }
+
+    /// <summary>What the document already said is kept; only the gaps are filled.</summary>
+    [Fact]
+    public void EmonCmsFeedTypes_CompletingTheList_DoesNotRewriteWhatWasConfigured()
+    {
+        var cfg = ConfigSchema.FromJson("""
+            {"EmonCMS":{"Feeds":{"Types":[{"Type":"energy","Suffix":"_kwh","IntervalSeconds":30,"Enabled":false}]}}}
+            """);
+
+        var energy = Assert.Single(cfg.EmonCMS.Feeds.Types, t => t.Type == "energy");
+        Assert.Equal("_kwh", energy.Suffix);
+        Assert.Equal(30, energy.IntervalSeconds);
+        Assert.False(energy.Enabled);
+        Assert.Equal(EmonCmsFeedsConfig.Supported.Count, cfg.EmonCMS.Feeds.Types.Count);
     }
 }

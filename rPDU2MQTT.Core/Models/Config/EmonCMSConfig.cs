@@ -122,10 +122,30 @@ public class EmonCmsFeedsConfig
     [Description("Create and maintain EmonCMS feeds from the exported inputs (takes effect without a restart).")]
     public bool AutoConfigure { get; set; }
 
+    private List<EmonCmsFeedTypeConfig> types = Supported.Select(EmonCmsFeedTypeConfig.For).ToList();
+
     /// <summary>One entry per supported measurement type; the set is fixed, what each does is not.</summary>
     [Description("The supported measurement types. Each says whether it gets a feed, how that feed is named and stored, and whether EmonCMS derives it.")]
     [FixedList(nameof(EmonCmsFeedTypeConfig.Type))]
-    public List<EmonCmsFeedTypeConfig> Types { get; set; } = Supported.Select(EmonCmsFeedTypeConfig.For).ToList();
+    public List<EmonCmsFeedTypeConfig> Types
+    {
+        get => types;
+        // A saved config predates whatever types this build added, and the list is fixed — there is no Add
+        // button to reach a missing one with. So every supported type is present after a load, in a settled
+        // order, with anything already configured kept exactly as it was written.
+        set => types = Complete(value);
+    }
+
+    /// <summary>The configured types, plus a default entry for every supported type not among them.</summary>
+    public static List<EmonCmsFeedTypeConfig> Complete(IEnumerable<EmonCmsFeedTypeConfig>? configured)
+    {
+        var have = (configured ?? []).Where(t => !string.IsNullOrWhiteSpace(t?.Type)).ToList();
+        var known = have.Select(t => t.Type).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var all = have.Concat(Supported.Where(t => !known.Contains(t)).Select(EmonCmsFeedTypeConfig.For));
+        // Supported order first, then anything this build does not recognise, kept rather than dropped.
+        return all.OrderBy(t => Supported.ToList().FindIndex(x => string.Equals(x, t.Type, StringComparison.OrdinalIgnoreCase)) is var i && i < 0 ? int.MaxValue : i)
+                  .ToList();
+    }
 
     /// <summary>The measurement types EmonCMS feeds can be built for.</summary>
     public static readonly IReadOnlyList<string> Supported =
@@ -175,9 +195,9 @@ public class EmonCmsFeedTypeConfig
     [Description("Build and maintain a feed for this type.")]
     public bool Enabled { get; set; } = true;
 
-    [DefaultValue(true)]
-    [Description("Let EmonCMS work this type out from the one a node does report, using its own processes — energy integrated from power, power from an energy counter, and the daily total from either. Applies to power, energy and daily energy; other types are recorded as they arrive.")]
-    public bool CalculateWithEmonCms { get; set; } = true;
+    [DefaultValue(EmonCmsCalculation.PreferLocal)]
+    [Description("Who works this type out. Prefer local uses this bridge's reading where it has one and an EmonCMS process otherwise; prefer EmonCMS reverses that — energy integrated from power, power from an energy counter, the daily total from either. The Force options use only that one and leave the feed unwritten when it cannot answer. Only power, energy and daily energy can be derived; every other type is recorded as it arrives.")]
+    public EmonCmsCalculation Calculation { get; set; } = EmonCmsCalculation.PreferLocal;
 
     [Description("Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
     [TemplateVariables("device", "source", "name", "number", "type", "units")]
@@ -205,7 +225,19 @@ public class EmonCmsFeedTypeConfig
         Suffix = "_" + type,
         Units = UnitFor(type),
         IntervalSeconds = string.Equals(type, EmonCmsFeedsConfig.EnergyPeriodMetric, StringComparison.OrdinalIgnoreCase) ? 86400 : 10,
-        CalculateWithEmonCms = EmonCmsFeedsConfig.Derivable.Contains(type),
+        Calculation = DefaultCalculation(type),
+    };
+
+    /// <summary>
+    /// Who works a type out unless told otherwise. The daily total is EmonCMS's: it owns the day boundary,
+    /// so a clock drifting here cannot push a reading into the wrong day. Energy is EmonCMS's too, for the
+    /// reset-dropping its accumulator does. Power is read, not derived — nothing calculates it from watts.
+    /// </summary>
+    public static EmonCmsCalculation DefaultCalculation(string type) => type.ToLowerInvariant() switch
+    {
+        EmonCmsFeedsConfig.EnergyPeriodMetric => EmonCmsCalculation.ForceEmonCms,
+        "energy" => EmonCmsCalculation.PreferEmonCms,
+        _ => EmonCmsCalculation.PreferLocal,
     };
 
     /// <summary>The unit a measurement type is stored in unless it is told otherwise.</summary>

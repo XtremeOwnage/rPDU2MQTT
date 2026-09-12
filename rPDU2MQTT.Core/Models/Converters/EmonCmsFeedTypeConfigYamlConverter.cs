@@ -17,6 +17,7 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
     {
         public string? Type { get; set; }
         public bool? Enabled { get; set; }
+        public EmonCmsCalculation? Calculation { get; set; }
         public bool? CalculateWithEmonCms { get; set; }
         public string? Prefix { get; set; }
         public string? Suffix { get; set; }
@@ -40,7 +41,9 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
         var dto = (Dto?)rootDeserializer(typeof(Dto)) ?? new Dto();
         var cfg = EmonCmsFeedTypeConfig.For(string.IsNullOrWhiteSpace(dto.Type) ? "realpower" : dto.Type!);
         if (dto.Enabled is { } e) cfg.Enabled = e;
-        if (dto.CalculateWithEmonCms is { } c) cfg.CalculateWithEmonCms = c;
+        if (dto.Calculation is { } calc) cfg.Calculation = calc;
+        // The v1 boolean: false meant this bridge's own reading and nothing derived.
+        else if (dto.CalculateWithEmonCms is false) cfg.Calculation = EmonCmsCalculation.ForceLocal;
         if (dto.Prefix is not null) cfg.Prefix = dto.Prefix;
         if (!string.IsNullOrWhiteSpace(dto.Suffix)) cfg.Suffix = dto.Suffix!;
         if (!string.IsNullOrWhiteSpace(dto.Units)) cfg.Units = dto.Units!;
@@ -56,7 +59,7 @@ public sealed class EmonCmsFeedTypeConfigYamlConverter : IYamlTypeConverter
         {
             Type = v.Type,
             Enabled = v.Enabled,
-            CalculateWithEmonCms = v.CalculateWithEmonCms,
+            Calculation = v.Calculation,
             Prefix = v.Prefix,
             Suffix = v.Suffix,
             Units = v.Units,

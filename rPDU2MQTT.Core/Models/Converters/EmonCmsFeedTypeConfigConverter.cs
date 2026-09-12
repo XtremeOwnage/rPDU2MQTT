@@ -16,6 +16,7 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
     {
         public string? Type { get; set; }
         public bool? Enabled { get; set; }
+        public EmonCmsCalculation? Calculation { get; set; }
         public bool? CalculateWithEmonCms { get; set; }
         public string? Prefix { get; set; }
         public string? Suffix { get; set; }
@@ -34,7 +35,9 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
         var dto = JsonSerializer.Deserialize<Dto>(ref reader, options) ?? new Dto();
         var cfg = EmonCmsFeedTypeConfig.For(string.IsNullOrWhiteSpace(dto.Type) ? "realpower" : dto.Type!);
         if (dto.Enabled is { } e) cfg.Enabled = e;
-        if (dto.CalculateWithEmonCms is { } c) cfg.CalculateWithEmonCms = c;
+        if (dto.Calculation is { } calc) cfg.Calculation = calc;
+        // The v1 boolean: false meant this bridge's own reading and nothing derived.
+        else if (dto.CalculateWithEmonCms is false) cfg.Calculation = EmonCmsCalculation.ForceLocal;
         if (dto.Prefix is not null) cfg.Prefix = dto.Prefix;
         if (!string.IsNullOrWhiteSpace(dto.Suffix)) cfg.Suffix = dto.Suffix!;
         if (!string.IsNullOrWhiteSpace(dto.Units)) cfg.Units = dto.Units!;
@@ -48,7 +51,7 @@ public sealed class EmonCmsFeedTypeConfigConverter : JsonConverter<EmonCmsFeedTy
         {
             Type = value.Type,
             Enabled = value.Enabled,
-            CalculateWithEmonCms = value.CalculateWithEmonCms,
+            Calculation = value.Calculation,
             Prefix = value.Prefix,
             Suffix = value.Suffix,
             Units = value.Units,

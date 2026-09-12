@@ -40,6 +40,18 @@ public sealed record EmonDesiredState(
 /// </summary>
 public static class EmonCmsFeedPlanner
 {
+    /// <summary>Who writes a type's feed once the configured preference has met what is actually available.</summary>
+    private enum Producer { None, Local, EmonCms }
+
+    /// <summary>The preference, resolved against what each side can actually supply here.</summary>
+    private static Producer Resolve(Models.Config.EmonCmsCalculation mode, bool local, bool emon) => mode switch
+    {
+        Models.Config.EmonCmsCalculation.ForceLocal => local ? Producer.Local : Producer.None,
+        Models.Config.EmonCmsCalculation.ForceEmonCms => emon ? Producer.EmonCms : Producer.None,
+        Models.Config.EmonCmsCalculation.PreferLocal => local ? Producer.Local : emon ? Producer.EmonCms : Producer.None,
+        _ => emon ? Producer.EmonCms : local ? Producer.Local : Producer.None,
+    };
+
     private const string PowerMetric = Core.Flow.FlowGraphBuilder.DefaultMetric;
     private const string EnergyMetric = "energy";
     private const string DailyMetric = Core.Flow.EnergyPeriod.Metric;
@@ -89,24 +101,39 @@ public static class EmonCmsFeedPlanner
                     return name;
                 }
 
+                Producer Who(string metric, bool local, bool emon)
+                    => byType.TryGetValue(metric, out var c) && c.Enabled ? Resolve(c.Calculation, local, emon) : Producer.None;
+
                 var steps = new List<DesiredProcess>();
-                var derive = typeCfg.CalculateWithEmonCms;
-                if (string.Equals(r.Type, EnergyMetric, StringComparison.OrdinalIgnoreCase) && derive)
+                if (string.Equals(r.Type, EnergyMetric, StringComparison.OrdinalIgnoreCase))
                 {
-                    steps.Add(new(ProcessSlot.KwhAccumulator, storageName));
-                    if (Derived(DailyMetric, 2) is { } daily) steps.Add(new(ProcessSlot.KwhToKwhd, daily));
-                    if (!hasPower && Derived(PowerMetric, 1) is { } power) steps.Add(new(ProcessSlot.KwhToPower, power));
+                    // The reading is a counter: logged as it arrives, or accumulated by EmonCMS to drop resets.
+                    var mine = Who(EnergyMetric, local: true, emon: true);
+                    steps.Add(mine == Producer.EmonCms
+                        ? new(ProcessSlot.KwhAccumulator, storageName)
+                        : new(ProcessSlot.LogToFeed, storageName));
+                    if (Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
+                        steps.Add(new(ProcessSlot.KwhToKwhd, daily));
+                    if (!hasPower && Who(PowerMetric, local: false, emon: true) == Producer.EmonCms && Derived(PowerMetric, 1) is { } power)
+                        steps.Add(new(ProcessSlot.KwhToPower, power));
                 }
-                else if (string.Equals(r.Type, PowerMetric, StringComparison.OrdinalIgnoreCase) && derive && !hasEnergy)
+                else if (string.Equals(r.Type, PowerMetric, StringComparison.OrdinalIgnoreCase))
                 {
-                    steps.Add(new(ProcessSlot.LogToFeed, storageName));
-                    if (Derived(EnergyMetric, 1) is { } energy) steps.Add(new(ProcessSlot.PowerToKwh, energy));
-                    if (Derived(DailyMetric, 2) is { } daily) steps.Add(new(ProcessSlot.PowerToKwhd, daily));
+                    if (Who(PowerMetric, local: true, emon: hasEnergy) == Producer.Local)
+                        steps.Add(new(ProcessSlot.LogToFeed, storageName));
+                    if (!hasEnergy)
+                    {
+                        if (Who(EnergyMetric, local: false, emon: true) == Producer.EmonCms && Derived(EnergyMetric, 1) is { } energy)
+                            steps.Add(new(ProcessSlot.PowerToKwh, energy));
+                        if (Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
+                            steps.Add(new(ProcessSlot.PowerToKwhd, daily));
+                    }
                 }
                 else
                 {
                     steps.Add(new(ProcessSlot.LogToFeed, storageName));
                 }
+                if (steps.Count == 0) continue;
                 inputs.Add(new DesiredInputLog(inputName, steps));
 
                 if (f.Virtual.Enabled)
@@ -159,33 +186,41 @@ public static class EmonCmsFeedPlanner
                 var powerFeed = FeedFor(powerMetric, 1);
                 var energyFeed = FeedFor(energyMetric, 1);
                 var dailyFeed = FeedFor(DailyMetric, 2);
-                var deriveFrom = (string metric) => byType.TryGetValue(metric, out var c) && c.CalculateWithEmonCms;
+                Producer Who(string metric, bool local, bool emon)
+                    => byType.TryGetValue(metric, out var c) && c.Enabled ? Resolve(c.Calculation, local, emon) : Producer.None;
+
+                // Power is read, never calculated from watts; only an energy counter can stand in for it.
+                var power = Who(powerMetric, hasPower, hasEnergy);
+                // Energy is the counter logged as it arrives, or EmonCMS accumulating it / integrating watts.
+                var energy = energyMetric is null ? Producer.None : Who(energyMetric, hasEnergy, hasEnergy || hasPower);
+                // The daily total has no local reading on a flow node — this pass never sends one.
+                var daily = Who(DailyMetric, false, hasEnergy || hasPower);
 
                 // kWh-to-Power is last: it hands watts to whatever follows it.
                 if (hasEnergy && energyFeed is not null)
                 {
-                    var derive = deriveFrom(energyMetric!);
-                    var steps = new List<DesiredProcess>
-                    {
-                        derive ? new(ProcessSlot.KwhAccumulator, energyFeed) : new(ProcessSlot.LogToFeed, energyFeed),
-                    };
-                    if (derive && dailyFeed is not null) steps.Add(new(ProcessSlot.KwhToKwhd, dailyFeed));
-                    if (derive && !hasPower && powerFeed is not null) steps.Add(new(ProcessSlot.KwhToPower, powerFeed));
+                    var steps = new List<DesiredProcess>();
+                    if (energy == Producer.EmonCms) steps.Add(new(ProcessSlot.KwhAccumulator, energyFeed));
+                    else if (energy == Producer.Local) steps.Add(new(ProcessSlot.LogToFeed, energyFeed));
+                    if (daily == Producer.EmonCms && dailyFeed is not null) steps.Add(new(ProcessSlot.KwhToKwhd, dailyFeed));
+                    if (power == Producer.EmonCms && powerFeed is not null) steps.Add(new(ProcessSlot.KwhToPower, powerFeed));
+
                     var name = MetricsHelper.EmonCmsFlowInputName(node.Id, node.Label, node.Kind, energyMetric!, config);
-                    if (seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
+                    if (steps.Count > 0 && seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
                 }
 
                 // Neither derivation changes the watts passed on, so both follow the plain log.
                 if (hasPower && powerFeed is not null)
                 {
-                    var steps = new List<DesiredProcess> { new(ProcessSlot.LogToFeed, powerFeed) };
-                    if (!hasEnergy && deriveFrom(powerMetric))
+                    var steps = new List<DesiredProcess>();
+                    if (power == Producer.Local) steps.Add(new(ProcessSlot.LogToFeed, powerFeed));
+                    if (!hasEnergy)
                     {
-                        if (energyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwh, energyFeed));
-                        if (dailyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwhd, dailyFeed));
+                        if (energy == Producer.EmonCms && energyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwh, energyFeed));
+                        if (daily == Producer.EmonCms && dailyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwhd, dailyFeed));
                     }
                     var name = MetricsHelper.EmonCmsFlowInputName(node.Id, node.Label, node.Kind, powerMetric, config);
-                    if (seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
+                    if (steps.Count > 0 && seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
                 }
 
                 if (f.Virtual.Enabled)
