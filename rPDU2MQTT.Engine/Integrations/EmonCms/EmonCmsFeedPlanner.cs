@@ -16,11 +16,7 @@ public sealed record DesiredFeed(string Name, string Tag, int Engine, int Interv
 /// <summary>One step of an input's processlist: the process, and the feed it writes.</summary>
 public sealed record DesiredProcess(string Process, string Feed);
 
-/// <summary>
-/// An input and the ordered processlist we want on it. Order is part of the meaning: some EmonCMS
-/// processes pass their result to the next step rather than the value they were given, so a step that
-/// rewrites the units has to come after every step that still needs the original.
-/// </summary>
+/// <summary>An input and the ordered processlist we want on it; order matters, as some steps rewrite the value passed on.</summary>
 public sealed record DesiredInputLog(string InputName, IReadOnlyList<DesiredProcess> Steps)
 {
     /// <summary>The feed the first step writes — the one a history read for this input looks up.</summary>
@@ -35,42 +31,6 @@ public sealed record EmonDesiredState(
     IReadOnlyList<DesiredFeed> Feeds,
     IReadOnlyList<DesiredInputLog> Inputs,
     IReadOnlyList<DesiredVirtualFeed> Virtuals);
-
-/// <summary>
-/// The EmonCMS processes a planned step can name, as the keys EmonCMS stores in a processlist
-/// (<c>key:feedid</c>).
-///
-/// <para>
-/// The key is <c>&lt;module&gt;__&lt;function&gt;</c>, and the core processes live in the <c>process</c>
-/// module. EmonCMS also accepts a numeric <c>id_num</c> for the processes that have one, mapping it onto
-/// the same key — but <c>kWh Accumulator</c> and <c>Log to feed (Join)</c> have no <c>id_num</c>, so the
-/// key form is the only one that can name every process. These are constants rather than configuration:
-/// they identify a process in EmonCMS itself, not anything that varies per deployment.
-/// </para>
-/// </summary>
-public static class ProcessSlot
-{
-    /// <summary>Log to feed: write the value as it arrived.</summary>
-    public const string LogToFeed = "process__log_to_feed";
-
-    /// <summary>kWh to kWh/d: upsert a cumulative energy value into a daily total.</summary>
-    public const string KwhToKwhd = "process__kwh_to_kwhd";
-
-    /// <summary>Source Feed: the source a virtual feed reads.</summary>
-    public const string SourceFeed = "process__source_feed_data_time";
-
-    /// <summary>Power to kWh: integrate watts into a cumulative energy feed.</summary>
-    public const string PowerToKwh = "process__power_to_kwh";
-
-    /// <summary>Power to kWh/d: integrate watts into a daily energy feed.</summary>
-    public const string PowerToKwhd = "process__power_to_kwhd";
-
-    /// <summary>kWh Accumulator: add positive input deltas onto the feed's own total, dropping resets.</summary>
-    public const string KwhAccumulator = "process__kwh_accumulator";
-
-    /// <summary>kWh to Power: derive watts from a cumulative energy input. Rewrites the value passed on.</summary>
-    public const string KwhToPower = "process__kwh_to_power";
-}
 
 /// <summary>
 /// Computes, purely from the readings + config, the EmonCMS feeds/processlists/virtual-feeds we want (#163).
@@ -133,15 +93,10 @@ public static class EmonCmsFeedPlanner
             }
         }
 
-        // The energy-flow tiers. Every node that has a power or an energy source of its own ends up with
-        // all three feeds — power, energy, energy/d — whichever one it actually reports. What it does not
-        // report is derived inside EmonCMS from what it does: accumulating a counter and splitting it by day
-        // are jobs EmonCMS does with the feed's own history in front of it, and this bridge does not.
+        // Every flow node gets power, energy and energy/d; EmonCMS derives whichever it does not report.
         if (flow is not null && config.EmonCMS.ExportFlowNodes)
         {
-            // Which metrics each node sources itself. A node whose value was summed from its children or
-            // inferred from conservation has no input of its own for that metric; one that expects a reading
-            // and is not currently getting one still does.
+            // Which metrics each node sources itself; a summed or inferred value is not an input.
             var sourced = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             var tiersOf = new Dictionary<string, Core.Flow.FlowNode>(StringComparer.OrdinalIgnoreCase);
             foreach (var (metric, graph) in flow)
@@ -164,8 +119,7 @@ public static class EmonCmsFeedPlanner
                 var have = sourced.TryGetValue(nodeId, out var h) ? h : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var hasPower = have.Contains(powerMetric);
                 var hasEnergy = energyMetric is not null && have.Contains(energyMetric);
-                // Nothing of its own either way: it is still exported, and the power it is given is what the
-                // rest is derived from — a summed panel gets the same three feeds as a metered one.
+                // Sources neither: still exported, and the power it is given is what the rest derives from.
                 if (!hasPower && !hasEnergy) hasPower = true;
 
                 string? FeedFor(string metric, int dataType, int interval)
@@ -187,9 +141,7 @@ public static class EmonCmsFeedPlanner
                         energyType.DailyIntervalSeconds, DataType: 2);
                 }
 
-                // The energy input, where there is one: the accumulator writes the energy feed from the
-                // counter and drops its resets, the daily split reads what it passed on, and kWh-to-Power
-                // comes last because it hands watts to whatever follows it.
+                // kWh-to-Power is last: it hands watts to whatever follows it.
                 if (hasEnergy && energyFeed is not null)
                 {
                     var steps = new List<DesiredProcess> { new(ProcessSlot.KwhAccumulator, energyFeed) };
@@ -199,8 +151,7 @@ public static class EmonCmsFeedPlanner
                     if (seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
                 }
 
-                // The power input. Neither derivation from it changes the value it passes on, so both can
-                // follow the plain log.
+                // Neither derivation changes the watts passed on, so both follow the plain log.
                 if (hasPower && powerFeed is not null)
                 {
                     var steps = new List<DesiredProcess> { new(ProcessSlot.LogToFeed, powerFeed) };
@@ -224,9 +175,7 @@ public static class EmonCmsFeedPlanner
                     }
             }
 
-            // Every other configured metric — energy since the period began, voltage, current — is logged
-            // as it arrives. Only power and the lifetime counter stand in for each other; nothing derives
-            // a voltage, and a period total is already the quantity it claims to be.
+            // Every other configured metric is logged as it arrives; only power and the counter substitute.
             foreach (var (metric, graph) in flow)
             {
                 if (string.Equals(metric, powerMetric, StringComparison.OrdinalIgnoreCase)
@@ -278,11 +227,7 @@ public static class EmonCmsFeedPlanner
         return null;
     }
 
-    /// <summary>
-    /// Build an input's processlist from its planned steps: <c>&lt;process&gt;:&lt;feedid&gt;</c>, in order.
-    /// A step whose feed does not exist is dropped rather than written as a broken pair — EmonCMS accepts
-    /// one and then logs nothing, with no error to read.
-    /// </summary>
+    /// <summary>Join the steps into <c>&lt;process&gt;:&lt;feedid&gt;</c> pairs, dropping any whose feed does not exist.</summary>
     public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId)
         => string.Join(",", steps
             .Select(st => (st.Process, Feed: feedId(st.Feed)))
