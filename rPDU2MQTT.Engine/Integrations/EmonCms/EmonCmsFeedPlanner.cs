@@ -37,36 +37,40 @@ public sealed record EmonDesiredState(
     IReadOnlyList<DesiredVirtualFeed> Virtuals);
 
 /// <summary>
-/// The processes a planned step can name. The planner works in these rather than in ids because an id is
-/// deployment configuration — EmonCMS numbers its built-in processes and keys the module-provided ones.
+/// The EmonCMS processes a planned step can name, as the keys EmonCMS stores in a processlist
+/// (<c>key:feedid</c>).
+///
+/// <para>
+/// The key is <c>&lt;module&gt;__&lt;function&gt;</c>, and the core processes live in the <c>process</c>
+/// module. EmonCMS also accepts a numeric <c>id_num</c> for the processes that have one, mapping it onto
+/// the same key — but <c>kWh Accumulator</c> and <c>Log to feed (Join)</c> have no <c>id_num</c>, so the
+/// key form is the only one that can name every process. These are constants rather than configuration:
+/// they identify a process in EmonCMS itself, not anything that varies per deployment.
+/// </para>
 /// </summary>
 public static class ProcessSlot
 {
-    public const string LogToFeed = "log_to_feed";
-    public const string KwhToKwhd = "kwh_to_kwhd";
-    public const string PowerToKwh = "power_to_kwh";
-    public const string PowerToKwhd = "power_to_kwhd";
-    public const string KwhAccumulator = "kwh_accumulator";
-    public const string KwhToPower = "kwh_to_power";
+    /// <summary>Log to feed: write the value as it arrived.</summary>
+    public const string LogToFeed = "process__log_to_feed";
 
-    /// <summary>The configured id for a slot, or null when this deployment has not been given one.</summary>
-    public static string? Resolve(string slot, EmonProcessIds p) => slot switch
-    {
-        LogToFeed => p.LogToFeed,
-        KwhToKwhd => p.KwhToKwhd,
-        PowerToKwh => p.PowerToKwh,
-        PowerToKwhd => p.PowerToKwhd,
-        KwhAccumulator => p.KwhAccumulator,
-        KwhToPower => p.KwhToPower,
-        _ => null,
-    };
+    /// <summary>kWh to kWh/d: upsert a cumulative energy value into a daily total.</summary>
+    public const string KwhToKwhd = "process__kwh_to_kwhd";
+
+    /// <summary>Source Feed: the source a virtual feed reads.</summary>
+    public const string SourceFeed = "process__source_feed_data_time";
+
+    /// <summary>Power to kWh: integrate watts into a cumulative energy feed.</summary>
+    public const string PowerToKwh = "process__power_to_kwh";
+
+    /// <summary>Power to kWh/d: integrate watts into a daily energy feed.</summary>
+    public const string PowerToKwhd = "process__power_to_kwhd";
+
+    /// <summary>kWh Accumulator: add positive input deltas onto the feed's own total, dropping resets.</summary>
+    public const string KwhAccumulator = "process__kwh_accumulator";
+
+    /// <summary>kWh to Power: derive watts from a cumulative energy input. Rewrites the value passed on.</summary>
+    public const string KwhToPower = "process__kwh_to_power";
 }
-
-/// <summary>The resolved process ids the planner/provisioner build processlists from.</summary>
-public sealed record EmonProcessIds(
-    string LogToFeed, string? KwhToKwhd, string? SourceFeed,
-    string? PowerToKwh = null, string? PowerToKwhd = null,
-    string? KwhAccumulator = null, string? KwhToPower = null);
 
 /// <summary>
 /// Computes, purely from the readings + config, the EmonCMS feeds/processlists/virtual-feeds we want (#163).
@@ -276,13 +280,12 @@ public static class EmonCmsFeedPlanner
 
     /// <summary>
     /// Build an input's processlist from its planned steps: <c>&lt;process&gt;:&lt;feedid&gt;</c>, in order.
-    /// A step whose process id is not configured, or whose feed does not exist, is dropped rather than
-    /// written as a broken pair — EmonCMS would accept it and silently log nothing.
+    /// A step whose feed does not exist is dropped rather than written as a broken pair — EmonCMS accepts
+    /// one and then logs nothing, with no error to read.
     /// </summary>
-    public static string BuildInputProcessList(
-        IReadOnlyList<DesiredProcess> steps, EmonProcessIds processes, Func<string, int?> feedId)
+    public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId)
         => string.Join(",", steps
-            .Select(st => (Process: ProcessSlot.Resolve(st.Process, processes), Feed: feedId(st.Feed)))
-            .Where(st => !string.IsNullOrWhiteSpace(st.Process) && st.Feed is not null)
+            .Select(st => (st.Process, Feed: feedId(st.Feed)))
+            .Where(st => st.Feed is not null)
             .Select(st => $"{st.Process}:{st.Feed}"));
 }
