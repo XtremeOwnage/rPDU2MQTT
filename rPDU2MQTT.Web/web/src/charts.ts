@@ -372,3 +372,64 @@ export function sparkline(opts: {
 
   return svg;
 }
+
+/// A ranking: one horizontal bar per item, largest first, labelled with its value and an optional note.
+export function rankChart(opts: {
+  items: { label: string; value: number; color: string; note?: string }[];
+  units: string;
+  /// Draw a ring of each item's share of the total beside the bars.
+  share?: boolean;
+  fitTo?: number;
+}): { svg: any; gaps: number } {
+  const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(420, opts.fitTo) : 720;
+  const rowH = 22, padT = 8;
+  const ring = opts.share && total > 0 ? 180 : 0;
+  const H = Math.max(ring, padT * 2 + items.length * rowH);
+  const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart trend-rank' });
+  const pct = (v: number) => `${(v / total * 100).toFixed(1)}%`;
+  const titled = (node: any, text: string) => {
+    const t = document.createElementNS(SVG, 'title');
+    t.textContent = text;
+    node.appendChild(t);
+    return node;
+  };
+  const describe = (it: typeof items[number]) =>
+    `${it.label}: ${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+
+  if (ring) {
+    const cx = ring / 2, cy = H / 2, r = 70, inner = 42;
+    const at = (rad: number, a: number) => `${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`;
+    let angle = -Math.PI / 2;
+    items.forEach(it => {
+      const frac = it.value / total;
+      // A whole ring cannot be drawn as one arc, so it is two circles instead.
+      if (frac >= 0.9999) {
+        svg.appendChild(titled(svgTag('circle', { cx, cy, r: (r + inner) / 2, fill: 'none', stroke: it.color, 'stroke-width': r - inner, class: 'trend-slice' }), describe(it)));
+        return;
+      }
+      const end = angle + frac * 2 * Math.PI;
+      const large = frac > 0.5 ? 1 : 0;
+      const d = `M ${at(r, angle)} A ${r} ${r} 0 ${large} 1 ${at(r, end)} L ${at(inner, end)} A ${inner} ${inner} 0 ${large} 0 ${at(inner, angle)} Z`;
+      svg.appendChild(titled(svgTag('path', { d, fill: it.color, class: 'trend-slice' }), describe(it)));
+      angle = end;
+    });
+  }
+
+  const x0 = ring + 160, valueW = 190;
+  const barMax = Math.max(40, W - x0 - valueW - 8);
+  const top = items.length ? items[0].value : 1;
+  items.forEach((it, i) => {
+    const yy = padT + i * rowH;
+    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--text)', 'font-size': 12 });
+    name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
+    svg.appendChild(name);
+    const w = Math.max(1, (it.value / top) * barMax);
+    svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
+    const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
+    value.textContent = `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+    svg.appendChild(value);
+  });
+  return { svg, gaps: 0 };
+}

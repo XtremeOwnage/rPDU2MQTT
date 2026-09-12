@@ -104,6 +104,22 @@ if (!headings.includes('Daily energy by node')) fail(`no "Daily energy by node" 
 for (const other of ['Grid per day', 'Self-sufficiency per day'])
   if (headings.includes(other)) fail(`"${other}" is drawn on the per-node page`);
 
+// --- Comparing the selected nodes ---------------------------------------------------------------------
+// Solar 159, battery out 32, grid import 27 kWh: 218 between them. Charge and export go back, so they are not ranked.
+const chartNamed = (title) => { const hs = query(sec, 'h3', true).map(h => h.textContent); return query(sec, 'svg', true)[hs.indexOf(title)]; };
+const largest = chartNamed('Largest nodes');
+if (!largest) fail(`no "Largest nodes" chart (got: ${headings.join(', ')})`);
+const rankText = query(largest, 'text', true).map(t => t.textContent);
+const names = rankText.filter(t => ['Solar', 'Battery', 'Grid', 'Battery (charging)', 'Grid (export)'].includes(t));
+if (names.join() !== 'Solar,Battery,Grid') fail(`the largest nodes are not ranked by energy, return lanes excluded: ${names.join(', ')}`);
+if (!rankText.some(t => t.includes('159') && t.includes('72.9%'))) fail(`solar's share is wrong: ${rankText.join(' | ')}`);
+if (query(largest, 'path', true).filter(e => e.attrs.class === 'trend-slice').length !== 3) fail('the share ring does not have a slice per ranked node');
+const busiest = chartNamed('Busiest day per node');
+if (!busiest) fail(`no "Busiest day per node" chart (got: ${headings.join(', ')})`);
+if (!query(busiest, 'text', true).some(t => t.textContent.includes('35') && t.textContent.includes('2026-08-07 so far'))) fail('solar\'s busiest day is not named as unfinished');
+for (const absent of ['By hour of day', 'Always on'])
+  if (headings.includes(absent)) fail(`"${absent}" is drawn for daily energy totals`);
+
 const byNode = charts[0];
 const totalsRow = (name) => query(sec, 'tbody tr', true).find(r => query(r, 'td')?.textContent === name);
 const bars = query(byNode, 'rect', true);
@@ -241,6 +257,18 @@ if (query(sec, 'div', true).some(d => 'scrollLeft' in d)) fail('a finished day w
 const dayStatus = query(sec, 'span', true).map(x => x.textContent).join(' ');
 if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus)) fail(`the status line does not say what window is charted: ${dayStatus}`);
 
+// A day of power samples: when each node works, and what it draws at its quietest. Grid holds 400 W all day;
+// solar falls to zero at night and so never counts as always on.
+const dayHeads = query(sec, 'h3', true).map(h => h.textContent);
+for (const want of ['Peak per node', 'By hour of day', 'Always on'])
+  if (!dayHeads.includes(want)) fail(`no "${want}" chart for a day of power samples (got: ${dayHeads.join(', ')})`);
+const hourChart = query(sec, 'svg', true)[dayHeads.indexOf('By hour of day')];
+if (query(hourChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit').length !== 24) fail('the hour-of-day chart does not have an hour per slot');
+if (!query(hourChart, 'polyline', true).some(e => e.attrs.class === 'trend-line')) fail('the hour-of-day chart drew no line');
+const alwaysText = query(query(sec, 'svg', true)[dayHeads.indexOf('Always on')], 'text', true).map(t => t.textContent);
+if (!alwaysText.includes('Grid') || !alwaysText.some(t => t.startsWith('400 W'))) fail(`the grid's steady draw is not shown: ${alwaysText.join(' | ')}`);
+if (alwaysText.includes('Solar')) fail('solar, which reaches zero, is listed as always on');
+
 // --- What the page says it is showing is what it is showing -------------------------------------------
 const blurb = () => (query(sec, '.desc', true).map(d => d.textContent)[0] || '');
 if (!/power/i.test(blurb())) fail(`the page describes a chart of watts as: ${blurb().slice(0, 120)}`);
@@ -350,4 +378,5 @@ if (!query(query(sec, 'svg', true)[0], 'rect', true).some(r => !r.attrs.class)) 
 console.log('node trends: per-node chart over the chosen range with empty days marked and counted; tags, a text filter '
   + 'and chips select what is charted; totals cover the days that reported; power within a day on a clock axis '
   + 'with kWh integrated; counters differenced; an overlay line on request; the interval is chosen, and widened '
-  + 'only when the chart cannot draw it, saying so; bars, lines or areas, stacked where that means something');
+  + 'only when the chart cannot draw it, saying so; bars, lines or areas, stacked where that means something; the largest nodes and their share, peaks, '
+  + 'the hour of day each node works and what it draws at its quietest');

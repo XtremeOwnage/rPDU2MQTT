@@ -1,8 +1,8 @@
 // Node Trends: each selected node's own series over the chosen window, with its totals.
 import { btn, el, formatNum } from '../helpers.js';
-import { barChart, colorFor, type Line } from '../charts.js';
+import { barChart, colorFor, rankChart, type Line } from '../charts.js';
 import { takeFocus } from '../state.js';
-import { trendsPage, signed, type TrendsPage } from './trends-shared.js';
+import { trendsPage, signed, isReturn, type TrendsPage } from './trends-shared.js';
 
 export function addNodeTrendsSection(nav: any, sections: any) {
   const off = new Set<string>();
@@ -168,6 +168,82 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     table.appendChild(t);
   };
 
+  // Charts that compare the selected nodes rather than follow them through time.
+  const drawInsights = (p: TrendsPage, series: any[], days: string[], units: string, partial: string | null) => {
+    const body = p.body();
+    const step = Number(body.stepSeconds) || 0;
+    const width = p.fitTo();
+    const color = (s: any) => colorFor(s.kind, all().indexOf(s));
+    const readings = (s: any) => (s.values as (number | null)[])
+      .map((v, d) => [v, d] as [number | null, number]).filter(([v]) => v != null) as [number, number][];
+    // Return lanes are energy going back, not a node's own use, so none of these rank them.
+    const own = series.filter((s: any) => !isReturn(s));
+    const estimated = !p.summable() && p.rate() && units === 'W' && step > 0;
+    // What a node amounts to over the window: its energy where readings add up, or energy estimated from power.
+    const amount = (s: any) => {
+      const sum = readings(s).reduce((a, [v]) => a + v, 0);
+      return p.summable() ? sum : estimated ? (sum * step) / 3_600_000 : null;
+    };
+
+    const ranked = own.map((s: any) => ({ s, value: amount(s) })).filter(x => x.value != null && x.value > 0)
+      .sort((a, b) => (b.value as number) - (a.value as number));
+    if (ranked.length >= 2) {
+      p.section('Largest nodes',
+        `Each selected node's share of their combined ${estimated ? 'energy, estimated from the power samples' : p.metricName()}. `
+        + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
+        rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value as number, color: color(x.s) })),
+          units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
+    }
+
+    const peaks = own.map((s: any) => {
+      const best = readings(s).reduce((a, b) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as [number, number] | null);
+      return best && best[0] > 0
+        ? { label: s.label || s.node, value: best[0], color: color(s), note: days[best[1]] + (days[best[1]] === partial ? ' so far' : '') }
+        : null;
+    }).filter(Boolean) as { label: string; value: number; color: string; note: string }[];
+    if (peaks.length) {
+      p.section(p.perDay() ? 'Busiest day per node' : 'Peak per node',
+        'The highest reading each selected node reached in the window, and when.',
+        rankChart({ items: peaks, units, fitTo: width }), []);
+    }
+
+    // The same hour across every day of the window, which shows when each node does its work.
+    const at: string[] = body.at || [];
+    if (!p.perDay() && at.length && new Set(at.map(iso => new Date(iso).getHours())).size >= 2) {
+      const hourOf = at.map(iso => new Date(iso).getHours());
+      const perHour = body.deltas && step > 0 ? 3600 / step : 1;
+      const lines: Line[] = (ranked.length ? ranked.map(x => x.s) : own).slice(0, 5).map((s: any) => ({
+        label: s.label || s.node, color: color(s),
+        values: Array.from({ length: 24 }, (_, h) => {
+          const inHour = readings(s).filter(([, d]) => hourOf[d] === h).map(([v]) => v);
+          return inHour.length ? (inHour.reduce((a, v) => a + v, 0) / inHour.length) * perHour : null;
+        }),
+      }));
+      if (lines.length) {
+        p.section('By hour of day',
+          (body.deltas ? `Energy per hour, averaged over every day in the window` : `Average ${p.metricName()} in each hour, over every day in the window`)
+          + (lines.length < own.length ? ', for the five largest selected nodes.' : '.') + ' An hour with no reading is left empty.',
+          barChart({ days: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`), lines,
+            units: body.deltas ? `${units}/h` : units, stacked: false, kind: 'line', fitTo: width, height: 220 }), lines);
+      }
+    }
+
+    // What a node draws at its quietest: a load that never falls to zero is one that never switches off.
+    if (p.rate() && units === 'W') {
+      const floor = own.map((s: any) => {
+        const v = readings(s).map(([x]) => x).sort((a, b) => a - b);
+        if (v.length < 12) return null;
+        const value = v[Math.floor(v.length * 0.05)];
+        return value > 0 ? { label: s.label || s.node, value, color: color(s), note: `${v.length} samples` } : null;
+      }).filter(Boolean) as { label: string; value: number; color: string; note: string }[];
+      if (floor.length) {
+        p.section('Always on',
+          'The power each selected node draws at its quietest: the reading 5% of its samples fall below. A node that never drops to zero is a load that never switches off.',
+          rankChart({ items: floor, units, fitTo: width }), []);
+      }
+    }
+  };
+
   const created = trendsPage(nav, sections, {
     label: 'Node Trends',
     icon: '▥',
@@ -222,6 +298,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
         barChart({ days, lines, units, stacked: p.stacked(), kind: p.kind(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
 
+      drawInsights(p, series, days, units, partial);
       drawTable(p, series, days, units, partial);
       p.status.textContent = p.statusLine(gaps);
       p.status.title = gaps ? 'Those are drawn as empty slots and left out of the totals. The backend holds nothing for them.' : '';

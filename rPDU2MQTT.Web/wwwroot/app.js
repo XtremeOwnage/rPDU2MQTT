@@ -1715,6 +1715,63 @@ function sparkline(opts
   return svg;
 }
 
+/// A ranking: one horizontal bar per item, largest first, labelled with its value and an optional note.
+function rankChart(opts
+
+ )                             {
+  const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(420, opts.fitTo) : 720;
+  const rowH = 22, padT = 8;
+  const ring = opts.share && total > 0 ? 180 : 0;
+  const H = Math.max(ring, padT * 2 + items.length * rowH);
+  const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart trend-rank' });
+  const pct = (v        ) => `${(v / total * 100).toFixed(1)}%`;
+  const titled = (node     , text        ) => {
+    const t = document.createElementNS(SVG, 'title');
+    t.textContent = text;
+    node.appendChild(t);
+    return node;
+  };
+  const describe = (it                      ) =>
+    `${it.label}: ${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+
+  if (ring) {
+    const cx = ring / 2, cy = H / 2, r = 70, inner = 42;
+    const at = (rad        , a        ) => `${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`;
+    let angle = -Math.PI / 2;
+    items.forEach(it => {
+      const frac = it.value / total;
+      // A whole ring cannot be drawn as one arc, so it is two circles instead.
+      if (frac >= 0.9999) {
+        svg.appendChild(titled(svgTag('circle', { cx, cy, r: (r + inner) / 2, fill: 'none', stroke: it.color, 'stroke-width': r - inner, class: 'trend-slice' }), describe(it)));
+        return;
+      }
+      const end = angle + frac * 2 * Math.PI;
+      const large = frac > 0.5 ? 1 : 0;
+      const d = `M ${at(r, angle)} A ${r} ${r} 0 ${large} 1 ${at(r, end)} L ${at(inner, end)} A ${inner} ${inner} 0 ${large} 0 ${at(inner, angle)} Z`;
+      svg.appendChild(titled(svgTag('path', { d, fill: it.color, class: 'trend-slice' }), describe(it)));
+      angle = end;
+    });
+  }
+
+  const x0 = ring + 160, valueW = 190;
+  const barMax = Math.max(40, W - x0 - valueW - 8);
+  const top = items.length ? items[0].value : 1;
+  items.forEach((it, i) => {
+    const yy = padT + i * rowH;
+    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--text)', 'font-size': 12 });
+    name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
+    svg.appendChild(name);
+    const w = Math.max(1, (it.value / top) * barMax);
+    svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
+    const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
+    value.textContent = `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+    svg.appendChild(value);
+  });
+  return { svg, gaps: 0 };
+}
+
 // ── energy-diagram.ts ───────────────────────────────────────────
 // The animated energy diagram: a hub with an arm per source, dots travelling the way the power is going.
 // Shared, because the home page and the Energy page must not draw the same system two different ways.
@@ -7703,6 +7760,82 @@ function addNodeTrendsSection(nav     , sections     ) {
     table.appendChild(t);
   };
 
+  // Charts that compare the selected nodes rather than follow them through time.
+  const drawInsights = (p            , series       , days          , units        , partial               ) => {
+    const body = p.body();
+    const step = Number(body.stepSeconds) || 0;
+    const width = p.fitTo();
+    const color = (s     ) => colorFor(s.kind, all().indexOf(s));
+    const readings = (s     ) => (s.values                     )
+      .map((v, d) => [v, d]                           ).filter(([v]) => v != null)                      ;
+    // Return lanes are energy going back, not a node's own use, so none of these rank them.
+    const own = series.filter((s     ) => !isReturn(s));
+    const estimated = !p.summable() && p.rate() && units === 'W' && step > 0;
+    // What a node amounts to over the window: its energy where readings add up, or energy estimated from power.
+    const amount = (s     ) => {
+      const sum = readings(s).reduce((a, [v]) => a + v, 0);
+      return p.summable() ? sum : estimated ? (sum * step) / 3_600_000 : null;
+    };
+
+    const ranked = own.map((s     ) => ({ s, value: amount(s) })).filter(x => x.value != null && x.value > 0)
+      .sort((a, b) => (b.value          ) - (a.value          ));
+    if (ranked.length >= 2) {
+      p.section('Largest nodes',
+        `Each selected node's share of their combined ${estimated ? 'energy, estimated from the power samples' : p.metricName()}. `
+        + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
+        rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value          , color: color(x.s) })),
+          units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
+    }
+
+    const peaks = own.map((s     ) => {
+      const best = readings(s).reduce((a, b) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null                           );
+      return best && best[0] > 0
+        ? { label: s.label || s.node, value: best[0], color: color(s), note: days[best[1]] + (days[best[1]] === partial ? ' so far' : '') }
+        : null;
+    }).filter(Boolean)                                                                   ;
+    if (peaks.length) {
+      p.section(p.perDay() ? 'Busiest day per node' : 'Peak per node',
+        'The highest reading each selected node reached in the window, and when.',
+        rankChart({ items: peaks, units, fitTo: width }), []);
+    }
+
+    // The same hour across every day of the window, which shows when each node does its work.
+    const at           = body.at || [];
+    if (!p.perDay() && at.length && new Set(at.map(iso => new Date(iso).getHours())).size >= 2) {
+      const hourOf = at.map(iso => new Date(iso).getHours());
+      const perHour = body.deltas && step > 0 ? 3600 / step : 1;
+      const lines         = (ranked.length ? ranked.map(x => x.s) : own).slice(0, 5).map((s     ) => ({
+        label: s.label || s.node, color: color(s),
+        values: Array.from({ length: 24 }, (_, h) => {
+          const inHour = readings(s).filter(([, d]) => hourOf[d] === h).map(([v]) => v);
+          return inHour.length ? (inHour.reduce((a, v) => a + v, 0) / inHour.length) * perHour : null;
+        }),
+      }));
+      if (lines.length) {
+        p.section('By hour of day',
+          (body.deltas ? `Energy per hour, averaged over every day in the window` : `Average ${p.metricName()} in each hour, over every day in the window`)
+          + (lines.length < own.length ? ', for the five largest selected nodes.' : '.') + ' An hour with no reading is left empty.',
+          barChart({ days: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`), lines,
+            units: body.deltas ? `${units}/h` : units, stacked: false, kind: 'line', fitTo: width, height: 220 }), lines);
+      }
+    }
+
+    // What a node draws at its quietest: a load that never falls to zero is one that never switches off.
+    if (p.rate() && units === 'W') {
+      const floor = own.map((s     ) => {
+        const v = readings(s).map(([x]) => x).sort((a, b) => a - b);
+        if (v.length < 12) return null;
+        const value = v[Math.floor(v.length * 0.05)];
+        return value > 0 ? { label: s.label || s.node, value, color: color(s), note: `${v.length} samples` } : null;
+      }).filter(Boolean)                                                                   ;
+      if (floor.length) {
+        p.section('Always on',
+          'The power each selected node draws at its quietest: the reading 5% of its samples fall below. A node that never drops to zero is a load that never switches off.',
+          rankChart({ items: floor, units, fitTo: width }), []);
+      }
+    }
+  };
+
   const created = trendsPage(nav, sections, {
     label: 'Node Trends',
     icon: '▥',
@@ -7757,6 +7890,7 @@ function addNodeTrendsSection(nav     , sections     ) {
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
         barChart({ days, lines, units, stacked: p.stacked(), kind: p.kind(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
 
+      drawInsights(p, series, days, units, partial);
       drawTable(p, series, days, units, partial);
       p.status.textContent = p.statusLine(gaps);
       p.status.title = gaps ? 'Those are drawn as empty slots and left out of the totals. The backend holds nothing for them.' : '';
