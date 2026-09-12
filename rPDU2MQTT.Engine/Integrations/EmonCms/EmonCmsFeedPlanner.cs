@@ -48,8 +48,7 @@ public static class EmonCmsFeedPlanner
     {
         Models.Config.EmonCmsCalculation.ForceLocal => local ? Producer.Local : Producer.None,
         Models.Config.EmonCmsCalculation.ForceEmonCms => emon ? Producer.EmonCms : Producer.None,
-        Models.Config.EmonCmsCalculation.PreferLocal => local ? Producer.Local : emon ? Producer.EmonCms : Producer.None,
-        _ => emon ? Producer.EmonCms : local ? Producer.Local : Producer.None,
+        _ => local ? Producer.Local : emon ? Producer.EmonCms : Producer.None,
     };
 
     private const string PowerMetric = Core.Flow.FlowGraphBuilder.DefaultMetric;

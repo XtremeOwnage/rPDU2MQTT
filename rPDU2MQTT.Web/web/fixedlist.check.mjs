@@ -72,16 +72,16 @@ if (!fieldLabels.some(t => t.includes('Suffix'))) fail(`the entry lost its edita
 const calc = entries.flatMap(e => query(e, 'div', true).filter(d => String(d.dataset?.path || '').endsWith('.Calculation')));
 if (calc.length !== 3) fail(`expected a Calculation control per entry, got ${calc.length}`);
 const radios = query(calc[0], 'input', true).filter(i => i.type === 'radio');
-if (radios.length !== 4) fail(`Calculation is not a four-way radio: ${radios.length} radio(s)`);
+if (radios.length !== 3) fail(`Calculation is not a three-way radio: ${radios.length} radio(s)`);
 if (!radios.some(r => r.value === 'ForceEmonCms')) fail(`no ForceEmonCms choice: ${radios.map(r => r.value).join(' | ')}`);
 // The explanation hangs off a mark you can aim at, one per choice.
 const hints = query(calc[0], 'span', true).filter(x => String(x.className || '') === 'hint');
-if (hints.length !== 4) fail(`each choice needs its own hint mark; got ${hints.length}`);
+if (hints.length !== 3) fail(`each choice needs its own hint mark; got ${hints.length}`);
 if (hints.some(h => !String(h.title || '').trim())) fail('a hint mark carries no tooltip text');
 
-// The acronym survives the label split: "PreferEmonCms" reads as "Prefer EmonCMS", not "Prefer Emon Cms".
+// The acronym survives the label split: "ForceEmonCms" reads as "Force EmonCMS", not "Force Emon Cms".
 const texts = query(calc[0], 'span', true).map(x => String(x.textContent || ''));
-if (!texts.includes('Prefer EmonCMS')) fail(`choice labels not humanised: ${texts.filter(Boolean).join(' | ')}`);
+if (!texts.includes('Force EmonCMS')) fail(`choice labels not humanised: ${texts.filter(Boolean).join(' | ')}`);
 
 // Nothing computes a frequency, so the question is not put for one.
 const freq = entries.find(e => query(e, 'strong', true).some(s2 => s2.textContent === 'Frequency'));
@@ -90,4 +90,4 @@ const freqCalc = query(freq, 'div', true).find(d => String(d.dataset?.path || ''
 if (!freqCalc) fail('Frequency has no Calculation control at all; expected one, hidden');
 if (!String(freqCalc.className || '').includes('is-hidden')) fail('Calculation is shown for frequency, which nothing derives');
 
-console.log('fixedlist: the EmonCMS types render as the fixed set they are — titled by type, no Add, no Remove, type not editable; Calculation is a four-way radio with a tooltip per choice, hidden for frequency');
+console.log('fixedlist: the EmonCMS types render as the fixed set they are — titled by type, no Add, no Remove, type not editable; Calculation is a three-way radio with a hint per choice, hidden for frequency');

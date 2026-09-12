@@ -197,7 +197,7 @@ public class EmonCmsFeedTypeConfig
     public bool Enabled { get; set; } = true;
 
     [DefaultValue(EmonCmsCalculation.PreferLocal)]
-    [Description("Who works this type out when both could.")]
+    [Description("Where this type's value comes from.")]
     [RadioChoices]
     // Frequency is measured and nothing computes it, so the question does not arise there.
     [VisibleWhen(nameof(Type), "realpower", "apparentpower", "energy", "energy_d", "voltage", "current", "powerfactor")]

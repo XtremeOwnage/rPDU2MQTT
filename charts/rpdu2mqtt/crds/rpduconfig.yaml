@@ -600,10 +600,9 @@ spec:
                               type: string
                               enum:
                               - PreferLocal
-                              - PreferEmonCms
                               - ForceLocal
                               - ForceEmonCms
-                              description: Who works this type out when both could.
+                              description: Where this type's value comes from.
                             Prefix:
                               type: string
                               description: 'Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'
