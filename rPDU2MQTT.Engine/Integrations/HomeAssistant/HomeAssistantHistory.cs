@@ -212,7 +212,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
     private static string EntityFor(string nodeId, string metric)
     {
         var uid = string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase)
-            ? FlowExport.DeviceId(nodeId) + "_energy_today"
+            ? FlowExport.DeviceId(nodeId) + "_energy_d"
             : metric.StartsWith("energy", StringComparison.OrdinalIgnoreCase)
                 ? FlowExport.EnergyUniqueId(nodeId)
                 : FlowExport.PowerUniqueId(nodeId);

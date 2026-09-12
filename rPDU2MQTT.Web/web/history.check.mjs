@@ -27,7 +27,7 @@ const past = {
 
 // A week of daily totals, summed by the server, with one node short of the window.
 const week = {
-  ok: true, metric: 'energytoday', units: 'kWh', historical: true,
+  ok: true, metric: 'energy_d', units: 'kWh', historical: true,
   at: '2026-08-08T04:59:59Z', source: 'prometheus', spanDays: 7,
   incomplete: [{ node: 'panel', days: 5 }],
   nodes: [{ id: 'grid', label: 'Grid', kind: 'grid', value: 210, derivation: 'measured' },
@@ -103,7 +103,7 @@ if (!withAt.length) fail(`no request carried the day: ${asked.join(' | ')}`);
 if (!/at=\d{4}-\d{2}-\d{2}T[^&]*Z/.test(decodeURIComponent(withAt.at(-1))))
   fail(`the day was not sent as a UTC instant: ${withAt.at(-1)}`);
 // A past day is an energy question, so the metric moved with it.
-if (!withAt.at(-1).includes('metric=energytoday'))
+if (!withAt.at(-1).includes('metric=energy_d'))
   fail(`choosing a day did not switch the metric to energy: ${withAt.at(-1)}`);
 
 if (badge().textContent !== 'HISTORICAL') fail('a past moment is still badged as live data');
@@ -146,20 +146,20 @@ if (endOfDay - withTime !== 62999_000)
 // day defaults to energy, but the default was re-imposed on every load: choosing Power put the diagram back
 // on energy the moment anything refreshed.
 const metricSel = query(flowSection(), 'select', true)
-  .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energytoday'));
+  .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energy_d'));
 if (!metricSel) fail('no metric selector on the Flow page');
 metricSel.value = 'realpower';
 metricSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 const asPower = decodeURIComponent(asked.filter(u => u.includes('at=')).at(-1));
-if (asPower.includes('metric=energytoday')) fail(`choosing Power at a past moment was overridden: ${asPower}`);
+if (asPower.includes('metric=energy_d')) fail(`choosing Power at a past moment was overridden: ${asPower}`);
 
 // ...and stepping to another day keeps it, rather than snapping back to energy on every press.
 stepBack.click();
 await new Promise(r => setTimeout(r, 300));
 if (metricSel.value !== 'realpower') fail('stepping a day discarded the chosen metric');
 
-metricSel.value = 'energytoday';
+metricSel.value = 'energy_d';
 metricSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 
@@ -176,7 +176,7 @@ const spanned = decodeURIComponent(asked.filter(u => u.includes('span=')).at(-1)
 if (!spanned) fail(`choosing a span asked for no window: ${asked.slice(-3).join(' | ')}`);
 if (!spanned.includes('span=7')) fail(`the window was not requested: ${spanned}`);
 // Only the daily total can be added across days, so asking for a week asks for that metric.
-if (!spanned.includes('metric=energytoday')) fail(`a span was requested on a metric that cannot be summed: ${spanned}`);
+if (!spanned.includes('metric=energy_d')) fail(`a span was requested on a metric that cannot be summed: ${spanned}`);
 if (!labels().includes('210')) fail('the diagram does not show the summed window');
 
 // A window with days missing from it is not that window.

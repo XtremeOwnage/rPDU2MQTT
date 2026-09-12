@@ -109,7 +109,7 @@ export function addDiagnosticsSection(nav: any, sections: any) {
       info.appendChild(row('EmonCMS', txt));
     }
     // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
-    // browser — the container's clock is UTC unless someone set TZ, so "Energy today" can end at 7pm local
+    // browser — the container's clock is UTC unless someone set TZ, so "Energy Daily" can end at 7pm local
     // and look like the numbers are wrong when it is only the day that ended.
     try {
       const t = (await api('/api/time')).body;

@@ -1,6 +1,7 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Models.Config;
 using System.Globalization;
 
 namespace rPDU2MQTT.Helpers;
@@ -70,7 +71,7 @@ public static class MetricsHelper
             "apparentpower" => "Apparent Power",
             "powerfactor" => "Power Factor",
             "energy" => "Energy",
-            "energytoday" => "Energy Today",
+            "energy_d" => "Energy Daily",
             "current" => "Current",
             "voltage" => "Voltage",
             "frequency" => "Frequency",
@@ -135,13 +136,18 @@ public static class MetricsHelper
             ? ov!.ID!
             : metric;
 
-        return Sanitize(template
+        var t = EmonCmsTypeConfig(metric, config);
+        string Expand(string? s) => (s ?? string.Empty)
             .Replace("{node}", nodeId)
             .Replace("{label}", label)
             .Replace("{kind}", kind)
             .Replace("{metric}", effectiveMetric)
             .Replace("{type}", effectiveMetric)
-            .Replace("{units}", rPDU2MQTT.Core.Flow.FlowUnits.Canonical(metric)));
+            .Replace("{units}", t.Units);
+
+        // The type carries its own suffix, so a template still naming the metric would say it twice.
+        var body = Expand(WithoutTypePlaceholder(WithoutTypePlaceholder(template, "{metric}"), "{type}"));
+        return Sanitize(Expand(t.Prefix) + body + Expand(t.Suffix));
     }
 
     /// <summary>The friendly (display-name) EmonCMS feed name for a flow tier's virtual feed.</summary>
@@ -179,31 +185,42 @@ public static class MetricsHelper
     /// Fill an EmonCMS feed-name template for a reading (#163). Keeps a human-friendly form (spaces allowed);
     /// <c>{type}</c> honours the measurement's Overrides.Measurements ID.
     /// </summary>
-    public static string EmonCmsFeedName(MeasurementReading r, string template, Config config)
+    public static string EmonCmsFeedName(MeasurementReading r, string template, Config config, bool trim = true)
     {
         var effectiveType = config.Overrides.Measurements.TryGetValue(r.Type, out var ov) && !string.IsNullOrWhiteSpace(ov?.ID)
             ? ov!.ID!
             : r.Type;
 
-        return (string.IsNullOrWhiteSpace(template) ? "{name} {type}" : template)
+        var built = (string.IsNullOrWhiteSpace(template) ? "{name} {type}" : template)
             .Replace("{type}", effectiveType)
             .Replace("{device}", r.Device)
             .Replace("{source}", r.Source)
             .Replace("{outlet}", r.Source)
             .Replace("{name}", r.SourceName ?? r.Source)
             .Replace("{number}", r.Number?.ToString() ?? string.Empty)
-            .Replace("{units}", r.Units)
-            .Trim();
+            .Replace("{units}", r.Units);
+        return trim ? built.Trim() : built;
     }
 
-    /// <summary>The idempotent storage-feed name (from a stable id template — no display name), or the friendly
-    /// name when idempotent naming is off.</summary>
+    /// <summary>The settings for a measurement type, or that type's shipped defaults when it is not listed.</summary>
+    public static EmonCmsFeedTypeConfig EmonCmsTypeConfig(string type, Config config)
+        => config.EmonCMS.Feeds.Types.FirstOrDefault(t => string.Equals(t.Type, type, StringComparison.OrdinalIgnoreCase))
+           ?? EmonCmsFeedTypeConfig.For(type);
+
+    /// <summary>Drop a placeholder the type's suffix now carries, with whatever separator sat in front of it.</summary>
+    internal static string WithoutTypePlaceholder(string? template, string placeholder)
+        => System.Text.RegularExpressions.Regex.Replace(template ?? string.Empty,
+            @"[_\-\s.]*" + System.Text.RegularExpressions.Regex.Escape(placeholder), string.Empty);
+
+    /// <summary>The storage-feed name: the type's prefix, the stable template, then the type's suffix.</summary>
     public static string EmonCmsStorageFeedName(MeasurementReading r, Config config)
     {
-        var f = config.EmonCMS.Feeds;
-        return f.IdempotentNames
-            ? EmonCmsFeedName(r, f.StorageNameTemplate, config)
-            : EmonCmsFeedName(r, f.Virtual.NameTemplate, config);
+        var t = EmonCmsTypeConfig(r.Type, config);
+        var body = EmonCmsFeedName(r, WithoutTypePlaceholder(config.EmonCMS.Feeds.StorageNameTemplate, "{type}"), config);
+        // Not trimmed individually: a suffix of " {type}" means the space, and the whole name is trimmed below.
+        var prefix = string.IsNullOrEmpty(t.Prefix) ? string.Empty : EmonCmsFeedName(r, t.Prefix, config, trim: false);
+        var suffix = string.IsNullOrEmpty(t.Suffix) ? string.Empty : EmonCmsFeedName(r, t.Suffix, config, trim: false);
+        return (prefix + body + suffix).Trim();
     }
 
     /// <summary>The friendly (display-name based) feed name used for virtual feeds.</summary>

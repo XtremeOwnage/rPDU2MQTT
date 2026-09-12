@@ -197,7 +197,7 @@ public static class FlowExport
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
         string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
-        bool includeEnergyToday = false)
+        bool includeEnergyDaily = false)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -247,9 +247,9 @@ public static class FlowExport
                 Sensor($"{id}_energy_out", "Energy Out", "energy", "total_increasing", units, "{{ value_json.energy_out }}");
         }
         // Energy since local midnight.
-        if (includeEnergyToday)
-            doc["components"]!.AsObject()[$"{id}_energy_today"] =
-                Sensor($"{id}_energy_today", "Energy today", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_today }}");
+        if (includeEnergyDaily)
+            doc["components"]!.AsObject()[$"{id}_energy_d"] =
+                Sensor($"{id}_energy_d", "Energy Daily", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_d }}");
         // A battery tier with a state-of-charge source publishes it too, so HA's battery source can show %.
         if (includeSoc)
             doc["components"]!.AsObject()[$"{id}_soc"] =

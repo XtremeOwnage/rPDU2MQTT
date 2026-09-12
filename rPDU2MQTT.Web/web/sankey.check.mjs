@@ -177,7 +177,7 @@ for (const id of ['pdu_1', 'fridge']) {
 // node in the COLUMN rather than below its own siblings, which is only the same thing when there is one
 // parent — and the check only ever had one.
 const twoParents = await render({
-  ok: true, metric: 'energytoday', units: 'kWh',
+  ok: true, metric: 'energy_d', units: 'kWh',
   nodes: [
     { id: 'panel', label: 'Main Panel', value: 138.876 },
     { id: 'pdu_1', label: 'Rack-PDU-1', value: 47.685 },

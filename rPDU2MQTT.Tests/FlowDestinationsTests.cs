@@ -44,7 +44,7 @@ public class FlowDestinationsTests
     {
         ["solar|realpower"] = 4200,
         ["solar|energy"] = 812.5,
-        ["solar|energytoday"] = 31.5,
+        ["solar|energy_d"] = 31.5,
     });
 
     [Fact]
@@ -69,7 +69,7 @@ public class FlowDestinationsTests
         var cfg = Configured();
 
         Assert.Equal("solar_realpower", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", "realpower", cfg));
-        Assert.Equal("solar_energytoday", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", EnergyPeriod.Metric, cfg));
+        Assert.Equal("solar_energy_d", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", EnergyPeriod.Metric, cfg));
         // An auto node's id carries separators EmonCMS will not take in a key.
         Assert.Equal("outlet_rack_pdu_1_4_energy", MetricsHelper.EmonCmsFlowInputName("outlet:rack_pdu_1:4", "Outlet 5", "outlet", "energy", cfg));
     }
@@ -78,7 +78,7 @@ public class FlowDestinationsTests
     public void ThePrometheusFlowMetricName_IsOneSpelling_ForTheExportAndTheHistory()
     {
         var cfg = Configured();
-        Assert.Equal("rpdu2mqtt_flow_energytoday", MetricsHelper.PrometheusFlowMetricName(EnergyPeriod.Metric, cfg));
+        Assert.Equal("rpdu2mqtt_flow_energy_d", MetricsHelper.PrometheusFlowMetricName(EnergyPeriod.Metric, cfg));
 
         // A template naming the units used to change the exported name and not the queried one, so every
         // lookup missed. Whatever the template, both sides now ask the same function.
@@ -94,14 +94,14 @@ public class FlowDestinationsTests
     {
         var cfg = Configured();
         cfg.EmonCMS.Feeds.AutoConfigure = true;
-        cfg.EmonCMS.Feeds.Types = [new() { Type = "realpower" }, new() { Type = EnergyPeriod.Metric }];
+        foreach (var t in cfg.EmonCMS.Feeds.Types) t.Enabled = t.Type == "realpower" || t.Type == EnergyPeriod.Metric;
 
         var desired = EmonCmsFeedPlanner.BuildDesired(new PduData(), cfg, FlowTiers.Graphs(new PduData(), cfg, Live()));
 
         Assert.Contains(desired.Feeds, f => f.Name == "solar_realpower");
-        Assert.Contains(desired.Feeds, f => f.Name == "solar_energytoday");
+        Assert.Contains(desired.Feeds, f => f.Name == "solar_energy_d");
         Assert.Contains(desired.Inputs, i => i.InputName == "solar_realpower" && i.StorageFeed == "solar_realpower");
-        // A type nobody asked for gets no feed, exactly as for a PDU reading.
+        // A type switched off gets no feed, exactly as for a PDU reading.
         Assert.DoesNotContain(desired.Feeds, f => f.Name == "solar_energy");
     }
 
@@ -211,7 +211,7 @@ public class FlowDestinationsTests
         // The half that never existed. Every tier, under every metric it has a value for.
         Assert.Equal(4200, sent["solar_realpower"]);
         Assert.Equal(812.5, sent["solar_energy"]);
-        Assert.Equal(31.5, sent["solar_energytoday"]);
+        Assert.Equal(31.5, sent["solar_energy_d"]);
         Assert.Equal(4200, sent["inverter_realpower"]);
     }
 
@@ -284,7 +284,7 @@ public class FlowDestinationsTests
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "wattsonly", Label = "Watts Only", Kind = "circuit" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "meter", Label = "Meter", Kind = "grid" });
         c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "both", Label = "Both", Kind = "inverter" });
-        c.EmonCMS.Feeds.Types = [new() { Type = "realpower" }, new() { Type = "energy", Daily = true }];
+        foreach (var t in c.EmonCMS.Feeds.Types) t.Enabled = t.Type is "realpower" or "energy" or "energy_d";
         return c;
     }
 
@@ -335,17 +335,17 @@ public class FlowDestinationsTests
     }
 
     /// <summary>
-    /// A node with only a counter has EmonCMS accumulate it — the reset-dropping this bridge kept getting
-    /// wrong — and derive watts from it. kWh to Power is last: it hands on watts, so anything after it
-    /// would be reading the wrong quantity.
+    /// A node with only a counter has the counter recorded and watts derived from it. kWh to Power is last:
+    /// it hands on watts, so anything after it would be reading the wrong quantity.
     /// </summary>
     [Fact]
-    public void AnEnergyOnlyNode_HasEmonCmsAccumulateIt_AndDerivePowerLast()
+    public void AnEnergyOnlyNode_HasItsCounterRecorded_AndDerivesPowerLast()
     {
         var input = Assert.Single(ThreeKindsDesired().Inputs, i => i.InputName == "meter_energy");
 
+        // Energy ships preferring the counter as sent; the daily total and the power are still EmonCMS's.
         Assert.Equal(
-            new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd, ProcessSlot.KwhToPower },
+            new[] { ProcessSlot.LogToFeed, ProcessSlot.KwhToKwhd, ProcessSlot.KwhToPower },
             input.Steps.Select(x => x.Process).ToArray());
         Assert.Equal(new[] { "meter_energy", "meter_energy_d", "meter_realpower" },
             input.Steps.Select(x => x.Feed).ToArray());
@@ -362,7 +362,8 @@ public class FlowDestinationsTests
         Assert.Equal(new[] { ProcessSlot.LogToFeed }, power.Steps.Select(x => x.Process).ToArray());
 
         var energy = Assert.Single(d.Inputs, i => i.InputName == "both_energy");
-        Assert.Equal(new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd },
+        Assert.Equal(new[] { ProcessSlot.LogToFeed, ProcessSlot.KwhToKwhd },
             energy.Steps.Select(x => x.Process).ToArray());
     }
+
 }

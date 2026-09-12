@@ -10,7 +10,7 @@ public static class EnergyPeriod
     /// redefinition of <c>energy</c>, so the lifetime counters that Home Assistant and EmonCMS have already
     /// recorded history against keep meaning exactly what they meant.
     /// </summary>
-    public const string Metric = "energytoday";
+    public const string Metric = "energy_d";
 
     /// <summary>Local time in <paramref name="zone"/> for an instant, whatever Kind the instant carries.</summary>
     public static DateTime Local(DateTime utc, TimeZoneInfo zone)

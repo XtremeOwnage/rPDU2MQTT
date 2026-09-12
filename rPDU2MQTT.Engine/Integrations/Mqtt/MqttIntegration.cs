@@ -131,7 +131,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 continue;
 
             var topic = FlowExport.Topic(node, graph, cfg.MQTT.ParentTopic, flow);
-            // Null — not 0 — when nothing determines it, exactly like energy_in / energy_today / soc below.
+            // Null — not 0 — when nothing determines it, exactly like energy_in / energy_d / soc below.
             // The sensor this feeds is state_class total_increasing, and to Home Assistant a series that
             // drops to zero is a meter reset: the next real reading is taken as a delta from zero and an
             // entire lifetime counter lands on one day's bar.
@@ -158,7 +158,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             if (energyOut is { } eo) energy = eo + (energyIn ?? 0);
 
             // Today's total. Null — not 0 — when nothing determines it.
-            double? energyToday = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
+            double? energyDaily = FlowExport.PeriodTotal(todayGraph, node.Id, periodsReady);
 
             // Signed net power for a bidirectional node: out (discharge/import) minus in (charge/export).
             double netPower = live is not null && live.TryGetValue(node.Id, FlowMetricKey.For("realpower", "in"), out var pin) ? power - pin : power;
@@ -173,7 +173,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 energy,
                 energy_out = energyOut,
                 energy_in = energyIn,
-                energy_today = energyToday,
+                energy_d = energyDaily,
                 soc,
                 units = graph.Units,
                 energyUnits = energyGraph.Units,
@@ -200,7 +200,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             {
                 var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
                     includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
-                    includeEnergyToday: energyToday is not null);
+                    includeEnergyDaily: energyDaily is not null);
                 await publisher.PublishAsync(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
             }
         }

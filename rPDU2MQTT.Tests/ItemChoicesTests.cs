@@ -45,9 +45,9 @@ public class ItemChoicesTests
             .ValueSchema!.Properties!.Single(p => p.Key == "Metric").EnumValues!;
 
         Assert.Equal(bindable.Where(v => v != "").ToArray(), metrics.ValueSchema.EnumValues);
-        // energytoday is derived from a counter's rise, not something a device publishes to bind to.
-        Assert.DoesNotContain("energytoday", metrics.ValueSchema.EnumValues!);
-        Assert.Contains("energytoday", FlowUnits.Metrics);
+        // energy_d is derived from a counter's rise, not something a device publishes to bind to.
+        Assert.DoesNotContain("energy_d", metrics.ValueSchema.EnumValues!);
+        Assert.Contains("energy_d", FlowUnits.Metrics);
     }
 
     [Fact]

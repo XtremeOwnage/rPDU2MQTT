@@ -57,7 +57,7 @@ export function addFlowSection(nav: any, sections: any) {
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' }) as HTMLSelectElement;
-  [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
+  [['realpower', 'Power (W)'], ['energy_d', 'Energy Daily (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   const count = document.createElement('span'); count.className = 'ld-count';
@@ -70,7 +70,7 @@ export function addFlowSection(nav: any, sections: any) {
   const showDayNote = async () => {
     dayNote.textContent = '';
     dayNote.removeAttribute('title');
-    if (metricSel.value !== 'energytoday') return;
+    if (metricSel.value !== 'energy_d') return;
     let p: any;
     try { p = (await api('/api/time')).body?.period; } catch { return; }
     if (!p) return;
@@ -100,7 +100,7 @@ export function addFlowSection(nav: any, sections: any) {
     hadDay = !!hist.day();
     // Only the daily total can be added across days, so asking for a span asks for that metric.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
-      if (metricSel.value !== 'energytoday') metricSel.value = 'energytoday';
+      if (metricSel.value !== 'energy_d') metricSel.value = 'energy_d';
       showDayNote();
     }
     load();
@@ -111,7 +111,7 @@ export function addFlowSection(nav: any, sections: any) {
   const periods = periodRow((key: PeriodKey) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    if (metricSel.value !== 'energytoday') { metricSel.value = 'energytoday'; showDayNote(); }
+    if (metricSel.value !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     periods.mark(key);
     hadDay = true;
     load();
@@ -700,7 +700,7 @@ export function addFlowSection(nav: any, sections: any) {
             + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
             + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (metricSel.value === 'energy'
-              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
+              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy Daily", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
       }
       labGroup.appendChild(lab);
@@ -869,7 +869,7 @@ export function addFlowSection(nav: any, sections: any) {
     body.appendChild(el('div', { class: 'desc' },
       'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
       + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
-      + 'Draw the diagram with Show → “Energy today”.'));
+      + 'Draw the diagram with Show → “Energy Daily”.'));
 
     const aggRow = el('div', { class: 'ld-toolbar' });
 
@@ -912,7 +912,7 @@ export function addFlowSection(nav: any, sections: any) {
       clock.textContent = `Server clock: ${String(t.host.time).replace('T', ' ').slice(0, 19)} (${t.host.zone}). `
         + (p.tracked
           ? `Current day ${p.key}, next rollover ${String(p.nextRolloverLocal).replace('T', ' ').slice(0, 16)} ${p.zone}.`
-          : 'Daily totals are off, so “Energy today” has nothing to draw.');
+          : 'Daily totals are off, so “Energy Daily” has nothing to draw.');
       if (p.tracked && !p.resolved) {
         clock.textContent += ` The saved zone "${p.configured}" does not exist on the server — it is using ${p.zone}.`;
         clock.style.color = 'var(--bad, #d05a5a)';

@@ -50,7 +50,7 @@ export function addTrendsSection(nav: any, sections: any) {
   };
   /// A counter's readings are not a per-bar quantity; the differences between them are.
   ///
-  /// Charting `energytoday` through a day draws the counter itself — a staircase climbing to the day's
+  /// Charting `energy_d` through a day draws the counter itself — a staircase climbing to the day's
   /// total, where every bar restates the whole day so far and none of them says what was used at that
   /// moment. The difference between one reading and the next is the energy in that interval, which is the
   /// quantity the chart is asking about, and those DO add up to the day.
@@ -117,7 +117,7 @@ export function addTrendsSection(nav: any, sections: any) {
   type Metric = { metric: string; units: string; epoch?: string };
   const LABELS: Record<string, string> = {
     realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-    frequency: 'frequency', energy: 'energy', energytoday: 'energy',
+    frequency: 'frequency', energy: 'energy', energy_d: 'energy',
   };
   const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
   // Seeded with the three every build exports, so a page that cannot reach /api/flow/metrics still offers
@@ -125,7 +125,7 @@ export function addTrendsSection(nav: any, sections: any) {
   let METRICS: Metric[] = [
     { metric: 'realpower', units: 'W', epoch: 'instant' },
     { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
-    { metric: 'energytoday', units: 'kWh', epoch: 'period' },
+    { metric: 'energy_d', units: 'kWh', epoch: 'period' },
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
   let metricChosen = false;
@@ -154,7 +154,7 @@ export function addTrendsSection(nav: any, sections: any) {
   /// What can honestly be drawn as a bar per point. A counter's own readings cannot be — each bar would be
   /// everything the meter has ever seen — but the differences between them can, and that is what is drawn:
   /// see toDeltas. Excluding lifetime metrics outright left EmonCMS with nothing to chart, because `energy`
-  /// is the feed it stores and `energytoday` is one it was never given.
+  /// is the feed it stores and `energy_d` is one it was never given.
   const chartable = () => METRICS;
   const fillMetrics = () => {
     metricSel.innerHTML = '';

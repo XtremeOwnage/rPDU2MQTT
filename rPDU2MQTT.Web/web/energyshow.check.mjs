@@ -20,7 +20,7 @@ const power = {
 };
 // Exported more than imported today: out 2.0, in 7.5 -> net -5.5 kWh.
 const today = {
-  ok: true, metric: 'energytoday', units: 'kWh',
+  ok: true, metric: 'energy_d', units: 'kWh',
   nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 41.2 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 2.0 }],
   links: [],
 };
@@ -36,7 +36,7 @@ const lifetime = {
 // A past view of the board. Its return lanes are series of their own, so the graph carries them; SoC is not
 // exported at all, so history has none.
 const pastDay = {
-  ok: true, metric: 'energytoday', units: 'kWh', historical: true,
+  ok: true, metric: 'energy_d', units: 'kWh', historical: true,
   at: '2026-08-03T04:59:59Z', source: 'prometheus',
   nodes: [
     { id: 'solar', label: 'Solar', kind: 'solar', value: 12.5 },
@@ -52,8 +52,8 @@ const { sandbox, getEl } = makeDom({
     url.includes('at=') ? pastDay :
     url.includes('/api/instances') ? { ok: true, instances: [] } :
     url.includes('/api/config') ? cfg :
-    url.includes('/api/flow/live') ? { ok: true, values: [{ node: 'grid', metric: 'energytoday#in', value: 7.5 }] } :
-    url.includes('metric=energytoday') ? today :
+    url.includes('/api/flow/live') ? { ok: true, values: [{ node: 'grid', metric: 'energy_d#in', value: 7.5 }] } :
+    url.includes('metric=energy_d') ? today :
     url.includes('metric=energy') ? lifetime :
     url.includes('/api/flow') ? power :
     { ok: true },
@@ -90,9 +90,9 @@ if (!/today/.test(ssLive.textContent)) fail(`self-sufficiency does not say it co
 if (!query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge'))) fail('no gauge on the power view');
 
 const show = query(getEl('sections'), 'select', true)
-  .find(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energytoday'));
+  .find(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energy_d'));
 if (!show) fail('no Show selector offering energy today');
-show.value = 'energytoday';
+show.value = 'energy_d';
 show.onchange({});
 await new Promise(r => setTimeout(r, 400));
 

@@ -43,7 +43,7 @@ const { sandbox, getEl } = makeDom({
     url.includes('/api/status/board') ? board :
     url.includes('/api/flow/series') ? { ok: true, series: [] } :
     url.includes('/api/flow/live') ? { ok: true, values: [] } :
-    url.includes('metric=energytoday') ? energy :
+    url.includes('metric=energy_d') ? energy :
     url.includes('/api/flow') ? power :
     url.includes('/api/time') ? { ok: true, period: null } :
     { ok: true },

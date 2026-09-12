@@ -122,18 +122,44 @@ public class EmonCmsFeedsConfig
     [Description("Create and maintain EmonCMS feeds from the exported inputs (takes effect without a restart).")]
     public bool AutoConfigure { get; set; }
 
-    /// <summary>Per-type feed configuration (engine, interval, processing) — one entry per measurement type.</summary>
-    [Description("The measurement types to build feeds for, each with its own engine, interval and processing.")]
-    public List<EmonCmsFeedTypeConfig> Types { get; set; } = new()
+    private List<EmonCmsFeedTypeConfig> types = Supported.Select(EmonCmsFeedTypeConfig.For).ToList();
+
+    /// <summary>One entry per supported measurement type; the set is fixed, what each does is not.</summary>
+    [Description("The supported measurement types. Each says whether it gets a feed, how that feed is named and stored, and whether EmonCMS derives it.")]
+    [FixedList(nameof(EmonCmsFeedTypeConfig.Type))]
+    public List<EmonCmsFeedTypeConfig> Types
     {
-        new() { Type = "realpower" },
-        new() { Type = "energy" },
-        // Only the energy-flow nodes carry a daily total; no PDU reports one, so this adds no outlet feeds.
-        new() { Type = EnergyPeriodMetric },
-    };
+        get => types;
+        // A saved config predates whatever types this build added, and the list is fixed — there is no Add
+        // button to reach a missing one with. So every supported type is present after a load, in a settled
+        // order, with anything already configured kept exactly as it was written.
+        set => types = Complete(value);
+    }
+
+    /// <summary>The configured types, plus a default entry for every supported type not among them.</summary>
+    public static List<EmonCmsFeedTypeConfig> Complete(IEnumerable<EmonCmsFeedTypeConfig>? configured)
+    {
+        var have = (configured ?? []).Where(t => !string.IsNullOrWhiteSpace(t?.Type)).ToList();
+        var known = have.Select(t => t.Type).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var all = have.Concat(Supported.Where(t => !known.Contains(t)).Select(EmonCmsFeedTypeConfig.For));
+        // Supported order first, then anything this build does not recognise, kept rather than dropped.
+        return all.OrderBy(t => Supported.ToList().FindIndex(x => string.Equals(x, t.Type, StringComparison.OrdinalIgnoreCase)) is var i && i < 0 ? int.MaxValue : i)
+                  .ToList();
+    }
+
+    /// <summary>The measurement types EmonCMS feeds can be built for.</summary>
+    public static readonly IReadOnlyList<string> Supported =
+    [
+        "realpower", "energy", EnergyPeriodMetric, "apparentpower", "current", "voltage", "frequency", "powerfactor",
+    ];
+
+    /// <summary>The types something can work out, given the others. Frequency is measured or it is absent.</summary>
+    public static readonly IReadOnlySet<string> Derivable = new HashSet<string>(
+        ["realpower", "apparentpower", "energy", EnergyPeriodMetric, "voltage", "current", "powerfactor"],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The daily-total metric name, spelled once (see <c>Core.Flow.EnergyPeriod.Metric</c>).</summary>
-    internal const string EnergyPeriodMetric = "energytoday";
+    internal const string EnergyPeriodMetric = "energy_d";
 
     [DefaultValue(EmonCmsFeedEngine.PHPFina)]
     [Description("Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).")]
@@ -144,18 +170,14 @@ public class EmonCmsFeedsConfig
     [Description("Default sample interval in seconds for a fixed-interval feed, for types that don't set their own.")]
     public int IntervalSeconds { get; set; } = 10;
 
-    [DefaultValue(true)]
-    [Description("Name storage feeds idempotently from stable ids (device/source/type) so they DON'T change when a source is renamed. Turn off to name them from the display name instead (renaming a source renames its feed).")]
-    public bool IdempotentNames { get; set; } = true;
-
     /// <summary>The EmonCMS "tag" (group) feeds are filed under. Blank uses the input node name.</summary>
     [Description("The EmonCMS tag (group) new feeds are filed under. Blank uses the input node name.")]
     public string? Tag { get; set; }
 
-    [DefaultValue("{device}_{source}_{type}")]
-    [Description("Template for the idempotent storage-feed name. Use only stable placeholders ({device}, {source}, {type}, {number}) so it never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
-    [TemplateVariables("device", "source", "name", "number", "type", "units")]
-    public string StorageNameTemplate { get; set; } = "{device}_{source}_{type}";
+    [DefaultValue("{device}_{source}")]
+    [Description("Template for the storage-feed name, without the type — each type appends its own suffix. Use only stable placeholders ({device}, {source}, {number}) so the name never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {units}.")]
+    [TemplateVariables("device", "source", "name", "number", "units")]
+    public string StorageNameTemplate { get; set; } = "{device}_{source}";
 
     /// <summary>Optional friendly-named feeds that source their data from the stable storage feeds (#163).</summary>
     [Description("Optionally create friendly-named virtual feeds that source from the stable storage feeds — so dashboards get nice names while the underlying feeds stay idempotent.")]
@@ -166,25 +188,71 @@ public class EmonCmsFeedsConfig
 [System.Text.Json.Serialization.JsonConverter(typeof(EmonCmsFeedTypeConfigConverter))]
 public class EmonCmsFeedTypeConfig
 {
-    [Description("The measurement type this applies to (raw PDU type name, or 'energytoday' for the energy-flow daily totals).")]
-    [AllowedValues("realpower", "apparentpower", "energy", "energytoday", "current", "voltage", "frequency", "powerfactor")]
+    [Description("The measurement type this applies to.")]
+    [AllowedValues("realpower", "energy", "energy_d", "apparentpower", "current", "voltage", "frequency", "powerfactor")]
     public string Type { get; set; } = "realpower";
+
+    [DefaultValue(true)]
+    [Description("Build and maintain a feed for this type.")]
+    public bool Enabled { get; set; } = true;
+
+    [DefaultValue(EmonCmsCalculation.PreferLocal)]
+    [Description("Where this type's value comes from.")]
+    [RadioChoices]
+    // Frequency is measured and nothing computes it, so the question does not arise there.
+    [VisibleWhen(nameof(Type), "realpower", "apparentpower", "energy", "energy_d", "voltage", "current", "powerfactor")]
+    public EmonCmsCalculation Calculation { get; set; } = EmonCmsCalculation.PreferLocal;
+
+    [Description("Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
+    [TemplateVariables("device", "source", "name", "number", "type", "units")]
+    public string? Prefix { get; set; }
+
+    [Description("Text placed after the feed name, which is where the type appears. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
+    [TemplateVariables("device", "source", "name", "number", "type", "units")]
+    public string Suffix { get; set; } = "_realpower";
+
+    [Description("The unit this feed is stored in.")]
+    public string Units { get; set; } = "W";
 
     [Description("Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.")]
     public EmonCmsFeedEngine? Engine { get; set; }
 
+    [DefaultValue(10)]
     [Range(1, 86400, ErrorMessage = "Interval must be between 1 and 86400 seconds.")]
-    [Description("Sample interval in seconds for this type's feed. Blank inherits Feeds.IntervalSeconds.")]
-    public int? IntervalSeconds { get; set; }
+    [Description("Sample interval in seconds for this type's feed.")]
+    public int IntervalSeconds { get; set; } = 10;
 
-    [DefaultValue(false)]
-    [Description("Also create a daily kWh/d feed (an extra processlist step: kWh→kWh/d). Typically only for the energy type.")]
-    public bool Daily { get; set; }
+    /// <summary>A type with its shipped defaults: suffix, units and interval all follow from what it is.</summary>
+    public static EmonCmsFeedTypeConfig For(string type) => new()
+    {
+        Type = type,
+        Suffix = "_" + type,
+        Units = UnitFor(type),
+        IntervalSeconds = string.Equals(type, EmonCmsFeedsConfig.EnergyPeriodMetric, StringComparison.OrdinalIgnoreCase) ? 86400 : 10,
+        Calculation = DefaultCalculation(type),
+    };
 
-    [DefaultValue(86400)]
-    [Range(1, 86400, ErrorMessage = "Interval must be between 1 and 86400 seconds.")]
-    [Description("Interval (seconds) for the daily kWh/d feed. Should be a day (86400), not the base interval.")]
-    public int DailyIntervalSeconds { get; set; } = 86400;
+    /// <summary>
+    /// Who works a type out unless told otherwise. The daily total is EmonCMS's: it owns the day boundary,
+    /// so a clock drifting here cannot push a reading into the wrong day. Everything else prefers the
+    /// reading that arrived, and falls back to EmonCMS only where none does.
+    /// </summary>
+    public static EmonCmsCalculation DefaultCalculation(string type)
+        => string.Equals(type, EmonCmsFeedsConfig.EnergyPeriodMetric, StringComparison.OrdinalIgnoreCase)
+            ? EmonCmsCalculation.ForceEmonCms
+            : EmonCmsCalculation.PreferLocal;
+
+    /// <summary>The unit a measurement type is stored in unless it is told otherwise.</summary>
+    public static string UnitFor(string type) => type.ToLowerInvariant() switch
+    {
+        "realpower" => "W",
+        "apparentpower" => "VA",
+        "energy" or "energy_d" => "kWh",
+        "current" => "A",
+        "voltage" => "V",
+        "frequency" => "Hz",
+        _ => "",
+    };
 }
 
 /// <summary>Friendly virtual feeds that source from the stable storage feeds.</summary>

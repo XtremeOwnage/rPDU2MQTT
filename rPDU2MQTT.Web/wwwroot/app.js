@@ -700,11 +700,18 @@ function same(a     , b     ) { return JSON.stringify(a ?? null) === JSON.string
 
 function diffConfig(before     , after     ) {
   const out        = [];
-  walk(prune(before), prune(after), [], out);
+  walk(prune(before), prune(after), [], [], out);
   return out;
 }
 
-function walk(a     , b     , path          , out       ) {
+/// What names an entry of a list of objects, for the review sheet: "Types › energy_d" rather than "Types › 2".
+function entryName(entry     , index        ) {
+  for (const k of ['Type', 'Id', 'Name', 'Key']) if (entry && typeof entry[k] === 'string' && entry[k]) return entry[k];
+  return `#${index + 1}`;
+}
+
+// `path` matches the form's field registry (list entries by index); `label` is how the review sheet names it.
+function walk(a     , b     , path          , label          , out       ) {
   if (same(a, b)) return;
 
   // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
@@ -712,11 +719,17 @@ function walk(a     , b     , path          , out       ) {
   const objectish = (v     ) => v === undefined || isPlainObject(v);
   if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
     const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
-    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], out);
+    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], [...label, k], out);
     return;
   }
 
-  out.push({ path, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
+  // Same length on both sides: an entry was edited in place, so report that entry's setting, not the list.
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length && [...a, ...b].every(isPlainObject)) {
+    a.forEach((_     , i        ) => walk(a[i], b[i], [...path, String(i)], [...label, entryName(b[i], i)], out));
+    return;
+  }
+
+  out.push({ path, label, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
 }
 
 // --- Display ---------------------------------------------------------------------------------------
@@ -974,12 +987,12 @@ const METRICS                                       = [
   ['temperature', 'Temperature', '°C', ['°C', 'K']],
 ];
 // Which metrics the flow may sum from the leaves upward. Mirrors FlowUnits.IsAdditive.
-const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'energytoday', 'current']);
+const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'energy_d', 'current']);
 const isAdditiveMetric = (key         ) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
 // Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS.
-const DERIVED_METRIC_LABELS                         = { energytoday: 'Energy today' };
+const DERIVED_METRIC_LABELS                         = { energy_d: 'Energy Daily' };
 const metricLabel = (key         ) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction.
 const sourceMetricKey = (src     ) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
@@ -2793,7 +2806,7 @@ function addDiagnosticsSection(nav     , sections     ) {
       info.appendChild(row('EmonCMS', txt));
     }
     // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
-    // browser — the container's clock is UTC unless someone set TZ, so "Energy today" can end at 7pm local
+    // browser — the container's clock is UTC unless someone set TZ, so "Energy Daily" can end at 7pm local
     // and look like the numbers are wrong when it is only the day that ended.
     try {
       const t = (await api('/api/time')).body;
@@ -3228,7 +3241,7 @@ function addFlowSection(nav     , sections     ) {
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' })                     ;
-  [['realpower', 'Power (W)'], ['energytoday', 'Energy today (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
+  [['realpower', 'Power (W)'], ['energy_d', 'Energy Daily (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   const count = document.createElement('span'); count.className = 'ld-count';
@@ -3241,7 +3254,7 @@ function addFlowSection(nav     , sections     ) {
   const showDayNote = async () => {
     dayNote.textContent = '';
     dayNote.removeAttribute('title');
-    if (metricSel.value !== 'energytoday') return;
+    if (metricSel.value !== 'energy_d') return;
     let p     ;
     try { p = (await api('/api/time')).body?.period; } catch { return; }
     if (!p) return;
@@ -3271,7 +3284,7 @@ function addFlowSection(nav     , sections     ) {
     hadDay = !!hist.day();
     // Only the daily total can be added across days, so asking for a span asks for that metric.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
-      if (metricSel.value !== 'energytoday') metricSel.value = 'energytoday';
+      if (metricSel.value !== 'energy_d') metricSel.value = 'energy_d';
       showDayNote();
     }
     load();
@@ -3282,7 +3295,7 @@ function addFlowSection(nav     , sections     ) {
   const periods = periodRow((key           ) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    if (metricSel.value !== 'energytoday') { metricSel.value = 'energytoday'; showDayNote(); }
+    if (metricSel.value !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     periods.mark(key);
     hadDay = true;
     load();
@@ -3870,7 +3883,7 @@ function addFlowSection(nav     , sections     ) {
             + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
             + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (metricSel.value === 'energy'
-              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy today", where every figure covers the same window.'
+              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy Daily", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
       }
       labGroup.appendChild(lab);
@@ -4039,7 +4052,7 @@ function addFlowSection(nav     , sections     ) {
     body.appendChild(el('div', { class: 'desc' },
       'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
       + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
-      + 'Draw the diagram with Show → “Energy today”.'));
+      + 'Draw the diagram with Show → “Energy Daily”.'));
 
     const aggRow = el('div', { class: 'ld-toolbar' });
 
@@ -4082,7 +4095,7 @@ function addFlowSection(nav     , sections     ) {
       clock.textContent = `Server clock: ${String(t.host.time).replace('T', ' ').slice(0, 19)} (${t.host.zone}). `
         + (p.tracked
           ? `Current day ${p.key}, next rollover ${String(p.nextRolloverLocal).replace('T', ' ').slice(0, 16)} ${p.zone}.`
-          : 'Daily totals are off, so “Energy today” has nothing to draw.');
+          : 'Daily totals are off, so “Energy Daily” has nothing to draw.');
       if (p.tracked && !p.resolved) {
         clock.textContent += ` The saved zone "${p.configured}" does not exist on the server — it is using ${p.zone}.`;
         clock.style.color = 'var(--bad, #d05a5a)';
@@ -5760,7 +5773,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   // Power now, or energy for the day so far (#371).
   const showSel = el('select', { style: { width: 'auto' } })                     ;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
-  showSel.appendChild(el('option', { value: 'energytoday', text: 'Energy today (kWh)' }));
+  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
@@ -5772,7 +5785,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
-      showSel.value = 'energytoday';
+      showSel.value = 'energy_d';
     load();
   });
   // One click for the periods people actually ask for. A period is a question about energy — "how much
@@ -5780,7 +5793,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const periods = periodRow((key           ) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    showSel.value = 'energytoday';
+    showSel.value = 'energy_d';
     periods.mark(key);
     hadDay = true;
     load();
@@ -6083,26 +6096,26 @@ function addEnergyOverviewSection(nav     , sections     ) {
       eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
       const day = hist.day();
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
-        : metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+        : metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
     } else try {
       // Today, not all time.
-      const er = await api(withInstance('/api/flow?metric=energytoday', instSel));
+      const er = await api(withInstance('/api/flow?metric=energy_d', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
         eUnits = er.body.units || 'kWh';
         // From the answer, not from what was asked for.
-        eWindow = er.body.metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+        eWindow = er.body.metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
         const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
         // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy                         = {};
-        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energytoday#in' }));
+        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy_d#in' }));
         if (eq.length) {
           try {
             const elr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(eq) });
             (elr.body?.values || []).forEach((v     ) => { if (typeof v.value === 'number') eInBy[`${v.node}|${v.metric}`] = v.value; });
           } catch { /* no live cache — energy#in just stays absent */ }
         }
-        const eSumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energytoday#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
+        const eSumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy_d#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
         const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;
@@ -6506,7 +6519,7 @@ function addOverviewSection(nav     , sections     ) {
   const load = async () => {
     stamp.textContent = 'loading…';
     try {
-      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energytoday')]);
+      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energy_d')]);
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || [])         ;
@@ -7097,7 +7110,7 @@ function addTrendsSection(nav     , sections     ) {
   };
   /// A counter's readings are not a per-bar quantity; the differences between them are.
   ///
-  /// Charting `energytoday` through a day draws the counter itself — a staircase climbing to the day's
+  /// Charting `energy_d` through a day draws the counter itself — a staircase climbing to the day's
   /// total, where every bar restates the whole day so far and none of them says what was used at that
   /// moment. The difference between one reading and the next is the energy in that interval, which is the
   /// quantity the chart is asking about, and those DO add up to the day.
@@ -7164,7 +7177,7 @@ function addTrendsSection(nav     , sections     ) {
 
   const LABELS                         = {
     realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-    frequency: 'frequency', energy: 'energy', energytoday: 'energy',
+    frequency: 'frequency', energy: 'energy', energy_d: 'energy',
   };
   const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
   // Seeded with the three every build exports, so a page that cannot reach /api/flow/metrics still offers
@@ -7172,7 +7185,7 @@ function addTrendsSection(nav     , sections     ) {
   let METRICS           = [
     { metric: 'realpower', units: 'W', epoch: 'instant' },
     { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
-    { metric: 'energytoday', units: 'kWh', epoch: 'period' },
+    { metric: 'energy_d', units: 'kWh', epoch: 'period' },
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
@@ -7201,7 +7214,7 @@ function addTrendsSection(nav     , sections     ) {
   /// What can honestly be drawn as a bar per point. A counter's own readings cannot be — each bar would be
   /// everything the meter has ever seen — but the differences between them can, and that is what is drawn:
   /// see toDeltas. Excluding lifetime metrics outright left EmonCMS with nothing to chart, because `energy`
-  /// is the feed it stores and `energytoday` is one it was never given.
+  /// is the feed it stores and `energy_d` is one it was never given.
   const chartable = () => METRICS;
   const fillMetrics = () => {
     metricSel.innerHTML = '';
@@ -8228,6 +8241,48 @@ window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm     , on         ) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
+/// PreferEmonCms -> "Prefer EmonCMS". The acronym is restored after the split, not before: splitting on a
+/// case change turns EmonCms into "Emon Cms" first, and a pattern looking for the joined-up form then
+/// matches nothing.
+function humanise(value        ) {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\bEmon\s*Cms\b/gi, 'EmonCMS')
+    .replace(/^./, c => c.toUpperCase());
+}
+
+/// A radio group for a small closed set, each choice carrying its own explanation as a tooltip.
+///
+/// The alternative is a dropdown under a paragraph covering every option, and that paragraph is then
+/// repeated for every entry of a fixed list — eight times over on the EmonCMS types page, saying the same
+/// thing about choices the reader is not looking at. The tooltip belongs to the choice it describes.
+function radioGroup(node     , obj     ) {
+  const wrap = document.createElement('div');
+  wrap.className = 'radio-group';
+  const name = `r${Math.random().toString(36).slice(2)}`;
+  const current = () => String(obj[node.key] ?? node.default ?? (node.enumValues || [])[0] ?? '');
+  (node.enumValues || []).forEach((v        , i        ) => {
+    const why = (node.enumDescriptions || [])[i] || '';
+    const lab = document.createElement('label');
+    lab.className = 'radio';
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = name; input.value = v;
+    input.checked = current() === v;
+    input.onchange = () => { if (input.checked) { obj[node.key] = v; refreshDirty(); runVisibilitySyncs(); } };
+    const text = document.createElement('span'); text.textContent = humanise(v);
+    lab.appendChild(input); lab.appendChild(text);
+    // The explanation hangs off a mark you can aim at, rather than being a paragraph under every choice or
+    // an invisible tooltip on the whole row that nothing tells you is there.
+    if (why) {
+      const hint = document.createElement('span');
+      hint.className = 'hint'; hint.textContent = 'ⓘ'; hint.title = why;
+      lab.appendChild(hint);
+    }
+    wrap.appendChild(lab);
+  });
+  return wrap;
+}
+
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
 function renderNode(node     , obj     , container     , path           = []) {
   const here = [...path, node.key];
@@ -8250,7 +8305,7 @@ function renderNode(node     , obj     , container     , path           = []) {
     f.dataset.path = here.join('.');
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
-    const input = scalarInput(node, obj);
+    const input = node.radio ? radioGroup(node, obj) : scalarInput(node, obj);
     // A masked field with no way to read it back is how a mistyped credential survives three attempts.
     f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
     // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
@@ -8289,6 +8344,19 @@ function templateVarChips(vars          , input     , obj     , node     ) {
   });
   return wrap;
 }
+
+/// The same schema minus the field that names the entry, which is shown as its heading instead.
+function withoutKey(valueSchema     , key        ) {
+  if (!valueSchema || valueSchema.type !== 'object' || !valueSchema.properties) return valueSchema;
+  return Object.assign({}, valueSchema, { properties: valueSchema.properties.filter((p     ) => p.key !== key) });
+}
+
+/// A measurement type as it is written down, in the words the rest of the GUI uses for it.
+const TYPE_LABELS                         = {
+  realpower: 'Power', apparentpower: 'Apparent power', energy: 'Energy', energy_d: 'Energy Daily',
+  current: 'Current', voltage: 'Voltage', frequency: 'Frequency', powerfactor: 'Power factor',
+};
+function labelFor(value        ) { return TYPE_LABELS[value] || value; }
 
 // Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
 // the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
@@ -8344,19 +8412,32 @@ function renderList(node     , arr       , path          ) {
   }
 
   const entries = document.createElement('div'); fs.appendChild(entries);
+  // A fixed list is the set it ships with — the measurement types EmonCMS understands, say. Its entries are
+  // titled by the field that names them rather than offering that field for editing, and neither the Add
+  // nor the Remove button is drawn, because either would produce an entry nothing downstream can act on.
+  const fixedKey                     = node.fixedListKey;
   const draw = (idx        ) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
-    const del = btn('Remove', 'danger');
-    del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
-    wrap.appendChild(del);
-    renderValue(node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
+    if (fixedKey) {
+      const head = document.createElement('div'); head.className = 'head';
+      const name = document.createElement('strong');
+      name.textContent = labelFor(String((arr[idx] || {})[fixedKey] ?? ''));
+      head.appendChild(name); wrap.appendChild(head);
+    } else {
+      const del = btn('Remove', 'danger');
+      del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
+      wrap.appendChild(del);
+    }
+    renderValue(fixedKey ? withoutKey(node.valueSchema, fixedKey) : node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
     entries.appendChild(wrap);
   };
   const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
   rebuild();
-  const add = btn('+ Add');
-  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
-  fs.appendChild(add);
+  if (!fixedKey) {
+    const add = btn('+ Add');
+    add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
+    fs.appendChild(add);
+  }
   return fs;
 }
 
@@ -9327,7 +9408,7 @@ function reviewChanges() {
   groups.forEach((rows, g) => {
     const box = el('div', { class: 'diff-group' }, el('h4', { text: g }));
     rows.forEach(c => box.appendChild(el('div', { class: 'diff-row' },
-      el('div', { class: 'diff-path', text: c.path.join(' › ') }),
+      el('div', { class: 'diff-path', text: (c.label || c.path).join(' › ') }),
       el('span', { class: 'diff-val diff-old', text: formatValue(c.from, c.secret) }),
       el('span', { class: 'diff-arrow', text: '→' }),
       el('span', { class: 'diff-val diff-new', text: formatValue(c.to, c.secret) }))));

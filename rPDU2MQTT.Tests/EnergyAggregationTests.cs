@@ -214,7 +214,7 @@ public class EnergyAggregationTests
         svc.Sample(TimeSpan.FromMinutes(2), t0.AddHours(3));
 
         Assert.True(svc.TryGetValue("battery", EnergyPeriod.Metric, out var discharged));
-        Assert.True(svc.TryGetValue("battery", "energytoday#in", out var charged));
+        Assert.True(svc.TryGetValue("battery", "energy_d#in", out var charged));
         Assert.Equal(2, discharged, 6);
         Assert.Equal(3, charged, 6);
     }

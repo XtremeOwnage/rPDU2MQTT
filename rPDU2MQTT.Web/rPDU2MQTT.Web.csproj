@@ -93,6 +93,9 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/energyshow.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/history.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/trends.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<!-- A fixed list is the set the build ships: no Add, no Remove, and the field that names an entry is
+		     its heading rather than something to edit. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/fixedlist.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A plugin is a drop-in DLL only for as long as no TypeScript names one. This renders a plugin the
 		     GUI has never heard of and asserts it gets a nav entry, generated fields and its buttons. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugin.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

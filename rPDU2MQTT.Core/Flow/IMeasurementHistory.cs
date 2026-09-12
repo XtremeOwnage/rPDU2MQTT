@@ -55,7 +55,7 @@ public sealed class HistoricalFlowValueSource : IFlowValueSource
     {
         value = 0;
 
-        // The in-direction is asked for as a metric suffix (energytoday#in) but stored as a node of its own.
+        // The in-direction is asked for as a metric suffix (energy_d#in) but stored as a node of its own.
         if (metric.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal))
         {
             var baseMetric = metric[..^FlowMetricKey.InSuffix.Length];
