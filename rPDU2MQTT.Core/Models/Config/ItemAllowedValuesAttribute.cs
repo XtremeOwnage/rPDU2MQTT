@@ -50,3 +50,13 @@ public sealed class NavGroupAttribute : Attribute
 
     public string Group { get; }
 }
+
+/// <summary>The entries of this list are a fixed set, identified by <paramref name="KeyProperty"/>.</summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class FixedListAttribute : Attribute
+{
+    public FixedListAttribute(string keyProperty) => KeyProperty = keyProperty;
+
+    /// <summary>The property naming each entry, shown as its heading instead of being edited.</summary>
+    public string KeyProperty { get; }
+}

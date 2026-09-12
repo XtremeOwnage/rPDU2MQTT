@@ -8290,6 +8290,19 @@ function templateVarChips(vars          , input     , obj     , node     ) {
   return wrap;
 }
 
+/// The same schema minus the field that names the entry, which is shown as its heading instead.
+function withoutKey(valueSchema     , key        ) {
+  if (!valueSchema || valueSchema.type !== 'object' || !valueSchema.properties) return valueSchema;
+  return Object.assign({}, valueSchema, { properties: valueSchema.properties.filter((p     ) => p.key !== key) });
+}
+
+/// A measurement type as it is written down, in the words the rest of the GUI uses for it.
+const TYPE_LABELS                         = {
+  realpower: 'Power', apparentpower: 'Apparent power', energy: 'Energy', energy_d: 'Energy Daily',
+  current: 'Current', voltage: 'Voltage', frequency: 'Frequency', powerfactor: 'Power factor',
+};
+function labelFor(value        ) { return TYPE_LABELS[value] || value; }
+
 // Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
 // the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
 function renderValue(valueSchema     , holder     , keyName     , container     , path          ) {
@@ -8344,19 +8357,32 @@ function renderList(node     , arr       , path          ) {
   }
 
   const entries = document.createElement('div'); fs.appendChild(entries);
+  // A fixed list is the set it ships with — the measurement types EmonCMS understands, say. Its entries are
+  // titled by the field that names them rather than offering that field for editing, and neither the Add
+  // nor the Remove button is drawn, because either would produce an entry nothing downstream can act on.
+  const fixedKey                     = node.fixedListKey;
   const draw = (idx        ) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
-    const del = btn('Remove', 'danger');
-    del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
-    wrap.appendChild(del);
-    renderValue(node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
+    if (fixedKey) {
+      const head = document.createElement('div'); head.className = 'head';
+      const name = document.createElement('strong');
+      name.textContent = labelFor(String((arr[idx] || {})[fixedKey] ?? ''));
+      head.appendChild(name); wrap.appendChild(head);
+    } else {
+      const del = btn('Remove', 'danger');
+      del.onclick = () => { arr.splice(idx, 1); rebuild(); refreshDirty(); };
+      wrap.appendChild(del);
+    }
+    renderValue(fixedKey ? withoutKey(node.valueSchema, fixedKey) : node.valueSchema, arr, idx, wrap, [...path, String(idx)]);
     entries.appendChild(wrap);
   };
   const rebuild = () => { entries.innerHTML = ''; arr.forEach((_, i) => draw(i)); };
   rebuild();
-  const add = btn('+ Add');
-  add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
-  fs.appendChild(add);
+  if (!fixedKey) {
+    const add = btn('+ Add');
+    add.onclick = () => { arr.push(node.valueSchema.type === 'object' ? {} : ''); rebuild(); refreshDirty(); };
+    fs.appendChild(add);
+  }
   return fs;
 }
 

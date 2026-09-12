@@ -124,6 +124,7 @@ public class EmonCmsFeedsConfig
 
     /// <summary>One entry per supported measurement type; the set is fixed, what each does is not.</summary>
     [Description("The supported measurement types. Each says whether it gets a feed, how that feed is named and stored, and whether EmonCMS derives it.")]
+    [FixedList(nameof(EmonCmsFeedTypeConfig.Type))]
     public List<EmonCmsFeedTypeConfig> Types { get; set; } = Supported.Select(EmonCmsFeedTypeConfig.For).ToList();
 
     /// <summary>The measurement types EmonCMS feeds can be built for.</summary>

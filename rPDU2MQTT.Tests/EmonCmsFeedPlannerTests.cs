@@ -251,4 +251,26 @@ public class EmonCmsFeedPlannerTests
         Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("realpower_realpower") || x.Name.Contains("energy_energy"));
     }
 
+
+    /// <summary>
+    /// An outlet reports power and energy, not frequency. Enabling a type is permission to record it where
+    /// the device sends one, never to provision a feed nothing will write to — the planner only ever walks
+    /// the readings that arrived.
+    /// </summary>
+    [Fact]
+    public void BuildDesired_AnEnabledType_ProvisionsNothingForAReadingTheDeviceDoesNotSend()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"), ("energy", "12"));
+        var config = Base();
+        config.EmonCMS.Feeds.Types.Add(Typed("realpower"));
+        config.EmonCMS.Feeds.Types.Add(Typed("energy"));
+        config.EmonCMS.Feeds.Types.Add(Typed("frequency"));
+        config.EmonCMS.Feeds.Types.Add(Typed("voltage"));
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config);
+
+        Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("frequency") || x.Name.Contains("voltage"));
+        Assert.DoesNotContain(d.Inputs, x => x.InputName.Contains("frequency") || x.InputName.Contains("voltage"));
+        Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_realpower");
+    }
 }

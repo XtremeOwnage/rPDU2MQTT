@@ -67,6 +67,9 @@ public sealed class SchemaNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TagChoices { get; set; }
 
+    /// <summary>The entries are a fixed set: none can be added or removed, and this names each one.</summary>
+    public string? FixedListKey { get; set; }
+
     /// <summary>
     /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
     /// rather than as a property of its own. The GUI reads and writes it there.
@@ -292,6 +295,8 @@ public static class ConfigSchema
         if (prop.GetCustomAttribute<NavGroupAttribute>() is { } nav) node.Group = nav.Group;
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
+
+        if (prop.GetCustomAttribute<FixedListAttribute>() is { } fixedList) node.FixedListKey = fixedList.KeyProperty;
 
         // A closed set of answers for a collection's items. The element of a list and the value of a
         // dictionary have no property to annotate, so this is where their choices arrive.

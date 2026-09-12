@@ -200,6 +200,8 @@ public static class EmonCmsFeedPlanner
             }
 
             // Every other configured metric is logged as it arrives; only power and the counter substitute.
+            // Nothing derives a voltage or a frequency, so a node that does not report one gets no feed for
+            // it however the type is configured — an enabled type is permission to record, not to invent.
             foreach (var (metric, graph) in flow)
             {
                 if (string.Equals(metric, powerMetric, StringComparison.OrdinalIgnoreCase)
@@ -210,6 +212,7 @@ public static class EmonCmsFeedPlanner
 
                 foreach (var t in Core.Flow.FlowTiers.Of(graph, config.EmonCMS.NodeTags))
                 {
+                    if (!(sourced.TryGetValue(t.Node.Id, out var reports) && reports.Contains(metric))) continue;
                     var inputName = MetricsHelper.EmonCmsFlowInputName(t.Node.Id, t.Node.Label, t.Node.Kind, metric, config);
                     if (!seenInputs.Add(inputName)) continue;
 

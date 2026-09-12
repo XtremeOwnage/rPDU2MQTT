@@ -365,4 +365,5 @@ public class FlowDestinationsTests
         Assert.Equal(new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd },
             energy.Steps.Select(x => x.Process).ToArray());
     }
+
 }
