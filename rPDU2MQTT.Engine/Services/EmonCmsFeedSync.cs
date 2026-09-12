@@ -51,8 +51,6 @@ public sealed class EmonCmsFeedSync
         if (!Core.Flow.FlowTiers.Any(merged, config))
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
-        var p = e.Feeds.Processes;
-        var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "log" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
         var flow = config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
         var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
 
@@ -74,10 +72,11 @@ public sealed class EmonCmsFeedSync
         foreach (var link in desired.Inputs)
         {
             if (!inputs.TryGetValue(link.InputName, out var input)) { missingInputs++; continue; }
-            if (!feedByName.TryGetValue(link.StorageFeed, out var storage)) continue;   // its feed failed to create
-            int? dailyId = link.DailyFeed is { } d && feedByName.TryGetValue(d, out var df) ? df.Id : null;
+            if (!feedByName.ContainsKey(link.StorageFeed)) continue;   // its feed failed to create
 
-            var wanted = EmonCmsFeedPlanner.BuildInputProcessList(storage.Id, dailyId, processes);
+            var wanted = EmonCmsFeedPlanner.BuildInputProcessList(link.Steps,
+                name => feedByName.TryGetValue(name, out var fd) ? fd.Id : null);
+            if (wanted.Length == 0) continue;
             if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
                 try
                 {
@@ -89,31 +88,28 @@ public sealed class EmonCmsFeedSync
         }
 
         // 3) Virtual feeds: friendly name, sourced from the storage feed.
-        if (desired.Virtuals.Count > 0 && string.IsNullOrWhiteSpace(processes.SourceFeed))
-            Log.Warning("EmonCMS: virtual feeds enabled but Feeds.Processes.SourceFeed is not set — skipping.");
-        else
-            foreach (var v in desired.Virtuals)
+        foreach (var v in desired.Virtuals)
+        {
+            if (!feedByName.TryGetValue(v.SourceFeed, out var source)) continue;
+            try
             {
-                if (!feedByName.TryGetValue(v.SourceFeed, out var source)) continue;
-                try
+                if (!feedByName.TryGetValue(v.Name, out var vfeed))
                 {
-                    if (!feedByName.TryGetValue(v.Name, out var vfeed))
-                    {
-                        var id = await CreateFeed(v.Name, v.Tag, (int)EmonCmsFeedEngine.VirtualFeed, 0, 1, ct);
-                        vfeed = new EmonFeed(id, v.Name, v.Tag);
-                        feedByName[v.Name] = vfeed;
-                        created++;
-                        Log.Information($"EmonCMS: created virtual feed '{v.Name}' (#{id}).");
-                    }
-                    var wanted = $"{processes.SourceFeed}:{source.Id}";
-                    if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
-                    {
-                        await PostForm("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString() }, new() { ["processlist"] = wanted }, ct);
-                        virtuals++;
-                    }
+                    var id = await CreateFeed(v.Name, v.Tag, (int)EmonCmsFeedEngine.VirtualFeed, 0, 1, ct);
+                    vfeed = new EmonFeed(id, v.Name, v.Tag);
+                    feedByName[v.Name] = vfeed;
+                    created++;
+                    Log.Information($"EmonCMS: created virtual feed '{v.Name}' (#{id}).");
                 }
-                catch (Exception ex) { errors.Add($"virtual feed '{v.Name}': {ex.Message}"); }
+                var wanted = $"{ProcessSlot.SourceFeed}:{source.Id}";
+                if (!string.Equals(vfeed.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
+                {
+                    await PostForm("feed/process/set.json", new() { ["id"] = vfeed.Id.ToString() }, new() { ["processlist"] = wanted }, ct);
+                    virtuals++;
+                }
             }
+            catch (Exception ex) { errors.Add($"virtual feed '{v.Name}': {ex.Message}"); }
+        }
 
         var msg = $"Created {created} feed(s), set {processesSet} processlist(s), wired {virtuals} virtual feed(s).";
         if (missingInputs > 0)

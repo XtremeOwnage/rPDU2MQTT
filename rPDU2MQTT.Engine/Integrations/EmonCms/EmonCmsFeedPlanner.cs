@@ -13,8 +13,15 @@ public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessL
 /// <summary>A feed we want to exist. DataType 1 = realtime, 2 = daily (kWh/d).</summary>
 public sealed record DesiredFeed(string Name, string Tag, int Engine, int IntervalSeconds, int DataType);
 
-/// <summary>An input we want logged to its storage feed (and, when set, a daily kWh/d feed).</summary>
-public sealed record DesiredInputLog(string InputName, string StorageFeed, string? DailyFeed);
+/// <summary>One step of an input's processlist: the process, and the feed it writes.</summary>
+public sealed record DesiredProcess(string Process, string Feed);
+
+/// <summary>An input and the ordered processlist we want on it; order matters, as some steps rewrite the value passed on.</summary>
+public sealed record DesiredInputLog(string InputName, IReadOnlyList<DesiredProcess> Steps)
+{
+    /// <summary>The feed the first step writes — the one a history read for this input looks up.</summary>
+    public string StorageFeed => Steps[0].Feed;
+}
 
 /// <summary>A friendly virtual feed sourced from a storage feed.</summary>
 public sealed record DesiredVirtualFeed(string Name, string Tag, string SourceFeed);
@@ -24,9 +31,6 @@ public sealed record EmonDesiredState(
     IReadOnlyList<DesiredFeed> Feeds,
     IReadOnlyList<DesiredInputLog> Inputs,
     IReadOnlyList<DesiredVirtualFeed> Virtuals);
-
-/// <summary>The resolved process ids the planner/provisioner build processlists from.</summary>
-public sealed record EmonProcessIds(string LogToFeed, string? KwhToKwhd, string? SourceFeed);
 
 /// <summary>
 /// Computes, purely from the readings + config, the EmonCMS feeds/processlists/virtual-feeds we want (#163).
@@ -75,7 +79,9 @@ public static class EmonCmsFeedPlanner
                 feeds[dailyName] = new DesiredFeed(dailyName, tag, engine, typeCfg.DailyIntervalSeconds, DataType: 2);
             }
 
-            inputs.Add(new DesiredInputLog(inputName, storageName, dailyName));
+            var readingSteps = new List<DesiredProcess> { new(ProcessSlot.LogToFeed, storageName) };
+            if (dailyName is not null) readingSteps.Add(new(ProcessSlot.KwhToKwhd, dailyName));
+            inputs.Add(new DesiredInputLog(inputName, readingSteps));
 
             if (f.Virtual.Enabled)
             {
@@ -87,11 +93,94 @@ public static class EmonCmsFeedPlanner
             }
         }
 
-        // The energy-flow tiers. Same per-type settings, named from the node rather than a device/outlet —
-        // and named exactly as the export writes them, since that is what the history reader looks up.
+        // Every flow node gets power, energy and energy/d; EmonCMS derives whichever it does not report.
         if (flow is not null && config.EmonCMS.ExportFlowNodes)
+        {
+            // Which metrics each node sources itself; a summed or inferred value is not an input.
+            var sourced = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var tiersOf = new Dictionary<string, Core.Flow.FlowNode>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (metric, graph) in flow)
+                foreach (var t in Core.Flow.FlowTiers.Of(graph, config.EmonCMS.NodeTags))
+                {
+                    tiersOf[t.Node.Id] = t.Node;
+                    if (t.Node.Derivation == Core.Flow.FlowDerivation.Measured || t.Node.Unreported)
+                        (sourced.TryGetValue(t.Node.Id, out var have)
+                            ? have
+                            : sourced[t.Node.Id] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(metric);
+                }
+
+            string powerMetric = Core.Flow.FlowGraphBuilder.DefaultMetric;
+            string? energyMetric = flow.Select(x => x.Metric)
+                .FirstOrDefault(m => string.Equals(Core.Flow.FlowUnits.Canonical(m), "kWh", StringComparison.Ordinal)
+                                  && !string.Equals(m, Core.Flow.EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase));
+
+            foreach (var (nodeId, node) in tiersOf)
+            {
+                var have = sourced.TryGetValue(nodeId, out var h) ? h : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var hasPower = have.Contains(powerMetric);
+                var hasEnergy = energyMetric is not null && have.Contains(energyMetric);
+                // Sources neither: still exported, and the power it is given is what the rest derives from.
+                if (!hasPower && !hasEnergy) hasPower = true;
+
+                string? FeedFor(string metric, int dataType, int interval)
+                {
+                    if (!byType.TryGetValue(metric, out var typeCfg)) return null;
+                    var name = MetricsHelper.EmonCmsFlowInputName(node.Id, node.Label, node.Kind, metric, config);
+                    feeds[name] = new DesiredFeed(name, tag, (int)(typeCfg.Engine ?? f.Engine),
+                        interval < 0 ? typeCfg.IntervalSeconds ?? f.IntervalSeconds : interval, dataType);
+                    return name;
+                }
+
+                var powerFeed = FeedFor(powerMetric, 1, -1);
+                var energyFeed = energyMetric is null ? null : FeedFor(energyMetric, 1, -1);
+                string? dailyFeed = null;
+                if (energyMetric is not null && byType.TryGetValue(energyMetric, out var energyType) && energyType.Daily && energyFeed is not null)
+                {
+                    dailyFeed = energyFeed + (f.IdempotentNames ? "_d" : " kWh/d");
+                    feeds[dailyFeed] = new DesiredFeed(dailyFeed, tag, (int)(energyType.Engine ?? f.Engine),
+                        energyType.DailyIntervalSeconds, DataType: 2);
+                }
+
+                // kWh-to-Power is last: it hands watts to whatever follows it.
+                if (hasEnergy && energyFeed is not null)
+                {
+                    var steps = new List<DesiredProcess> { new(ProcessSlot.KwhAccumulator, energyFeed) };
+                    if (dailyFeed is not null) steps.Add(new(ProcessSlot.KwhToKwhd, dailyFeed));
+                    if (!hasPower && powerFeed is not null) steps.Add(new(ProcessSlot.KwhToPower, powerFeed));
+                    var name = MetricsHelper.EmonCmsFlowInputName(node.Id, node.Label, node.Kind, energyMetric!, config);
+                    if (seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
+                }
+
+                // Neither derivation changes the watts passed on, so both follow the plain log.
+                if (hasPower && powerFeed is not null)
+                {
+                    var steps = new List<DesiredProcess> { new(ProcessSlot.LogToFeed, powerFeed) };
+                    if (!hasEnergy)
+                    {
+                        if (energyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwh, energyFeed));
+                        if (dailyFeed is not null) steps.Add(new(ProcessSlot.PowerToKwhd, dailyFeed));
+                    }
+                    var name = MetricsHelper.EmonCmsFlowInputName(node.Id, node.Label, node.Kind, powerMetric, config);
+                    if (seenInputs.Add(name)) inputs.Add(new DesiredInputLog(name, steps));
+                }
+
+                if (f.Virtual.Enabled)
+                    foreach (var (metric, feedName) in new (string? Metric, string? Feed)[] { (powerMetric, powerFeed), (energyMetric, energyFeed) })
+                    {
+                        if (metric is null || feedName is null) continue;
+                        var friendly = MetricsHelper.EmonCmsFlowFeedName(node.Label, metric, config);
+                        var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                        if (!(string.Equals(friendly, feedName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
+                            virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, feedName);
+                    }
+            }
+
+            // Every other configured metric is logged as it arrives; only power and the counter substitute.
             foreach (var (metric, graph) in flow)
             {
+                if (string.Equals(metric, powerMetric, StringComparison.OrdinalIgnoreCase)
+                    || (energyMetric is not null && string.Equals(metric, energyMetric, StringComparison.OrdinalIgnoreCase)))
+                    continue;
                 if (!byType.TryGetValue(metric, out var typeCfg)) continue;
 
                 foreach (var t in Core.Flow.FlowTiers.Of(graph, config.EmonCMS.NodeTags))
@@ -100,18 +189,16 @@ public static class EmonCmsFeedPlanner
                     if (!seenInputs.Add(inputName)) continue;
 
                     var engine = (int)(typeCfg.Engine ?? f.Engine);
-                    var interval = typeCfg.IntervalSeconds ?? f.IntervalSeconds;
+                    feeds[inputName] = new DesiredFeed(inputName, tag, engine, typeCfg.IntervalSeconds ?? f.IntervalSeconds, DataType: 1);
 
-                    feeds[inputName] = new DesiredFeed(inputName, tag, engine, interval, DataType: 1);
-
-                    string? dailyName = null;
+                    var steps = new List<DesiredProcess> { new(ProcessSlot.LogToFeed, inputName) };
                     if (typeCfg.Daily)
                     {
-                        dailyName = inputName + (f.IdempotentNames ? "_d" : " kWh/d");
+                        var dailyName = inputName + (f.IdempotentNames ? "_d" : " kWh/d");
                         feeds[dailyName] = new DesiredFeed(dailyName, tag, engine, typeCfg.DailyIntervalSeconds, DataType: 2);
+                        steps.Add(new(ProcessSlot.KwhToKwhd, dailyName));
                     }
-
-                    inputs.Add(new DesiredInputLog(inputName, inputName, dailyName));
+                    inputs.Add(new DesiredInputLog(inputName, steps));
 
                     if (f.Virtual.Enabled)
                     {
@@ -122,6 +209,7 @@ public static class EmonCmsFeedPlanner
                     }
                 }
             }
+        }
 
         return new EmonDesiredState(feeds.Values.ToList(), inputs, virtuals.Values.ToList());
     }
@@ -139,15 +227,10 @@ public static class EmonCmsFeedPlanner
         return null;
     }
 
-    /// <summary>
-    /// Build the processlist for an input: <c>log_to_feed:&lt;storage&gt;</c>, then <c>kwh_to_kwhd:&lt;daily&gt;</c>
-    /// when a daily feed + process id are configured. Matches the two-step energy pattern in EmonCMS.
-    /// </summary>
-    public static string BuildInputProcessList(int storageFeedId, int? dailyFeedId, EmonProcessIds processes)
-    {
-        var list = $"{processes.LogToFeed}:{storageFeedId}";
-        if (dailyFeedId is { } daily && !string.IsNullOrWhiteSpace(processes.KwhToKwhd))
-            list += $",{processes.KwhToKwhd}:{daily}";
-        return list;
-    }
+    /// <summary>Join the steps into <c>&lt;process&gt;:&lt;feedid&gt;</c> pairs, dropping any whose feed does not exist.</summary>
+    public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId)
+        => string.Join(",", steps
+            .Select(st => (st.Process, Feed: feedId(st.Feed)))
+            .Where(st => st.Feed is not null)
+            .Select(st => $"{st.Process}:{st.Feed}"));
 }
