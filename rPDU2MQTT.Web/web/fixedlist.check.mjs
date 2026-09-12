@@ -90,4 +90,27 @@ const freqCalc = query(freq, 'div', true).find(d => String(d.dataset?.path || ''
 if (!freqCalc) fail('Frequency has no Calculation control at all; expected one, hidden');
 if (!String(freqCalc.className || '').includes('is-hidden')) fail('Calculation is shown for frequency, which nothing derives');
 
-console.log('fixedlist: the EmonCMS types render as the fixed set they are — titled by type, no Add, no Remove, type not editable; Calculation is a three-way radio with a hint per choice, hidden for frequency');
+
+// Choosing a radio is an unsaved edit of that one setting, reported as that setting. The diff used to stop
+// at the list, so the review sheet read "EmonCMS › Feeds › Types: 8 entries → 8 entries" — a row that
+// says nothing changed and hides what did — and no field on the page was marked.
+const powerEntry = entries.find(e => query(e, 'strong', true).some(x => x.textContent === 'Power'));
+const powerCalc = query(powerEntry, 'div', true).find(d => String(d.dataset?.path || '').endsWith('.Calculation'));
+const forceEmon = query(powerCalc, 'input', true).find(i => i.type === 'radio' && i.value === 'ForceEmonCms');
+forceEmon.checked = true;
+forceEmon.onchange();
+
+if (!String(powerCalc.className || '').includes('dirty')) fail('choosing a radio did not mark its field as changed');
+const otherCalcs = calc.filter(c => c !== powerCalc);
+if (otherCalcs.some(c => String(c.className || '').includes('dirty'))) fail('choosing one entry\'s radio marked another entry as changed');
+if (getEl('save-count').textContent !== '1 unsaved change') fail(`the save bar miscounted a radio edit: "${getEl('save-count').textContent}"`);
+
+getEl('btn-review').onclick();   // bound through on(), which assigns onclick
+await new Promise(r => setTimeout(r, 50));
+const rows = query(getEl('overlay'), 'div', true).filter(d => String(d.className || '') === 'diff-path').map(d => d.textContent);
+if (rows.length !== 1) fail(`expected one row in the review sheet, got ${rows.length}: ${rows.join(' | ')}`);
+if (rows[0] !== 'EmonCMS › Feeds › Types › realpower › Calculation') fail(`the review row does not name the setting: "${rows[0]}"`);
+const vals = query(getEl('overlay'), 'span', true).map(x => String(x.textContent || ''));
+if (!vals.includes('PreferLocal') || !vals.includes('ForceEmonCms')) fail(`the review row does not show the choice changing: ${vals.join(' | ')}`);
+
+console.log('fixedlist: the EmonCMS types render as the fixed set they are — titled by type, no Add, no Remove, type not editable; Calculation is a three-way radio with a hint per choice, hidden for frequency; a radio edit is tracked and reviewed as that one setting');

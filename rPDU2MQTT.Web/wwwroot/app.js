@@ -700,11 +700,18 @@ function same(a     , b     ) { return JSON.stringify(a ?? null) === JSON.string
 
 function diffConfig(before     , after     ) {
   const out        = [];
-  walk(prune(before), prune(after), [], out);
+  walk(prune(before), prune(after), [], [], out);
   return out;
 }
 
-function walk(a     , b     , path          , out       ) {
+/// What names an entry of a list of objects, for the review sheet: "Types › energy_d" rather than "Types › 2".
+function entryName(entry     , index        ) {
+  for (const k of ['Type', 'Id', 'Name', 'Key']) if (entry && typeof entry[k] === 'string' && entry[k]) return entry[k];
+  return `#${index + 1}`;
+}
+
+// `path` matches the form's field registry (list entries by index); `label` is how the review sheet names it.
+function walk(a     , b     , path          , label          , out       ) {
   if (same(a, b)) return;
 
   // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
@@ -712,11 +719,17 @@ function walk(a     , b     , path          , out       ) {
   const objectish = (v     ) => v === undefined || isPlainObject(v);
   if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
     const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
-    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], out);
+    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], [...label, k], out);
     return;
   }
 
-  out.push({ path, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
+  // Same length on both sides: an entry was edited in place, so report that entry's setting, not the list.
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length && [...a, ...b].every(isPlainObject)) {
+    a.forEach((_     , i        ) => walk(a[i], b[i], [...path, String(i)], [...label, entryName(b[i], i)], out));
+    return;
+  }
+
+  out.push({ path, label, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
 }
 
 // --- Display ---------------------------------------------------------------------------------------
@@ -9395,7 +9408,7 @@ function reviewChanges() {
   groups.forEach((rows, g) => {
     const box = el('div', { class: 'diff-group' }, el('h4', { text: g }));
     rows.forEach(c => box.appendChild(el('div', { class: 'diff-row' },
-      el('div', { class: 'diff-path', text: c.path.join(' › ') }),
+      el('div', { class: 'diff-path', text: (c.label || c.path).join(' › ') }),
       el('span', { class: 'diff-val diff-old', text: formatValue(c.from, c.secret) }),
       el('span', { class: 'diff-arrow', text: '→' }),
       el('span', { class: 'diff-val diff-new', text: formatValue(c.to, c.secret) }))));

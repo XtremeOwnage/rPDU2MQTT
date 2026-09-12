@@ -94,11 +94,18 @@ function same(a: any, b: any) { return JSON.stringify(a ?? null) === JSON.string
 
 export function diffConfig(before: any, after: any) {
   const out: any[] = [];
-  walk(prune(before), prune(after), [], out);
+  walk(prune(before), prune(after), [], [], out);
   return out;
 }
 
-function walk(a: any, b: any, path: string[], out: any[]) {
+/// What names an entry of a list of objects, for the review sheet: "Types › energy_d" rather than "Types › 2".
+function entryName(entry: any, index: number) {
+  for (const k of ['Type', 'Id', 'Name', 'Key']) if (entry && typeof entry[k] === 'string' && entry[k]) return entry[k];
+  return `#${index + 1}`;
+}
+
+// `path` matches the form's field registry (list entries by index); `label` is how the review sheet names it.
+function walk(a: any, b: any, path: string[], label: string[], out: any[]) {
   if (same(a, b)) return;
 
   // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
@@ -106,11 +113,17 @@ function walk(a: any, b: any, path: string[], out: any[]) {
   const objectish = (v: any) => v === undefined || isPlainObject(v);
   if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
     const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
-    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], out);
+    for (const k of keys) walk((a || {})[k], (b || {})[k], [...path, k], [...label, k], out);
     return;
   }
 
-  out.push({ path, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
+  // Same length on both sides: an entry was edited in place, so report that entry's setting, not the list.
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length && [...a, ...b].every(isPlainObject)) {
+    a.forEach((_: any, i: number) => walk(a[i], b[i], [...path, String(i)], [...label, entryName(b[i], i)], out));
+    return;
+  }
+
+  out.push({ path, label, key: pathKey(path), from: a, to: b, secret: dirtySecrets.has(pathKey(path)) });
 }
 
 // --- Display ---------------------------------------------------------------------------------------

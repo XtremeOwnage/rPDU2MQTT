@@ -293,7 +293,7 @@ function reviewChanges() {
   groups.forEach((rows, g) => {
     const box = el('div', { class: 'diff-group' }, el('h4', { text: g }));
     rows.forEach(c => box.appendChild(el('div', { class: 'diff-row' },
-      el('div', { class: 'diff-path', text: c.path.join(' › ') }),
+      el('div', { class: 'diff-path', text: (c.label || c.path).join(' › ') }),
       el('span', { class: 'diff-val diff-old', text: formatValue(c.from, c.secret) }),
       el('span', { class: 'diff-arrow', text: '→' }),
       el('span', { class: 'diff-val diff-new', text: formatValue(c.to, c.secret) }))));
