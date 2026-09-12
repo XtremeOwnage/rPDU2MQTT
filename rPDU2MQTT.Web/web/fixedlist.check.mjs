@@ -74,8 +74,14 @@ if (calc.length !== 3) fail(`expected a Calculation control per entry, got ${cal
 const radios = query(calc[0], 'input', true).filter(i => i.type === 'radio');
 if (radios.length !== 4) fail(`Calculation is not a four-way radio: ${radios.length} radio(s)`);
 if (!radios.some(r => r.value === 'ForceEmonCms')) fail(`no ForceEmonCms choice: ${radios.map(r => r.value).join(' | ')}`);
-const tips = query(calc[0], 'label', true).map(l => String(l.title || '')).filter(Boolean);
-if (tips.length !== 4) fail(`each choice needs its own tooltip; got ${tips.length}`);
+// The explanation hangs off a mark you can aim at, one per choice.
+const hints = query(calc[0], 'span', true).filter(x => String(x.className || '') === 'hint');
+if (hints.length !== 4) fail(`each choice needs its own hint mark; got ${hints.length}`);
+if (hints.some(h => !String(h.title || '').trim())) fail('a hint mark carries no tooltip text');
+
+// The acronym survives the label split: "PreferEmonCms" reads as "Prefer EmonCMS", not "Prefer Emon Cms".
+const texts = query(calc[0], 'span', true).map(x => String(x.textContent || ''));
+if (!texts.includes('Prefer EmonCMS')) fail(`choice labels not humanised: ${texts.filter(Boolean).join(' | ')}`);
 
 // Nothing computes a frequency, so the question is not put for one.
 const freq = entries.find(e => query(e, 'strong', true).some(s2 => s2.textContent === 'Frequency'));

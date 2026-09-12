@@ -134,9 +134,14 @@ window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm: any, on: boolean) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
-/// PreferEmonCms -> "Prefer EmonCMS". The schema carries the stored value; this is how it is read out.
+/// PreferEmonCms -> "Prefer EmonCMS". The acronym is restored after the split, not before: splitting on a
+/// case change turns EmonCms into "Emon Cms" first, and a pattern looking for the joined-up form then
+/// matches nothing.
 function humanise(value: string) {
-  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/EmonCms/gi, 'EmonCMS').replace(/^./, c => c.toUpperCase());
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\bEmon\s*Cms\b/gi, 'EmonCMS')
+    .replace(/^./, c => c.toUpperCase());
 }
 
 /// A radio group for a small closed set, each choice carrying its own explanation as a tooltip.
@@ -153,13 +158,19 @@ function radioGroup(node: any, obj: any) {
     const why = (node.enumDescriptions || [])[i] || '';
     const lab = document.createElement('label');
     lab.className = 'radio';
-    if (why) lab.title = why;
     const input = document.createElement('input');
     input.type = 'radio'; input.name = name; input.value = v;
     input.checked = current() === v;
     input.onchange = () => { if (input.checked) { obj[node.key] = v; refreshDirty(); runVisibilitySyncs(); } };
     const text = document.createElement('span'); text.textContent = humanise(v);
     lab.appendChild(input); lab.appendChild(text);
+    // The explanation hangs off a mark you can aim at, rather than being a paragraph under every choice or
+    // an invisible tooltip on the whole row that nothing tells you is there.
+    if (why) {
+      const hint = document.createElement('span');
+      hint.className = 'hint'; hint.textContent = 'ⓘ'; hint.title = why;
+      lab.appendChild(hint);
+    }
     wrap.appendChild(lab);
   });
   return wrap;
