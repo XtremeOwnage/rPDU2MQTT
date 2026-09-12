@@ -49,6 +49,8 @@ export function barChart(opts: {
   fitTo?: number;
   /// Chart height in px. Defaults to 240 — the size that suits a chart with others stacked under it.
   height?: number;
+  /// A second series drawn as a line over the bars, on the same axis.
+  overlay?: Line;
 }): { svg: any; gaps: number } {
   const { days, lines, units, stacked } = opts;
   const has = (d: number) => lines.some(l => l.values[d] != null);
@@ -57,14 +59,16 @@ export function barChart(opts: {
   // Charge and export are negative quantities — energy leaving in the other direction.
   const posOf = (d: number) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
   const negOf = (d: number) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
+  const overlay = opts.overlay;
+  const overlaid = overlay ? overlay.values.filter((v): v is number => v != null) : [];
   const peak = opts.max ?? Math.max(
     stacked ? Math.max(...days.map((_, d) => (has(d) ? posOf(d) : 0)), 0)
       : Math.max(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
+    ...overlaid, 0);
   const trough = Math.min(
     stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
       : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
+    ...overlaid, 0);
   const span = (peak - trough) || 1;
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
@@ -150,6 +154,26 @@ export function barChart(opts: {
     }
   });
 
+  // The overlay is drawn as runs of consecutive readings, so a gap breaks the line instead of bridging it.
+  if (overlay) {
+    let run: string[] = [];
+    const flush = () => {
+      if (run.length > 1)
+        svg.appendChild(svgTag('polyline', { points: run.join(' '), fill: 'none', stroke: overlay.color, 'stroke-width': 2, class: 'trend-overlay' }));
+      else if (run.length === 1) {
+        const [cx, cy] = run[0].split(',');
+        svg.appendChild(svgTag('circle', { cx, cy, r: 2, fill: overlay.color, class: 'trend-overlay' }));
+      }
+      run = [];
+    };
+    days.forEach((_, d) => {
+      const v = overlay.values[d];
+      if (v == null) flush();
+      else run.push(`${(x(d) + slot / 2).toFixed(1)},${y(v).toFixed(1)}`);
+    });
+    flush();
+  }
+
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
 
@@ -179,6 +203,14 @@ export function barChart(opts: {
           c.appendChild(el('div', { class: 'nh-row nh-total' },
             el('span', { class: 'nh-name', text: 'Total' }),
             el('span', { class: 'nh-num', text: `${formatNum(Number(dayTotal(d).toFixed(2)))} ${units}` })));
+      }
+      if (overlay) {
+        const v = overlay.values[d];
+        c.appendChild(el('div', { class: 'nh-row' },
+          el('span', { class: 'nh-name' },
+            el('span', { class: 'trend-swatch', style: { background: overlay.color } }),
+            `${overlay.label} (overlay)`),
+          el('span', { class: 'nh-num', text: v == null ? '—' : `${formatNum(Number(v.toFixed(2)))} ${units}` })));
       }
       c.classList.add('show');
       const px = (ev && ev.clientX) || 0, py = (ev && ev.clientY) || 0;

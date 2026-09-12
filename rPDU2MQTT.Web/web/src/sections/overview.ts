@@ -59,8 +59,8 @@ export function addOverviewSection(nav: any, sections: any) {
       t.classList.add('is-link');
       t.title = `Show ${label} through the day`;
       t.onclick = () => {
-        requestFocus(ids, 'today=1&step=300', label);
-        (document.querySelector('nav a[data-label="Trends"]') as any)?.click();
+        requestFocus(ids, 'today=1', label);
+        (document.querySelector('nav a[data-label="Node Trends"]') as any)?.click();
       };
     }
     return t;
@@ -268,8 +268,8 @@ export function addOverviewSection(nav: any, sections: any) {
     drawEnergyFlow(flowWrap, arms, (a, g) => {
       g.style.cursor = 'pointer';
       g.onclick = () => {
-        requestFocus(a.ids!, 'today=1&step=300', a.label);
-        (document.querySelector('nav a[data-label="Trends"]') as any)?.click();
+        requestFocus(a.ids!, 'today=1', a.label);
+        (document.querySelector('nav a[data-label="Node Trends"]') as any)?.click();
       };
     });
 

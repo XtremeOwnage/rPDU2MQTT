@@ -49,6 +49,7 @@
 			<GuiSource Include="web\energyshow.check.mjs" />
 			<GuiSource Include="web\history.check.mjs" />
 			<GuiSource Include="web\trends.check.mjs" />
+			<GuiSource Include="web\node-trends.check.mjs" />
 			<GuiSource Include="web\mobile.check.mjs" />
 			<GuiSource Include="web\sparkline.check.mjs" />
 			<GuiSource Include="web\drilldown.check.mjs" />
@@ -93,6 +94,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/energyshow.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/history.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/trends.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/node-trends.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A fixed list is the set the build ships: no Add, no Remove, and the field that names an entry is
 		     its heading rather than something to edit. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/fixedlist.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

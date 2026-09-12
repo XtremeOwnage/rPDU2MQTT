@@ -119,12 +119,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     elm.classList?.add('is-linked');
     elm.style.cursor = 'pointer';
     if (elm.setAttribute) elm.setAttribute('tabindex', '0');
-    const title = `Show ${label} for today on the Trends page`;
+    const title = `Show ${label} for today on the Node Trends page`;
     if (elm.setAttribute) elm.setAttribute('title', title); else elm.title = title;
 
     const go = () => {
-      requestFocus(ids, 'today=1&step=300', label);
-      const link = [...document.querySelectorAll('nav a')].find((a: any) => (a.dataset?.label || '') === 'Trends');
+      requestFocus(ids, 'today=1', label);
+      const link = [...document.querySelectorAll('nav a')].find((a: any) => (a.dataset?.label || '') === 'Node Trends');
       if (link) (link as any).click();
     };
     elm.addEventListener('click', go);
