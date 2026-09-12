@@ -8,17 +8,18 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('trends check FAILED: ' + m); process.exit(1); };
 
-// Seven days; the backend has nothing at all for two of them, and solar alone is missing on a third.
+// Day-end readings of the energy counter: one before the window, then seven days. Nothing read at the end of
+// the third day, which empties the third and fourth, since each day is the rise from the reading before it.
 const series = {
-  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus',
-  days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
+  ok: true, metric: 'energy', units: 'kWh', source: 'prometheus',
+  days: ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
   partial: '2026-08-07',
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: [30, 32, null, null, 28, null, 35] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [5, 4, null, null, 9, 6, 3] },
-    { node: 'battery', label: 'Battery', kind: 'battery', values: [8, 9, null, null, 7, 2, 6] },
-    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [10, 11, null, null, 9, 3, 8] },
-    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [1, 2, null, null, 4, 0, 1] },
+    { node: 'solar', label: 'Solar', kind: 'solar', values: [100, 130, 162, null, 200, 228, 262, 297] },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
+    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
+    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, 15] },
   ],
 };
 
@@ -61,7 +62,7 @@ await new Promise(r => setTimeout(r, 300));
 
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!sec) fail('clicking Trends activated no section');
-if (!asked.length || !/days=30/.test(asked[0])) fail(`the default range was not requested: ${asked[0]}`);
+if (!asked.length || !/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(asked[0])) fail(`the default range was not requested as the energy counter: ${asked[0]}`);
 
 const charts = query(sec, 'svg', true);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
@@ -79,8 +80,8 @@ const ssChart = charts[headings.indexOf('Self-sufficiency per day')];
 const ssHits = query(ssChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
 ssHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 if (!query(sandbox.document.body, '.trend-card').textContent.includes('70.97')) fail('self-sufficiency for the day is wrong');
-// 2026-08-06 has grid but no solar, so no home can be determined and no percentage is given.
-ssHits.find(h => h.attrs['data-day'] === '2026-08-06').dispatch('mouseenter', { clientX: 10, clientY: 10 });
+// 2026-08-03 has no reading from anything, so no percentage is given.
+ssHits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 if (!/no reading|—/.test(query(sandbox.document.body, '.trend-card').textContent)) fail('a day missing an input was given a percentage anyway');
 
 // Charge and export are below the line and subtract: 28 + 7 + 9 - 9 - 4 = 31.

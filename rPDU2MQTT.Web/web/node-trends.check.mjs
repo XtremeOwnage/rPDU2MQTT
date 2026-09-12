@@ -9,17 +9,18 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('node trends check FAILED: ' + m); process.exit(1); };
 
-// Seven days; the backend has nothing at all for two of them, and solar alone is missing on a third.
+// Day-end readings of the energy counter: one before the window, then seven days. Nothing read at the end of
+// the third day, which empties the third and fourth, since each day is the rise from the reading before it.
 const series = {
-  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus',
-  days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
+  ok: true, metric: 'energy', units: 'kWh', source: 'prometheus',
+  days: ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
   partial: '2026-08-07',
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [30, 32, null, null, 28, null, 35] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [5, 4, null, null, 9, 6, 3] },
-    { node: 'battery', label: 'Battery', kind: 'battery', values: [8, 9, null, null, 7, 2, 6] },
-    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [10, 11, null, null, 9, 3, 8] },
-    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [1, 2, null, null, 4, 0, 1] },
+    { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [100, 130, 162, null, 200, 228, 262, 297] },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
+    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
+    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, 15] },
   ],
 };
 
@@ -91,7 +92,8 @@ await new Promise(r => setTimeout(r, 300));
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!sec) fail('clicking Node Trends activated no section');
 if (!asked.length) fail('the page charted nothing — no series was requested');
-if (!/days=30/.test(asked[0])) fail(`the default range was not requested: ${asked[0]}`);
+// Thirty days of the energy counter: one more day-end is asked for, so the first day has a reading before it.
+if (!/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(asked[0])) fail(`the default range was not requested as the energy counter: ${asked[0]}`);
 // Across days, auto means one total per day, so no step is sent.
 if (/step=/.test(asked[0])) fail(`a per-day window was sampled instead of totalled: ${asked[0]}`);
 
@@ -116,7 +118,7 @@ for (const g of gapBars) {
 }
 
 const hits = query(byNode, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
-if (hits.length !== series.days.length) fail(`expected one hover target per day, found ${hits.length}`);
+if (hits.length !== series.days.length - 1) fail(`expected one hover target per day, found ${hits.length}`);
 hits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 100, clientY: 100 });
 const cardEl = query(sandbox.document.body, '.trend-card');
 if (!cardEl || !cardEl.classList.contains('show')) fail('hovering a day showed nothing');
@@ -149,12 +151,12 @@ if (!query(query(sec, 'svg', true)[0], 'rect', true).some(r => r.attrs.opacity =
 const status = query(sec, 'span', true).map(s => s.textContent).join(' ');
 if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: ${status.slice(0, 200)}`);
 
-// Totals cover the days that reported, today included, and say how many: solar 4 of 7 (125), grid 5 of 7.
+// Totals cover the days that reported, today included, and say how many: solar 5 of 7 (159), grid 5 of 7.
 const rows = query(sec, 'tr', true);
 const solarRow = rows.find(r => r.textContent.includes('Solar'));
 if (!solarRow) fail('no totals row for solar');
-if (!solarRow.textContent.includes('125')) fail(`the day still in progress is missing from the total: ${solarRow.textContent}`);
-if (!/4 of 7/.test(solarRow.textContent)) fail(`solar's total does not say how many days it covers: ${solarRow.textContent}`);
+if (!solarRow.textContent.includes('159')) fail(`the day still in progress is missing from the total: ${solarRow.textContent}`);
+if (!/5 of 7/.test(solarRow.textContent)) fail(`solar's total does not say how many days it covers: ${solarRow.textContent}`);
 if (!/5 of 7/.test(rows.find(r => r.textContent.includes('Grid')).textContent)) fail('grid\'s day count is wrong');
 if (!/counts in the totals/.test(sec.textContent)) fail('nothing says the unfinished day is in the totals');
 if (!solarRow.textContent.includes('2026-08-07') || !/so far/.test(solarRow.textContent)) fail(`solar's peak day is not named as unfinished: ${solarRow.textContent}`);
@@ -246,12 +248,15 @@ if (!/power/i.test(blurb())) fail(`the page describes a chart of watts as: ${blu
 rangeSel.value = 'minutes=360';
 rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
-const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energy_d'));
+const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'realpower'));
 if (!metricSel) fail('no way to choose what is charted');
-metricSel.value = 'energy_d';
+// Power and energy are the choices; energy since the period began is not offered.
+const offered = (metricSel.children || []).map(o => o.value);
+if (offered.join() !== 'realpower,energy') fail(`the metric choices are not power and energy: ${offered.join(', ')}`);
+metricSel.value = 'energy';
 metricSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
-if (!/metric=energy_d/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
+if (!/metric=energy(&|$)/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
 
 // A counter's readings are differenced: 2 + 2 + 2 = 6 over three intervals; a re-base is a gap, not negative.
 const solarCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Solar')), 'td', true).map(t => t.textContent);
@@ -263,16 +268,6 @@ if (!gridCells.includes('3') || !gridCells.some(c => /2 of 4/.test(c))) fail(`th
 if (!/changed between two readings/.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
 if (query(sec, 'th', true).some(h => /kWh, est/.test(h.textContent))) fail('energy readings were integrated as if they were watts');
 
-// The lifetime counter is choosable and differenced like any other.
-const optText = (metricSel.children || []).map(o => o.textContent);
-if (!(metricSel.children || []).some(o => o.value === 'energy')) fail('the lifetime counter cannot be charted');
-if (new Set(optText).size !== optText.length) fail(`two metrics offer the same label: ${optText.join(' | ')}`);
-metricSel.value = 'energy';
-metricSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-if (!/metric=energy(&|$)/.test(decodeURIComponent(asked.at(-1)))) fail(`the lifetime counter was not asked for: ${asked.at(-1)}`);
-const lifeCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Solar')), 'td', true).map(t => t.textContent);
-if (lifeCells.includes('16') || lifeCells.includes('52')) fail(`the lifetime counter was charted or summed: ${lifeCells.join(' | ')}`);
 
 // --- Search: a filter over the node chips --------------------------------------------------------------
 const search = query(sec, 'input', true).find(i => i.type === 'search');

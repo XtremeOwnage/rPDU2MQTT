@@ -33,7 +33,7 @@ export const MIN_BAR_PX = 6;
 
 export const LABELS: Record<string, string> = {
   realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-  frequency: 'frequency', energy: 'energy', energy_d: 'energy',
+  frequency: 'frequency', energy: 'energy',
 };
 export const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
 
@@ -140,7 +140,6 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   let METRICS: Metric[] = [
     { metric: 'realpower', units: 'W', epoch: 'instant' },
     { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
-    { metric: 'energy_d', units: 'kWh', epoch: 'period' },
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
   let metricChosen = false;
@@ -148,26 +147,16 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const epochOf = (m: string) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
   const rate = () => RATES.includes(unitsOf(metricSel.value));
   const metricName = () => LABELS[metricSel.value] || metricSel.value;
-  // Per-day bars come from the server already totalled; within a day the counter is what backends store.
-  const energyFor = (range: string) => {
-    const quantity = METRICS.filter(m => !RATES.includes(m.units));
-    const want = range.startsWith('days=') ? 'period' : 'lifetime';
-    return quantity.find(m => epochOf(m.metric) === want) || quantity[0];
-  };
+  // Only power and the energy counter are offered; a per-day bar is the counter's rise across that day.
+  const chartable = () => METRICS.filter(m => epochOf(m.metric) !== 'period');
+  const energyFor = (_range: string) => chartable().find(m => !RATES.includes(m.units));
   const impliedMetric = () => {
-    const found = rangeOf().wants === 'power' ? METRICS.find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
-    return (found || METRICS[0]).metric;
+    const found = rangeOf().wants === 'power' ? chartable().find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
+    return (found || chartable()[0]).metric;
   };
   const fillMetrics = () => {
     metricSel.innerHTML = '';
-    const seen = new Map<string, number>();
-    METRICS.forEach(m => seen.set(LABELS[m.metric] || m.metric, (seen.get(LABELS[m.metric] || m.metric) || 0) + 1));
-    METRICS.forEach(m => {
-      const name = LABELS[m.metric] || m.metric;
-      // Two metrics can share a name; only then is the epoch spelled out.
-      const epoch = (seen.get(name) || 0) > 1 && m.epoch === 'period' ? ' since period start' : '';
-      metricSel.appendChild(el('option', { value: m.metric, text: `${name} (${m.units})${epoch}` }));
-    });
+    chartable().forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
     if (!metricChosen) metricSel.value = impliedMetric();
   };
   metricSel.onchange = () => { metricChosen = true; load(); };
@@ -294,13 +283,21 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const load = async () => {
     status.textContent = 'loading…';
     const p = plan();
-    const query = rangeSel.value + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(metricSel.value);
+    const counterEpoch = epochOf(metricSel.value);
+    // A counter's first day needs the reading before it, so one more day-end is asked for and dropped after differencing.
+    const lead = p.used == null && counterEpoch === 'lifetime';
+    const range = lead ? rangeSel.value.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : rangeSel.value;
+    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(metricSel.value);
     let r: any;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
-    const counterEpoch = epochOf(metricSel.value);
     if (body?.ok && (counterEpoch === 'lifetime' || (!body.days && counterEpoch === 'period'))) toDeltas(body);
+    if (body?.ok && lead && body.days?.length > 1) {
+      body.days = body.days.slice(1);
+      if (body.at) body.at = body.at.slice(1);
+      (body.series || []).forEach((x: any) => { x.values = x.values.slice(1); });
+    }
     if (!body?.ok) {
       draw();
       status.textContent = '';
