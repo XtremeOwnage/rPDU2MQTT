@@ -27,7 +27,7 @@ public class WithheldOncePerIngestTests
         {
             // Refuse everything: this test is about who reports it, not about the audit's own rules.
             if (!Held.Any(w => w.Source == source))
-                Held.Add(new WithheldSource(nodeId, source, "energytoday", "did not reset at the rollover"));
+                Held.Add(new WithheldSource(nodeId, source, "energy_d", "did not reset at the rollover"));
             return false;
         }
         public IReadOnlyCollection<WithheldSource> Withheld => Held;
@@ -39,7 +39,7 @@ public class WithheldOncePerIngestTests
         var audit = new SharedAudit();
         // Something else — the MQTT ingest — already withheld a topic against the same audit.
         audit.Held.Add(new WithheldSource("coffee_pot", "esphome/devices/coffee-pot/sensor/energy_d/state",
-                                          "energytoday", "did not reset at the rollover"));
+                                          "energy_d", "did not reset at the rollover"));
 
         var cfg = new Config();
         cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode
@@ -93,9 +93,9 @@ public class WithheldOncePerIngestTests
         var audit = new SharedAudit();
         // What Load() put back: this ingest's feed, and another ingest's topic.
         audit.Held.Add(new WithheldSource("main_panel", "EmonCMS feed 'Main Panel Energy Daily'",
-                                          "energytoday", "did not reset at the rollover"));
+                                          "energy_d", "did not reset at the rollover"));
         audit.Held.Add(new WithheldSource("coffee_pot", "esphome/devices/coffee-pot/sensor/energy_d/state",
-                                          "energytoday", "did not reset at the rollover"));
+                                          "energy_d", "did not reset at the rollover"));
 
         var cfg = new Config();
         cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode
@@ -118,7 +118,7 @@ public class WithheldOncePerIngestTests
     {
         var audit = new SharedAudit();
         audit.Held.Add(new WithheldSource("coffee_pot", "esphome/devices/coffee-pot/sensor/energy_d/state",
-                                          "energytoday", "did not reset at the rollover"));
+                                          "energy_d", "did not reset at the rollover"));
 
         var cfg = new Config();
         var emon = new EmonCmsValueSource(cfg, null, audit);

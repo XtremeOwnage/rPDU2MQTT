@@ -316,7 +316,7 @@ export function addOverviewSection(nav: any, sections: any) {
   const load = async () => {
     stamp.textContent = 'loading…';
     try {
-      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energytoday')]);
+      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energy_d')]);
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || []) as any[];

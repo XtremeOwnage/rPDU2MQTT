@@ -11,7 +11,7 @@ const fail = (m) => { console.error('trends check FAILED: ' + m); process.exit(1
 
 // Seven days; the backend has nothing at all for two of them, and solar alone is missing on a third.
 const series = {
-  ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus',
+  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus',
   days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
   // The last one has not ended: it is today so far, and must not be read as a finished day.
   partial: '2026-08-07',
@@ -55,7 +55,7 @@ const wholeDay = {
 
 // The same window asked about as energy: a cumulative counter, which climbs and must never be summed.
 const counter = {
-  ok: true, metric: 'energytoday', units: 'kWh', source: 'prometheus', stepSeconds: 300,
+  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus', stepSeconds: 300,
   at,
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] },
@@ -71,17 +71,17 @@ const { sandbox, getEl } = makeDom({
       asked.push(url);
       if (url.includes('back=1')) return wholeDay;
       // Asked for energy over an intra-day window: a counter climbing, not a per-period total.
-      if (/metric=energy(today)?(&|$)/.test(url) && url.includes('minutes=')) return structuredClone(counter);
+      if (/metric=energy(_d)?(&|$)/.test(url) && url.includes('minutes=')) return structuredClone(counter);
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
     if (url.includes('/api/flow/metrics'))
       return { ok: true, metrics: [
         { metric: 'realpower', units: 'W', epoch: 'instant' },
         // The lifetime counter. Leaving it out of this fixture is what hid a Trends page that could only
-        // ever ask EmonCMS for `energytoday`, a metric it was never given a feed for, while `energy` —
+        // ever ask EmonCMS for `energy_d`, a metric it was never given a feed for, while `energy` —
         // the feed it does store — was filtered out of the picker as unchartable.
         { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
-        { metric: 'energytoday', units: 'kWh', epoch: 'period' }] };
+        { metric: 'energy_d', units: 'kWh', epoch: 'period' }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -378,12 +378,12 @@ if (/Daily energy over time/.test(blurb())) fail('the page still calls a chart o
 rangeSel.value = 'minutes=360&step=300';
 rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
-const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energytoday'));
+const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energy_d'));
 if (!metricSel) fail('no way to choose what is charted');
-metricSel.value = 'energytoday';
+metricSel.value = 'energy_d';
 metricSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
-if (!/metric=energytoday/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
+if (!/metric=energy_d/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
 if (!/energy/i.test(blurb())) fail(`the page still describes power after energy was chosen: ${blurb().slice(0, 120)}`);
 
 // A counter read through a day climbs: 10, 12, 14, 16 kWh is the day's total restated four times, not
@@ -424,7 +424,7 @@ console.log('trends: several charts over the chosen range; hovering a day says w
 
 // The lifetime counter has to be choosable, and has to be differenced like any other counter. It was
 // filtered out of the picker as "unchartable", which left the EmonCMS backend unusable for energy: `energy`
-// is the feed it stores and `energytoday` is one it was never given, so the only selectable energy metric
+// is the feed it stores and `energy_d` is one it was never given, so the only selectable energy metric
 // was the one that could never answer.
 const lifetimeOpt = (metricSel.children || []).find(o => o.value === 'energy');
 if (!lifetimeOpt) fail(`the lifetime counter cannot be charted: ${(metricSel.children || []).map(o => o.value).join(', ')}`);

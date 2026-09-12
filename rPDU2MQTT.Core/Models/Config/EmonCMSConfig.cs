@@ -133,7 +133,7 @@ public class EmonCmsFeedsConfig
     };
 
     /// <summary>The daily-total metric name, spelled once (see <c>Core.Flow.EnergyPeriod.Metric</c>).</summary>
-    internal const string EnergyPeriodMetric = "energytoday";
+    internal const string EnergyPeriodMetric = "energy_d";
 
     [DefaultValue(EmonCmsFeedEngine.PHPFina)]
     [Description("Default feed storage engine, for types that don't set their own. PHPFina = fixed-interval time series, PHPTimeSeries = variable interval, MySQL = MySQL storage (no phpfina files).")]
@@ -166,8 +166,8 @@ public class EmonCmsFeedsConfig
 [System.Text.Json.Serialization.JsonConverter(typeof(EmonCmsFeedTypeConfigConverter))]
 public class EmonCmsFeedTypeConfig
 {
-    [Description("The measurement type this applies to (raw PDU type name, or 'energytoday' for the energy-flow daily totals).")]
-    [AllowedValues("realpower", "apparentpower", "energy", "energytoday", "current", "voltage", "frequency", "powerfactor")]
+    [Description("The measurement type this applies to (raw PDU type name, or 'energy_d' for the energy-flow daily totals).")]
+    [AllowedValues("realpower", "apparentpower", "energy", "energy_d", "current", "voltage", "frequency", "powerfactor")]
     public string Type { get; set; } = "realpower";
 
     [Description("Feed storage engine for this type. Blank inherits Feeds.Engine. PHPFina = fixed-interval, PHPTimeSeries = variable, MySQL = MySQL storage.")]

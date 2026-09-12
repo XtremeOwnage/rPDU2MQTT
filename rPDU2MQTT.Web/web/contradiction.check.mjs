@@ -14,7 +14,7 @@ const cfg = { EnergyFlow: { Nodes: [], Links: [] } };
 
 // `imbalance` is what the server reports as unaccounted for. inverter is the live case (a reading of 2.1
 // with 129.9 passing through it); panel is 4% out, which is ordinary.
-const graph = (inverterImbalance, metric = 'energytoday') => ({
+const graph = (inverterImbalance, metric = 'energy_d') => ({
   ok: true, metric, units: 'kWh',
   nodes: [
     { id: 'solar', label: 'Solar (PV)', kind: 'solar', value: 129.9, derivation: 'measured', imbalance: null },
@@ -94,10 +94,10 @@ if (lifetime.length) fail('a lifetime-energy gap raised a contradiction banner â
 // The bridge drops readings it can show to be wrong â€” a counter declared daily that never resets. Doing it
 // silently leaves the node reading "no data", which is indistinguishable from a binding nobody configured,
 // and sends the operator hunting for a fault in the wrong place entirely.
-sections = await render(0.12, 'energytoday', [{
+sections = await render(0.12, 'energy_d', [{
   node: 'solar',
   source: 'solar_assistant/total/pv_energy/state',
-  metric: 'energytoday',
+  metric: 'energy_d',
   reason: 'Configured as a daily (period) counter, but it did not reset when the day rolled over.',
 }]);
 const notices = query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction'));
@@ -107,7 +107,7 @@ if (!notice.includes('solar_assistant/total/pv_energy/state')) fail('the notice 
 if (!notice.includes('did not reset')) fail('the notice does not say why the binding is withheld');
 
 // And nothing is announced when nothing is being withheld.
-sections = await render(0.12, 'energytoday', []);
+sections = await render(0.12, 'energy_d', []);
 if (query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction')).length)
   fail('a notice appeared with nothing withheld and no contradiction');
 

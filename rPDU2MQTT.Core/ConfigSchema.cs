@@ -125,7 +125,7 @@ public static class ConfigSchema
     /// actually validates a binding.
     ///
     /// <para>
-    /// Not every metric in the unit table: <c>energytoday</c> is derived by the aggregation service from a
+    /// Not every metric in the unit table: <c>energy_d</c> is derived by the aggregation service from a
     /// counter's rise, so offering it as something to bind would produce a binding the source validation
     /// then rejects. Taken from the property rather than retyped so the offer and the rule cannot drift.
     /// </para>

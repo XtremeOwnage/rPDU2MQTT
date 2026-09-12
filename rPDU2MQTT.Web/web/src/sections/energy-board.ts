@@ -22,7 +22,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   // Power now, or energy for the day so far (#371).
   const showSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
-  showSel.appendChild(el('option', { value: 'energytoday', text: 'Energy today (kWh)' }));
+  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
   bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
@@ -34,7 +34,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
-      showSel.value = 'energytoday';
+      showSel.value = 'energy_d';
     load();
   });
   // One click for the periods people actually ask for. A period is a question about energy — "how much
@@ -42,7 +42,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const periods = periodRow((key: PeriodKey) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    showSel.value = 'energytoday';
+    showSel.value = 'energy_d';
     periods.mark(key);
     hadDay = true;
     load();
@@ -345,26 +345,26 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
       const day = hist.day();
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
-        : metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+        : metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
     } else try {
       // Today, not all time.
-      const er = await api(withInstance('/api/flow?metric=energytoday', instSel));
+      const er = await api(withInstance('/api/flow?metric=energy_d', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
         eUnits = er.body.units || 'kWh';
         // From the answer, not from what was asked for.
-        eWindow = er.body.metric === 'energytoday' ? 'of today’s energy' : 'of lifetime energy';
+        eWindow = er.body.metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
         const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
         // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy: Record<string, number> = {};
-        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energytoday#in' }));
+        const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy_d#in' }));
         if (eq.length) {
           try {
             const elr = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(eq) });
             (elr.body?.values || []).forEach((v: any) => { if (typeof v.value === 'number') eInBy[`${v.node}|${v.metric}`] = v.value; });
           } catch { /* no live cache — energy#in just stays absent */ }
         }
-        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energytoday#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
+        const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy_d#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
         const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;

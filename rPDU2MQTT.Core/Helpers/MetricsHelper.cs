@@ -70,7 +70,7 @@ public static class MetricsHelper
             "apparentpower" => "Apparent Power",
             "powerfactor" => "Power Factor",
             "energy" => "Energy",
-            "energytoday" => "Energy Today",
+            "energy_d" => "Energy Daily",
             "current" => "Current",
             "voltage" => "Voltage",
             "frequency" => "Frequency",

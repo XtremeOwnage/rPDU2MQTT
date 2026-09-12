@@ -587,12 +587,12 @@ spec:
                               - realpower
                               - apparentpower
                               - energy
-                              - energytoday
+                              - energy_d
                               - current
                               - voltage
                               - frequency
                               - powerfactor
-                              description: The measurement type this applies to (raw PDU type name, or 'energytoday' for the energy-flow daily totals).
+                              description: The measurement type this applies to (raw PDU type name, or 'energy_d' for the energy-flow daily totals).
                             Engine:
                               type: string
                               enum:

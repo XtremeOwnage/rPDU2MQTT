@@ -59,6 +59,6 @@ public class FlowSpanTests
     {
         // The one metric whose days share a starting point. Lifetime counters run from unrelated epochs and
         // power is not a quantity of energy at all.
-        Assert.Equal("energytoday", FlowSpan.SpannableMetric);
+        Assert.Equal("energy_d", FlowSpan.SpannableMetric);
     }
 }

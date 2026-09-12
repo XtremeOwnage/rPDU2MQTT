@@ -24,13 +24,13 @@ public class ReturnLaneExportTests
         c.Links.Add(new EnergyFlowLink { From = "solar", To = "inverter" });
         c.Links.Add(new EnergyFlowLink { From = "battery", To = "inverter" });
         c.Links.Add(new EnergyFlowLink { From = "inverter", To = "panel" });
-        return (FlowGraphBuilder.Build(new PduData(), c, "energytoday", new Fixed(live.ToDictionary(x => x.Key, x => x.Value))), c);
+        return (FlowGraphBuilder.Build(new PduData(), c, "energy_d", new Fixed(live.ToDictionary(x => x.Key, x => x.Value))), c);
     }
 
     [Fact]
     public void AChargeLaneIsAReturnLane_NotTheUnmeteredRemainder()
     {
-        var (graph, _) = Build(("solar|energytoday", 40), ("battery|energytoday", 0), ("battery|energytoday#in", 12));
+        var (graph, _) = Build(("solar|energy_d", 40), ("battery|energy_d", 0), ("battery|energy_d#in", 12));
 
         var charge = graph.Nodes.Single(n => n.Id == "battery#in");
 
@@ -43,7 +43,7 @@ public class ReturnLaneExportTests
     public void TheUnmeteredRemainderIsStillNotAReturnLane()
     {
         // Arithmetic about a hierarchy. It belongs on a diagram and nowhere near a metrics store.
-        var (graph, _) = Build(("solar|energytoday", 40), ("inverter|energytoday", 40), ("panel|energytoday", 40));
+        var (graph, _) = Build(("solar|energy_d", 40), ("inverter|energy_d", 40), ("panel|energy_d", 40));
 
         foreach (var n in graph.Nodes.Where(n => n.Id.EndsWith("#unmeasured")))
             Assert.False(n.ReturnLane);
@@ -53,7 +53,7 @@ public class ReturnLaneExportTests
     public void AReturnLaneCarriesItsNodesTags()
     {
         // Or a tag filter keeps the discharge and silently drops the charge, and the export is half a story.
-        var (graph, _) = Build(("battery|energytoday", 0), ("battery|energytoday#in", 12), ("solar|energytoday", 40));
+        var (graph, _) = Build(("battery|energy_d", 0), ("battery|energy_d#in", 12), ("solar|energy_d", 40));
 
         var charge = graph.Nodes.Single(n => n.Id == "battery#in");
 
@@ -65,7 +65,7 @@ public class ReturnLaneExportTests
     {
         // Calls the production rule rather than restating it: a test carrying its own copy of the condition
         // passes just as happily when the exporter stops using it.
-        var (graph, _) = Build(("solar|energytoday", 40), ("battery|energytoday#in", 12), ("panel|energytoday", 5));
+        var (graph, _) = Build(("solar|energy_d", 40), ("battery|energy_d#in", 12), ("panel|energy_d", 5));
 
         var exported = graph.Nodes.Where(FlowExport.ToMetricsStore).Select(n => n.Id).ToList();
 

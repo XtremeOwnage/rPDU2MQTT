@@ -47,7 +47,7 @@ const { sandbox, getEl } = makeDom({
     if (url.includes('/api/flow/live')) return live;
     if (url.includes('/api/status/board')) return board;
     if (url.includes('/api/flow/series')) return day;
-    if (url.includes('/api/flow')) return url.includes('energytoday') ? energy : power;
+    if (url.includes('/api/flow')) return url.includes('energy_d') ? energy : power;
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }

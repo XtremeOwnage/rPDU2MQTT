@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Core.Flow;
 public static class FlowSpan
 {
     /// <summary>The metric a span can be taken over. Anything else is refused.</summary>
-    public const string SpannableMetric = "energytoday";
+    public const string SpannableMetric = "energy_d";
 
     // Which instants represent the last N days is EnergyPeriod.RecentPeriodEnds, and only that.
 

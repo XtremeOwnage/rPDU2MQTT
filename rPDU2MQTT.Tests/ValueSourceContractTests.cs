@@ -70,7 +70,7 @@ public class ValueSourceContractTests
 
         var key = SourceBindings.For(c, "fake")[0].Key();
 
-        Assert.Contains("energytoday", key);   // period accumulation is its own metric
+        Assert.Contains("energy_d", key);   // period accumulation is its own metric
         Assert.EndsWith(FlowMetricKey.InSuffix, key);
     }
 

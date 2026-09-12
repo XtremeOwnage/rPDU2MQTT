@@ -25,14 +25,14 @@ public class FlowPrometheusTests
         Assert.NotEqual(reading, tier);   // sharing a name would mean two label sets on one gauge
 
         cfg.Prometheus.MetricNameTemplate = "homelab_{type}";
-        Assert.Equal("homelab_flow_energytoday", MetricsHelper.PrometheusMetricName($"flow_{EnergyPeriod.Metric}", "", "", "kWh", cfg));
+        Assert.Equal("homelab_flow_energy_d", MetricsHelper.PrometheusMetricName($"flow_{EnergyPeriod.Metric}", "", "", "kWh", cfg));
     }
 
     [Fact]
     public void TheDailyMetric_HasAFriendlyName_ForTheMetricBrowser()
     {
         // The HELP text is what makes a series readable in Grafana without knowing this project's vocabulary.
-        Assert.Equal("Energy Today", MetricsHelper.FriendlyTypeName(EnergyPeriod.Metric));
+        Assert.Equal("Energy Daily", MetricsHelper.FriendlyTypeName(EnergyPeriod.Metric));
         Assert.Equal("Energy", MetricsHelper.FriendlyTypeName("energy"));
     }
 

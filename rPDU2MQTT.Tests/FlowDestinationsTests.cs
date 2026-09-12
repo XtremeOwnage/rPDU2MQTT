@@ -44,7 +44,7 @@ public class FlowDestinationsTests
     {
         ["solar|realpower"] = 4200,
         ["solar|energy"] = 812.5,
-        ["solar|energytoday"] = 31.5,
+        ["solar|energy_d"] = 31.5,
     });
 
     [Fact]
@@ -69,7 +69,7 @@ public class FlowDestinationsTests
         var cfg = Configured();
 
         Assert.Equal("solar_realpower", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", "realpower", cfg));
-        Assert.Equal("solar_energytoday", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", EnergyPeriod.Metric, cfg));
+        Assert.Equal("solar_energy_d", MetricsHelper.EmonCmsFlowInputName("solar", "Solar", "solar", EnergyPeriod.Metric, cfg));
         // An auto node's id carries separators EmonCMS will not take in a key.
         Assert.Equal("outlet_rack_pdu_1_4_energy", MetricsHelper.EmonCmsFlowInputName("outlet:rack_pdu_1:4", "Outlet 5", "outlet", "energy", cfg));
     }
@@ -78,7 +78,7 @@ public class FlowDestinationsTests
     public void ThePrometheusFlowMetricName_IsOneSpelling_ForTheExportAndTheHistory()
     {
         var cfg = Configured();
-        Assert.Equal("rpdu2mqtt_flow_energytoday", MetricsHelper.PrometheusFlowMetricName(EnergyPeriod.Metric, cfg));
+        Assert.Equal("rpdu2mqtt_flow_energy_d", MetricsHelper.PrometheusFlowMetricName(EnergyPeriod.Metric, cfg));
 
         // A template naming the units used to change the exported name and not the queried one, so every
         // lookup missed. Whatever the template, both sides now ask the same function.
@@ -99,7 +99,7 @@ public class FlowDestinationsTests
         var desired = EmonCmsFeedPlanner.BuildDesired(new PduData(), cfg, FlowTiers.Graphs(new PduData(), cfg, Live()));
 
         Assert.Contains(desired.Feeds, f => f.Name == "solar_realpower");
-        Assert.Contains(desired.Feeds, f => f.Name == "solar_energytoday");
+        Assert.Contains(desired.Feeds, f => f.Name == "solar_energy_d");
         Assert.Contains(desired.Inputs, i => i.InputName == "solar_realpower" && i.StorageFeed == "solar_realpower");
         // A type nobody asked for gets no feed, exactly as for a PDU reading.
         Assert.DoesNotContain(desired.Feeds, f => f.Name == "solar_energy");
@@ -211,7 +211,7 @@ public class FlowDestinationsTests
         // The half that never existed. Every tier, under every metric it has a value for.
         Assert.Equal(4200, sent["solar_realpower"]);
         Assert.Equal(812.5, sent["solar_energy"]);
-        Assert.Equal(31.5, sent["solar_energytoday"]);
+        Assert.Equal(31.5, sent["solar_energy_d"]);
         Assert.Equal(4200, sent["inverter_realpower"]);
     }
 

@@ -68,10 +68,10 @@ public class FlowHistoryTests
         // starts a fresh series for the same node. A bare selector returns all of them and the reader took
         // whichever the answer happened to list last — on the cluster this was found on, eighteen
         // instances in a day.
-        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energytoday", ["solar", "grid"]);
+        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energy_d", ["solar", "grid"]);
 
         Assert.StartsWith("max by (node) (", query);
-        Assert.Contains("rpdu2mqtt_flow_energytoday{node=~", query);
+        Assert.Contains("rpdu2mqtt_flow_energy_d{node=~", query);
         Assert.Contains("solar", query);
     }
 
@@ -116,7 +116,7 @@ public class FlowHistoryTests
     {
         // PromQL's string escapes are Go's: a lone backslash before anything but " \ n r t etc. is a parse
         // error. Every backslash we emit must therefore be part of a pair.
-        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energytoday",
+        var query = PrometheusWire.NodeQuery("rpdu2mqtt_flow_energy_d",
             ["grid#in", "outlet:pdu_1:4", "a.b", "solar"]);
 
         for (var i = 0; i < query.Length; i++)

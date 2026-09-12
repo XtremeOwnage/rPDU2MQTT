@@ -12,12 +12,12 @@ export const METRICS: [string, string, string, string[]][] = [
   ['temperature', 'Temperature', '°C', ['°C', 'K']],
 ];
 // Which metrics the flow may sum from the leaves upward. Mirrors FlowUnits.IsAdditive.
-export const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'energytoday', 'current']);
+export const ADDITIVE_METRICS = new Set(['realpower', 'apparentpower', 'energy', 'energy_d', 'current']);
 export const isAdditiveMetric = (key?: string) => ADDITIVE_METRICS.has(key || '');
 export const SOURCE_METRICS = METRICS.map(m => m[0]);
 export const metricMeta = (key?: string) => METRICS.find(m => m[0] === key) || METRICS[0];
 // Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS.
-export const DERIVED_METRIC_LABELS: Record<string, string> = { energytoday: 'Energy today' };
+export const DERIVED_METRIC_LABELS: Record<string, string> = { energy_d: 'Energy Daily' };
 export const metricLabel = (key?: string) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction.
 export const sourceMetricKey = (src: any) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
