@@ -68,6 +68,7 @@ export type TrendsPage = {
   rate: () => boolean;
   metricName: () => string;
   stacked: () => boolean;
+  kind: () => 'bar' | 'line' | 'area';
   fitTo: () => number;
   leadHeight: () => number;
   section: (title: string, note: string, made: { svg: any; gaps: number }, legend: Line[]) => number;
@@ -78,8 +79,8 @@ export type TrendsPage = {
 export type TrendsSpec = {
   label: string;
   icon: string;
-  /// Whether the stacked / side-by-side choice applies to anything the page draws.
-  mode: boolean;
+  /// Whether the page offers the stacked choice; a page whose charts must net their signs always stacks.
+  stackable: boolean;
   controls?: (page: TrendsPage) => any[];
   above?: (page: TrendsPage) => any[];
   below?: (page: TrendsPage) => any[];
@@ -161,9 +162,16 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   };
   metricSel.onchange = () => { metricChosen = true; load(); };
 
-  const modeSel = el('select', { title: 'Stack the nodes into one bar, or draw them side by side.' }) as HTMLSelectElement;
-  [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
-  modeSel.onchange = () => draw();
+  const chartSel = el('select', { title: 'Draw the series as bars, lines or filled areas.' }) as HTMLSelectElement;
+  [['bar', 'bars'], ['line', 'lines'], ['area', 'areas']].forEach(([v, t]) => chartSel.appendChild(el('option', { value: v, text: t })));
+  const stackBox = el('input') as HTMLInputElement;
+  stackBox.type = 'checkbox';
+  stackBox.checked = true;
+  stackBox.title = 'Stack the series on top of each other. Off, bars sit side by side and areas overlap.';
+  // Lines are never stacked.
+  const syncStack = () => { stackBox.disabled = chartSel.value === 'line'; };
+  chartSel.onchange = () => { syncStack(); draw(); };
+  stackBox.onchange = () => draw();
 
   const periods = periodRow((key: PeriodKey) => {
     const { days } = periodWindow(key);
@@ -310,7 +318,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
 
   const page: TrendsPage = {
     sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName,
-    stacked: () => modeSel.value === 'stack', fitTo, leadHeight, section, statusLine, showRange,
+    stacked: () => stackBox.checked && chartSel.value !== 'line',
+    kind: () => chartSel.value as 'bar' | 'line' | 'area', fitTo, leadHeight, section, statusLine, showRange,
   };
 
   sec.appendChild(periods.row);
@@ -318,7 +327,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
-    ...(spec.mode ? [el('label', { class: 'ld-inst' }, 'as ', modeSel)] : []),
+    el('label', { class: 'ld-inst' }, 'as ', chartSel),
+    ...(spec.stackable ? [el('label', { class: 'ld-inst' }, stackBox, ' stacked')] : []),
     ...(spec.controls?.(page) || []),
     instSel.wrap, status);
   sec.appendChild(bar);
@@ -327,6 +337,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   (spec.below?.(page) || []).forEach(x => sec.appendChild(x));
   fillMetrics();
   syncIntervals();
+  syncStack();
 
   refresh.onclick = () => load();
   let metricsAsked = false;

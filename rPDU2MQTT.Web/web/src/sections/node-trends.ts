@@ -171,7 +171,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
   const created = trendsPage(nav, sections, {
     label: 'Node Trends',
     icon: '▥',
-    mode: true,
+    stackable: true,
     controls: () => [el('label', { class: 'ld-inst' }, 'overlay ', overlaySel)],
     above: () => [tagRow, searchRow, picker],
     below: () => [table],
@@ -220,7 +220,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       const legend = overlay ? [...lines, { ...overlay, label: `${overlay.label} (overlay)` }] : lines;
       const gaps = p.section(byNodeTitle(p),
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: p.stacked(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
+        barChart({ days, lines, units, stacked: p.stacked(), kind: p.kind(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
 
       drawTable(p, series, days, units, partial);
       p.status.textContent = p.statusLine(gaps);

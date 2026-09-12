@@ -8,7 +8,7 @@ export function addTrendsSection(nav: any, sections: any) {
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
-    mode: false,
+    stackable: false,
     render: (p) => {
       const body = p.body();
       if (!body?.ok) return;
@@ -35,7 +35,7 @@ export function addTrendsSection(nav: any, sections: any) {
         p.section(p.perDay() ? 'Grid per day' : 'Grid',
           'Every grid node. Import above the line, export below it'
           + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
-          barChart({ days, lines: gridLines, units, stacked: true, partial, fitTo: p.fitTo() }), gridLines);
+          barChart({ days, lines: gridLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), gridLines);
         drawn++;
       }
 
@@ -56,7 +56,7 @@ export function addTrendsSection(nav: any, sections: any) {
             'The share of the home’s energy that did not come from the grid'
             + (load ? '.' : ', with the home taken as the balance of the measured sources.')
             + ' A day missing either figure is left empty rather than estimated.',
-            barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
           drawn++;
         }
       }
@@ -79,7 +79,7 @@ export function addTrendsSection(nav: any, sections: any) {
         p.section(p.perDay() ? `Where the day’s ${p.metricName()} came from` : `Where the ${p.metricName()} is coming from`,
           'Each kind summed across its nodes. What went back — battery charge, grid export — is below the line, '
           + 'so the same energy is not counted as produced and then again as returned.',
-          barChart({ days, lines: supplyLines, units, stacked: true, partial, fitTo: p.fitTo() }), supplyLines);
+          barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
       }
 

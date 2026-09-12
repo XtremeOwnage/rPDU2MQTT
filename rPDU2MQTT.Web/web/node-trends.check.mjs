@@ -321,7 +321,33 @@ if (!/days=90/.test(asked.at(-1)) || !/step=43200/.test(asked.at(-1))) fail(`nin
 if (!/widened from 1 hour to 12 hours/.test(query(sec, 'span', true).map(x => x.textContent).join(' ')))
   fail('the page does not say the interval was widened');
 
+// --- Chart type: bars, lines or areas; stacking applies to bars and areas ------------------------------
+metricSel.value = 'realpower';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+const chartSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'line'));
+const stackBox = query(sec, 'input', true).find(i => i.type === 'checkbox');
+if (!chartSel) fail('no chart type control');
+if (!stackBox) fail('no stacked control');
+const marks = (svg, cls) => ['polyline', 'polygon', 'circle'].flatMap(t => query(svg, t, true)).filter(e => e.attrs.class === cls);
+chartSel.value = 'line';
+chartSel.onchange({});
+await new Promise(r => setTimeout(r, 50));
+const lineSvg = query(sec, 'svg', true)[0];
+if (!marks(lineSvg, 'trend-line').length) fail('choosing lines drew no line');
+if (query(lineSvg, 'rect', true).some(r => !r.attrs.class)) fail('choosing lines still drew bars');
+if (!stackBox.disabled) fail('stacking is offered for lines, which are never stacked');
+chartSel.value = 'area';
+chartSel.onchange({});
+await new Promise(r => setTimeout(r, 50));
+if (!marks(query(sec, 'svg', true)[0], 'trend-area').length) fail('choosing areas drew no area');
+if (stackBox.disabled) fail('stacking is not offered for areas');
+chartSel.value = 'bar';
+chartSel.onchange({});
+await new Promise(r => setTimeout(r, 50));
+if (!query(query(sec, 'svg', true)[0], 'rect', true).some(r => !r.attrs.class)) fail('going back to bars drew no bars');
+
 console.log('node trends: per-node chart over the chosen range with empty days marked and counted; tags, a text filter '
   + 'and chips select what is charted; totals cover the days that reported; power within a day on a clock axis '
   + 'with kWh integrated; counters differenced; an overlay line on request; the interval is chosen, and widened '
-  + 'only when the chart cannot draw it, saying so');
+  + 'only when the chart cannot draw it, saying so; bars, lines or areas, stacked where that means something');

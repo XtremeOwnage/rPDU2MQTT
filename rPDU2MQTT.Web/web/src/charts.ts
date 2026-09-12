@@ -51,8 +51,12 @@ export function barChart(opts: {
   height?: number;
   /// A second series drawn as a line over the bars, on the same axis.
   overlay?: Line;
+  /// Bars, lines or filled areas. Lines are never stacked.
+  kind?: 'bar' | 'line' | 'area';
 }): { svg: any; gaps: number } {
-  const { days, lines, units, stacked } = opts;
+  const { days, lines, units } = opts;
+  const kind = opts.kind || 'bar';
+  const stacked = opts.stacked && kind !== 'line';
   const has = (d: number) => lines.some(l => l.values[d] != null);
   const dayTotal = (d: number) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
 
@@ -106,7 +110,7 @@ export function barChart(opts: {
       title.textContent = `${day} — no reading from the history backend`;
       g.appendChild(title);
       svg.appendChild(g);
-    } else {
+    } else if (kind === 'bar') {
       // The period still in progress is drawn faded: it is a real reading of an unfinished day.
       const partial = day === opts.partial;
       const paint = (attrs: Record<string, any>) => {
@@ -153,6 +157,36 @@ export function barChart(opts: {
       svg.appendChild(t);
     }
   });
+
+  // Lines and areas are drawn as runs of consecutive readings, so a gap breaks them instead of bridging it.
+  if (kind !== 'bar') {
+    const up = days.map(() => 0), down = days.map(() => 0);
+    const cx = (d: number) => (x(d) + slot / 2).toFixed(1);
+    lines.forEach(l => {
+      const base: number[] = [], top: number[] = [];
+      days.forEach((_, d) => {
+        const v = l.values[d];
+        if (v == null) { base.push(NaN); top.push(NaN); return; }
+        const from = stacked ? (v >= 0 ? up[d] : down[d]) : 0;
+        base.push(from); top.push(from + v);
+        if (stacked) { if (v >= 0) up[d] = from + v; else down[d] = from + v; }
+      });
+      let run: number[] = [];
+      const flush = () => {
+        if (run.length === 1)
+          svg.appendChild(svgTag('circle', { cx: cx(run[0]), cy: y(top[run[0]]).toFixed(1), r: 2.5, fill: l.color, class: kind === 'area' ? 'trend-area' : 'trend-line' }));
+        else if (run.length > 1 && kind === 'area') {
+          const pts = run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`)
+            .concat([...run].reverse().map(d => `${cx(d)},${y(base[d]).toFixed(1)}`));
+          svg.appendChild(svgTag('polygon', { points: pts.join(' '), fill: l.color, 'fill-opacity': stacked ? 0.85 : 0.35, stroke: l.color, 'stroke-width': 1, class: 'trend-area' }));
+        } else if (run.length > 1)
+          svg.appendChild(svgTag('polyline', { points: run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`).join(' '), fill: 'none', stroke: l.color, 'stroke-width': 2, class: 'trend-line' }));
+        run = [];
+      };
+      days.forEach((_, d) => { if (Number.isNaN(top[d])) flush(); else run.push(d); });
+      flush();
+    });
+  }
 
   // The overlay is drawn as runs of consecutive readings, so a gap breaks the line instead of bridging it.
   if (overlay) {

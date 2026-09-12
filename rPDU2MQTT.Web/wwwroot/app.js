@@ -1397,7 +1397,9 @@ function barChart(opts
                                            
 
  )                             {
-  const { days, lines, units, stacked } = opts;
+  const { days, lines, units } = opts;
+  const kind = opts.kind || 'bar';
+  const stacked = opts.stacked && kind !== 'line';
   const has = (d        ) => lines.some(l => l.values[d] != null);
   const dayTotal = (d        ) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
 
@@ -1451,7 +1453,7 @@ function barChart(opts
       title.textContent = `${day} — no reading from the history backend`;
       g.appendChild(title);
       svg.appendChild(g);
-    } else {
+    } else if (kind === 'bar') {
       // The period still in progress is drawn faded: it is a real reading of an unfinished day.
       const partial = day === opts.partial;
       const paint = (attrs                     ) => {
@@ -1498,6 +1500,36 @@ function barChart(opts
       svg.appendChild(t);
     }
   });
+
+  // Lines and areas are drawn as runs of consecutive readings, so a gap breaks them instead of bridging it.
+  if (kind !== 'bar') {
+    const up = days.map(() => 0), down = days.map(() => 0);
+    const cx = (d        ) => (x(d) + slot / 2).toFixed(1);
+    lines.forEach(l => {
+      const base           = [], top           = [];
+      days.forEach((_, d) => {
+        const v = l.values[d];
+        if (v == null) { base.push(NaN); top.push(NaN); return; }
+        const from = stacked ? (v >= 0 ? up[d] : down[d]) : 0;
+        base.push(from); top.push(from + v);
+        if (stacked) { if (v >= 0) up[d] = from + v; else down[d] = from + v; }
+      });
+      let run           = [];
+      const flush = () => {
+        if (run.length === 1)
+          svg.appendChild(svgTag('circle', { cx: cx(run[0]), cy: y(top[run[0]]).toFixed(1), r: 2.5, fill: l.color, class: kind === 'area' ? 'trend-area' : 'trend-line' }));
+        else if (run.length > 1 && kind === 'area') {
+          const pts = run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`)
+            .concat([...run].reverse().map(d => `${cx(d)},${y(base[d]).toFixed(1)}`));
+          svg.appendChild(svgTag('polygon', { points: pts.join(' '), fill: l.color, 'fill-opacity': stacked ? 0.85 : 0.35, stroke: l.color, 'stroke-width': 1, class: 'trend-area' }));
+        } else if (run.length > 1)
+          svg.appendChild(svgTag('polyline', { points: run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`).join(' '), fill: 'none', stroke: l.color, 'stroke-width': 2, class: 'trend-line' }));
+        run = [];
+      };
+      days.forEach((_, d) => { if (Number.isNaN(top[d])) flush(); else run.push(d); });
+      flush();
+    });
+  }
 
   // The overlay is drawn as runs of consecutive readings, so a gap breaks the line instead of bridging it.
   if (overlay) {
@@ -7218,9 +7250,16 @@ function trendsPage(nav     , sections     , spec            ) {
   };
   metricSel.onchange = () => { metricChosen = true; load(); };
 
-  const modeSel = el('select', { title: 'Stack the nodes into one bar, or draw them side by side.' })                     ;
-  [['stack', 'stacked'], ['group', 'side by side']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
-  modeSel.onchange = () => draw();
+  const chartSel = el('select', { title: 'Draw the series as bars, lines or filled areas.' })                     ;
+  [['bar', 'bars'], ['line', 'lines'], ['area', 'areas']].forEach(([v, t]) => chartSel.appendChild(el('option', { value: v, text: t })));
+  const stackBox = el('input')                    ;
+  stackBox.type = 'checkbox';
+  stackBox.checked = true;
+  stackBox.title = 'Stack the series on top of each other. Off, bars sit side by side and areas overlap.';
+  // Lines are never stacked.
+  const syncStack = () => { stackBox.disabled = chartSel.value === 'line'; };
+  chartSel.onchange = () => { syncStack(); draw(); };
+  stackBox.onchange = () => draw();
 
   const periods = periodRow((key           ) => {
     const { days } = periodWindow(key);
@@ -7367,7 +7406,8 @@ function trendsPage(nav     , sections     , spec            ) {
 
   const page             = {
     sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName,
-    stacked: () => modeSel.value === 'stack', fitTo, leadHeight, section, statusLine, showRange,
+    stacked: () => stackBox.checked && chartSel.value !== 'line',
+    kind: () => chartSel.value                           , fitTo, leadHeight, section, statusLine, showRange,
   };
 
   sec.appendChild(periods.row);
@@ -7375,7 +7415,8 @@ function trendsPage(nav     , sections     , spec            ) {
     el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
-    ...(spec.mode ? [el('label', { class: 'ld-inst' }, 'as ', modeSel)] : []),
+    el('label', { class: 'ld-inst' }, 'as ', chartSel),
+    ...(spec.stackable ? [el('label', { class: 'ld-inst' }, stackBox, ' stacked')] : []),
     ...(spec.controls?.(page) || []),
     instSel.wrap, status);
   sec.appendChild(bar);
@@ -7384,6 +7425,7 @@ function trendsPage(nav     , sections     , spec            ) {
   (spec.below?.(page) || []).forEach(x => sec.appendChild(x));
   fillMetrics();
   syncIntervals();
+  syncStack();
 
   refresh.onclick = () => load();
   let metricsAsked = false;
@@ -7409,7 +7451,7 @@ function addTrendsSection(nav     , sections     ) {
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
-    mode: false,
+    stackable: false,
     render: (p) => {
       const body = p.body();
       if (!body?.ok) return;
@@ -7436,7 +7478,7 @@ function addTrendsSection(nav     , sections     ) {
         p.section(p.perDay() ? 'Grid per day' : 'Grid',
           'Every grid node. Import above the line, export below it'
           + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
-          barChart({ days, lines: gridLines, units, stacked: true, partial, fitTo: p.fitTo() }), gridLines);
+          barChart({ days, lines: gridLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), gridLines);
         drawn++;
       }
 
@@ -7457,7 +7499,7 @@ function addTrendsSection(nav     , sections     ) {
             'The share of the home’s energy that did not come from the grid'
             + (load ? '.' : ', with the home taken as the balance of the measured sources.')
             + ' A day missing either figure is left empty rather than estimated.',
-            barChart({ days, lines: ssLines, units: '%', stacked: false, max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
           drawn++;
         }
       }
@@ -7480,7 +7522,7 @@ function addTrendsSection(nav     , sections     ) {
         p.section(p.perDay() ? `Where the day’s ${p.metricName()} came from` : `Where the ${p.metricName()} is coming from`,
           'Each kind summed across its nodes. What went back — battery charge, grid export — is below the line, '
           + 'so the same energy is not counted as produced and then again as returned.',
-          barChart({ days, lines: supplyLines, units, stacked: true, partial, fitTo: p.fitTo() }), supplyLines);
+          barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
       }
 
@@ -7664,7 +7706,7 @@ function addNodeTrendsSection(nav     , sections     ) {
   const created = trendsPage(nav, sections, {
     label: 'Node Trends',
     icon: '▥',
-    mode: true,
+    stackable: true,
     controls: () => [el('label', { class: 'ld-inst' }, 'overlay ', overlaySel)],
     above: () => [tagRow, searchRow, picker],
     below: () => [table],
@@ -7713,7 +7755,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       const legend = overlay ? [...lines, { ...overlay, label: `${overlay.label} (overlay)` }] : lines;
       const gaps = p.section(byNodeTitle(p),
         'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
-        barChart({ days, lines, units, stacked: p.stacked(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
+        barChart({ days, lines, units, stacked: p.stacked(), kind: p.kind(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
 
       drawTable(p, series, days, units, partial);
       p.status.textContent = p.statusLine(gaps);

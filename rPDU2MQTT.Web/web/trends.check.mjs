@@ -117,5 +117,16 @@ const intraHeads = query(sec, 'h3', true).map(h => h.textContent);
 if (!intraHeads.includes('Grid')) fail(`the grid is not charted within a day: ${intraHeads.join(', ')}`);
 if (intraHeads.some(h => /Self-sufficiency/.test(h))) fail('self-sufficiency was drawn from instantaneous power');
 
+// The chart type applies here too. Stacking is not a choice on this page: import and export, supply and
+// return have to net against each other.
+const chartSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'line'));
+if (!chartSel) fail('no chart type control on the whole-system page');
+if (query(sec, 'input', true).some(i => i.type === 'checkbox')) fail('the whole-system page offers unstacking');
+chartSel.value = 'line';
+chartSel.onchange({});
+await new Promise(r => setTimeout(r, 50));
+const gridSvg = query(sec, 'svg', true)[query(sec, 'h3', true).map(h => h.textContent).indexOf('Grid')];
+if (!['polyline', 'circle'].flatMap(t => query(gridSvg, t, true)).some(e => e.attrs.class === 'trend-line')) fail('choosing lines drew no line on the grid chart');
+
 console.log('trends: the whole system over the chosen window — grid, self-sufficiency and where the energy came from, '
   + 'signed and netted, with no per-node selection on the page; empty days counted; the interval applies here too');
