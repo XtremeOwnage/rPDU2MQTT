@@ -52,7 +52,9 @@ public sealed class EmonCmsFeedSync
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
         var p = e.Feeds.Processes;
-        var processes = new EmonProcessIds(string.IsNullOrWhiteSpace(p.LogToFeed) ? "log" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim());
+        var processes = new EmonProcessIds(
+            string.IsNullOrWhiteSpace(p.LogToFeed) ? "log" : p.LogToFeed.Trim(), p.KwhToKwhd?.Trim(), p.SourceFeed?.Trim(),
+            p.PowerToKwh?.Trim(), p.PowerToKwhd?.Trim(), p.KwhAccumulator?.Trim(), p.KwhToPower?.Trim());
         var flow = config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
         var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
 
@@ -74,10 +76,11 @@ public sealed class EmonCmsFeedSync
         foreach (var link in desired.Inputs)
         {
             if (!inputs.TryGetValue(link.InputName, out var input)) { missingInputs++; continue; }
-            if (!feedByName.TryGetValue(link.StorageFeed, out var storage)) continue;   // its feed failed to create
-            int? dailyId = link.DailyFeed is { } d && feedByName.TryGetValue(d, out var df) ? df.Id : null;
+            if (!feedByName.ContainsKey(link.StorageFeed)) continue;   // its feed failed to create
 
-            var wanted = EmonCmsFeedPlanner.BuildInputProcessList(storage.Id, dailyId, processes);
+            var wanted = EmonCmsFeedPlanner.BuildInputProcessList(link.Steps, processes,
+                name => feedByName.TryGetValue(name, out var fd) ? fd.Id : null);
+            if (wanted.Length == 0) continue;
             if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
                 try
                 {

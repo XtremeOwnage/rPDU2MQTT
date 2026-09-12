@@ -226,4 +226,21 @@ public class EmonCmsProcessConfig
     [DefaultValue("53")]
     [Description("Process id_num for 'Source feed', used for virtual feeds (default 53).")]
     public string? SourceFeed { get; set; } = "53";
+
+    [DefaultValue("4")]
+    [Description("Process id_num for 'Power to kWh', deriving an energy feed from a power input (default 4).")]
+    public string? PowerToKwh { get; set; } = "4";
+
+    [DefaultValue("5")]
+    [Description("Process id_num for 'Power to kWh/d', deriving a daily energy feed from a power input (default 5).")]
+    public string? PowerToKwhd { get; set; } = "5";
+
+    // Not a number: EmonCMS identifies module-provided processes by key, and the planner writes ids as text.
+    [DefaultValue("process__kwh_accumulator")]
+    [Description("Process key for 'kWh Accumulator', which accumulates a cumulative energy input onto its feed and drops resets (default process__kwh_accumulator).")]
+    public string? KwhAccumulator { get; set; } = "process__kwh_accumulator";
+
+    [DefaultValue("21")]
+    [Description("Process id_num for 'kWh to Power', deriving a power feed from an energy input (default 21).")]
+    public string? KwhToPower { get; set; } = "21";
 }

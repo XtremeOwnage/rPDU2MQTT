@@ -271,4 +271,98 @@ public class FlowDestinationsTests
         Assert.Equal(60, payloads["rack_pdu_1"]["rack_pdu_1_o0_realpower"]);
         Assert.Equal(4200, payloads[EmonCmsPayload.Combined]["solar_realpower"]);
     }
+
+    /// <summary>
+    /// Power, energy and energy/d come out of every node that reports either one. A node that reports only
+    /// watts had no energy feed at all, so the Trends page asking EmonCMS for energy got an empty chart
+    /// from a backend that was never given anything to answer with.
+    /// </summary>
+    private static Config ThreeKinds()
+    {
+        var c = new Config();
+        c.EnergyFlow = new EnergyFlowConfig();
+        c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "wattsonly", Label = "Watts Only", Kind = "circuit" });
+        c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "meter", Label = "Meter", Kind = "grid" });
+        c.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "both", Label = "Both", Kind = "inverter" });
+        c.EmonCMS.Feeds.Types = [new() { Type = "realpower" }, new() { Type = "energy", Daily = true }];
+        return c;
+    }
+
+    private static EmonDesiredState ThreeKindsDesired()
+    {
+        var cfg = ThreeKinds();
+        var live = new Fixed(new()
+        {
+            ["wattsonly|realpower"] = 900,
+            ["meter|energy"] = 4200.5,
+            ["both|realpower"] = 120,
+            ["both|energy"] = 88.25,
+        });
+        return EmonCmsFeedPlanner.BuildDesired(new PduData(), cfg, FlowTiers.Graphs(new PduData(), cfg, live));
+    }
+
+    [Theory]
+    [InlineData("wattsonly")]
+    [InlineData("meter")]
+    [InlineData("both")]
+    public void EveryNodeThatReportsPowerOrEnergy_GetsAllThreeFeeds(string node)
+    {
+        var d = ThreeKindsDesired();
+
+        Assert.Contains(d.Feeds, f => f.Name == $"{node}_realpower");
+        Assert.Contains(d.Feeds, f => f.Name == $"{node}_energy");
+        Assert.Contains(d.Feeds, f => f.Name == $"{node}_energy_d" && f.DataType == 2);
+
+        // Provisioned is not the same as written. A feed nothing logs to is the shape of the original
+        // defect: EmonCMS answers every read for it with no data, and nothing anywhere says why.
+        var written = d.Inputs.SelectMany(i => i.Steps).Select(x => x.Feed).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains($"{node}_realpower", written);
+        Assert.Contains($"{node}_energy", written);
+        Assert.Contains($"{node}_energy_d", written);
+    }
+
+    /// <summary>A node with only watts has EmonCMS integrate them; none of those steps rewrites the value.</summary>
+    [Fact]
+    public void APowerOnlyNode_HasEmonCmsDeriveItsEnergy()
+    {
+        var input = Assert.Single(ThreeKindsDesired().Inputs, i => i.InputName == "wattsonly_realpower");
+
+        Assert.Equal(
+            new[] { ProcessSlot.LogToFeed, ProcessSlot.PowerToKwh, ProcessSlot.PowerToKwhd },
+            input.Steps.Select(x => x.Process).ToArray());
+        Assert.Equal(new[] { "wattsonly_realpower", "wattsonly_energy", "wattsonly_energy_d" },
+            input.Steps.Select(x => x.Feed).ToArray());
+    }
+
+    /// <summary>
+    /// A node with only a counter has EmonCMS accumulate it — the reset-dropping this bridge kept getting
+    /// wrong — and derive watts from it. kWh to Power is last: it hands on watts, so anything after it
+    /// would be reading the wrong quantity.
+    /// </summary>
+    [Fact]
+    public void AnEnergyOnlyNode_HasEmonCmsAccumulateIt_AndDerivePowerLast()
+    {
+        var input = Assert.Single(ThreeKindsDesired().Inputs, i => i.InputName == "meter_energy");
+
+        Assert.Equal(
+            new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd, ProcessSlot.KwhToPower },
+            input.Steps.Select(x => x.Process).ToArray());
+        Assert.Equal(new[] { "meter_energy", "meter_energy_d", "meter_realpower" },
+            input.Steps.Select(x => x.Feed).ToArray());
+        Assert.DoesNotContain(ThreeKindsDesired().Inputs, i => i.InputName == "meter_realpower");
+    }
+
+    /// <summary>Nothing is derived from what the node already reports for itself.</summary>
+    [Fact]
+    public void ANodeReportingBoth_HasNeitherDerivedFromTheOther()
+    {
+        var d = ThreeKindsDesired();
+
+        var power = Assert.Single(d.Inputs, i => i.InputName == "both_realpower");
+        Assert.Equal(new[] { ProcessSlot.LogToFeed }, power.Steps.Select(x => x.Process).ToArray());
+
+        var energy = Assert.Single(d.Inputs, i => i.InputName == "both_energy");
+        Assert.Equal(new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd },
+            energy.Steps.Select(x => x.Process).ToArray());
+    }
 }

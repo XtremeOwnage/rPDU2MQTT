@@ -49,7 +49,7 @@ public class EmonCmsFeedPlannerTests
         Assert.Contains(d.Feeds, x => x.Name == "rack_pdu_1_o0_energy");
         Assert.DoesNotContain(d.Feeds, x => x.Name.Contains("voltage"));
         Assert.Equal(2, d.Inputs.Count);
-        Assert.All(d.Inputs, i => Assert.Null(i.DailyFeed));
+        Assert.All(d.Inputs, i => Assert.Single(i.Steps));   // log to feed, and nothing derived
         Assert.Empty(d.Virtuals);
     }
 
@@ -86,7 +86,9 @@ public class EmonCmsFeedPlannerTests
         var daily = Assert.Single(d.Feeds, x => x.DataType == 2);
         Assert.Equal("rack_pdu_1_o0_energy_d", daily.Name);
         Assert.Equal(86400, daily.IntervalSeconds);
-        Assert.Equal("rack_pdu_1_o0_energy_d", Assert.Single(d.Inputs).DailyFeed);
+        var steps = Assert.Single(d.Inputs).Steps;
+        Assert.Equal(ProcessSlot.KwhToKwhd, steps[1].Process);
+        Assert.Equal("rack_pdu_1_o0_energy_d", steps[1].Feed);
     }
 
     [Fact]
@@ -119,15 +121,46 @@ public class EmonCmsFeedPlannerTests
         Assert.Empty(d.Virtuals);   // friendly == storage, so no separate virtual feed
     }
 
+    private static readonly Func<string, int?> Feeds =
+        name => name switch { "store" => 16, "daily" => 17, "power" => 18, _ => null };
+
     [Fact]
-    public void BuildInputProcessList_LogToFeed_ThenDailyStepWhenConfigured()
+    public void BuildInputProcessList_WritesEachStepInOrder()
     {
-        // EmonCMS stores the processlist as id_num:feedid (log_to_feed = 1, kwh_to_kwhd = 23).
-        var p = new EmonProcessIds("1", "23", "53");
-        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, null, p));
-        Assert.Equal("1:16,23:17", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, p));
-        // Daily wanted but no kwh_to_kwhd id -> only the log step.
-        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(16, 17, new EmonProcessIds("1", null, null)));
+        // EmonCMS stores the processlist as <process>:<feedid>, and the numbered built-ins sit alongside
+        // module-provided processes keyed by name — which is why an id is text here, not an int.
+        var p = new EmonProcessIds("1", "23", "53", "4", "5", "process__kwh_accumulator", "21");
+
+        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(
+            new DesiredProcess[] { new(ProcessSlot.LogToFeed, "store") }, p, Feeds));
+
+        Assert.Equal("1:16,23:17", EmonCmsFeedPlanner.BuildInputProcessList(
+            new DesiredProcess[] { new(ProcessSlot.LogToFeed, "store"), new(ProcessSlot.KwhToKwhd, "daily") }, p, Feeds));
+
+        // kWh to Power rewrites the value it passes on, so it is written last and nothing follows it.
+        Assert.Equal("process__kwh_accumulator:16,23:17,21:18", EmonCmsFeedPlanner.BuildInputProcessList(
+            new DesiredProcess[]
+            {
+                new(ProcessSlot.KwhAccumulator, "store"),
+                new(ProcessSlot.KwhToKwhd, "daily"),
+                new(ProcessSlot.KwhToPower, "power"),
+            }, p, Feeds));
+    }
+
+    /// <summary>
+    /// A step EmonCMS has not been given an id for, or whose feed does not exist, is left out rather than
+    /// written as a broken pair — EmonCMS accepts one and then logs nothing, with no error to read.
+    /// </summary>
+    [Fact]
+    public void BuildInputProcessList_DropsAStepItCannotResolve()
+    {
+        var noDaily = new EmonProcessIds("1", null, null);
+        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(
+            new DesiredProcess[] { new(ProcessSlot.LogToFeed, "store"), new(ProcessSlot.KwhToKwhd, "daily") }, noDaily, Feeds));
+
+        var all = new EmonProcessIds("1", "23", "53", "4", "5", "process__kwh_accumulator", "21");
+        Assert.Equal("1:16", EmonCmsFeedPlanner.BuildInputProcessList(
+            new DesiredProcess[] { new(ProcessSlot.LogToFeed, "store"), new(ProcessSlot.PowerToKwh, "absent") }, all, Feeds));
     }
 
     [Theory]

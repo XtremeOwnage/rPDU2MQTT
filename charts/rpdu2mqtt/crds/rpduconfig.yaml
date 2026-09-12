@@ -664,6 +664,18 @@ spec:
                           SourceFeed:
                             type: string
                             description: Process id_num for 'Source feed', used for virtual feeds (default 53).
+                          PowerToKwh:
+                            type: string
+                            description: Process id_num for 'Power to kWh', deriving an energy feed from a power input (default 4).
+                          PowerToKwhd:
+                            type: string
+                            description: Process id_num for 'Power to kWh/d', deriving a daily energy feed from a power input (default 5).
+                          KwhAccumulator:
+                            type: string
+                            description: Process key for 'kWh Accumulator', which accumulates a cumulative energy input onto its feed and drops resets (default process__kwh_accumulator).
+                          KwhToPower:
+                            type: string
+                            description: Process id_num for 'kWh to Power', deriving a power feed from an energy input (default 21).
                         description: EmonCMS process ids used in the generated processlists. Match these to your EmonCMS (Inputs → process dropdown).
                     description: Automatically create and maintain EmonCMS feeds from the exported inputs. (Http transport; needs a read/write API key.)
                   Source:

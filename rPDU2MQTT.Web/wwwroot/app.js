@@ -7167,9 +7167,13 @@ function addTrendsSection(nav     , sections     ) {
     frequency: 'frequency', energy: 'energy', energytoday: 'energy',
   };
   const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
-  // Seeded with the two every build exports, so a page that cannot reach /api/flow/metrics still offers
+  // Seeded with the three every build exports, so a page that cannot reach /api/flow/metrics still offers
   // the right default for each range instead of labelling a chart of energy "power".
-  let METRICS           = [{ metric: 'realpower', units: 'W', epoch: 'instant' }, { metric: 'energytoday', units: 'kWh', epoch: 'period' }];
+  let METRICS           = [
+    { metric: 'realpower', units: 'W', epoch: 'instant' },
+    { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
+    { metric: 'energytoday', units: 'kWh', epoch: 'period' },
+  ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
   const unitsOf = (m        ) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
@@ -7178,19 +7182,38 @@ function addTrendsSection(nav     , sections     ) {
   /// period is. Which one this is follows the metric, not the range.
   const rate = () => RATES.includes(unitsOf(metricSel.value));
   const metricName = () => LABELS[metricSel.value] || metricSel.value;
+  /// Which energy metric suits a range. Per-day bars come from the server already totalled per period, and
+  /// a lifetime counter charted that way loses its first day for want of a predecessor to difference against.
+  /// Within a day it is the other way round: the counter is what the history backends actually store, and
+  /// asking EmonCMS for a period metric it was never given a feed for returned an empty chart.
+  const energyFor = (range        ) => {
+    const quantity = chartable().filter(m => !RATES.includes(m.units));
+    const want = range.includes('days=') ? 'period' : 'lifetime';
+    return quantity.find(m => epochOf(m.metric) === want) || quantity[0];
+  };
   /// The metric a range implies when nobody has said otherwise.
   const impliedMetric = () => {
     const wants = (RANGES.find(r => r[0] === rangeSel.value) || [])[2];
     const list = chartable();
-    const found = list.find(m => wants === 'power' ? RATES.includes(m.units) : !RATES.includes(m.units));
+    const found = wants === 'power' ? list.find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
     return (found || list[0]).metric;
   };
-  /// What can honestly be drawn as a bar per point. A lifetime counter cannot: each bar would be everything
-  /// the meter has ever seen, so the chart is a staircase and the day's own figure is nowhere on it.
-  const chartable = () => METRICS.filter(m => m.epoch !== 'lifetime');
+  /// What can honestly be drawn as a bar per point. A counter's own readings cannot be — each bar would be
+  /// everything the meter has ever seen — but the differences between them can, and that is what is drawn:
+  /// see toDeltas. Excluding lifetime metrics outright left EmonCMS with nothing to chart, because `energy`
+  /// is the feed it stores and `energytoday` is one it was never given.
+  const chartable = () => METRICS;
   const fillMetrics = () => {
     metricSel.innerHTML = '';
-    chartable().forEach(m => metricSel.appendChild(el('option', { value: m.metric, text: `${LABELS[m.metric] || m.metric} (${m.units})` })));
+    const seen = new Map                ();
+    chartable().forEach(m => seen.set(LABELS[m.metric] || m.metric, (seen.get(LABELS[m.metric] || m.metric) || 0) + 1));
+    chartable().forEach(m => {
+      const name = LABELS[m.metric] || m.metric;
+      // Two metrics can share a name — energy the counter and energy since the period began both read
+      // "energy (kWh)" — and a choice nobody can tell apart is not one. Only then is the epoch spelled out.
+      const epoch = (seen.get(name) || 0) > 1 && m.epoch === 'period' ? ' since period start' : '';
+      metricSel.appendChild(el('option', { value: m.metric, text: `${name} (${m.units})${epoch}` }));
+    });
     if (!metricChosen) metricSel.value = impliedMetric();
   };
   fillMetrics();
@@ -7210,7 +7233,7 @@ function addTrendsSection(nav     , sections     ) {
     if (!Array.from(rangeSel.children).some((o     ) => o.value === range))
       rangeSel.appendChild(el('option', { value: range, text: `${key === 'week' ? 'this week' : key === 'month' ? 'this month' : 'this year'} (${days} days)` }));
     rangeSel.value = range;
-    const energy = chartable().find(m => !RATES.includes(m.units));
+    const energy = energyFor(range);
     if (energy) { metricSel.value = energy.metric; metricChosen = true; }
     periods.mark(key);
     load();
@@ -7245,7 +7268,8 @@ function addTrendsSection(nav     , sections     ) {
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
     // A period counter read at intervals within its own period is charted as what changed between reads.
-    if (body?.ok && !body.days && epochOf(metricSel.value) === 'period') toDeltas(body);
+    const counterEpoch = epochOf(metricSel.value);
+    if (body?.ok && (counterEpoch === 'lifetime' || (!body.days && counterEpoch === 'period'))) toDeltas(body);
     if (!body || !body.ok) {
       status.textContent = '';
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: (body && body.message) || 'Could not load the series.' }));

@@ -71,12 +71,16 @@ const { sandbox, getEl } = makeDom({
       asked.push(url);
       if (url.includes('back=1')) return wholeDay;
       // Asked for energy over an intra-day window: a counter climbing, not a per-period total.
-      if (url.includes('metric=energytoday') && url.includes('minutes=')) return counter;
+      if (/metric=energy(today)?(&|$)/.test(url) && url.includes('minutes=')) return structuredClone(counter);
       return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
     }
     if (url.includes('/api/flow/metrics'))
       return { ok: true, metrics: [
         { metric: 'realpower', units: 'W', epoch: 'instant' },
+        // The lifetime counter. Leaving it out of this fixture is what hid a Trends page that could only
+        // ever ask EmonCMS for `energytoday`, a metric it was never given a feed for, while `energy` —
+        // the feed it does store — was filtered out of the picker as unchartable.
+        { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
         { metric: 'energytoday', units: 'kWh', epoch: 'period' }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
@@ -417,3 +421,23 @@ console.log('trends: several charts over the chosen range; hovering a day says w
   + 'the period before this one, fits on screen whole, is labelled every other hour and says which window '
   + 'it charted; what is charted is chosen and described in the same words; a cumulative counter is not '
   + 'summed; the table sorts');
+
+// The lifetime counter has to be choosable, and has to be differenced like any other counter. It was
+// filtered out of the picker as "unchartable", which left the EmonCMS backend unusable for energy: `energy`
+// is the feed it stores and `energytoday` is one it was never given, so the only selectable energy metric
+// was the one that could never answer.
+const lifetimeOpt = (metricSel.children || []).find(o => o.value === 'energy');
+if (!lifetimeOpt) fail(`the lifetime counter cannot be charted: ${(metricSel.children || []).map(o => o.value).join(', ')}`);
+// Two metrics both reading "energy (kWh)" is not a choice anyone can make.
+const optText = (metricSel.children || []).map(o => o.textContent);
+if (new Set(optText).size !== optText.length) fail(`two metrics offer the same label: ${optText.join(' | ')}`);
+
+metricSel.value = 'energy';
+metricSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+if (!/metric=energy(&|$)/.test(decodeURIComponent(asked.at(-1)))) fail(`the lifetime counter was not asked for: ${asked.at(-1)}`);
+const lifeRow = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
+const lifeCells = query(lifeRow, 'td', true).map(t => t.textContent);
+if (lifeCells.includes('16')) fail(`the lifetime counter itself is charted, not its differences: ${lifeCells.join(' | ')}`);
+if (lifeCells.includes('52')) fail(`the lifetime counter's readings were summed: ${lifeCells.join(' | ')}`);
+
