@@ -153,9 +153,10 @@ public class EmonCmsFeedsConfig
         "realpower", "energy", EnergyPeriodMetric, "apparentpower", "current", "voltage", "frequency", "powerfactor",
     ];
 
-    /// <summary>The types EmonCMS can derive from one another, rather than only record.</summary>
-    public static readonly IReadOnlySet<string> Derivable =
-        new HashSet<string>(["realpower", "energy", EnergyPeriodMetric], StringComparer.OrdinalIgnoreCase);
+    /// <summary>The types something can work out, given the others. Frequency is measured or it is absent.</summary>
+    public static readonly IReadOnlySet<string> Derivable = new HashSet<string>(
+        ["realpower", "apparentpower", "energy", EnergyPeriodMetric, "voltage", "current", "powerfactor"],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The daily-total metric name, spelled once (see <c>Core.Flow.EnergyPeriod.Metric</c>).</summary>
     internal const string EnergyPeriodMetric = "energy_d";
@@ -196,7 +197,10 @@ public class EmonCmsFeedTypeConfig
     public bool Enabled { get; set; } = true;
 
     [DefaultValue(EmonCmsCalculation.PreferLocal)]
-    [Description("Who works this type out. Prefer local uses this bridge's reading where it has one and an EmonCMS process otherwise; prefer EmonCMS reverses that — energy integrated from power, power from an energy counter, the daily total from either. The Force options use only that one and leave the feed unwritten when it cannot answer. Only power, energy and daily energy can be derived; every other type is recorded as it arrives.")]
+    [Description("Who works this type out when both could.")]
+    [RadioChoices]
+    // Frequency is measured and nothing computes it, so the question does not arise there.
+    [VisibleWhen(nameof(Type), "realpower", "apparentpower", "energy", "energy_d", "voltage", "current", "powerfactor")]
     public EmonCmsCalculation Calculation { get; set; } = EmonCmsCalculation.PreferLocal;
 
     [Description("Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.")]
@@ -230,15 +234,13 @@ public class EmonCmsFeedTypeConfig
 
     /// <summary>
     /// Who works a type out unless told otherwise. The daily total is EmonCMS's: it owns the day boundary,
-    /// so a clock drifting here cannot push a reading into the wrong day. Energy is EmonCMS's too, for the
-    /// reset-dropping its accumulator does. Power is read, not derived — nothing calculates it from watts.
+    /// so a clock drifting here cannot push a reading into the wrong day. Everything else prefers the
+    /// reading that arrived, and falls back to EmonCMS only where none does.
     /// </summary>
-    public static EmonCmsCalculation DefaultCalculation(string type) => type.ToLowerInvariant() switch
-    {
-        EmonCmsFeedsConfig.EnergyPeriodMetric => EmonCmsCalculation.ForceEmonCms,
-        "energy" => EmonCmsCalculation.PreferEmonCms,
-        _ => EmonCmsCalculation.PreferLocal,
-    };
+    public static EmonCmsCalculation DefaultCalculation(string type)
+        => string.Equals(type, EmonCmsFeedsConfig.EnergyPeriodMetric, StringComparison.OrdinalIgnoreCase)
+            ? EmonCmsCalculation.ForceEmonCms
+            : EmonCmsCalculation.PreferLocal;
 
     /// <summary>The unit a measurement type is stored in unless it is told otherwise.</summary>
     public static string UnitFor(string type) => type.ToLowerInvariant() switch

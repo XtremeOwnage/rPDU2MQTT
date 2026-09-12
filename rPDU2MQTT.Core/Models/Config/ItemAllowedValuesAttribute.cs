@@ -60,3 +60,9 @@ public sealed class FixedListAttribute : Attribute
     /// <summary>The property naming each entry, shown as its heading instead of being edited.</summary>
     public string KeyProperty { get; }
 }
+
+/// <summary>Render this enum as a radio group, each choice carrying its own description as a tooltip.</summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class RadioChoicesAttribute : Attribute
+{
+}

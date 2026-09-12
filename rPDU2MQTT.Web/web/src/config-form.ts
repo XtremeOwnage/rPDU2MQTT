@@ -134,6 +134,37 @@ window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm: any, on: boolean) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
+/// PreferEmonCms -> "Prefer EmonCMS". The schema carries the stored value; this is how it is read out.
+function humanise(value: string) {
+  return value.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/EmonCms/gi, 'EmonCMS').replace(/^./, c => c.toUpperCase());
+}
+
+/// A radio group for a small closed set, each choice carrying its own explanation as a tooltip.
+///
+/// The alternative is a dropdown under a paragraph covering every option, and that paragraph is then
+/// repeated for every entry of a fixed list — eight times over on the EmonCMS types page, saying the same
+/// thing about choices the reader is not looking at. The tooltip belongs to the choice it describes.
+function radioGroup(node: any, obj: any) {
+  const wrap = document.createElement('div');
+  wrap.className = 'radio-group';
+  const name = `r${Math.random().toString(36).slice(2)}`;
+  const current = () => String(obj[node.key] ?? node.default ?? (node.enumValues || [])[0] ?? '');
+  (node.enumValues || []).forEach((v: string, i: number) => {
+    const why = (node.enumDescriptions || [])[i] || '';
+    const lab = document.createElement('label');
+    lab.className = 'radio';
+    if (why) lab.title = why;
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = name; input.value = v;
+    input.checked = current() === v;
+    input.onchange = () => { if (input.checked) { obj[node.key] = v; refreshDirty(); runVisibilitySyncs(); } };
+    const text = document.createElement('span'); text.textContent = humanise(v);
+    lab.appendChild(input); lab.appendChild(text);
+    wrap.appendChild(lab);
+  });
+  return wrap;
+}
+
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
 export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
   const here = [...path, node.key];
@@ -156,7 +187,7 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     f.dataset.path = here.join('.');
     const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
-    const input = scalarInput(node, obj);
+    const input = node.radio ? radioGroup(node, obj) : scalarInput(node, obj);
     // A masked field with no way to read it back is how a mistyped credential survives three attempts.
     f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
     // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.

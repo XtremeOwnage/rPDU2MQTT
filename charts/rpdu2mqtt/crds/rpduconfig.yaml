@@ -603,7 +603,7 @@ spec:
                               - PreferEmonCms
                               - ForceLocal
                               - ForceEmonCms
-                              description: Who works this type out. Prefer local uses this bridge's reading where it has one and an EmonCMS process otherwise; prefer EmonCMS reverses that — energy integrated from power, power from an energy counter, the daily total from either. The Force options use only that one and leave the feed unwritten when it cannot answer. Only power, energy and daily energy can be derived; every other type is recorded as it arrives.
+                              description: Who works this type out when both could.
                             Prefix:
                               type: string
                               description: 'Text placed before the feed name. Blank by default. Placeholders: {device}, {source}, {name}, {number}, {type}, {units}.'

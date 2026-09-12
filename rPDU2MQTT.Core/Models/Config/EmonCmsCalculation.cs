@@ -1,17 +1,19 @@
+using System.ComponentModel;
+
 namespace rPDU2MQTT.Models.Config;
 
 /// <summary>Who works out a measurement type's feed: this bridge, or an EmonCMS process.</summary>
 public enum EmonCmsCalculation
 {
-    /// <summary>This bridge's reading where there is one, an EmonCMS process otherwise.</summary>
+    [Description("This bridge's own reading where it has one, and an EmonCMS process otherwise.")]
     PreferLocal,
 
-    /// <summary>An EmonCMS process where one applies, this bridge's reading otherwise.</summary>
+    [Description("An EmonCMS process where one applies, and this bridge's reading otherwise.")]
     PreferEmonCms,
 
-    /// <summary>Only this bridge's reading; the feed goes unwritten when there is none.</summary>
+    [Description("Only this bridge's reading. The feed goes unwritten when no reading arrives.")]
     ForceLocal,
 
-    /// <summary>Only an EmonCMS process; the feed goes unwritten when nothing can be derived.</summary>
+    [Description("Only what EmonCMS works out. The feed goes unwritten when it has nothing to work from.")]
     ForceEmonCms,
 }

@@ -335,17 +335,17 @@ public class FlowDestinationsTests
     }
 
     /// <summary>
-    /// A node with only a counter has EmonCMS accumulate it — the reset-dropping this bridge kept getting
-    /// wrong — and derive watts from it. kWh to Power is last: it hands on watts, so anything after it
-    /// would be reading the wrong quantity.
+    /// A node with only a counter has the counter recorded and watts derived from it. kWh to Power is last:
+    /// it hands on watts, so anything after it would be reading the wrong quantity.
     /// </summary>
     [Fact]
-    public void AnEnergyOnlyNode_HasEmonCmsAccumulateIt_AndDerivePowerLast()
+    public void AnEnergyOnlyNode_HasItsCounterRecorded_AndDerivesPowerLast()
     {
         var input = Assert.Single(ThreeKindsDesired().Inputs, i => i.InputName == "meter_energy");
 
+        // Energy ships preferring the counter as sent; the daily total and the power are still EmonCMS's.
         Assert.Equal(
-            new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd, ProcessSlot.KwhToPower },
+            new[] { ProcessSlot.LogToFeed, ProcessSlot.KwhToKwhd, ProcessSlot.KwhToPower },
             input.Steps.Select(x => x.Process).ToArray());
         Assert.Equal(new[] { "meter_energy", "meter_energy_d", "meter_realpower" },
             input.Steps.Select(x => x.Feed).ToArray());
@@ -362,7 +362,7 @@ public class FlowDestinationsTests
         Assert.Equal(new[] { ProcessSlot.LogToFeed }, power.Steps.Select(x => x.Process).ToArray());
 
         var energy = Assert.Single(d.Inputs, i => i.InputName == "both_energy");
-        Assert.Equal(new[] { ProcessSlot.KwhAccumulator, ProcessSlot.KwhToKwhd },
+        Assert.Equal(new[] { ProcessSlot.LogToFeed, ProcessSlot.KwhToKwhd },
             energy.Steps.Select(x => x.Process).ToArray());
     }
 

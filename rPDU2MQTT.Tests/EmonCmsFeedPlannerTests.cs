@@ -103,7 +103,7 @@ public class EmonCmsFeedPlannerTests
         Assert.Equal(86400, daily.IntervalSeconds);
 
         var steps = Assert.Single(d.Inputs).Steps;
-        Assert.Equal(ProcessSlot.KwhAccumulator, steps[0].Process);
+        Assert.Equal(ProcessSlot.LogToFeed, steps[0].Process);      // energy ships preferring the local counter
         Assert.Equal(ProcessSlot.KwhToKwhd, steps[1].Process);
         Assert.Equal("rack_pdu_1_o0_energy_d", steps[1].Feed);
     }
@@ -290,10 +290,11 @@ public class EmonCmsFeedPlannerTests
         Assert.Equal(ProcessSlot.LogToFeed, steps[0].Process);
     }
 
-    /// <summary>Prefer EmonCMS hands the same counter to the accumulator instead.</summary>
+    /// <summary>Prefer EmonCMS hands the same counter to the accumulator instead. Energy ships preferring local.</summary>
     [Fact]
     public void BuildDesired_PreferEmonCms_AccumulatesTheCounterInstead()
     {
+        Assert.Equal(EmonCmsCalculation.PreferLocal, EmonCmsFeedTypeConfig.For("energy").Calculation);
         var data = OnePdu("o0", "Server A", ("energy", "12"));
         var config = Base();
         Enable(config, "energy", 10).Calculation = EmonCmsCalculation.PreferEmonCms;

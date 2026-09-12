@@ -70,6 +70,12 @@ public sealed class SchemaNode
     /// <summary>The entries are a fixed set: none can be added or removed, and this names each one.</summary>
     public string? FixedListKey { get; set; }
 
+    /// <summary>One description per <see cref="EnumValues"/> entry, for a tooltip on each choice.</summary>
+    public string[]? EnumDescriptions { get; set; }
+
+    /// <summary>Show the choices as radios rather than a dropdown.</summary>
+    public bool Radio { get; set; }
+
     /// <summary>
     /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
     /// rather than as a property of its own. The GUI reads and writes it there.
@@ -298,6 +304,12 @@ public static class ConfigSchema
 
         if (prop.GetCustomAttribute<FixedListAttribute>() is { } fixedList) node.FixedListKey = fixedList.KeyProperty;
 
+        if (prop.GetCustomAttribute<RadioChoicesAttribute>() is not null)
+        {
+            node.Radio = true;
+            node.EnumDescriptions = EnumDescriptionsOf(Nullable.GetUnderlyingType(type) ?? type, node.EnumValues);
+        }
+
         // A closed set of answers for a collection's items. The element of a list and the value of a
         // dictionary have no property to annotate, so this is where their choices arrive.
         if (node.ValueSchema is { } vs)
@@ -320,6 +332,13 @@ public static class ConfigSchema
             }
         }
         return node;
+    }
+
+    /// <summary>Each enum member's [Description], in the same order the values were emitted.</summary>
+    private static string[]? EnumDescriptionsOf(Type type, string[]? values)
+    {
+        if (!type.IsEnum || values is null) return null;
+        return values.Select(v => type.GetField(v)?.GetCustomAttribute<DescriptionAttribute>()?.Description ?? string.Empty).ToArray();
     }
 
     private static string ClassifyAndPopulate(Type type, string name, SchemaNode node)

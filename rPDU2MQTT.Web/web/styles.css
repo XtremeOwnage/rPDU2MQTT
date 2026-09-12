@@ -953,3 +953,8 @@
   .reveal-wrap { display:flex; gap:6px; align-items:center; }
   .reveal-wrap input { flex:1; min-width:0; }
   .reveal-btn { flex:none; }
+
+/* A small closed set read as a column of choices, each carrying its own tooltip. */
+.radio-group { display: flex; flex-direction: column; gap: 4px; }
+.radio-group .radio { display: flex; align-items: center; gap: 6px; cursor: help; font-weight: 400; }
+.radio-group .radio input { margin: 0; cursor: pointer; }
