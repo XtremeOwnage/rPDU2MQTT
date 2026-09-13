@@ -390,6 +390,9 @@
   button.ghost:hover { background:var(--panel2); }
   button.danger { color:var(--bad); }
   button.danger:hover { border-color:var(--bad); background:var(--bad-bg); }
+  /* A chip that is on: filled, whatever colour its border carries. */
+  button.chip-on { background:var(--accent-bg); border-color:var(--accent); color:var(--fg); }
+  button.chip-on:hover { background:var(--accent-bg); border-color:var(--accent-hi); }
   button.small { padding:5px 11px; font-size:12.5px; }
   button:disabled { opacity:.45; cursor:not-allowed; background:var(--panel2); border-color:var(--line); transform:none; }
   button.test { margin:6px 0 4px; }

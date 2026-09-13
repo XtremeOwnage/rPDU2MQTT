@@ -233,6 +233,17 @@ if (distinct.size !== 8) fail(`expected 7 node colours and Other, drew ${distinc
 if (!distinct.has('var(--faint)')) fail('the smallest outlets are not drawn together as Other');
 if ([...distinct].some(f => f === '#7f8ea3')) fail('an outlet is still drawn in the colour of its kind');
 if (!sec.textContent.includes('Other (3 nodes)')) fail('the Other series does not say how many nodes it holds');
+// A selected chip reads as selected whether its node has a colour of its own or is drawn in Other.
+const nodeChipsNow = query(sec, 'button', true).filter(b => /^[●○] Outlet \d+$/.test(b.textContent || ''));
+const onChips = nodeChipsNow.filter(b => b.textContent.startsWith('●'));
+if (onChips.length !== 10) fail(`expected ten selected outlet chips, found ${onChips.length}`);
+if (onChips.some(b => !b.classList.contains('chip-on'))) fail(`a selected chip is not styled as selected: ${onChips.filter(b => !b.classList.contains('chip-on')).map(b => b.textContent).join(', ')}`);
+query(sec, 'button', true).find(b => b.textContent === '● Outlet 1').click();
+await new Promise(r => setTimeout(r, 50));
+const offChip = query(sec, 'button', true).find(b => b.textContent === '○ Outlet 1');
+if (!offChip || offChip.classList.contains('chip-on')) fail('an unselected chip is styled as selected');
+query(sec, 'button', true).find(b => b.textContent === '○ Outlet 1').click();
+await new Promise(r => setTimeout(r, 50));
 
 // --- Within a day: power, sampled ---------------------------------------------------------------------
 rangeSel.value = 'minutes=360';

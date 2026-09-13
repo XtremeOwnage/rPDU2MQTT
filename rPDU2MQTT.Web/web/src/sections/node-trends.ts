@@ -74,6 +74,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       const members = all().filter((s: any) => (s.tags || []).includes(tag));
       const allOn = members.every((s: any) => !off.has(s.node));
       const chip = btn((allOn ? '● ' : '○ ') + tag);
+      if (allOn) chip.classList.add('chip-on');
       chip.title = `${members.length} node(s) tagged "${tag}" — click to chart exactly these`;
       chip.onclick = () => {
         off.clear();
@@ -94,7 +95,12 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
       chip.title = (on ? 'On the chart — click to take it off' : 'Off the chart — click to add it')
         + ((s.tags || []).length ? `\ntags: ${(s.tags || []).join(', ')}` : '');
-      if (on && colours.has(s.node)) chip.style.borderColor = colours.get(s.node)!;
+      // Selected reads the same whether or not the node has its own colour; the colour is only its border.
+      if (on) {
+        chip.classList.add('chip-on');
+        if (colours.has(s.node)) chip.style.borderColor = colours.get(s.node)!;
+        else chip.title += '\ndrawn as part of Other';
+      }
       chip.onclick = () => { if (on) off.add(s.node); else off.delete(s.node); page.draw(); };
       picker.appendChild(chip);
     });
