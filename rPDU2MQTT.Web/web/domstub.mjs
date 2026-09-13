@@ -167,7 +167,17 @@ export function makeDom({ bodies }) {
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
     },
-    window: { addEventListener() { }, removeEventListener() { }, dispatchEvent() { return true; }, prompt: () => null },
+    // Window listeners are recorded, not discarded: a drag reports its movement and release there, so a
+    // test cannot drive one without them. `dispatchEvent` stays inert, so nothing the app already does
+    // starts behaving differently — `dispatch` is the test-side door.
+    window: {
+      _on: {},
+      addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
+      removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
+      dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
+      dispatchEvent() { return true; },
+      prompt: () => null,
+    },
     // protocol/hostname are read when building the API docs links (#190).
     location: { hash: '', protocol: 'http:', hostname: 'localhost' },
     navigator: { clipboard: { writeText() { } } },
