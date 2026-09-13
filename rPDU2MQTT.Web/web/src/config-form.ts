@@ -14,6 +14,7 @@ import { addLiveDataSection } from './sections/livedata.js';
 import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImportSection } from './sections/flow.js';
 import { addNodeDataSection } from './sections/nodedata.js';
 import { addTrendsSection } from './sections/trends.js';
+import { renderPduTags } from './sections/pdu-tags.js';
 import { addNodeTrendsSection } from './sections/node-trends.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
@@ -505,6 +506,13 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     else if (node.key === 'Api') wireApiDocs(sec);
     else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
+  }
+  // The PDU page is where anything about the PDUs is looked for, their tags included.
+  if (node.key === 'Pdus') {
+    const tags = renderPduTags();
+    sec.appendChild(tags.el);
+    const open = link.onclick;
+    link.onclick = (ev: any) => { open?.call(link, ev); tags.load(); };
   }
   return link;
 }

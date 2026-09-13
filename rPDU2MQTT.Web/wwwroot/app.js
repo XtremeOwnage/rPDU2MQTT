@@ -1507,12 +1507,15 @@ function barChart(opts
     const cx = (d        ) => (x(d) + slot / 2).toFixed(1);
     lines.forEach(l => {
       const base           = [], top           = [];
+      // A series with no positive reading stacks below the line, zeros included; -0 >= 0 would put them on top.
+      const below = !l.values.some(v => v != null && v > 0) && l.values.some(v => v != null && v < 0);
       days.forEach((_, d) => {
         const v = l.values[d];
         if (v == null) { base.push(NaN); top.push(NaN); return; }
-        const from = stacked ? (v >= 0 ? up[d] : down[d]) : 0;
+        const down_ = below || v < 0;
+        const from = stacked ? (down_ ? down[d] : up[d]) : 0;
         base.push(from); top.push(from + v);
-        if (stacked) { if (v >= 0) up[d] = from + v; else down[d] = from + v; }
+        if (stacked) { if (down_) down[d] = from + v; else up[d] = from + v; }
       });
       let run           = [];
       const flush = () => {
@@ -5783,6 +5786,11 @@ function addTagsSection(nav     , sections     ) {
       'A tag defined here exists before anything carries it, so a filter can be set up ahead of the nodes '
       + 'it will select. Typing one straight onto a node still works and still appears below.' }));
 
+    sec.appendChild(el('div', { class: 'desc' },
+      el('span', { text: 'Default and per-outlet tags for the PDUs are set on the ' }),
+      el('a', { text: 'Vertiv rPDU page', onclick: () => (document.querySelector('nav a[data-label="Vertiv rPDU"]')       )?.click() }),
+      el('span', { text: '.' })));
+
     const tags = knownTags();
     if (!tags.length) {
       sec.appendChild(el('div', { class: 'desc', style: { marginTop: '12px' },
@@ -7598,6 +7606,13 @@ function addTrendsSection(nav     , sections     ) {
 // ── sections/node-trends.ts ─────────────────────────────────────
 // Node Trends: each selected node's own series over the chosen window, with its totals.
 
+/// Most nodes drawn in their own colour; past this the smallest are drawn together as one series.
+const OWN_COLOURS = 7;
+/// The categorical order, defined in styles.css for each theme.
+const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
+  'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
+const OTHER_COLOUR = 'var(--faint)';
+
 function addNodeTrendsSection(nav     , sections     ) {
   const off = new Set        ();
   const sort = { col: 1, desc: true };
@@ -7605,6 +7620,8 @@ function addNodeTrendsSection(nav     , sections     ) {
   let overlayId = '';
   let pending                                                                         = null;
   let page            ;
+  // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
+  let colours = new Map                ();
 
   const tagRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
   const search = el('input', { class: 'trend-search' })                    ;
@@ -7629,6 +7646,25 @@ function addNodeTrendsSection(nav     , sections     ) {
     if (preferred.length >= 2) all().forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
   };
 
+  // A node's weight in the window, for choosing which get their own colour.
+  const weight = (s     ) => (s.values                     ).reduce((a        , v) => a + Math.abs(v ?? 0), 0);
+
+  // Colour follows the node: its slot is its position among every node, moved on only if a drawn node holds it.
+  const assignColours = (selected       ) => {
+    const own = selected.length > OWN_COLOURS + 1
+      ? [...selected].sort((a, b) => weight(b) - weight(a)).slice(0, OWN_COLOURS)
+      : selected;
+    const taken = new Set        ();
+    colours = new Map();
+    [...own].sort((a, b) => all().indexOf(a) - all().indexOf(b)).forEach((s     ) => {
+      let slot = all().indexOf(s) % SERIES.length;
+      while (taken.has(slot)) slot = (slot + 1) % SERIES.length;
+      taken.add(slot);
+      colours.set(s.node, SERIES[slot]);
+    });
+    return { own, rest: selected.filter((s     ) => !colours.has(s.node)) };
+  };
+
   const drawTags = () => {
     tagRow.innerHTML = '';
     const tags = new Set        ();
@@ -7639,6 +7675,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       const members = all().filter((s     ) => (s.tags || []).includes(tag));
       const allOn = members.every((s     ) => !off.has(s.node));
       const chip = btn((allOn ? '● ' : '○ ') + tag);
+      if (allOn) chip.classList.add('chip-on');
       chip.title = `${members.length} node(s) tagged "${tag}" — click to chart exactly these`;
       chip.onclick = () => {
         off.clear();
@@ -7659,7 +7696,12 @@ function addNodeTrendsSection(nav     , sections     ) {
       const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
       chip.title = (on ? 'On the chart — click to take it off' : 'Off the chart — click to add it')
         + ((s.tags || []).length ? `\ntags: ${(s.tags || []).join(', ')}` : '');
-      if (on) chip.style.borderColor = colorFor(s.kind, i);
+      // Selected reads the same whether or not the node has its own colour; the colour is only its border.
+      if (on) {
+        chip.classList.add('chip-on');
+        if (colours.has(s.node)) chip.style.borderColor = colours.get(s.node) ;
+        else chip.title += '\ndrawn as part of Other';
+      }
       chip.onclick = () => { if (on) off.add(s.node); else off.delete(s.node); page.draw(); };
       picker.appendChild(chip);
     });
@@ -7767,7 +7809,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     const body = p.body();
     const step = Number(body.stepSeconds) || 0;
     const width = p.fitTo();
-    const color = (s     ) => colorFor(s.kind, all().indexOf(s));
+    const color = (s     ) => colours.get(s.node) || OTHER_COLOUR;
     const readings = (s     ) => (s.values                     )
       .map((v, d) => [v, d]                           ).filter(([v]) => v != null)                      ;
     // Return lanes are energy going back, not a node's own use, so none of these rank them.
@@ -7866,8 +7908,9 @@ function addNodeTrendsSection(nav     , sections     ) {
       return true;
     },
     render: (p) => {
-      drawTags(); drawPicker(); table.innerHTML = '';
       const body = p.body();
+      const fold = assignColours(body?.ok ? shown() : []);
+      drawTags(); drawPicker(); table.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();
@@ -7887,7 +7930,11 @@ function addNodeTrendsSection(nav     , sections     ) {
         return;
       }
 
-      const lines         = series.map((s     , i        ) => ({ label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s) }));
+      const lines         = fold.own.map((s     ) => ({ label: s.label || s.node, color: colours.get(s.node) , values: signed(s) }));
+      // The rest are one series, so every drawn series can be told apart; the table below still lists each.
+      if (fold.rest.length)
+        lines.push({ label: `Other (${fold.rest.length} nodes)`, color: OTHER_COLOUR,
+          values: days.map((_, d) => sumKnown(fold.rest.map((s     ) => signed(s)[d]))) });
       const legend = overlay ? [...lines, { ...overlay, label: `${overlay.label} (overlay)` }] : lines;
       const gaps = p.section(byNodeTitle(p),
         'The nodes selected above.' + (!partial ? ''
@@ -8424,6 +8471,74 @@ const FEATURE_LABELS                         = {
   Cache: 'Persistent cache (Valkey/Redis)',
 };
 
+// ── sections/pdu-tags.ts ────────────────────────────────────────
+// PDU tags: default tags for every PDU and outlet, and each one's own, kept as the EnergyFlow tag rules.
+
+/// A tag box for the rule whose pattern is exactly `match`; the rule exists only while it carries a tag.
+function ruleTags(match        ) {
+  const rules = () => ensure(ensure(state.data, 'EnergyFlow', {}), 'AutoTags', []);
+  const find = () => rules().find((x     ) => String(x.Match || '').trim().toLowerCase() === match.toLowerCase());
+  const arr           = [...(find()?.Tags || [])];
+  return tagInput(arr, {
+    placeholder: 'add tag',
+    onChange: () => {
+      const list = rules();
+      const rule = find();
+      if (!arr.length) { if (rule) list.splice(list.indexOf(rule), 1); }
+      else if (rule) rule.Tags = [...arr];
+      else list.push({ Match: match, Tags: [...arr] });
+      refreshDirty();
+    },
+  });
+}
+
+/// The tags panel for the PDU page, and the load that reads the discovered PDUs and outlets into it.
+function renderPduTags()                                                 {
+  const box = el('div', { class: 'pdu-tags', style: { margin: '18px 0' } });
+  let graph      = null;
+
+  const draw = () => {
+    box.innerHTML = '';
+    box.appendChild(el('h3', { text: 'Tags', style: { margin: '4px 0', fontSize: '15px' } }));
+    box.appendChild(el('div', { class: 'desc', text:
+      'Tags for what the PDUs report. Every PDU and every outlet can carry default tags, and each one its own '
+      + 'on top of them. Patterns covering part of a PDU are on the Nodes page, and every tag is listed on the '
+      + 'Tags page. Circuits are not nodes in the energy flow, so they cannot carry tags yet.' }));
+
+    const defaults = el('table', { class: 'ld' });
+    defaults.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'Applies to' }), el('th', { text: 'Default tags' }))));
+    const dbody = el('tbody');
+    ([['All PDUs', 'pdu:*'], ['All outlets', 'outlet:*']]                      ).forEach(([name, match]) =>
+      dbody.appendChild(el('tr', {}, el('td', { text: name }), el('td', {}, ruleTags(match)))));
+    defaults.appendChild(dbody);
+    box.appendChild(defaults);
+
+    const derived = (graph?.nodes || [])
+      .filter((n     ) => /^(pdu|outlet):/.test(String(n.id || '')))
+      .sort((a     , b     ) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    if (!derived.length) {
+      box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' },
+        text: 'No PDU or outlet has been reported yet, so there is nothing to tag individually.' }));
+      return;
+    }
+    const items = el('table', { class: 'ld', style: { marginTop: '10px' } });
+    items.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'PDU or outlet' }), el('th', { text: 'Id' }), el('th', { text: 'Its own tags' }))));
+    const ibody = el('tbody');
+    derived.forEach((n     ) => ibody.appendChild(el('tr', {},
+      el('td', { text: n.label || n.id }), el('td', { class: 'desc', text: n.id }), el('td', {}, ruleTags(n.id)))));
+    items.appendChild(ibody);
+    box.appendChild(items);
+  };
+
+  const load = async () => {
+    try { const r      = await api('/api/flow'); graph = r?.body?.ok ? r.body : null; } catch { graph = null; }
+    draw();
+  };
+
+  draw();
+  return { el: box, load };
+}
+
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
@@ -8909,6 +9024,13 @@ function renderConfigSection(node     , nav     , sections     ) {
     else if (node.key === 'Api') wireApiDocs(sec);
     else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
+  }
+  // The PDU page is where anything about the PDUs is looked for, their tags included.
+  if (node.key === 'Pdus') {
+    const tags = renderPduTags();
+    sec.appendChild(tags.el);
+    const open = link.onclick;
+    link.onclick = (ev     ) => { open?.call(link, ev); tags.load(); };
   }
   return link;
 }

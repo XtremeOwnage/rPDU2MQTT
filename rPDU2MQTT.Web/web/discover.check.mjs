@@ -94,6 +94,8 @@ if (!nav) fail('no MQTT Import page in the nav');
 nav.click();
 await new Promise(r => setTimeout(r, 200));
 
+// Rows are counted on this page only: every section is in the DOM at once, and other pages have tables with inputs too.
+const page = () => query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
 const buttons = () => query(getEl('sections'), 'button', true);
 // The label carries the count once rows are ticked, so match on the prefix.
 const addButtons = () => buttons().filter(b => /^Add( \d+)? selected$/.test(b.textContent || ''));
@@ -107,7 +109,7 @@ if (!buttons().some(b => b.textContent === 'Scan broker')) fail('the MQTT Import
 buttons().find(b => b.textContent === 'Scan broker').click();
 await new Promise(r => setTimeout(r, 200));
 
-const rows = query(getEl('sections'), 'tr', true).filter(r => query(r, 'input', true).length);
+const rows = query(page(), 'tr', true).filter(r => query(r, 'input', true).length);
 if (rows.length !== 3) fail(`expected a row per reading, got ${rows.length}`);
 
 const boxFor = (label) => {
@@ -159,7 +161,7 @@ sel.value = 'esphome';
 buttons().find(b => b.textContent === 'Scan broker').click();
 await new Promise(r => setTimeout(r, 200));
 
-const patRow = query(getEl('sections'), 'tr', true).find(r => r.textContent.includes('deep_freezer'));
+const patRow = query(page(), 'tr', true).find(r => r.textContent.includes('deep_freezer'));
 if (!patRow) fail('the topic-profile scan rendered no row');
 // The sampled value is shown, because it is the only thing that distinguishes Wh from kWh.
 if (!patRow.textContent.includes('3063.783')) fail('the row does not show the sampled value');
@@ -181,7 +183,7 @@ feeds.value = 'main_panel';
 // Select all: one click rather than one per row.
 buttons().find(b => b.textContent === 'Select all').click();
 await new Promise(r => setTimeout(r, 20));
-const allRows = query(getEl('sections'), 'tr', true).filter(r => query(r, 'input', true).length);
+const allRows = query(page(), 'tr', true).filter(r => query(r, 'input', true).length);
 const checkable = allRows.map(r => query(r, 'input', true)[0]).filter(b => !b.disabled);
 if (!checkable.every(b => b.checked)) fail('Select all left rows unchecked');
 

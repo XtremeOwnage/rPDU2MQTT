@@ -75,6 +75,18 @@ if (!chartTypeSel || chartTypeSel.value !== 'area') fail(`the page does not open
 if (!['polygon', 'circle'].flatMap(t => query(charts[headings.indexOf('Grid per day')], t, true)).some(e => e.attrs.class === 'trend-area'))
   fail('the grid chart does not open as a stacked area');
 
+// Export stacks below the line on every day, including 2026-08-06 when it reads 0. Signed, that zero is -0,
+// and -0 >= 0 had it stacked on top of import, drawing a spike up to the import line.
+{
+  const grid = charts[headings.indexOf('Grid per day')];
+  const zero = query(grid, 'line', true).find(l => l.attrs.stroke === 'var(--muted)');
+  const exportArea = query(grid, 'polygon', true).filter(e => e.attrs.class === 'trend-area' && e.attrs.fill === '#6fb0e0');
+  if (!zero || !exportArea.length) fail('no export area or zero line on the grid chart');
+  const zeroY = Number(zero.attrs.y1);
+  const ys = exportArea.flatMap(e => String(e.attrs.points).split(' ').map(p => Number(p.split(',')[1])));
+  if (ys.some(y => y < zeroY - 0.5)) fail(`the export area rises above the zero line: highest y ${Math.min(...ys)}, zero at ${zeroY}`);
+}
+
 // Nothing here is about a selection: the per-node chart, its picker and its totals are the Node Trends page.
 if (headings.some(h => /by node/.test(h))) fail(`a per-node chart is drawn on the whole-system page: ${headings.join(', ')}`);
 const buttons = query(sec, 'button', true).map(b => b.textContent);

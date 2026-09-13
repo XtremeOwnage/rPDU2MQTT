@@ -39,7 +39,11 @@ const open = async () => {
       : url.includes('/api/config') ? config
       : url.includes('/api/flow/live') ? { ok: true, values: [] }
       : url.includes('/api/flow/withheld') ? { ok: true, sources: [] }
-      : url.includes('/api/flow') ? { ok: true, nodes: [], links: [], metric: 'realpower', units: 'W' }
+      : url.includes('/api/flow') ? { ok: true, links: [], metric: 'realpower', units: 'W', nodes: [
+          { id: 'pdu:rack_pdu_1', label: 'Rack PDU 1', kind: 'pdu' },
+          { id: 'outlet:rack_pdu_1:0', label: 'Outlet 1', kind: 'outlet' },
+          { id: 'outlet:rack_pdu_1:1', label: 'Outlet 2', kind: 'outlet' },
+        ] }
       : { ok: true },
   });
   vm.createContext(sandbox);
@@ -131,7 +135,14 @@ const open = async () => {
     fail('removing a tag left it on a node');
 }
 
+// --- PDU tags live on the Vertiv rPDU page; this page links there ----------------------------------------
+{
+  const { sec } = await open();
+  if (query(sec, 'td', true).some(td => td.textContent === 'All outlets')) fail('PDU tags are still edited on the Tags page');
+  if (!query(sec, 'a', true).some(a => a.textContent === 'Vertiv rPDU page')) fail('the Tags page does not point to where PDU tags are set');
+}
+
 console.log('tagspage: the Tags page lists every tag declared or merely carried, names what carries each '
   + 'and which destinations decide on it, flags one that decides nothing, lets a tag be defined before '
   + 'anything carries it and offered in the pickers, and removes one from the declaration, its holders and '
-  + 'every filter at once');
+  + 'every filter at once, and points to the Vertiv rPDU page for PDU tags');

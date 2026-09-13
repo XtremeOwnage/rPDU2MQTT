@@ -15,6 +15,9 @@
     --line:#2b3441; --line-soft:#212936;
     /* Text. */
     --fg:#e9edf4; --muted:#93a0b4; --faint:#6b7789;
+    /* Categorical series, in fixed order; validated against --panel. */
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
+    --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
     /* Accent + semantics. Each has a low-alpha companion for fills. */
     --accent:#5b9dff; --accent-hi:#7db1ff; --accent-dim:#2b4a7d; --accent-fg:#08111f;
     --good:#3ecf74; --bad:#f2564d; --warn:#e9ab3c;
@@ -35,6 +38,8 @@
     --bg:#f4f6fa; --panel:#ffffff; --panel2:#f7f9fc; --panel3:#eef2f8;
     --line:#dde3ec; --line-soft:#e7ecf4;
     --fg:#141a23; --muted:#5b6779; --faint:#8794a6;
+    --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+    --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
     --accent:#1f6feb; --accent-hi:#3b82f6; --accent-dim:#bcd4fb; --accent-fg:#ffffff;
     --good:#1a9b52; --bad:#d1362c; --warn:#b57b0e;
     --good-bg:rgba(26,155,82,.11); --bad-bg:rgba(209,54,44,.10);
@@ -52,6 +57,8 @@
       --bg:#f4f6fa; --panel:#ffffff; --panel2:#f7f9fc; --panel3:#eef2f8;
       --line:#dde3ec; --line-soft:#e7ecf4;
       --fg:#141a23; --muted:#5b6779; --faint:#8794a6;
+      --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+      --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
       --accent:#1f6feb; --accent-hi:#3b82f6; --accent-dim:#bcd4fb; --accent-fg:#ffffff;
       --good:#1a9b52; --bad:#d1362c; --warn:#b57b0e;
       --good-bg:rgba(26,155,82,.11); --bad-bg:rgba(209,54,44,.10);
@@ -383,6 +390,9 @@
   button.ghost:hover { background:var(--panel2); }
   button.danger { color:var(--bad); }
   button.danger:hover { border-color:var(--bad); background:var(--bad-bg); }
+  /* A chip that is on: filled, whatever colour its border carries. */
+  button.chip-on { background:var(--accent-bg); border-color:var(--accent); color:var(--fg); }
+  button.chip-on:hover { background:var(--accent-bg); border-color:var(--accent-hi); }
   button.small { padding:5px 11px; font-size:12.5px; }
   button:disabled { opacity:.45; cursor:not-allowed; background:var(--panel2); border-color:var(--line); transform:none; }
   button.test { margin:6px 0 4px; }

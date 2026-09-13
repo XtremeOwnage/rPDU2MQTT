@@ -47,6 +47,11 @@ export function addTagsSection(nav: any, sections: any) {
       'A tag defined here exists before anything carries it, so a filter can be set up ahead of the nodes '
       + 'it will select. Typing one straight onto a node still works and still appears below.' }));
 
+    sec.appendChild(el('div', { class: 'desc' },
+      el('span', { text: 'Default and per-outlet tags for the PDUs are set on the ' }),
+      el('a', { text: 'Vertiv rPDU page', onclick: () => (document.querySelector('nav a[data-label="Vertiv rPDU"]') as any)?.click() }),
+      el('span', { text: '.' })));
+
     const tags = knownTags();
     if (!tags.length) {
       sec.appendChild(el('div', { class: 'desc', style: { marginTop: '12px' },
