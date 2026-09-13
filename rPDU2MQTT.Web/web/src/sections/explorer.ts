@@ -172,7 +172,12 @@ export function openMqttExplorer() {
   const open = new Set<string>();      // branches showing their children
   const decided = new Set<string>();   // branches the reader has opened or closed themselves
 
-  const drawBranch = (n: TopicTree, depth: number) => {
+  const drawBranch = (start: TopicTree, depth: number) => {
+    // A chain of single children is one line: esphome/fridge/sensor/power/state, not five rows of one each.
+    const names = [start.name];
+    let n = start;
+    while (!n.row && n.children.size === 1) { n = [...n.children.values()][0]; names.push(n.name); }
+    const label = names.join('/');
     const topics = treeTopics(n);
     const branch = n.children.size > 0;
     // A small branch opens itself, a big one waits to be asked, and either way the reader's choice sticks.
@@ -193,7 +198,7 @@ export function openMqttExplorer() {
       toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
       name.appendChild(toggle);
     }
-    name.append(el('code', { text: n.name }));
+    name.append(el('code', { text: label }));
     if (branch) name.append(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: `${topics.length} topic(s)` }));
 
     const t = n.row;
