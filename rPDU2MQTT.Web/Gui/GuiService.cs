@@ -750,7 +750,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                return Results.Json(new { ok = false, message = $"Failed to save config: {ex.Message}" }, statusCode: 500);
+                // A rejection the API server explained is reported in words; anything else as it came.
+                var explained = Startup.ConfigSources.KubernetesSaveError.Explain(ex);
+                return Results.Json(new { ok = false, message = explained ?? $"Failed to save config: {ex.Message}" }, statusCode: 500);
             }
         });
 

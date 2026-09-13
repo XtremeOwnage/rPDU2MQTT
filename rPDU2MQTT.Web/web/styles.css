@@ -736,6 +736,8 @@
     border-left:3px solid var(--muted); border-radius:var(--r); box-shadow:var(--shadow-lg);
     animation:rpdu-toast-in .2s var(--ease);
   }
+  /* A rejection the server explained comes back as several lines; they are the explanation. */
+  .toast-msg { white-space:pre-line; }
   .toast.good { border-left-color:var(--good); }
   .toast.bad  { border-left-color:var(--bad); }
   .toast.leaving { animation:rpdu-toast-out .18s var(--ease) forwards; }
