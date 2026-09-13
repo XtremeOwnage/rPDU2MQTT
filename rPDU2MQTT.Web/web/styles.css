@@ -682,6 +682,14 @@
      detached and floated over the rows exactly as described there. */
   .sheet table.ld th, .sheet-panel table.ld th { position:static; }
 
+  /* Copy the topic, or what it published, from the row itself. */
+  .copy-btn {
+    background:none; border:0; padding:0 4px; margin:0; cursor:pointer;
+    color:var(--faint); font-size:12px; line-height:1; opacity:.55; transition:color .12s, opacity .12s;
+  }
+  .copy-btn:hover { color:var(--accent); opacity:1; }
+  tr:hover .copy-btn { opacity:1; }
+
   /* What a topic published, opened under its row in the MQTT explorer. */
   .payload {
     margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word;
