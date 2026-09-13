@@ -4,15 +4,69 @@
 // filter names it. So the page has to answer both halves at once: what wears this tag, and what does
 // wearing it do. Buried at the bottom of the Nodes page it answered neither, and a tag could not exist
 // until something already carried it, so a filter could never be set up ahead of the nodes it selects.
-import { btn, el, activate, navLink, ensure } from '../helpers.js';
+import { api, btn, el, activate, navLink, ensure } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
-import { knownTags, tagUsage, tagDescription, declaredTags, declareTag, renameTag, removeTag } from '../tags.js';
+import { knownTags, tagUsage, tagDescription, declaredTags, declareTag, renameTag, removeTag, tagInput } from '../tags.js';
 
 export function addTagsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Tags', '#');
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
+  // The live graph, for the PDUs and outlets the bridge has discovered.
+  let graph: any = null;
+
+  // A tag box for the rule whose pattern is exactly `match`; the rule exists only while it carries a tag.
+  const ruleTags = (match: string) => {
+    const rules = () => ensure(ensure(state.data, 'EnergyFlow', {}), 'AutoTags', []);
+    const find = () => rules().find((x: any) => String(x.Match || '').trim().toLowerCase() === match.toLowerCase());
+    const arr: string[] = [...(find()?.Tags || [])];
+    return tagInput(arr, {
+      placeholder: 'add tag',
+      onChange: () => {
+        const list = rules();
+        const rule = find();
+        if (!arr.length) { if (rule) list.splice(list.indexOf(rule), 1); }
+        else if (rule) rule.Tags = [...arr];
+        else list.push({ Match: match, Tags: [...arr] });
+        refreshDirty();
+      },
+    });
+  };
+
+  const pduTags = () => {
+    const box = el('div', { style: { margin: '18px 0' } });
+    box.appendChild(el('h3', { text: 'PDU tags', style: { margin: '4px 0', fontSize: '15px' } }));
+    box.appendChild(el('div', { class: 'desc', text:
+      'Tags for what the PDUs report. Every PDU and every outlet can carry default tags, and each one its own '
+      + 'on top of them. Patterns covering part of a PDU are on the Nodes page. Circuits are not nodes in the '
+      + 'energy flow, so they cannot carry tags yet.' }));
+
+    const defaults = el('table', { class: 'ld' });
+    defaults.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'Applies to' }), el('th', { text: 'Default tags' }))));
+    const dbody = el('tbody');
+    ([['All PDUs', 'pdu:*'], ['All outlets', 'outlet:*']] as [string, string][]).forEach(([name, match]) =>
+      dbody.appendChild(el('tr', { 'data-match': match }, el('td', { text: name }), el('td', {}, ruleTags(match)))));
+    defaults.appendChild(dbody);
+    box.appendChild(defaults);
+
+    const derived = (graph?.nodes || [])
+      .filter((n: any) => /^(pdu|outlet):/.test(String(n.id || '')))
+      .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    if (!derived.length) {
+      box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' },
+        text: 'No PDU or outlet has been reported yet, so there is nothing to tag individually.' }));
+      return box;
+    }
+    const items = el('table', { class: 'ld', style: { marginTop: '10px' } });
+    items.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'PDU or outlet' }), el('th', { text: 'Id' }), el('th', { text: 'Its own tags' }))));
+    const ibody = el('tbody');
+    derived.forEach((n: any) => ibody.appendChild(el('tr', { 'data-match': n.id },
+      el('td', { text: n.label || n.id }), el('td', { class: 'desc', text: n.id }), el('td', {}, ruleTags(n.id)))));
+    items.appendChild(ibody);
+    box.appendChild(items);
+    return box;
+  };
 
   const render = () => {
     sec.innerHTML = '';
@@ -46,6 +100,8 @@ export function addTagsSection(nav: any, sections: any) {
     sec.appendChild(el('div', { class: 'desc', text:
       'A tag defined here exists before anything carries it, so a filter can be set up ahead of the nodes '
       + 'it will select. Typing one straight onto a node still works and still appears below.' }));
+
+    sec.appendChild(pduTags());
 
     const tags = knownTags();
     if (!tags.length) {
@@ -136,6 +192,10 @@ export function addTagsSection(nav: any, sections: any) {
           + 'it on a destination’s Include or Exclude list to give it an effect.' }));
   };
 
-  link.onclick = () => { render(); activate(link, sec); };
+  link.onclick = async () => {
+    render(); activate(link, sec);
+    try { const r: any = await api('/api/flow'); graph = r?.body?.ok ? r.body : null; } catch { graph = null; }
+    render();
+  };
   render();
 }

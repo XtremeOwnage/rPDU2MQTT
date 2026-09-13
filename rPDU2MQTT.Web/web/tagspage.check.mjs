@@ -39,7 +39,11 @@ const open = async () => {
       : url.includes('/api/config') ? config
       : url.includes('/api/flow/live') ? { ok: true, values: [] }
       : url.includes('/api/flow/withheld') ? { ok: true, sources: [] }
-      : url.includes('/api/flow') ? { ok: true, nodes: [], links: [], metric: 'realpower', units: 'W' }
+      : url.includes('/api/flow') ? { ok: true, links: [], metric: 'realpower', units: 'W', nodes: [
+          { id: 'pdu:rack_pdu_1', label: 'Rack PDU 1', kind: 'pdu' },
+          { id: 'outlet:rack_pdu_1:0', label: 'Outlet 1', kind: 'outlet' },
+          { id: 'outlet:rack_pdu_1:1', label: 'Outlet 2', kind: 'outlet' },
+        ] }
       : { ok: true },
   });
   vm.createContext(sandbox);
@@ -131,7 +135,44 @@ const open = async () => {
     fail('removing a tag left it on a node');
 }
 
+// --- PDU tags: defaults for every PDU and outlet, and each one's own -----------------------------------
+{
+  const original = structuredClone(config.EnergyFlow.AutoTags);
+  const { sec } = await open();
+  if (!query(sec, 'h3', true).some(h => h.textContent === 'PDU tags')) fail('there is no PDU tags section');
+  if (JSON.stringify(config.EnergyFlow.AutoTags) !== JSON.stringify(original)) fail('opening the page changed the tag rules');
+  if (!/Circuits are not nodes/.test(sec.textContent || '')) fail('the page does not say circuits cannot carry tags');
+
+  const rowFor = (text) => query(sec, 'tr', true).find(r => query(r, 'td', true).some(td => td.textContent === text));
+  const typeInto = (row, tag) => {
+    const box = query(row, 'input', true).find(i => String(i.className || (i.attrs && i.attrs.class) || '').includes('tag-new'));
+    if (!box) fail('a PDU tags row has no tag box');
+    box.value = tag;
+    box.onblur();
+  };
+  const rule = (match) => (config.EnergyFlow.AutoTags || []).find(r => r.Match === match);
+
+  for (const label of ['All PDUs', 'All outlets', 'Rack PDU 1', 'Outlet 1', 'Outlet 2'])
+    if (!rowFor(label)) fail(`no PDU tags row for "${label}"`);
+
+  typeInto(rowFor('All outlets'), 'pdu_outlet');
+  typeInto(rowFor('All PDUs'), 'pdu');
+  typeInto(rowFor('outlet:rack_pdu_1:0'), 'critical');
+  if (JSON.stringify(rule('outlet:*')?.Tags) !== '["pdu_outlet"]') fail(`a default outlet tag did not become the outlet:* rule: ${JSON.stringify(config.EnergyFlow.AutoTags)}`);
+  if (JSON.stringify(rule('pdu:*')?.Tags) !== '["pdu"]') fail(`a default PDU tag did not become the pdu:* rule: ${JSON.stringify(config.EnergyFlow.AutoTags)}`);
+  if (JSON.stringify(rule('outlet:rack_pdu_1:0')?.Tags) !== '["critical"]') fail(`an outlet's own tag did not become a rule for that outlet: ${JSON.stringify(config.EnergyFlow.AutoTags)}`);
+  if (JSON.stringify(rule('outlet:rack_pdu_1:*')?.Tags) !== '["panel"]') fail('editing PDU tags changed an unrelated pattern rule');
+
+  // A rule with no tags left is removed rather than kept empty.
+  const remove = query(rowFor('All outlets'), 'button', true).find(x => x.textContent === '✕');
+  if (!remove) fail('a default tag cannot be removed');
+  remove.onclick();
+  if (rule('outlet:*')) fail('removing the last default outlet tag left an empty outlet:* rule');
+
+  config.EnergyFlow.AutoTags = original;
+}
+
 console.log('tagspage: the Tags page lists every tag declared or merely carried, names what carries each '
   + 'and which destinations decide on it, flags one that decides nothing, lets a tag be defined before '
   + 'anything carries it and offered in the pickers, and removes one from the declaration, its holders and '
-  + 'every filter at once');
+  + 'every filter at once; PDU tags set defaults for every PDU and outlet and each one\'s own, as rules');
