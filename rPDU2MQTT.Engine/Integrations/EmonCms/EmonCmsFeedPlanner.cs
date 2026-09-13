@@ -5,7 +5,7 @@ using rPDU2MQTT.Models.PDU;
 namespace rPDU2MQTT.Integrations.EmonCms;
 
 /// <summary>An EmonCMS input as returned by <c>input/get_inputs</c>: its id, key and processlist.</summary>
-public sealed record EmonInput(int Id, string Name, string ProcessList);
+public sealed record EmonInput(int Id, string Name, string ProcessList, string? Node = null);
 
 /// <summary>An EmonCMS feed as returned by <c>feed/list</c>.</summary>
 public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessList = null);
@@ -25,6 +25,9 @@ public sealed record DesiredInputLog(string InputName, IReadOnlyList<DesiredProc
 
 /// <summary>A friendly virtual feed sourced from a storage feed.</summary>
 public sealed record DesiredVirtualFeed(string Name, string Tag, string SourceFeed);
+
+/// <summary>Inputs and feeds EmonCMS holds for this bridge that it no longer sends or provisions, or why none were looked for.</summary>
+public sealed record EmonStalePlan(IReadOnlyList<EmonInput> Inputs, IReadOnlyList<EmonFeed> Feeds, string? Refused = null);
 
 /// <summary>The full set of EmonCMS objects the config wants, before reconciling against what exists.</summary>
 public sealed record EmonDesiredState(
@@ -287,4 +290,44 @@ public static class EmonCmsFeedPlanner
             .Select(st => (st.Process, Feed: feedId(st.Feed)))
             .Where(st => st.Feed is not null)
             .Select(st => $"{st.Process}:{st.Feed}"));
+
+    /// <summary>
+    /// What is stale: an input under one of <paramref name="inputNodes"/> that is not in <paramref name="postedInputs"/>,
+    /// and a feed not in <paramref name="desired"/> that is either under <paramref name="storageTag"/> or is a virtual
+    /// feed under <paramref name="virtualTag"/> reading one of those feeds or a feed that no longer exists.
+    /// </summary>
+    public static EmonStalePlan Stale(
+        IReadOnlyCollection<string> postedInputs, IReadOnlySet<string> inputNodes, EmonDesiredState desired,
+        IReadOnlyList<EmonInput> inputs, IReadOnlyList<EmonFeed> feeds, string storageTag, string? virtualTag)
+    {
+        // With nothing sent or planned, everything would look stale; that is a cold start, not a cleanup.
+        if (postedInputs.Count == 0 || desired.Feeds.Count == 0)
+            return new([], [], "Nothing is being sent or provisioned yet, so every input and feed would look stale. Wait for the first poll, then try again.");
+
+        var posted = new HashSet<string>(postedInputs, StringComparer.OrdinalIgnoreCase);
+        var staleInputs = inputs.Where(i => i.Node is not null && inputNodes.Contains(i.Node) && !posted.Contains(i.Name)).ToList();
+
+        var wanted = new HashSet<string>(desired.Feeds.Select(f => f.Name).Concat(desired.Virtuals.Select(v => v.Name)), StringComparer.Ordinal);
+        var byId = feeds.GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First());
+        bool Storage(EmonFeed f) => string.Equals(f.Tag, storageTag, StringComparison.OrdinalIgnoreCase);
+        bool OurVirtual(EmonFeed f)
+        {
+            if (string.IsNullOrWhiteSpace(virtualTag) || !string.Equals(f.Tag, virtualTag, StringComparison.OrdinalIgnoreCase)) return false;
+            return SourceFeedId(f.ProcessList) is { } source && (!byId.TryGetValue(source, out var read) || Storage(read));
+        }
+        var staleFeeds = feeds.Where(f => !wanted.Contains(f.Name) && (Storage(f) || OurVirtual(f))).ToList();
+        return new(staleInputs, staleFeeds);
+    }
+
+    /// <summary>The feed a virtual feed reads: the argument of its first source-feed step, by id_num or key.</summary>
+    public static int? SourceFeedId(string? processList)
+    {
+        foreach (var pair in (processList ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = pair.Split(':', StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && (parts[0] == "53" || parts[0] == ProcessSlot.SourceFeed) && int.TryParse(parts[1], out var id))
+                return id;
+        }
+        return null;
+    }
 }

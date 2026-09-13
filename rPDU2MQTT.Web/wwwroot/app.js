@@ -9388,7 +9388,8 @@ function sectionActions(node     ) {
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') {
-    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
+    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
+    add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
     bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
   } else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
@@ -9486,12 +9487,32 @@ async function deleteEmonCmsFeeds() {
   const typed = prompt('Final confirmation — type  DELETE  (all caps) to permanently delete all rPDU2MQTT feeds:');
   if (typed !== 'DELETE') { toast('Cancelled — nothing was deleted.', false); return; }
   toast('Deleting EmonCMS feeds…', true);
-  // Through the generic route: the integration owns the rule and the single-owner lease, so the button and
-  // the API cannot do different things.
-  const r = await api('/api/integrations/emoncms/sweep', { method: 'POST' });
+  const r = await api('/api/integrations/emoncms/delete-all-feeds', { method: 'POST' });
   const inner = (r.body || {}).result || {};
   toast(inner.message ?? r.body?.message ?? 'Done.', r.body?.ok !== false);
 }
+/// List what EmonCMS still holds that this bridge no longer sends or provisions, name it, and delete it on confirmation.
+async function cleanupEmonCms(kind                    ) {
+  const r = await api('/api/integrations/emoncms/stale', { method: 'POST' });
+  const found = r.body?.result || {};
+  if (r.body?.ok === false || found.ok === false) {
+    const message = found.message || r.body?.message || 'Could not list old inputs and feeds.';
+    toast(message, false);
+    return { ok: false, message };
+  }
+  const names           = found[kind] || [];
+  if (!names.length) return { ok: true, message: `No old ${kind} to delete.` };
+  const listed = names.slice(0, 15).join('\n') + (names.length > 15 ? `\n…and ${names.length - 15} more` : '');
+  const consequence = kind === 'feeds'
+    ? 'Deleting a feed deletes its stored history in EmonCMS. It cannot be undone.'
+    : 'No feed data is lost: an input only receives readings.';
+  if (!confirm(`Delete ${names.length} ${kind} that rPDU2MQTT no longer ${kind === 'inputs' ? 'sends' : 'provisions'}?\n\n${listed}\n\n${consequence}`)) return;
+  const d = await api(`/api/integrations/emoncms/sweep-${kind}`, { method: 'POST' });
+  const done = d.body?.result || {};
+  return { ok: d.body?.ok !== false && done.ok !== false, message: done.message || d.body?.message || 'Done.' };
+}
+const cleanupEmonCmsInputs = () => cleanupEmonCms('inputs');
+const cleanupEmonCmsFeeds = () => cleanupEmonCms('feeds');
 async function rediscoverHa() { toast('Requesting discovery…', true); const r = await api('/api/discovery/rediscover', { method: 'POST' }); toast(r.body.message, r.body.ok); }
 async function clearHa() {
   if (!confirm('Clear ALL Home Assistant discovery messages published by rPDU2MQTT — including any left over '

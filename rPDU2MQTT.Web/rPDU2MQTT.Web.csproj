@@ -122,6 +122,7 @@
 		<!-- Defining a tag, and seeing both what carries it and what it decides. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tagspage.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/pdutags.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncmscleanup.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
 		     fine in Firefox and sat on top of the first row in Chrome. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
