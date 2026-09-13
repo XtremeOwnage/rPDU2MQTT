@@ -1,5 +1,4 @@
-// The Trends page: daily energy over time. A day the backend has nothing for is an empty slot, counted and
-// left out of the totals, and the totals say how many days they actually cover.
+// Trends: the whole system over the chosen window — the grid, self-sufficiency, and where the energy came from.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -9,58 +8,27 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('trends check FAILED: ' + m); process.exit(1); };
 
-// Seven days; the backend has nothing at all for two of them, and solar alone is missing on a third.
+// Day-end readings of the energy counter: one before the window, then seven days. Nothing read at the end of
+// the third day, which empties the third and fourth, since each day is the rise from the reading before it.
 const series = {
-  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus',
-  days: ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
-  // The last one has not ended: it is today so far, and must not be read as a finished day.
+  ok: true, metric: 'energy', units: 'kWh', source: 'prometheus',
+  days: ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
   partial: '2026-08-07',
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [30, 32, null, null, 28, null, 35] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [5, 4, null, null, 9, 6, 3] },
-    // The return lanes, which the exporter now publishes: charge and export are measurements, and they are
-    // the other direction — the chart has to subtract them, not add them.
-    { node: 'battery', label: 'Battery', kind: 'battery', values: [8, 9, null, null, 7, 2, 6] },
-    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [10, 11, null, null, 9, 3, 8] },
-    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [1, 2, null, null, 4, 0, 1] },
+    { node: 'solar', label: 'Solar', kind: 'solar', values: [100, 130, 162, null, 200, 228, 262, 297] },
+    { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
+    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
+    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, 15] },
   ],
 };
 
-// The same window asked about within a day: power every 5 minutes, not a daily total. A cumulative daily
-// counter charted through the day only ever climbs, so this is a different metric, not a finer one.
-// Instants, not labels: a moment within a day is named in the viewer's clock, and the server does not know
-// it. Formatting them server-side stamped every intra-day tick with the container's timezone — UTC unless
-// someone set TZ — so a chart ending at this minute read as ending hours ago.
-const at = ['2026-08-08T18:00:00Z', '2026-08-08T18:05:00Z', '2026-08-08T18:10:00Z', '2026-08-08T18:15:00Z'];
 const power = {
   ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
-  at,
+  at: ['2026-08-08T18:00:00Z', '2026-08-08T18:05:00Z', '2026-08-08T18:10:00Z', '2026-08-08T18:15:00Z'],
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', tags: ['roof'], values: [4200, 4400, null, 3900] },
+    { node: 'solar', label: 'Solar', kind: 'solar', values: [4200, 4400, null, 3900] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [0, 0, null, 120] },
-  ],
-};
-
-// A whole day of five-minute samples — 288 of them, which is what "yesterday" actually returns.
-const dayStart = new Date(2026, 7, 19, 0, 0, 0);
-const wholeDay = {
-  ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
-  at: Array.from({ length: 288 }, (_, i) => new Date(dayStart.getTime() + i * 300_000).toISOString()),
-  series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: 288 },
-        (_, i) => Math.max(0, Math.round(5000 * Math.sin(Math.PI * (i - 84) / 120))) ) },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: Array.from({ length: 288 }, () => 400) },
-  ],
-};
-
-// The same window asked about as energy: a cumulative counter, which climbs and must never be summed.
-const counter = {
-  ok: true, metric: 'energy_d', units: 'kWh', source: 'prometheus', stepSeconds: 300,
-  at,
-  series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] },
-    // This one's counter re-based partway through the window — a midnight rollover, or a meter reset.
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [8, 9, 1, 3] },
   ],
 };
 
@@ -69,17 +37,11 @@ const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow/series')) {
       asked.push(url);
-      if (url.includes('back=1')) return wholeDay;
-      // Asked for energy over an intra-day window: a counter climbing, not a per-period total.
-      if (/metric=energy(_d)?(&|$)/.test(url) && url.includes('minutes=')) return structuredClone(counter);
-      return (url.includes('minutes=') || url.includes('today=1')) ? power : series;
+      return (url.includes('minutes=') || url.includes('today=1') || url.includes('step=')) ? structuredClone(power) : structuredClone(series);
     }
     if (url.includes('/api/flow/metrics'))
       return { ok: true, metrics: [
         { metric: 'realpower', units: 'W', epoch: 'instant' },
-        // The lifetime counter. Leaving it out of this fixture is what hid a Trends page that could only
-        // ever ask EmonCMS for `energy_d`, a metric it was never given a feed for, while `energy` —
-        // the feed it does store — was filtered out of the picker as unchartable.
         { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
         { metric: 'energy_d', units: 'kWh', epoch: 'period' }] };
     return url.includes('/api/schema') ? schema
@@ -94,350 +56,83 @@ await new Promise(r => setTimeout(r, 50));
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Trends');
 if (!link) fail('no Trends page');
-// The landing page asks for its own window on startup; this check is about what Trends asks for.
 asked.length = 0;
 link.click();
 await new Promise(r => setTimeout(r, 300));
 
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!sec) fail('clicking Trends activated no section');
-if (!asked.length) fail('the page charted nothing — no series was requested');
-if (!/days=30/.test(asked[0])) fail(`the default range was not requested: ${asked[0]}`);
-if (!/stepSeconds|days=/.test(asked[0])) fail('the range was not expressed in the query');
+if (!asked.length || !/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(asked[0])) fail(`the default range was not requested as the energy counter: ${asked[0]}`);
 
-// The charts are found by their headings — several are drawn from one fetch, and each is a different
-// question about the same days.
 const charts = query(sec, 'svg', true);
-if (charts.length < 2) fail(`expected several charts, drew ${charts.length}`);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Daily energy by node', 'Grid per day', 'Self-sufficiency per day'])
+for (const want of ['Grid per day', 'Self-sufficiency per day', 'Where the day’s energy came from'])
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
-const byNode = charts[0];
-// A totals row for exactly this node — "Grid" and "Grid (export)" are two rows, and a substring match on
-// the whole row would say the first is still listed when only the second is.
-const totalsRow = (name) => query(sec, 'tbody tr', true).find(r => query(r, 'td')?.textContent === name);
-const bars = query(byNode, 'rect', true);
-if (!bars.length) fail('no bars were drawn');
+// The page opens as stacked areas.
+const chartTypeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'area'));
+if (!chartTypeSel || chartTypeSel.value !== 'area') fail(`the page does not open as area charts: ${chartTypeSel?.value}`);
+if (!['polygon', 'circle'].flatMap(t => query(charts[headings.indexOf('Grid per day')], t, true)).some(e => e.attrs.class === 'trend-area'))
+  fail('the grid chart does not open as a stacked area');
 
-// Two days have no reading from anything. They are slots on the axis, marked, not bars of zero.
-const gapBars = bars.filter(r => (r.attrs.class || '') === 'trend-gap');
-if (gapBars.length !== 2) fail(`expected 2 empty days, drew ${gapBars.length}`);
-for (const g of gapBars) {
-  const t = query(g, 'title');
-  if (!t || !/no reading/.test(t.textContent)) fail('an empty day does not say why it is empty');
-}
+// Nothing here is about a selection: the per-node chart, its picker and its totals are the Node Trends page.
+if (headings.some(h => /by node/.test(h))) fail(`a per-node chart is drawn on the whole-system page: ${headings.join(', ')}`);
+const buttons = query(sec, 'button', true).map(b => b.textContent);
+if (buttons.includes('None') || buttons.includes('Reset')) fail('the whole-system page offers a node selection');
+if (query(sec, 'tbody tr', true).length) fail('the whole-system page lists per-node totals');
 
-// Hovering a day says what you are looking at. Hovering the bar itself is a game of skill — a stacked
-// segment can be a pixel tall — so the whole day column is the target.
-const hits = query(byNode, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
-if (hits.length !== series.days.length) fail(`expected one hover target per day, found ${hits.length}`);
-const dayFive = hits.find(h => h.attrs['data-day'] === '2026-08-05');
-dayFive.dispatch('mouseenter', { clientX: 100, clientY: 100 });
-const cardEl = query(sandbox.document.body, '.trend-card');
-if (!cardEl || !cardEl.classList.contains('show')) fail('hovering a day showed nothing');
-const cardText = cardEl.textContent;
-for (const want of ['2026-08-05', 'Solar', '28', 'Grid', '9'])
-  if (!cardText.includes(want)) fail(`the hover card does not say what is being looked at: "${cardText}"`);
-// Stacked, so the day's total belongs on the card — and it nets: 28 solar + 9 import + 7 discharge
-// - 9 charge - 4 export = 31. Unsigned it would read 57, the same energy counted on the way in and out.
-if (!cardText.includes('31')) fail(`the hover card omits or miscounts the day's total: "${cardText}"`);
-
-// A day nothing reported says so rather than showing a row of zeroes.
-hits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { clientX: 10, clientY: 10 });
-if (!/no reading/.test(query(sandbox.document.body, '.trend-card').textContent))
-  fail('hovering an empty day does not say it is empty');
-
-// Self-sufficiency is a percentage of the home's energy, and only for days that have both figures. On
-// 2026-08-05 the home is what it actually took: 28 solar + (7 discharge - 9 charge) + (9 import - 4
-// export) = 31. Of that, 9 came from the grid — the import, not the net, because exporting 4 did not
-// avoid drawing anything: (31-9)/31 = 70.97%.
+// Self-sufficiency on 2026-08-05: home 28 + (7 - 9) + (9 - 4) = 31, of which 9 was imported: 70.97%.
 const ssChart = charts[headings.indexOf('Self-sufficiency per day')];
 const ssHits = query(ssChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
 ssHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
-const ssText = query(sandbox.document.body, '.trend-card').textContent;
-if (!ssText.includes('70.97')) fail(`self-sufficiency for the day is wrong: "${ssText}"`);
+if (!query(sandbox.document.body, '.trend-card').textContent.includes('70.97')) fail('self-sufficiency for the day is wrong');
+// 2026-08-03 has no reading from anything, so no percentage is given.
+ssHits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { clientX: 10, clientY: 10 });
+if (!/no reading|—/.test(query(sandbox.document.body, '.trend-card').textContent)) fail('a day missing an input was given a percentage anyway');
 
-// A day with no grid figure has no percentage: 2026-08-06 has grid but no solar, so the home cannot be
-// determined and estimating one would put a number nobody measured on a chart.
-ssHits.find(h => h.attrs['data-day'] === '2026-08-06').dispatch('mouseenter', { clientX: 10, clientY: 10 });
-const ssGap = query(sandbox.document.body, '.trend-card').textContent;
-if (!/no reading|—/.test(ssGap)) fail(`a day missing an input was given a percentage anyway: "${ssGap}"`);
-
-// Tags select what to chart: one click charts exactly the nodes carrying that tag.
-const tagChip = query(sec, 'button', true).find(b => b.textContent.includes('roof'));
-if (!tagChip) fail('no tag chips to select by');
-tagChip.click();
-await new Promise(r => setTimeout(r, 50));
-if (totalsRow('Grid')) fail('selecting a tag left untagged nodes on the chart');
-if (!query(sec, 'tr', true).some(r => r.textContent.includes('Solar')))
-  fail('selecting a tag took its own node off the chart');
-const allChip = query(sec, 'button', true).find(b => b.textContent === 'All');
-allChip.click();
-await new Promise(r => setTimeout(r, 50));
-
-// Charge and export are the other direction, so they are drawn below the line and subtract. Counted as
-// supply they inflate the day: the same energy shows up once as produced and again as given back.
+// Charge and export are below the line and subtract: 28 + 7 + 9 - 9 - 4 = 31.
 const supplyChart = charts[headings.indexOf('Where the day’s energy came from')];
-const supplyHits = query(supplyChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
-supplyHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 5, clientY: 5 });
+query(supplyChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit')
+  .find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 5, clientY: 5 });
 const supplyText = query(sandbox.document.body, '.trend-card').textContent;
-if (!/-9|−9/.test(supplyText)) fail(`battery charge is not shown as negative: "${supplyText}"`);
-if (!/-4|−4/.test(supplyText)) fail(`grid export is not shown as negative: "${supplyText}"`);
-// 28 solar + 7 discharge + 9 import - 9 charge - 4 export = 31, not the 57 an unsigned stack would total.
+if (!/-9|−9/.test(supplyText) || !/-4|−4/.test(supplyText)) fail(`charge and export are not negative: "${supplyText}"`);
 if (!supplyText.includes('31')) fail(`the day's energy does not net out: "${supplyText}"`);
+if (!query(supplyChart, 'line', true).some(l => l.attrs.stroke === 'var(--muted)')) fail('no zero line on a chart that draws both signs');
 
-// The zero line is where the two sides meet, so a bar's side of it is the sign.
-const zeroLines = query(supplyChart, 'line', true).filter(l => l.attrs.stroke === 'var(--muted)');
-if (!zeroLines.length) fail('no zero line on a chart that draws both signs');
+// Days nothing at all reported are counted.
+if (!/2 with no reading/.test(query(sec, 'span', true).map(s => s.textContent).join(' '))) fail('the missing days are not counted');
 
-// The period still in progress is a real reading of an unfinished day, and it counts. Drawn beside finished
-// ones at full strength it would read as a quiet day rather than an early one, so it is faded and said in
-// words — the marking is what keeps a part-day total from being mistaken for a whole one.
-const todayHit = hits.find(h => h.attrs['data-day'] === '2026-08-07');
-todayHit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
-const todayText = query(sandbox.document.body, '.trend-card').textContent;
-if (!/so far|in progress/.test(todayText)) fail(`the unfinished day is not marked: "${todayText}"`);
-const faded = query(byNode, 'rect', true).filter(r => r.attrs.opacity === '0.55');
-if (!faded.length) fail('the unfinished day is drawn exactly like a finished one');
-
-// And it is said in words too, not only in the drawing.
-const status = query(sec, 'span', true).map(s => s.textContent).join(' ');
-if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: ${status.slice(0, 200)}`);
-
-// The totals cover the days that reported, today included, and say how many that was: solar has 4 of 7
-// (30+32+28+35=125), grid 5 of 7. A total presented as a week when it covers four days is how a gap
-// becomes a saving, so the count is what a reader checks the total against.
-const rows = query(sec, 'tr', true);
-const solarRow = rows.find(r => r.textContent.includes('Solar'));
-if (!solarRow) fail('no totals row for solar');
-if (!solarRow.textContent.includes('125')) fail(`the day still in progress is missing from the total: ${solarRow.textContent}`);
-if (!/4 of 7/.test(solarRow.textContent)) fail(`solar's total does not say how many days it covers: ${solarRow.textContent}`);
-const gridRow = rows.find(r => r.textContent.includes('Grid'));
-if (!/5 of 7/.test(gridRow.textContent)) fail(`grid's day count is wrong: ${gridRow.textContent}`);
-// …and the page says the last of those days is not finished, in the note, the status line and the column.
-if (!/counts in the totals/.test(sec.textContent)) fail('nothing says the unfinished day is in the totals');
-
-// Its peak day is named, so "when did this happen" does not need a spreadsheet. Here the highest reading
-// is the day still in progress, and a peak that may still rise is marked as such.
-if (!solarRow.textContent.includes('2026-08-07')) fail(`solar's peak day is not named: ${solarRow.textContent}`);
-if (!/so far/.test(solarRow.textContent)) fail(`a peak on the unfinished day is not marked: ${solarRow.textContent}`);
-
-// The node selection governs the by-node chart and the totals — and nothing else. Emptying it used to hide
-// every chart, which said the selection drove them all, while they went on summing every node regardless.
-const noneBtn = query(sec, 'button', true).find(b => b.textContent === 'None');
-if (!noneBtn) fail('no way to clear the node selection');
-noneBtn.click();
-await new Promise(r => setTimeout(r, 50));
-const emptyHeads = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Grid per day', 'Self-sufficiency per day'])
-  if (!emptyHeads.includes(want)) fail(`clearing the node selection hid "${want}", which is not about the selection`);
-if (query(sec, 'tbody tr', true).length)
-  fail('the totals still list nodes after the selection was cleared');
-if (!sec.textContent.includes('No nodes selected')) fail('nothing says the by-node chart is empty on purpose');
-
-// Reset puts back what the page opened with, rather than leaving you to tick nodes one at a time.
-const resetBtn = query(sec, 'button', true).find(b => b.textContent === 'Reset');
-if (!resetBtn) fail('no way to reset the node selection');
-resetBtn.click();
-await new Promise(r => setTimeout(r, 50));
-const backRows = query(sec, 'tr', true).map(r => r.textContent).join(' ');
-if (!backRows.includes('Solar') || !backRows.includes('Grid')) fail(`Reset did not restore the default selection: ${backRows}`);
-
-// A node can be taken off the chart — a hierarchy counts the same watts at several tiers, so charting
-// everything at once and stacking would draw a total that is true of nothing.
-const gridChip = query(sec, 'button', true).find(b => b.textContent.includes('Grid'));
-if (!gridChip) fail('no way to take a node off the chart');
-const before = query(sec, 'rect', true).length;
-gridChip.click();
-await new Promise(r => setTimeout(r, 50));
-if (query(sec, 'rect', true).length >= before) fail('taking a node off the chart changed nothing');
-if (totalsRow('Grid')) fail('a node taken off the chart is still in the totals');
-
-// "Today so far" starts where the counters last re-based — the configured boundary, not a fixed 24 hours
-// and not the browser's midnight. A chart of today anchored anywhere else covers a different day from the
-// totals beside it.
-const todayOpt = query(sec, 'select', true)
-  .find(x => (x.children || []).some(o => (o.value || '').includes('today=1')));
-if (!todayOpt) fail('no "today so far" range offered');
-todayOpt.value = 'today=1&step=300';
-todayOpt.onchange({});
-await new Promise(r => setTimeout(r, 300));
-if (!/today=1/.test(decodeURIComponent(asked.at(-1)))) fail(`"today" was not asked for as the period: ${asked.at(-1)}`);
-// It is a moment-in-the-day view, so it charts power like the other intra-day ranges.
-if (!query(sec, 'h3', true).map(h => h.textContent).includes('Power by node'))
-  fail('"today so far" is not charted as power');
-
-// --- Within a day: power, sampled, and no self-sufficiency ------------------------------------------
+// The interval applies here too: seven days at an hour.
 const rangeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => (o.value || '').includes('minutes=')));
-if (!rangeSel) fail('no intra-day range offered');
-rangeSel.value = 'minutes=360&step=300';
+const intervalSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'day'));
+if (!intervalSel) fail('no interval control on the whole-system page');
+rangeSel.value = 'days=7';
 rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
+intervalSel.value = '3600';
+intervalSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
+if (!/days=7/.test(asked.at(-1)) || !/step=3600/.test(asked.at(-1))) fail(`seven days at an hour was not asked for: ${asked.at(-1)}`);
 
-const intra = decodeURIComponent(asked.at(-1));
-if (!/minutes=360/.test(intra) || !/step=300/.test(intra)) fail(`the intra-day window was not requested: ${intra}`);
-
+// Self-sufficiency is a share of energy; instantaneous power is a different quantity and is not charted as one.
+intervalSel.value = 'auto';
+rangeSel.value = 'minutes=360';
+rangeSel.onchange({});
+await new Promise(r => setTimeout(r, 300));
 const intraHeads = query(sec, 'h3', true).map(h => h.textContent);
-if (!intraHeads.includes('Power by node')) fail(`the intra-day view is not labelled as power: ${intraHeads.join(', ')}`);
-// Self-sufficiency is a share of energy over a period. The same arithmetic on instantaneous power is a
-// different quantity, and giving it the same name invites reading a momentary grid draw as a bad day.
-if (intraHeads.includes('Self-sufficiency per day'))
-  fail('self-sufficiency was drawn from instantaneous power');
+if (!intraHeads.includes('Grid')) fail(`the grid is not charted within a day: ${intraHeads.join(', ')}`);
+if (intraHeads.some(h => /Self-sufficiency/.test(h))) fail('self-sufficiency was drawn from instantaneous power');
 
-// A total of power samples is a number in watts that is a quantity of nothing, so the column is the peak —
-// and the quantity people actually want, kWh, is integrated from the samples instead.
-const intraRows = query(sec, 'th', true).map(h => h.textContent);
-if (!intraRows.some(h => /Peak \(W\)/.test(h))) fail(`power samples are being totalled: ${intraRows.join(', ')}`);
-if (!intraRows.some(h => /Samples with data/.test(h))) fail(`the intra-day table still counts days: ${intraRows.join(', ')}`);
-if (!intraRows.some(h => /Energy \(kWh/.test(h))) fail(`no energy column on the power view: ${intraRows.join(', ')}`);
-
-// Solar: 4200 + 4400 + 3900 = 12,500 W of samples, each holding for a 300s step —
-// 12500 * 300 / 3,600,000 = 1.042 kWh. The missing sample contributes nothing rather than being filled in.
-const solarIntra = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
-if (!solarIntra.textContent.includes('1.042')) fail(`the energy estimate is wrong: ${solarIntra.textContent}`);
-
-// The axis is the clock — this browser's clock, whatever the server's is.
-const local = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const intraCard = query(sec, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
-const want = local(at[1]);
-const hit = intraCard.find(h => h.attrs['data-day'] === want);
-if (!hit) fail(`the axis is not in this browser's clock: expected "${want}", got ${intraCard.map(h => h.attrs['data-day']).join(', ')}`);
-hit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
-const intraText = query(sandbox.document.body, '.trend-card').textContent;
-if (!intraText.includes(want) || !intraText.includes('4,400')) fail(`the intra-day hover is wrong: "${intraText}"`);
-
-// …and so are the labels under it. Charting a day key drops its year, and doing that to a clock label left
-// the axis reading "AM" — the one part of the chart that says which hours it covers (#378).
-const axisText = query(sec, 'text', true).map(t => t.textContent);
-if (!axisText.includes(local(at[0]))) fail(`the axis is not labelled with the clock: ${axisText.join(', ')}`);
-
-// Columns sort. Twelve nodes over ninety days is a table you read by scanning for the biggest number.
-// Every node back on first: a one-row table is sorted whatever the code does, which is no test at all.
-query(sec, 'button', true).find(b => b.textContent === 'All').click();
+// The chart type applies here too. Stacking is not a choice on this page: import and export, supply and
+// return have to net against each other.
+const chartSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'line'));
+if (!chartSel) fail('no chart type control on the whole-system page');
+if (query(sec, 'input', true).some(i => i.type === 'checkbox')) fail('the whole-system page offers unstacking');
+chartSel.value = 'line';
+chartSel.onchange({});
 await new Promise(r => setTimeout(r, 50));
-if (query(sec, 'tbody tr', true).length < 2) fail('the sort test needs more than one row to mean anything');
-const heads = query(sec, 'th', true);
-const nameHead = heads.find(h => h.textContent.startsWith('Node'));
-nameHead.onclick();
-await new Promise(r => setTimeout(r, 50));
-const order = () => query(sec, 'tbody tr', true).map(r => query(r, 'td')?.textContent);
-const byName = order();
-if (byName.join() !== [...byName].sort().join()) fail(`sorting by node did not order the rows: ${byName.join(', ')}`);
-nameHead.onclick();
-await new Promise(r => setTimeout(r, 50));
-if (order().join() !== [...byName].reverse().join()) fail('clicking the same column again did not reverse it');
+const gridSvg = query(sec, 'svg', true)[query(sec, 'h3', true).map(h => h.textContent).indexOf('Grid')];
+if (!['polyline', 'circle'].flatMap(t => query(gridSvg, t, true)).some(e => e.attrs.class === 'trend-line')) fail('choosing lines drew no line on the grid chart');
 
-// Yesterday is the period before the one in progress, on the same boundary — the server knows where that
-// boundary is, so the page asks for a period back rather than subtracting 24 hours itself (#378).
-const yesterdaySel = query(sec, 'select', true).find(x => (x.children || []).some(o => (o.value || '').includes('back=1')));
-if (!yesterdaySel) fail('no "yesterday" range offered');
-yesterdaySel.value = 'today=1&back=1&step=300';
-yesterdaySel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-const askedYesterday = decodeURIComponent(asked.at(-1));
-if (!/today=1/.test(askedYesterday) || !/back=1/.test(askedYesterday))
-  fail(`yesterday was not asked for as the previous period: ${askedYesterday}`);
-
-// …and a whole day fits on screen. 288 five-minute samples at the daily rule of 26px a bar is a 7,488px
-// chart in a ~1,600px pane, opened at its right-hand end: the reader gets the last five hours of yesterday
-// and two axis labels, with nothing saying the other nineteen hours exist (#393 follow-up).
-const dayChart = query(sec, 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
-if (!dayChart) fail('no chart drawn for yesterday');
-const chartW = Number(dayChart.attrs.width);
-if (!(chartW > 0 && chartW <= 1200)) fail(`a day of samples was drawn ${chartW}px wide — it does not fit a pane`);
-
-// Every other hour across the whole day, not two labels at one end of it.
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const axis = query(dayChart, 'text', true)
-  .filter(t => t.attrs['text-anchor'] === 'middle')   // the x-axis row; the value ticks down the left are anchored 'end'
-  .map(t => t.textContent).filter(Boolean);
-if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s): ${axis.join(', ')}`);
-// The first is the moment the day rolled over, in the reader's clock — the axis begins where the day did.
-if (axis[0] !== clock(wholeDay.at[0])) fail(`the axis does not start at the window's start: ${axis[0]}`);
-
-// A finished day has no "newest", so it opens at its beginning. Jumping to the end is for a window that
-// is still filling.
-const scrolled = query(sec, 'div', true).filter(d => 'scrollLeft' in d);
-if (scrolled.length) fail('a finished day was opened scrolled to its right-hand end');
-
-// And the page says outright where the window fell in the reader's own clock — the day rolls over on the
-// server's configured zone, which is not necessarily theirs.
-const dayStatus = query(sec, 'span', true).map(x => x.textContent).join(' ');
-if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus))
-  fail(`the status line does not say what window is charted: ${dayStatus}`);
-
-// --- What the page says it is showing is what it is showing ----------------------------------------
-// The blurb was fixed prose: "Daily energy over time" stood above a chart of watts, on every intra-day
-// range, and there was no way to ask for anything else.
-const blurb = () => (query(sec, '.desc', true).map(d => d.textContent)[0] || '');
-if (!/power/i.test(blurb())) fail(`the page describes a chart of watts as: ${blurb().slice(0, 120)}`);
-if (/Daily energy over time/.test(blurb())) fail('the page still calls a chart of power "daily energy"');
-
-// The metric is a control, not something the range decides for you.
-rangeSel.value = 'minutes=360&step=300';
-rangeSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energy_d'));
-if (!metricSel) fail('no way to choose what is charted');
-metricSel.value = 'energy_d';
-metricSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-if (!/metric=energy_d/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
-if (!/energy/i.test(blurb())) fail(`the page still describes power after energy was chosen: ${blurb().slice(0, 120)}`);
-
-// A counter read through a day climbs: 10, 12, 14, 16 kWh is the day's total restated four times, not
-// four measurements of anything. Charting it drew a staircase where every bar was the whole day so far and
-// none said what was used at that moment (#395). What the reader asked about is the DIFFERENCE between
-// readings — 2 kWh an interval — and those add up to the day instead of each restating it.
-const counterRows = query(sec, 'th', true).map(h => h.textContent);
-const solarCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
-const counterCells = query(solarCounter, 'td', true).map(t => t.textContent);
-if (counterCells.includes('52')) fail(`the counter's readings were summed: ${counterCells.join(' | ')}`);
-if (counterCells.includes('16')) fail(`the counter itself is being charted: ${counterCells.join(' | ')}`);
-// 2 + 2 + 2 = 6 kWh over the three intervals the readings cover. The first has no predecessor, so it is a
-// gap: three intervals from four readings, never four.
-if (!counterCells.includes('6')) fail(`the intervals do not add up to the day: ${counterCells.join(' | ')}`);
-if (!counterCells.some(c => /3 of 4/.test(c))) fail(`an interval was invented for the first reading: ${counterCells.join(' | ')}`);
-if (!counterRows.some(h => /^Total/.test(h))) fail(`deltas are a quantity and do add up: ${counterRows.join(', ')}`);
-// A counter that re-based went 9 → 1, which is not "minus 8 kWh": nothing was measured across that step,
-// so it is a gap. Charting the negative would draw a bar below the line that never happened.
-const gridCounter = query(sec, 'tr', true).find(r => r.textContent.includes('Grid'));
-const gridCells = query(gridCounter, 'td', true).map(t => t.textContent);
-if (gridCells.some(c => /-/.test(c))) fail(`a counter re-base was charted as negative energy: ${gridCells.join(' | ')}`);
-// 1 + 2 = 3 kWh over the two intervals that have both readings.
-if (!gridCells.includes('3')) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
-if (!gridCells.some(c => /2 of 4/.test(c))) fail(`the re-based step was counted as measured: ${gridCells.join(' | ')}`);
-
-// …and the page says that is what it did.
-if (!/changed between two readings/.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
-// kWh is not "estimated" from readings that are already kWh.
-if (counterRows.some(h => /kWh, est/.test(h))) fail('energy readings were integrated as if they were watts');
-
-console.log('trends: several charts over the chosen range; hovering a day says what is on it; tags select '
-  + 'what to chart; days with no reading are empty slots, counted, and left out of totals that say how '
-  + 'many days they cover; today counts, faded and marked as unfinished; within a day it charts power on a '
-  + 'clock axis and integrates kWh; yesterday is '
-  + 'the period before this one, fits on screen whole, is labelled every other hour and says which window '
-  + 'it charted; what is charted is chosen and described in the same words; a cumulative counter is not '
-  + 'summed; the table sorts');
-
-// The lifetime counter has to be choosable, and has to be differenced like any other counter. It was
-// filtered out of the picker as "unchartable", which left the EmonCMS backend unusable for energy: `energy`
-// is the feed it stores and `energy_d` is one it was never given, so the only selectable energy metric
-// was the one that could never answer.
-const lifetimeOpt = (metricSel.children || []).find(o => o.value === 'energy');
-if (!lifetimeOpt) fail(`the lifetime counter cannot be charted: ${(metricSel.children || []).map(o => o.value).join(', ')}`);
-// Two metrics both reading "energy (kWh)" is not a choice anyone can make.
-const optText = (metricSel.children || []).map(o => o.textContent);
-if (new Set(optText).size !== optText.length) fail(`two metrics offer the same label: ${optText.join(' | ')}`);
-
-metricSel.value = 'energy';
-metricSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-if (!/metric=energy(&|$)/.test(decodeURIComponent(asked.at(-1)))) fail(`the lifetime counter was not asked for: ${asked.at(-1)}`);
-const lifeRow = query(sec, 'tr', true).find(r => r.textContent.includes('Solar'));
-const lifeCells = query(lifeRow, 'td', true).map(t => t.textContent);
-if (lifeCells.includes('16')) fail(`the lifetime counter itself is charted, not its differences: ${lifeCells.join(' | ')}`);
-if (lifeCells.includes('52')) fail(`the lifetime counter's readings were summed: ${lifeCells.join(' | ')}`);
-
+console.log('trends: the whole system over the chosen window — grid, self-sufficiency and where the energy came from, '
+  + 'signed and netted, with no per-node selection on the page; empty days counted; the interval applies here too');

@@ -475,7 +475,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     /// One value per node per day across a window — the daily totals, kept apart rather than summed.
     /// </summary>
     private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
-                                                IReadOnlyList<string>? labels, string? partialLabel, CancellationToken ct)
+                                                IReadOnlyList<string>? labels, string? partialLabel, CancellationToken ct,
+                                                int? requestedStepSeconds = null)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -523,6 +524,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // The last bar is a period still in progress.
                 partial = partialLabel,
                 stepSeconds = when.Count > 1 ? (int)(when[1] - when[0]).TotalSeconds : 0,
+                // Differs from stepSeconds when the window held more instants than one request samples.
+                requestedStepSeconds,
                 series,
             };
         }
@@ -1753,25 +1756,20 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // ?back=<n> charts a whole earlier period instead — yesterday is back=1.
                 var back = int.TryParse(ctx.Request.Query["back"].ToString(), out var bk) ? Math.Clamp(bk, 0, 366) : 0;
                 (var began, end) = EnergyPeriod.Window(end, dayZone, config.EnergyFlow.Aggregation.PeriodStartHour, back);
-                var stepToday = int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? Math.Clamp(ts, 60, 3600) : 300;
+                var stepToday = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? ts : null, 300);
                 var metricToday = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
-                var sinceStart = new List<DateTime>();
-                for (var t = began; t <= end; t = t.AddSeconds(stepToday)) sinceStart.Add(t);
-                if (sinceStart.Count == 0) sinceStart.Add(end);
-                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricToday, sinceStart,
-                    null, null, ctx.RequestAborted), ConfigSchema.Json);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricToday,
+                    SeriesWindow.Instants(began, end, stepToday), null, null, ctx.RequestAborted, stepToday), ConfigSchema.Json);
             }
 
             if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
             {
-                var step = int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? Math.Clamp(st, 60, 3600) : 300;
-                var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, 60 * 48));
+                var step = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? st : null, 300);
+                var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, SeriesWindow.MaxMinutes));
                 var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
-                var steps = new List<DateTime>();
-                for (var t = end - span; t <= end; t = t.AddSeconds(step)) steps.Add(t);
                 // No labels: a moment within a day is named in the viewer's zone.
-                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow, steps,
-                    null, null, ctx.RequestAborted), ConfigSchema.Json);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow,
+                    SeriesWindow.Instants(end - span, end, step), null, null, ctx.RequestAborted, step), ConfigSchema.Json);
             }
 
             // Up to a year: "this year" is a period people ask for, and 92 days silently answered a different
@@ -1779,8 +1777,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 366) : 30;
             var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
 
-            // Each day read at its own rollover, not at whatever time of day it happens to be now.
             var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
+
+            // A step asks for samples through the days rather than one total per day.
+            if (int.TryParse(ctx.Request.Query["step"].ToString(), out var sd))
+            {
+                var stepDays = SeriesWindow.ClampStep(sd, 3600);
+                var (from, _) = EnergyPeriod.Window(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days - 1);
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
+                    SeriesWindow.Instants(from, end, stepDays), null, null, ctx.RequestAborted, stepDays), ConfigSchema.Json);
+            }
+
+            // Each day read at its own rollover, not at whatever time of day it happens to be now.
             var periods = EnergyPeriod.RecentPeriodEnds(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days);
             return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
                 periods.Select(p => p.AtUtc).ToList(), periods.Select(p => p.Day).ToList(),

@@ -4,6 +4,25 @@ import { readFile } from 'node:fs/promises';
 const css = await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8');
 const fail = (m) => { console.error('css check FAILED: ' + m); process.exit(1); };
 
+// Every custom property the GUI reads has to be one the theme defines. An undefined one resolves to nothing
+// without an error: rank-chart labels were filled var(--text), which no theme sets, and drew black on the
+// dark panel.
+{
+  const { readdir } = await import('node:fs/promises');
+  const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map(m => m[1]));
+  const srcDir = new URL('./src/', import.meta.url);
+  const files = (await readdir(srcDir, { recursive: true })).filter(f => f.endsWith('.ts'));
+  const undefinedUses = [];
+  for (const f of files) {
+    const text = await readFile(new URL(f, srcDir), 'utf8');
+    for (const m of text.matchAll(/var\((--[a-z0-9-]+)/gi))
+      if (!defined.has(m[1])) undefinedUses.push(`${f}: ${m[1]}`);
+  }
+  for (const m of css.matchAll(/var\((--[a-z0-9-]+)/gi))
+    if (!defined.has(m[1])) undefinedUses.push(`styles.css: ${m[1]}`);
+  if (undefinedUses.length) fail(`custom properties used but never defined: ${[...new Set(undefinedUses)].join(', ')}`);
+}
+
 // A sticky element resolves `top` against its nearest SCROLLING ancestor, and `overflow:hidden` makes one.
 // `table.ld` carried it for the rounded corners, so Chrome pinned every table header 56px down INSIDE its
 // own table, on top of the first row — measured at inset=57px against inset=1px without it (#395). Firefox

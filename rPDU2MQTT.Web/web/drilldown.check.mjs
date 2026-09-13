@@ -68,16 +68,16 @@ const solarTile = tiles.find(t => t.classList.has('solar'));
 if (!solarTile) fail('no solar tile to click');
 if (!solarTile.classList.has('is-linked')) fail('the solar tile is not marked as leading anywhere');
 
-// The click: it should land on Trends, over today, charting only the solar nodes.
+// The click: it should land on Node Trends, over today, charting only the solar nodes.
 asked.length = 0;
 solarTile.dispatch('click', { preventDefault() {} });
 await new Promise(r => setTimeout(r, 150));
 
-const trendsLink = navTo('Trends');
-if (!trendsLink.classList.has('active')) fail('clicking the solar tile did not open the Trends page');
+const trendsLink = navTo('Node Trends');
+if (!trendsLink.classList.has('active')) fail('clicking the solar tile did not open the Node Trends page');
 
 const todayAsked = asked.find(u => u.includes('today=1'));
-if (!todayAsked) fail(`Trends did not ask for today; it asked: ${JSON.stringify(asked)}`);
+if (!todayAsked) fail(`Node Trends did not ask for today; it asked: ${JSON.stringify(asked)}`);
 
 // The chart must be scoped to the nodes the tile was summed from — both MPPTs, and not the grid.
 const trendsSection = query(getEl('sections'), '.section', true).find(s => s.classList.has('active'));
@@ -94,10 +94,10 @@ if (!off('Grid'))
 navTo('Energy').click();
 await new Promise(r => setTimeout(r, 60));
 asked.length = 0;
-navTo('Trends').click();
+navTo('Node Trends').click();
 await new Promise(r => setTimeout(r, 120));
 if (asked.some(u => u.includes('today=1')) && asked.length > 0 && !todayAsked)
   fail('the focus request was applied twice — a stale selection would override what the reader picked');
 
-console.log('drilldown: the Solar tile is marked as a link, opens Trends over today, charts exactly the '
+console.log('drilldown: the Solar tile is marked as a link, opens Node Trends over today, charts exactly the '
   + 'nodes its figure was summed from (both MPPTs, not the grid), and the request is spent once');

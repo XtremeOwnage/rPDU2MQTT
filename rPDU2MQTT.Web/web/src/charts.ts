@@ -49,22 +49,30 @@ export function barChart(opts: {
   fitTo?: number;
   /// Chart height in px. Defaults to 240 — the size that suits a chart with others stacked under it.
   height?: number;
+  /// A second series drawn as a line over the bars, on the same axis.
+  overlay?: Line;
+  /// Bars, lines or filled areas. Lines are never stacked.
+  kind?: 'bar' | 'line' | 'area';
 }): { svg: any; gaps: number } {
-  const { days, lines, units, stacked } = opts;
+  const { days, lines, units } = opts;
+  const kind = opts.kind || 'bar';
+  const stacked = opts.stacked && kind !== 'line';
   const has = (d: number) => lines.some(l => l.values[d] != null);
   const dayTotal = (d: number) => lines.reduce((s, l) => s + (l.values[d] ?? 0), 0);
 
   // Charge and export are negative quantities — energy leaving in the other direction.
   const posOf = (d: number) => lines.reduce((s, l) => s + Math.max(0, l.values[d] ?? 0), 0);
   const negOf = (d: number) => lines.reduce((s, l) => s + Math.min(0, l.values[d] ?? 0), 0);
+  const overlay = opts.overlay;
+  const overlaid = overlay ? overlay.values.filter((v): v is number => v != null) : [];
   const peak = opts.max ?? Math.max(
     stacked ? Math.max(...days.map((_, d) => (has(d) ? posOf(d) : 0)), 0)
       : Math.max(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
+    ...overlaid, 0);
   const trough = Math.min(
     stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
       : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
-    0);
+    ...overlaid, 0);
   const span = (peak - trough) || 1;
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
@@ -102,7 +110,7 @@ export function barChart(opts: {
       title.textContent = `${day} — no reading from the history backend`;
       g.appendChild(title);
       svg.appendChild(g);
-    } else {
+    } else if (kind === 'bar') {
       // The period still in progress is drawn faded: it is a real reading of an unfinished day.
       const partial = day === opts.partial;
       const paint = (attrs: Record<string, any>) => {
@@ -150,6 +158,56 @@ export function barChart(opts: {
     }
   });
 
+  // Lines and areas are drawn as runs of consecutive readings, so a gap breaks them instead of bridging it.
+  if (kind !== 'bar') {
+    const up = days.map(() => 0), down = days.map(() => 0);
+    const cx = (d: number) => (x(d) + slot / 2).toFixed(1);
+    lines.forEach(l => {
+      const base: number[] = [], top: number[] = [];
+      days.forEach((_, d) => {
+        const v = l.values[d];
+        if (v == null) { base.push(NaN); top.push(NaN); return; }
+        const from = stacked ? (v >= 0 ? up[d] : down[d]) : 0;
+        base.push(from); top.push(from + v);
+        if (stacked) { if (v >= 0) up[d] = from + v; else down[d] = from + v; }
+      });
+      let run: number[] = [];
+      const flush = () => {
+        if (run.length === 1)
+          svg.appendChild(svgTag('circle', { cx: cx(run[0]), cy: y(top[run[0]]).toFixed(1), r: 2.5, fill: l.color, class: kind === 'area' ? 'trend-area' : 'trend-line' }));
+        else if (run.length > 1 && kind === 'area') {
+          const pts = run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`)
+            .concat([...run].reverse().map(d => `${cx(d)},${y(base[d]).toFixed(1)}`));
+          svg.appendChild(svgTag('polygon', { points: pts.join(' '), fill: l.color, 'fill-opacity': stacked ? 0.85 : 0.35, stroke: l.color, 'stroke-width': 1, class: 'trend-area' }));
+        } else if (run.length > 1)
+          svg.appendChild(svgTag('polyline', { points: run.map(d => `${cx(d)},${y(top[d]).toFixed(1)}`).join(' '), fill: 'none', stroke: l.color, 'stroke-width': 2, class: 'trend-line' }));
+        run = [];
+      };
+      days.forEach((_, d) => { if (Number.isNaN(top[d])) flush(); else run.push(d); });
+      flush();
+    });
+  }
+
+  // The overlay is drawn as runs of consecutive readings, so a gap breaks the line instead of bridging it.
+  if (overlay) {
+    let run: string[] = [];
+    const flush = () => {
+      if (run.length > 1)
+        svg.appendChild(svgTag('polyline', { points: run.join(' '), fill: 'none', stroke: overlay.color, 'stroke-width': 2, class: 'trend-overlay' }));
+      else if (run.length === 1) {
+        const [cx, cy] = run[0].split(',');
+        svg.appendChild(svgTag('circle', { cx, cy, r: 2, fill: overlay.color, class: 'trend-overlay' }));
+      }
+      run = [];
+    };
+    days.forEach((_, d) => {
+      const v = overlay.values[d];
+      if (v == null) flush();
+      else run.push(`${(x(d) + slot / 2).toFixed(1)},${y(v).toFixed(1)}`);
+    });
+    flush();
+  }
+
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
 
@@ -179,6 +237,14 @@ export function barChart(opts: {
           c.appendChild(el('div', { class: 'nh-row nh-total' },
             el('span', { class: 'nh-name', text: 'Total' }),
             el('span', { class: 'nh-num', text: `${formatNum(Number(dayTotal(d).toFixed(2)))} ${units}` })));
+      }
+      if (overlay) {
+        const v = overlay.values[d];
+        c.appendChild(el('div', { class: 'nh-row' },
+          el('span', { class: 'nh-name' },
+            el('span', { class: 'trend-swatch', style: { background: overlay.color } }),
+            `${overlay.label} (overlay)`),
+          el('span', { class: 'nh-num', text: v == null ? '—' : `${formatNum(Number(v.toFixed(2)))} ${units}` })));
       }
       c.classList.add('show');
       const px = (ev && ev.clientX) || 0, py = (ev && ev.clientY) || 0;
@@ -305,4 +371,65 @@ export function sparkline(opts: {
   hit.addEventListener('mouseleave', () => hideCard());
 
   return svg;
+}
+
+/// A ranking: one horizontal bar per item, largest first, labelled with its value and an optional note.
+export function rankChart(opts: {
+  items: { label: string; value: number; color: string; note?: string }[];
+  units: string;
+  /// Draw a ring of each item's share of the total beside the bars.
+  share?: boolean;
+  fitTo?: number;
+}): { svg: any; gaps: number } {
+  const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const total = items.reduce((s, i) => s + i.value, 0);
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(420, opts.fitTo) : 720;
+  const rowH = 22, padT = 8;
+  const ring = opts.share && total > 0 ? 180 : 0;
+  const H = Math.max(ring, padT * 2 + items.length * rowH);
+  const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart trend-rank' });
+  const pct = (v: number) => `${(v / total * 100).toFixed(1)}%`;
+  const titled = (node: any, text: string) => {
+    const t = document.createElementNS(SVG, 'title');
+    t.textContent = text;
+    node.appendChild(t);
+    return node;
+  };
+  const describe = (it: typeof items[number]) =>
+    `${it.label}: ${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+
+  if (ring) {
+    const cx = ring / 2, cy = H / 2, r = 70, inner = 42;
+    const at = (rad: number, a: number) => `${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`;
+    let angle = -Math.PI / 2;
+    items.forEach(it => {
+      const frac = it.value / total;
+      // A whole ring cannot be drawn as one arc, so it is two circles instead.
+      if (frac >= 0.9999) {
+        svg.appendChild(titled(svgTag('circle', { cx, cy, r: (r + inner) / 2, fill: 'none', stroke: it.color, 'stroke-width': r - inner, class: 'trend-slice' }), describe(it)));
+        return;
+      }
+      const end = angle + frac * 2 * Math.PI;
+      const large = frac > 0.5 ? 1 : 0;
+      const d = `M ${at(r, angle)} A ${r} ${r} 0 ${large} 1 ${at(r, end)} L ${at(inner, end)} A ${inner} ${inner} 0 ${large} 0 ${at(inner, angle)} Z`;
+      svg.appendChild(titled(svgTag('path', { d, fill: it.color, class: 'trend-slice' }), describe(it)));
+      angle = end;
+    });
+  }
+
+  const x0 = ring + 160, valueW = 190;
+  const barMax = Math.max(40, W - x0 - valueW - 8);
+  const top = items.length ? items[0].value : 1;
+  items.forEach((it, i) => {
+    const yy = padT + i * rowH;
+    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
+    name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
+    svg.appendChild(name);
+    const w = Math.max(1, (it.value / top) * barMax);
+    svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
+    const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
+    value.textContent = `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+    svg.appendChild(value);
+  });
+  return { svg, gaps: 0 };
 }
