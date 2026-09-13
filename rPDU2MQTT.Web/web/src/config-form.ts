@@ -275,6 +275,11 @@ function renderMap(node: any, mapObj: any, path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+  // A worked entry says more than another sentence about the shape of one.
+  if (node.mapExample) {
+    const ex = document.createElement('div'); ex.className = 'desc map-example'; ex.textContent = node.mapExample;
+    fs.appendChild(ex);
+  }
   const entries = document.createElement('div'); fs.appendChild(entries);
 
   // A map of scalars is one row per entry — key, value, Remove. Only a map of objects (each PDU, each
@@ -310,6 +315,16 @@ function renderMap(node: any, mapObj: any, path: string[]) {
     };
     entries.appendChild(wrap);
   };
+
+  // Rows of two unlabelled boxes say nothing about which side is which, so the columns are headed — and
+  // the heading stands whether or not there are any entries yet to read it against.
+  if (inline) {
+    const head = document.createElement('div'); head.className = 'map-head';
+    const k = document.createElement('span'); k.textContent = node.keyLabel || 'Key';
+    const v = document.createElement('span'); v.textContent = node.valueLabel || 'Value';
+    head.appendChild(k); head.appendChild(v);
+    entries.appendChild(head);
+  }
 
   Object.keys(mapObj).forEach(drawEntry);
   const add = btn('+ Add');

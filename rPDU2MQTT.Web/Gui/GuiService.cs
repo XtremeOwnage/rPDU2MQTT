@@ -1285,6 +1285,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     ok = true,
                     scanned = samples.Count,
                     profile = profile.Id,
+                    tags = profile.Tags ?? [],
                     readings = matches.Select(m => new
                     {
                         id = Core.Flow.MqttDiscoveryImport.NodeId($"{profile.Id}_{m.Device}_{m.Measure}"),
@@ -1309,7 +1310,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new
             {
                 ok = true,
-                profile = new { id = p.Id, label = p.Label, filter = p.Filter, pattern = p.Pattern, jsonField = p.JsonField, metrics = p.Metrics },
+                profile = new { id = p.Id, label = p.Label, filter = p.Filter, pattern = p.Pattern, jsonField = p.JsonField, metrics = p.Metrics, tags = p.Tags ?? [] },
             }, ConfigSchema.Json);
         });
 

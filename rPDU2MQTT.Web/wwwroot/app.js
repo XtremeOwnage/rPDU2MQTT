@@ -7258,12 +7258,15 @@ function renderDiscoverPanel(flow     , rerender            )              {
       toast(`'${p.label}' is already in ImportProfiles.`, false);
       return;
     }
-    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined, Metrics: p.metrics });
+    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined,
+                Metrics: p.metrics, Tags: (p.tags || []).length ? [...p.tags] : undefined });
     toast(`Copied '${p.label}' into MQTT → ImportProfiles. Edit it there, then Save.`, true);
     refreshDirty();
   };
 
   let found        = [];
+  // Tags the chosen profile puts on everything imported through it, beside the one typed above.
+  let profileTags           = [];
   scan.onclick = async () => {
     const src = srcSel.value;
     note.textContent = 'Scanning the broker…';
@@ -7272,7 +7275,9 @@ function renderDiscoverPanel(flow     , rerender            )              {
       : '/api/mqtt/importable/pattern?profile=' + encodeURIComponent(src));
     if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
     found = r.body.readings || [];
-    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
+    profileTags = r.body.tags || [];
+    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`
+      + (profileTags.length ? ` This profile tags what it imports: ${profileTags.join(', ')}.` : '');
     render(found);
   };
 
@@ -7327,7 +7332,8 @@ function renderDiscoverPanel(flow     , rerender            )              {
         Mode: 'none',
         Sources: sources,
       };
-      if (tag) node.Tags = [tag];
+      const tags = [...new Set([...(tag ? [tag] : []), ...profileTags])];
+      if (tags.length) node.Tags = tags;
       nodes.push(node);
       added++;
       // One link per node, in the direction chosen.
@@ -9141,6 +9147,11 @@ function renderMap(node     , mapObj     , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+  // A worked entry says more than another sentence about the shape of one.
+  if (node.mapExample) {
+    const ex = document.createElement('div'); ex.className = 'desc map-example'; ex.textContent = node.mapExample;
+    fs.appendChild(ex);
+  }
   const entries = document.createElement('div'); fs.appendChild(entries);
 
   // A map of scalars is one row per entry — key, value, Remove. Only a map of objects (each PDU, each
@@ -9176,6 +9187,16 @@ function renderMap(node     , mapObj     , path          ) {
     };
     entries.appendChild(wrap);
   };
+
+  // Rows of two unlabelled boxes say nothing about which side is which, so the columns are headed — and
+  // the heading stands whether or not there are any entries yet to read it against.
+  if (inline) {
+    const head = document.createElement('div'); head.className = 'map-head';
+    const k = document.createElement('span'); k.textContent = node.keyLabel || 'Key';
+    const v = document.createElement('span'); v.textContent = node.valueLabel || 'Value';
+    head.appendChild(k); head.appendChild(v);
+    entries.appendChild(head);
+  }
 
   Object.keys(mapObj).forEach(drawEntry);
   const add = btn('+ Add');

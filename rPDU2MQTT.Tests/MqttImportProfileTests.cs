@@ -115,4 +115,19 @@ public class MqttImportProfileTests
         Assert.Equal("energy", m.Metric);
         Assert.Equal("period", m.Accumulation);
     }
+
+    /// <summary>A profile's own tags travel with it, so what it imports can be filtered as a group.</summary>
+    [Fact]
+    public void AProfileCarriesItsDefaultTags()
+    {
+        var profile = Tasmota();
+        profile.Tags = ["imported", "  ", "tasmota"];
+
+        var p = MqttTopicProfile.Resolve("custom:Tasmota", Configured(profile));
+
+        // Blank entries are dropped: a tag nothing can match is a filter that silently never fires.
+        Assert.Equal(["imported", "tasmota"], p!.Tags);
+        // A built-in tags nothing of its own.
+        Assert.Empty(MqttTopicProfile.Resolve("esphome", null)!.Tags ?? []);
+    }
 }

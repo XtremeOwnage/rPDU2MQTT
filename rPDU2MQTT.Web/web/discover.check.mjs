@@ -29,7 +29,7 @@ const importable = {
 // Topic-matched readings state no unit: esphome/.../energy_d/state = 3063.783 is Wh or kWh depending only
 // on the value. The panel must ask rather than assume.
 const pattern = {
-  ok: true, scanned: 68, profile: 'esphome',
+  ok: true, scanned: 68, profile: 'esphome', tags: ['esphome'],
   readings: [
     { id: 'esphome_deep_freezer_energy_d', label: 'deep_freezer energy_d', device: 'deep_freezer',
       topic: 'esphome/devices/deep_freezer/sensor/energy_d/state', metric: 'energy', unit: null,
@@ -70,6 +70,7 @@ const builtIn = {
     id: 'esphome', label: 'ESPHome', filter: 'esphome/#',
     pattern: 'esphome/devices/{device}/sensor/{measure}/state', jsonField: null,
     metrics: { power: 'realpower', energy_d: 'energy_d' },
+    tags: ['esphome'],
   },
 };
 
@@ -244,6 +245,10 @@ if (!lifetime) fail('the lifetime energy reading was not imported');
 if ((lifetime.Sources || [])[0]?.Accumulation !== 'lifetime')
   fail(`an energy counter nothing spoke for was imported as '${(lifetime.Sources || [])[0]?.Accumulation}'`);
 
+// A profile's own tags go on what it imports, beside the tag typed on the page.
+if (JSON.stringify((imported.Tags || []).slice().sort()) !== JSON.stringify(['esphome', 'imported']))
+  fail(`the profile's tags did not reach the imported node: ${JSON.stringify(imported.Tags)}`);
+
 // One node per device with a source per metric, not one node per reading. The fridge publishes two.
 const fridge = cfg.EnergyFlow.Nodes.find(n => n.Id === 'fridge');
 if (!fridge) fail(`no node for the fridge device: ${cfg.EnergyFlow.Nodes.map(n => n.Id).join(', ')}`);
@@ -287,6 +292,7 @@ const copied = ((cfg.MQTT || {}).ImportProfiles || []).find(p => p.Name === 'ESP
 if (!copied) fail('copying a built-in profile put nothing into MQTT.ImportProfiles');
 if (copied.Pattern !== 'esphome/devices/{device}/sensor/{measure}/state') fail('the copied profile lost its pattern');
 if (!copied.Metrics || copied.Metrics.power !== 'realpower') fail('the copied profile lost its metric map');
+if (JSON.stringify(copied.Tags) !== JSON.stringify(['esphome'])) fail(`the copied profile lost its tags: ${JSON.stringify(copied.Tags)}`);
 
 console.log('discover: both scans import; refusals shown with a reason; units default and set in bulk; a '
   + 'profile\'s daily-reset counters import as such and the rest default to lifetime; imported nodes are '

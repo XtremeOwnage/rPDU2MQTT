@@ -12,6 +12,30 @@ public sealed class ItemAllowedValuesAttribute : Attribute
 }
 
 /// <summary>
+/// What a dictionary's two columns hold, so a map of scalars can head its rows instead of leaving the
+/// reader to infer which side is which from the values in them.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class MapColumnsAttribute : Attribute
+{
+    public MapColumnsAttribute(string keyLabel, string valueLabel, string? example = null)
+    {
+        KeyLabel = keyLabel;
+        ValueLabel = valueLabel;
+        Example = example;
+    }
+
+    /// <summary>Heading over the key column.</summary>
+    public string KeyLabel { get; }
+
+    /// <summary>Heading over the value column.</summary>
+    public string ValueLabel { get; }
+
+    /// <summary>A worked entry, shown with the description — the fastest way to say what a row is.</summary>
+    public string? Example { get; }
+}
+
+/// <summary>
 /// The items of this collection are metric names, whichever ones this build understands.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property)]

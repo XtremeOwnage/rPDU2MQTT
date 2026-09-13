@@ -42,6 +42,16 @@ const page = await navTo('MQTT');
 const rows = query(page, '.map-entry', true).filter(r => r.classList.contains('inline'));
 if (rows.length !== 2) fail(`expected a row per mapped measure, got ${rows.length}`);
 
+// Two unlabelled boxes say nothing about which side is which, so the columns are headed from the schema.
+const heads = query(page, '.map-head', true);
+if (!heads.length) fail('a map of scalars has no column headings');
+const headText = heads[0].textContent;
+if (!/Captured \{measure\}/.test(headText) || !/Metric it supplies/.test(headText))
+  fail(`the columns are not headed with what they hold: "${headText}"`);
+// And a worked entry, which says more than another sentence about the shape of one.
+if (!query(page, '.map-example', true).some(e => /sensor\/power\/state/.test(e.textContent)))
+  fail('the map does not show a worked example');
+
 // One line: the key, the control it names, and Remove — no card, no second label saying "value".
 const row = rows.find(r => query(r, 'input', true).some(i => i.value === 'power'));
 if (!row) fail('no row for the "power" measure');
@@ -69,6 +79,6 @@ const metrics = config.MQTT.ImportProfiles[0].Metrics;
 if (metrics.power !== undefined) fail(`editing a renamed entry put the old key back: ${JSON.stringify(metrics)}`);
 if (metrics.watts !== 'apparentpower') fail(`the renamed entry did not take the edit: ${JSON.stringify(metrics)}`);
 
-console.log('maprow: a dictionary of scalars is one row per entry — key, value, Remove — a dictionary of '
-  + 'objects keeps its card, and a renamed key keeps its own value');
+console.log('maprow: a dictionary of scalars is one row per entry — key, value, Remove — under headings and a '
+  + 'worked example from the schema, a dictionary of objects keeps its card, and a renamed key keeps its own value');
 process.exit(0);

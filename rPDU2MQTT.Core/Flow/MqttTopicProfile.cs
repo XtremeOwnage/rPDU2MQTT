@@ -31,9 +31,10 @@ public static class MqttTopicProfile
     /// <param name="Pattern">Slash-delimited, with <c>{device}</c>, <c>{measure}</c> and <c>+</c> wildcards.</param>
     /// <param name="JsonField">Field holding the value, when the payload is JSON.</param>
     /// <param name="Metrics">Measure -> our metric name. Measures absent from this map are not readings we roll up.</param>
+    /// <param name="Tags">Tags every node imported through this profile carries.</param>
     public sealed record Profile(
         string Id, string Label, string Filter, string Pattern, string? JsonField,
-        IReadOnlyDictionary<string, string> Metrics);
+        IReadOnlyDictionary<string, string> Metrics, IReadOnlyList<string>? Tags = null);
 
     private static readonly Dictionary<string, string> EsphomeMetrics = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -91,7 +92,8 @@ public static class MqttTopicProfile
 
         return new Profile(id, string.IsNullOrWhiteSpace(p.Name) ? "Custom" : p.Name, filter, p.Pattern.Trim(),
                            string.IsNullOrWhiteSpace(p.JsonField) ? null : p.JsonField.Trim(),
-                           new Dictionary<string, string>(p.Metrics ?? new(), StringComparer.OrdinalIgnoreCase));
+                           new Dictionary<string, string>(p.Metrics ?? new(), StringComparer.OrdinalIgnoreCase),
+                           (p.Tags ?? new()).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList());
     }
 
     /// <summary>
