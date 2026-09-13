@@ -164,12 +164,15 @@ export function barChart(opts: {
     const cx = (d: number) => (x(d) + slot / 2).toFixed(1);
     lines.forEach(l => {
       const base: number[] = [], top: number[] = [];
+      // A series with no positive reading stacks below the line, zeros included; -0 >= 0 would put them on top.
+      const below = !l.values.some(v => v != null && v > 0) && l.values.some(v => v != null && v < 0);
       days.forEach((_, d) => {
         const v = l.values[d];
         if (v == null) { base.push(NaN); top.push(NaN); return; }
-        const from = stacked ? (v >= 0 ? up[d] : down[d]) : 0;
+        const down_ = below || v < 0;
+        const from = stacked ? (down_ ? down[d] : up[d]) : 0;
         base.push(from); top.push(from + v);
-        if (stacked) { if (v >= 0) up[d] = from + v; else down[d] = from + v; }
+        if (stacked) { if (down_) down[d] = from + v; else up[d] = from + v; }
       });
       let run: number[] = [];
       const flush = () => {
