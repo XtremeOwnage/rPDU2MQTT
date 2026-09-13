@@ -25,7 +25,8 @@ const { sandbox, getEl } = makeDom({
         { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy' },
         { topic: 'solar/inverter/temperature/state', value: 41, unit: '°C' },
         // A JSON payload: the topic list reports its numeric fields as dotted paths, not objects.
-        { topic: 'shelly/em/status', payload: '{"volts":230.5,"amps":4.25}', isJson: true, fields: ['volts', 'amps'] },
+        { topic: 'shelly/em/status', payload: '{"volts":230.5,"amps":4.25,"watts":975.6,"hertz":60.01}', isJson: true,
+          fields: ['volts', 'amps', 'watts', 'hertz'] },
       ] }
     : url.includes('/api/modbus/scan') ? { ok: true, rows: [{ register: 0, uint16: 230, int16: 230, uint32: 15073280, float32: null }] }
     : url.includes('/api/flow') ? { ok: true, nodes: [], links: [] }
@@ -69,7 +70,7 @@ if (!button(explorer, 'Create node').disabled) fail('Create node is enabled with
 // A JSON payload is readable in full: 48 truncated characters say nothing, and there is nowhere else to look.
 const jsonRow = treeRow('shelly/em/status');
 if (!jsonRow) fail('no row for the JSON topic');
-if (!/JSON · 2 field\(s\)/.test(jsonRow.textContent)) fail(`the JSON row does not count its fields: ${jsonRow.textContent}`);
+if (!/JSON · 4 field\(s\)/.test(jsonRow.textContent)) fail(`the JSON row does not count its fields: ${jsonRow.textContent}`);
 const valueCell = query(jsonRow, 'td', true).find(td => td.classList.contains('num'));
 if (!valueCell.onclick) fail('the value cannot be opened');
 valueCell.onclick();
@@ -82,6 +83,31 @@ if (!/volts = 230.5/.test(payload.textContent) || !/amps = 4.25/.test(payload.te
   fail(`the payload does not list its fields and values: ${payload.textContent}`);
 valueCell.onclick();
 if (query(explorer, '.payload-row', true).length) fail('the payload would not close again');
+
+// Copying, because reading a topic off the screen and retyping it into a pattern or a binding is how a
+// typo gets in. The path, what it last published, and a JSON field's own path.
+const copied = [];
+sandbox.navigator.clipboard.writeText = (t) => { copied.push(t); return Promise.resolve(); };
+const copyButtons = (row) => query(row, 'button', true).filter(b => b.textContent === '⧉');
+const [topicCopy, valueCopy] = copyButtons(jsonRow);
+if (!topicCopy || !valueCopy) fail(`a topic row has no copy buttons: ${copyButtons(jsonRow).length}`);
+await topicCopy.onclick();
+if (copied[0] !== 'shelly/em/status') fail(`copying the topic gave "${copied[0]}"`);
+await valueCopy.onclick();
+// In full: the cell shows the first 48 characters, and copying that instead is the bug this states.
+if (copied[1] !== '{"volts":230.5,"amps":4.25,"watts":975.6,"hertz":60.01}') fail(`copying the value gave "${copied[1]}"`);
+
+// A branch copies its path, which is what a subscription filter or a profile pattern is built from.
+await copyButtons(treeRow('solar'))[0].onclick();
+if (copied[2] !== 'solar') fail(`copying a branch path gave "${copied[2]}"`);
+
+// And inside the payload, each field copies the dotted path a binding asks for.
+valueCell.onclick();
+const fieldCopy = copyButtons(query(explorer, '.payload-row', true)[0]);
+if (fieldCopy.length < 4) fail(`the payload has no per-field copy: ${fieldCopy.length} buttons`);
+await fieldCopy[fieldCopy.length - 1].onclick();
+if (copied[3] !== 'hertz') fail(`copying a field path gave "${copied[3]}"`);
+valueCell.onclick();
 
 // Ticking that topic offers its fields by name — they arrive as strings here, not objects.
 const jsonBox = query(jsonRow, 'input[type=checkbox]', true)[0];
@@ -148,7 +174,7 @@ if (!src || src.Type !== 'modbus' || src.Connection !== 'meter_gw' || src.Regist
   fail(`the Modbus binding is not the ticked register: ${JSON.stringify(src)}`);
 
 console.log('explorer: the MQTT page shows the broker as a topic tree that opens, closes and ticks a whole branch, '
-  + 'reads a JSON payload in full with its fields and values, '
+  + 'reads a JSON payload in full with its fields and values, copies a topic, a value and a field path, '
   + 'condenses a single-child chain into one row, the Modbus page explores registers, ticked readings become a new node with a binding each, an existing id is '
   + 'refused, and the node opens in the node editor');
 process.exit(0);

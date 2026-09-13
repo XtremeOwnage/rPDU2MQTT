@@ -1,5 +1,5 @@
 // Explorers on the MQTT and Modbus pages: browse what is out there, tick readings, and create a node from them.
-import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
+import { api, btn, copyText, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { METRICS, NODE_KINDS, MODBUS_REGISTER_TYPES, metricLabel } from '../flow-vocabulary.js';
@@ -24,6 +24,19 @@ function explorerFooter(picked: Map<string, PickedBinding>, suggestId: () => str
   bar.append(create, clear, count);
   sync();
   return { bar, sync };
+}
+
+/// A small copy affordance for the row it sits in: the topic, or what the topic last published.
+function copyButton(title: string, what: string, text: () => string) {
+  const b = el('button', { class: 'copy-btn', text: '⧉', title }) as HTMLButtonElement;
+  b.onclick = async (ev: any) => {
+    // The value cell opens the payload when clicked; copying is not that.
+    ev?.stopPropagation?.();
+    const value = text();
+    const ok = await copyText(value);
+    toast(ok ? `Copied the ${what}.` : `Could not copy — your browser blocked it. The ${what} is: ${value}`, ok);
+  };
+  return b;
 }
 
 /// The numeric fields of a JSON payload, from either shape the API returns: the topic list gives dotted
@@ -192,6 +205,11 @@ export function openMqttExplorer() {
   const payloadRow = (t: any) => {
     const cell = el('td');
     cell.setAttribute('colspan', '4');
+    const bar = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', margin: '0 0 6px' } });
+    bar.append(el('code', { class: 'desc', style: { margin: '0' }, text: t.topic }),
+               copyButton(`Copy the topic ${t.topic}`, 'topic', () => t.topic),
+               copyButton('Copy the whole payload', 'payload', () => t.payload || String(t.value ?? '')));
+    cell.appendChild(bar);
     cell.appendChild(el('pre', { class: 'payload', text: prettyPayload(t.payload || String(t.value ?? '')) }));
     const names = fieldNames(t.fields);
     if (names.length) {
@@ -201,7 +219,9 @@ export function openMqttExplorer() {
       list.appendChild(el('span', { text: 'Numeric fields: ' }));
       names.forEach((f, i) => {
         const v = parsed ? atPath(parsed, f) : undefined;
-        list.append(el('code', { text: f + (v != null && typeof v !== 'object' ? ` = ${v}` : '') }));
+        // The field's own path, which is what a binding's JSON field asks for.
+        const code = el('code', { text: f + (v != null && typeof v !== 'object' ? ` = ${v}` : '') });
+        list.append(code, copyButton(`Copy the field path ${f}`, 'field path', () => f));
         if (i < names.length - 1) list.append(', ');
       });
       cell.appendChild(list);
@@ -238,6 +258,9 @@ export function openMqttExplorer() {
     }
     name.append(el('code', { text: label }));
     if (branch) name.append(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: `${topics.length} topic(s)` }));
+    // The path, ready to paste into a profile pattern, a subscription or a binding.
+    name.append(copyButton(branch ? `Copy the path ${n.path}` : `Copy the topic ${n.path}`,
+                           branch ? 'path' : 'topic', () => n.path));
 
     const t = n.row;
     const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
@@ -246,6 +269,8 @@ export function openMqttExplorer() {
       value.title = t.payload || '';
       value.style.cursor = 'pointer';
       value.onclick = () => { showing.has(t.topic) ? showing.delete(t.topic) : showing.add(t.topic); draw(); };
+      // What it last published, in full — not the 48 characters the cell has room for.
+      value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
     tbody.appendChild(el('tr', {},
       el('td', {}, box),
