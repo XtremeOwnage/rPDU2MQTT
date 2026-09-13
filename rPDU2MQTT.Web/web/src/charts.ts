@@ -422,7 +422,7 @@ export function rankChart(opts: {
   const top = items.length ? items[0].value : 1;
   items.forEach((it, i) => {
     const yy = padT + i * rowH;
-    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--text)', 'font-size': 12 });
+    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
     name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
     svg.appendChild(name);
     const w = Math.max(1, (it.value / top) * barMax);

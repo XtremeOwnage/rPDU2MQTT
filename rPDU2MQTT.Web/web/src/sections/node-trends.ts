@@ -188,8 +188,8 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const ranked = own.map((s: any) => ({ s, value: amount(s) })).filter(x => x.value != null && x.value > 0)
       .sort((a, b) => (b.value as number) - (a.value as number));
     if (ranked.length >= 2) {
-      p.section('Largest nodes',
-        `Each selected node's share of their combined ${estimated ? 'energy, estimated from the power samples' : p.metricName()}. `
+      p.section('Total energy by node',
+        `Each selected node's total energy over the window${estimated ? ', estimated from its power readings' : ''}, and its share of the selected nodes' total. `
         + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
         rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value as number, color: color(x.s) })),
           units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
@@ -202,8 +202,9 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         : null;
     }).filter(Boolean) as { label: string; value: number; color: string; note: string }[];
     if (peaks.length) {
-      p.section(p.perDay() ? 'Busiest day per node' : 'Peak per node',
-        'The highest reading each selected node reached in the window, and when.',
+      p.section(p.perDay() ? 'Peak daily energy by node' : `Peak ${p.metricName()} by node`,
+        p.perDay() ? 'Each selected node\'s highest daily energy in the window, and the day it occurred.'
+          : `Each selected node's highest ${p.metricName()} reading in the window, and when it occurred.`,
         rankChart({ items: peaks, units, fitTo: width }), []);
     }
 
@@ -220,7 +221,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         }),
       }));
       if (lines.length) {
-        p.section('By hour of day',
+        p.section(`Average ${p.metricName()} by hour of day`,
           (body.deltas ? `Energy per hour, averaged over every day in the window` : `Average ${p.metricName()} in each hour, over every day in the window`)
           + (lines.length < own.length ? ', for the five largest selected nodes.' : '.') + ' An hour with no reading is left empty.',
           barChart({ days: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`), lines,
@@ -237,8 +238,8 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         return value > 0 ? { label: s.label || s.node, value, color: color(s), note: `${v.length} samples` } : null;
       }).filter(Boolean) as { label: string; value: number; color: string; note: string }[];
       if (floor.length) {
-        p.section('Always on',
-          'The power each selected node draws at its quietest: the reading 5% of its samples fall below. A node that never drops to zero is a load that never switches off.',
+        p.section('Base load by node',
+          'Each selected node\'s base load: the power that 5% of its readings fall below. A base load above zero is power drawn even at the node\'s quietest.',
           rankChart({ items: floor, units, fitTo: width }), []);
       }
     }

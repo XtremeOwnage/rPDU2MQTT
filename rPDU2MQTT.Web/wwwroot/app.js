@@ -1760,7 +1760,7 @@ function rankChart(opts
   const top = items.length ? items[0].value : 1;
   items.forEach((it, i) => {
     const yy = padT + i * rowH;
-    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--text)', 'font-size': 12 });
+    const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
     name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
     svg.appendChild(name);
     const w = Math.max(1, (it.value / top) * barMax);
@@ -7780,8 +7780,8 @@ function addNodeTrendsSection(nav     , sections     ) {
     const ranked = own.map((s     ) => ({ s, value: amount(s) })).filter(x => x.value != null && x.value > 0)
       .sort((a, b) => (b.value          ) - (a.value          ));
     if (ranked.length >= 2) {
-      p.section('Largest nodes',
-        `Each selected node's share of their combined ${estimated ? 'energy, estimated from the power samples' : p.metricName()}. `
+      p.section('Total energy by node',
+        `Each selected node's total energy over the window${estimated ? ', estimated from its power readings' : ''}, and its share of the selected nodes' total. `
         + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
         rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value          , color: color(x.s) })),
           units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
@@ -7794,8 +7794,9 @@ function addNodeTrendsSection(nav     , sections     ) {
         : null;
     }).filter(Boolean)                                                                   ;
     if (peaks.length) {
-      p.section(p.perDay() ? 'Busiest day per node' : 'Peak per node',
-        'The highest reading each selected node reached in the window, and when.',
+      p.section(p.perDay() ? 'Peak daily energy by node' : `Peak ${p.metricName()} by node`,
+        p.perDay() ? 'Each selected node\'s highest daily energy in the window, and the day it occurred.'
+          : `Each selected node's highest ${p.metricName()} reading in the window, and when it occurred.`,
         rankChart({ items: peaks, units, fitTo: width }), []);
     }
 
@@ -7812,7 +7813,7 @@ function addNodeTrendsSection(nav     , sections     ) {
         }),
       }));
       if (lines.length) {
-        p.section('By hour of day',
+        p.section(`Average ${p.metricName()} by hour of day`,
           (body.deltas ? `Energy per hour, averaged over every day in the window` : `Average ${p.metricName()} in each hour, over every day in the window`)
           + (lines.length < own.length ? ', for the five largest selected nodes.' : '.') + ' An hour with no reading is left empty.',
           barChart({ days: Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`), lines,
@@ -7829,8 +7830,8 @@ function addNodeTrendsSection(nav     , sections     ) {
         return value > 0 ? { label: s.label || s.node, value, color: color(s), note: `${v.length} samples` } : null;
       }).filter(Boolean)                                                                   ;
       if (floor.length) {
-        p.section('Always on',
-          'The power each selected node draws at its quietest: the reading 5% of its samples fall below. A node that never drops to zero is a load that never switches off.',
+        p.section('Base load by node',
+          'Each selected node\'s base load: the power that 5% of its readings fall below. A base load above zero is power drawn even at the node\'s quietest.',
           rankChart({ items: floor, units, fitTo: width }), []);
       }
     }
