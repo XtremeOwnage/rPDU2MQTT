@@ -51,7 +51,7 @@ export function overlay(title: string, onClose?: () => void): { body: any, close
   return { body, close };
 }
 
-async function fetchTopics(q: string, limit = 50, filter?: string): Promise<any> {
+export async function fetchTopics(q: string, limit = 50, filter?: string): Promise<any> {
   const f = filter ? `&filter=${encodeURIComponent(filter)}` : '';
   const r = await api(`/api/mqtt/topics?q=${encodeURIComponent(q || '')}&limit=${limit}${f}`);
   return (r.body && r.body.ok) ? r.body : { topics: [], listening: false, indexed: 0 };

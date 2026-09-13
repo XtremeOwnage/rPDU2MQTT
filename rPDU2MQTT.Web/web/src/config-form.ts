@@ -15,6 +15,7 @@ import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImpor
 import { addNodeDataSection } from './sections/nodedata.js';
 import { addTrendsSection } from './sections/trends.js';
 import { renderPduTags } from './sections/pdu-tags.js';
+import { openMqttExplorer, openRegisterExplorer } from './sections/explorer.js';
 import { addNodeTrendsSection } from './sections/node-trends.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
@@ -865,10 +866,10 @@ function sectionActions(node: any) {
     bar.appendChild(b);
   };
 
-  if (node.key === 'MQTT') add('Test MQTT connection', testMqtt);
+  if (node.key === 'MQTT') { add('Test MQTT connection', testMqtt); add('Explore topics', async () => openMqttExplorer()); }
   else if (node.key === 'History') add('Test history backend', testHistory);
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
-  else if (node.key === 'Modbus') add('Test connections', testModbus);
+  else if (node.key === 'Modbus') { add('Test connections', testModbus); add('Explore registers', async () => openRegisterExplorer()); }
   else if (node.key === 'EmonCMS') {
     add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
     add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
