@@ -38,6 +38,14 @@ public sealed class EmonCmsFeedSync
         return merged;
     }
 
+    /// <summary>The PDU instance each cached device was polled from, keyed by device name.</summary>
+    private Dictionary<string, string> Instances()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in snapshots.All) foreach (var d in s.Data.Devices) map[d.Entity_Name] = s.InstanceId;
+        return map;
+    }
+
     /// <summary>Reconcile using the snapshot cache as the data source (the periodic Worker path).</summary>
     public Task<EmonFeedSyncResult> ReconcileAsync(CancellationToken ct) => ReconcileAsync(Merged(), ct);
 
@@ -56,7 +64,7 @@ public sealed class EmonCmsFeedSync
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
         var flow = config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
-        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow, Instances());
 
         var inputList = await GetInputs(ct);
         var inputs = inputList.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
@@ -136,6 +144,13 @@ public sealed class EmonCmsFeedSync
             string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag!,
         };
         if (!string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag)) tags.Add(e.Feeds.Virtual.Tag!);
+        // Per-node and per-PDU tags, as the current plan files feeds under them.
+        var merged = Merged();
+        if (Core.Flow.FlowTiers.Any(merged, config))
+        {
+            var planned = EmonCmsFeedPlanner.BuildDesired(merged, config, e.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null, Instances());
+            foreach (var t in planned.Feeds.Select(x => x.Tag).Concat(planned.Virtuals.Select(x => x.Tag))) tags.Add(t);
+        }
 
         int deleted = 0; var errors = new List<string>();
         foreach (var f in (await GetFeeds(ct)).Where(f => tags.Contains(f.Tag ?? "")))
@@ -169,10 +184,13 @@ public sealed class EmonCmsFeedSync
         if (e.Transport == EmonCmsTransport.Mqtt && MetricsHelper.EmonCmsSplitsByDevice(config))
             foreach (var r in MetricsHelper.EnumerateReadings(merged)) nodes.Add(r.Device);
 
-        var storageTag = string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag!;
-        var virtualTag = string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag) ? null : e.Feeds.Virtual.Tag;
-        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
-        return EmonCmsFeedPlanner.Stale(posted, nodes, desired, await GetInputs(ct), await GetFeeds(ct), storageTag, virtualTag);
+        // Every tag the plan files feeds under is this bridge's, so per-node and per-PDU tags are covered too.
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow, Instances());
+        var storageTags = new HashSet<string>(desired.Feeds.Select(x => x.Tag), StringComparer.OrdinalIgnoreCase)
+            { string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag! };
+        var virtualTags = new HashSet<string>(desired.Virtuals.Select(x => x.Tag), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag)) virtualTags.Add(e.Feeds.Virtual.Tag!);
+        return EmonCmsFeedPlanner.Stale(posted, nodes, desired, await GetInputs(ct), await GetFeeds(ct), storageTags, virtualTags);
     }
 
     /// <summary>Delete the stale inputs, feeds, or both, as <see cref="FindStaleAsync"/> finds them now.</summary>

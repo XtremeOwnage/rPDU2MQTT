@@ -7,6 +7,24 @@ public class EmonCmsStaleTests
 {
     private static readonly HashSet<string> OurNode = new(StringComparer.OrdinalIgnoreCase) { "rpdu2mqtt" };
 
+    private static HashSet<string> Tags(params string[] tags) => new(tags, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Feeds filed under a per-PDU tag are this bridge's too, so a stale one under it is found.</summary>
+    [Fact]
+    public void AFeedUnderAnyTagThePlanUses_IsOurs()
+    {
+        var feeds = new List<EmonFeed>
+        {
+            new(10, "solar_realpower", "rpdu2mqtt"),
+            new(11, "old_outlet_power", "rack_pdu_1"),
+            new(12, "old_outlet_power", "IotaWatt"),
+        };
+
+        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), [], feeds, Tags("rpdu2mqtt", "rack_pdu_1"), Tags("Virtual"));
+
+        Assert.Equal([11], plan.Feeds.Select(f => f.Id));
+    }
+
     private static EmonDesiredState Desired(params string[] feeds)
         => new(feeds.Select(n => new DesiredFeed(n, "rpdu2mqtt", 0, 10, 1)).ToList(), [], [new DesiredVirtualFeed("Solar power", "Virtual", "solar_realpower")]);
 
@@ -20,7 +38,7 @@ public class EmonCmsStaleTests
             new(3, "old_outlet_power", "1:12", "IotaWatt"),
         };
 
-        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), inputs, [], "rpdu2mqtt", "Virtual");
+        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), inputs, [], Tags("rpdu2mqtt"), Tags("Virtual"));
 
         Assert.Null(plan.Refused);
         Assert.Equal([2], plan.Inputs.Select(i => i.Id));
@@ -36,7 +54,7 @@ public class EmonCmsStaleTests
             new(12, "old_outlet_power", "IotaWatt"),
         };
 
-        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), [], feeds, "rpdu2mqtt", "Virtual");
+        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), [], feeds, Tags("rpdu2mqtt"), Tags("Virtual"));
 
         Assert.Equal([11], plan.Feeds.Select(f => f.Id));
     }
@@ -56,7 +74,7 @@ public class EmonCmsStaleTests
             new(30, "house_power", "IotaWatt"),
         };
 
-        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), [], feeds, "rpdu2mqtt", "Virtual");
+        var plan = EmonCmsFeedPlanner.Stale(["solar_realpower"], OurNode, Desired("solar_realpower"), [], feeds, Tags("rpdu2mqtt"), Tags("Virtual"));
 
         Assert.Equal([11, 21, 22], plan.Feeds.Select(f => f.Id).OrderBy(x => x));
     }
@@ -65,7 +83,7 @@ public class EmonCmsStaleTests
     [Fact]
     public void BeforeTheFirstPoll_NothingIsOffered()
     {
-        var plan = EmonCmsFeedPlanner.Stale([], OurNode, Desired(), [new(1, "anything", "", "rpdu2mqtt")], [new(10, "anything", "rpdu2mqtt")], "rpdu2mqtt", "Virtual");
+        var plan = EmonCmsFeedPlanner.Stale([], OurNode, Desired(), [new(1, "anything", "", "rpdu2mqtt")], [new(10, "anything", "rpdu2mqtt")], Tags("rpdu2mqtt"), Tags("Virtual"));
 
         Assert.NotNull(plan.Refused);
         Assert.Empty(plan.Inputs);

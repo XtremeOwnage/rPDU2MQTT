@@ -204,6 +204,12 @@ spec:
                     RemapManufacturer:
                       type: boolean
                       description: Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.
+                    EmonCmsTag:
+                      type: string
+                      description: "EmonCMS tag this PDU's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {device} (the PDU's name), {instance} (this entry's key), e.g. '{device}'."
+                    EmonCmsVirtualTag:
+                      type: string
+                      description: "EmonCMS tag this PDU's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {device}, {instance}, e.g. '{device}-virtual'."
                 description: PDU instances to bridge, keyed by instance name.
               HomeAssistant:
                 type: object
@@ -888,6 +894,12 @@ spec:
                           items:
                             type: string
                           description: Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.
+                        EmonCmsTag:
+                          type: string
+                          description: "EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}."
+                        EmonCmsVirtualTag:
+                          type: string
+                          description: "EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}."
                         StorageKwh:
                           type: number
                           description: 'For a battery node: usable storage capacity in kWh (display metadata; optional).'

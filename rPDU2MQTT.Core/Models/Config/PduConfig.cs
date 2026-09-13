@@ -55,4 +55,16 @@ public class PduConfig
     [YamlMember(Alias = "RemapMake", DefaultValuesHandling = DefaultValuesHandling.OmitNull, Description = "Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.")]
     [Display(Name = "Remap Manufacturer column", Description = "Replace each entity's Manufacturer (in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer.")]
     public bool RemapManufacturer { get; set; }
+
+    [DefaultValue(null)]
+    [YamlMember(Alias = "EmonCmsTag", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Name = "EmonCMS tag", Description = "EmonCMS tag this PDU's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {device} (the PDU's name), {instance} (this entry's key), e.g. '{device}'.")]
+    [TemplateVariables("device", "instance")]
+    public string? EmonCmsTag { get; set; }
+
+    [DefaultValue(null)]
+    [YamlMember(Alias = "EmonCmsVirtualTag", DefaultValuesHandling = DefaultValuesHandling.OmitNull)]
+    [Display(Name = "EmonCMS virtual-feed tag", Description = "EmonCMS tag this PDU's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {device}, {instance}, e.g. '{device}-virtual'.")]
+    [TemplateVariables("device", "instance")]
+    public string? EmonCmsVirtualTag { get; set; }
 }

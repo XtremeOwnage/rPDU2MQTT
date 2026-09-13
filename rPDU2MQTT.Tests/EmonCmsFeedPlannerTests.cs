@@ -350,4 +350,62 @@ public class EmonCmsFeedPlannerTests
 
         Assert.Contains(steps, x => x.Process == ProcessSlot.KwhToKwhd && x.Feed == "rack_pdu_1_o0_energy_d");
     }
+
+    /// <summary>A PDU's own tags, templated with its name, file its storage and virtual feeds apart from the defaults.</summary>
+    [Fact]
+    public void BuildDesired_APdusOwnTags_AreTemplatedWithItsName()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"));
+        var config = Base();
+        Enable(config, "realpower", 10);
+        config.EmonCMS.Feeds.Virtual.Enabled = true;
+        config.Pdus["pdu1"] = new PduConfig { EmonCmsTag = "{device}", EmonCmsVirtualTag = "{device}-virtual" };
+        config.Pdus["pdu2"] = new PduConfig();
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config, null, new Dictionary<string, string> { ["rack_pdu_1"] = "pdu1" });
+
+        Assert.Equal("rack_pdu_1", Assert.Single(d.Feeds).Tag);
+        Assert.Equal("rack_pdu_1-virtual", Assert.Single(d.Virtuals).Tag);
+    }
+
+    /// <summary>A PDU with no tags of its own keeps the EmonCMS defaults.</summary>
+    [Fact]
+    public void BuildDesired_APduWithoutItsOwnTags_UsesTheDefaults()
+    {
+        var data = OnePdu("o0", "Server A", ("realpower", "60"));
+        var config = Base();
+        Enable(config, "realpower", 10);
+        config.EmonCMS.Feeds.Virtual.Enabled = true;
+        config.EmonCMS.Feeds.Virtual.Tag = "Virtual";
+        config.Pdus["pdu1"] = new PduConfig { EmonCmsTag = "{device}" };
+        config.Pdus["pdu2"] = new PduConfig();
+
+        var d = EmonCmsFeedPlanner.BuildDesired(data, config, null, new Dictionary<string, string> { ["rack_pdu_1"] = "pdu2" });
+
+        Assert.Equal("rpdu2mqtt", Assert.Single(d.Feeds).Tag);
+        Assert.Equal("Virtual", Assert.Single(d.Virtuals).Tag);
+    }
+
+    /// <summary>A configured node's own tag files its feeds; the node beside it keeps the default.</summary>
+    [Fact]
+    public void BuildDesired_ANodesOwnTag_FilesOnlyThatNodesFeeds()
+    {
+        var config = Base();
+        Enable(config, "realpower", 10);
+        config.EmonCMS.ExportFlowNodes = true;
+        config.EnergyFlow = new EnergyFlowConfig();
+        config.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "solar", Label = "Solar", Kind = "solar", EmonCmsTag = "{kind}-feeds" });
+        config.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "grid", Label = "Grid", Kind = "grid" });
+        var live = new Fixed(new() { ["solar|realpower"] = 4200, ["grid|realpower"] = 300 });
+
+        var d = EmonCmsFeedPlanner.BuildDesired(new PduData(), config, Core.Flow.FlowTiers.Graphs(new PduData(), config, live));
+
+        Assert.Equal("solar-feeds", d.Feeds.Single(x => x.Name.StartsWith("solar")).Tag);
+        Assert.Equal("rpdu2mqtt", d.Feeds.Single(x => x.Name.StartsWith("grid")).Tag);
+    }
+
+    private sealed class Fixed(Dictionary<string, double> v) : Core.Flow.IFlowValueSource
+    {
+        public bool TryGetValue(string node, string metric, out double value) => v.TryGetValue(node + "|" + metric, out value);
+    }
 }

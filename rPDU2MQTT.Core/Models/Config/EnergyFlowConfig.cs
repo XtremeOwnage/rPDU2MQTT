@@ -213,6 +213,14 @@ public class EnergyFlowNode
     [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
     public List<string> Tags { get; set; } = new();
 
+    [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]
+    [TemplateVariables("node", "label", "kind")]
+    public string? EmonCmsTag { get; set; }
+
+    [Description("EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}.")]
+    [TemplateVariables("node", "label", "kind")]
+    public string? EmonCmsVirtualTag { get; set; }
+
     /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
     /// diagram/state-of-charge display; does not affect the power roll-up.</summary>
     [Description("For a battery node: usable storage capacity in kWh (display metadata; optional).")]
