@@ -21,7 +21,7 @@ namespace rPDU2MQTT.Integrations.EmonCms;
 /// </para>
 /// </summary>
 public sealed class EmonCmsIntegration
-    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher, IStatusProvider
+    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher, IStatusProvider, IIntegrationApi
 {
     private static readonly HttpClient http = new();
     private readonly Config cfg;
@@ -171,12 +171,65 @@ public sealed class EmonCmsIntegration
         return message;
     }
 
+    /// <summary>Removes the inputs this bridge no longer sends and the feeds it no longer provisions.</summary>
     public async Task<string> SweepAsync(ExportPass pass, CancellationToken ct)
     {
         var message = "Another instance is managing EmonCMS feeds.";
         await lease.RunIfOwnerAsync("emoncms:feeds",
-            async token => message = (await feeds.DeleteAllAsync(token)).Message, ct);
+            async token => message = (await feeds.DeleteStaleAsync(pass.Snapshot, inputs: true, feeds: true, token)).Message, ct);
         return message;
+    }
+
+    // --- Cleanup actions ------------------------------------------------------------------------------
+
+    public IReadOnlyList<IntegrationAction> Actions =>
+    [
+        new("stale", "Find old inputs and feeds",
+            "List the inputs under this bridge's node that it no longer sends, and the feeds under its tags that the current configuration no longer provisions.",
+            ActionEffect.Read,
+            async (_, ct) =>
+            {
+                var plan = await feeds.FindStaleAsync(feeds.Merged(), ct);
+                return new
+                {
+                    ok = plan.Refused is null,
+                    message = plan.Refused,
+                    inputs = plan.Inputs.Select(i => $"{i.Node}/{i.Name}").ToList(),
+                    feeds = plan.Feeds.Select(f => $"{f.Tag}/{f.Name}").ToList(),
+                };
+            }),
+        new("sweep-inputs", "Delete old inputs",
+            "Delete the inputs under this bridge's node that it no longer sends. No feed data is stored on an input.",
+            ActionEffect.Write,
+            (_, ct) => CleanAsync(inputs: true, feedsToo: false, ct)),
+        new("sweep-feeds", "Delete old feeds",
+            "Delete the feeds under this bridge's tags that the current configuration no longer provisions, and their stored history.",
+            ActionEffect.Destructive,
+            (_, ct) => CleanAsync(inputs: false, feedsToo: true, ct)),
+        new("delete-all-feeds", "Delete all feeds",
+            "Delete every feed under this bridge's tags, and their stored history.",
+            ActionEffect.Destructive,
+            async (_, ct) =>
+            {
+                object? result = new { ok = false, message = "Another instance is managing EmonCMS feeds." };
+                await lease.RunIfOwnerAsync("emoncms:feeds", async token =>
+                {
+                    var r = await feeds.DeleteAllAsync(token);
+                    result = new { ok = r.Ok, message = r.Message };
+                }, ct);
+                return result;
+            }),
+    ];
+
+    private async Task<object?> CleanAsync(bool inputs, bool feedsToo, CancellationToken ct)
+    {
+        object? result = new { ok = false, message = "Another instance is managing EmonCMS feeds." };
+        await lease.RunIfOwnerAsync("emoncms:feeds", async token =>
+        {
+            var r = await feeds.DeleteStaleAsync(feeds.Merged(), inputs, feedsToo, token);
+            result = new { ok = r.Ok, message = r.Message };
+        }, ct);
+        return result;
     }
 
     // --- History --------------------------------------------------------------------------------------

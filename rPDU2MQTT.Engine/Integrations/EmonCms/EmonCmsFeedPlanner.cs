@@ -5,7 +5,7 @@ using rPDU2MQTT.Models.PDU;
 namespace rPDU2MQTT.Integrations.EmonCms;
 
 /// <summary>An EmonCMS input as returned by <c>input/get_inputs</c>: its id, key and processlist.</summary>
-public sealed record EmonInput(int Id, string Name, string ProcessList);
+public sealed record EmonInput(int Id, string Name, string ProcessList, string? Node = null);
 
 /// <summary>An EmonCMS feed as returned by <c>feed/list</c>.</summary>
 public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessList = null);
@@ -25,6 +25,9 @@ public sealed record DesiredInputLog(string InputName, IReadOnlyList<DesiredProc
 
 /// <summary>A friendly virtual feed sourced from a storage feed.</summary>
 public sealed record DesiredVirtualFeed(string Name, string Tag, string SourceFeed);
+
+/// <summary>Inputs and feeds EmonCMS holds for this bridge that it no longer sends or provisions, or why none were looked for.</summary>
+public sealed record EmonStalePlan(IReadOnlyList<EmonInput> Inputs, IReadOnlyList<EmonFeed> Feeds, string? Refused = null);
 
 /// <summary>The full set of EmonCMS objects the config wants, before reconciling against what exists.</summary>
 public sealed record EmonDesiredState(
@@ -61,10 +64,39 @@ public static class EmonCmsFeedPlanner
     /// can build the graphs should pass them.
     /// </param>
     public static EmonDesiredState BuildDesired(
-        PduData data, Config config, IReadOnlyList<(string Metric, Core.Flow.FlowGraph Graph)>? flow = null)
+        PduData data, Config config, IReadOnlyList<(string Metric, Core.Flow.FlowGraph Graph)>? flow = null,
+        IReadOnlyDictionary<string, string>? instances = null)
     {
         var f = config.EmonCMS.Feeds;
-        var tag = string.IsNullOrWhiteSpace(f.Tag) ? config.EmonCMS.Node : f.Tag!;
+        var defaultTag = string.IsNullOrWhiteSpace(f.Tag) ? config.EmonCMS.Node : f.Tag!;
+        // The PDU instance each device was polled from; with one PDU configured it can only be that one.
+        string? InstanceOf(string device) => instances is not null && instances.TryGetValue(device, out var i) ? i
+            : config.Pdus.Count == 1 ? config.Pdus.Keys.First() : null;
+
+        // An override's tags, or the EmonCMS defaults; a blank virtual tag follows the storage tag it pairs with.
+        (string Storage, string Virtual) Tags(string? storage, string? virtualTag)
+        {
+            var s = string.IsNullOrWhiteSpace(storage) ? defaultTag : storage.Trim();
+            var v = !string.IsNullOrWhiteSpace(virtualTag) ? virtualTag.Trim() : string.IsNullOrWhiteSpace(f.Virtual.Tag) ? s : f.Virtual.Tag!;
+            return (s, v);
+        }
+        (string Storage, string Virtual) ForDevice(string device, string? instance)
+        {
+            instance = string.IsNullOrEmpty(instance) ? InstanceOf(device) : instance;
+            config.Pdus.TryGetValue(instance ?? "", out var pdu);
+            string? Expand(string? t) => t?.Replace("{device}", device).Replace("{instance}", instance ?? "");
+            return Tags(Expand(pdu?.EmonCmsTag), Expand(pdu?.EmonCmsVirtualTag));
+        }
+        // A PDU or outlet node is filed as its PDU's feeds are; a configured node by its own override.
+        (string Storage, string Virtual) ForNode(Core.Flow.FlowNode node)
+        {
+            var parts = node.Id.Split(':');
+            if (parts.Length >= 2 && parts[0] is "pdu" or "outlet")
+                return ForDevice(parts[1], null);
+            var cfgNode = config.EnergyFlow.Nodes.FirstOrDefault(n => string.Equals(n.Id, node.Id, StringComparison.OrdinalIgnoreCase));
+            string? Expand(string? t) => t?.Replace("{node}", node.Id).Replace("{label}", node.Label).Replace("{kind}", node.Kind);
+            return Tags(Expand(cfgNode?.EmonCmsTag), Expand(cfgNode?.EmonCmsVirtualTag));
+        }
         var byType = new Dictionary<string, Models.Config.EmonCmsFeedTypeConfig>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in f.Types) if (!string.IsNullOrWhiteSpace(t.Type)) byType[t.Type.Trim()] = t;
 
@@ -87,6 +119,7 @@ public static class EmonCmsFeedPlanner
                 var inputName = MetricsHelper.EmonCmsInputName(r, config);
                 if (!seenInputs.Add(inputName)) continue;
 
+                var (tag, virtualTagOfItem) = ForDevice(r.Device, r.InstanceId);
                 var storageName = MetricsHelper.EmonCmsStorageFeedName(r, config);
                 feeds[storageName] = new DesiredFeed(storageName, tag,
                     (int)(typeCfg.Engine ?? f.Engine), typeCfg.IntervalSeconds, DataType: 1);
@@ -138,7 +171,7 @@ public static class EmonCmsFeedPlanner
                 if (f.Virtual.Enabled)
                 {
                     var friendly = MetricsHelper.EmonCmsVirtualFeedName(r, config);
-                    var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                    var virtualTag = virtualTagOfItem;
                     if (!(string.Equals(friendly, storageName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
                         virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, storageName);
                 }
@@ -173,6 +206,8 @@ public static class EmonCmsFeedPlanner
                 var hasEnergy = energyMetric is not null && have.Contains(energyMetric);
                 // Sources neither: still exported, and the power it is given is what the rest derives from.
                 if (!hasPower && !hasEnergy) hasPower = true;
+
+                var (tag, virtualTagOfNode) = ForNode(node);
 
                 string? FeedFor(string? metric, int dataType)
                 {
@@ -227,7 +262,7 @@ public static class EmonCmsFeedPlanner
                     {
                         if (metric is null || feedName is null) continue;
                         var friendly = MetricsHelper.EmonCmsFlowFeedName(node.Label, metric, config);
-                        var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                        var virtualTag = virtualTagOfNode;
                         if (!(string.Equals(friendly, feedName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
                             virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, feedName);
                     }
@@ -249,6 +284,7 @@ public static class EmonCmsFeedPlanner
                     if (!(sourced.TryGetValue(t.Node.Id, out var reports) && reports.Contains(metric))) continue;
                     var inputName = MetricsHelper.EmonCmsFlowInputName(t.Node.Id, t.Node.Label, t.Node.Kind, metric, config);
                     if (!seenInputs.Add(inputName)) continue;
+                    var (tag, virtualTagOfTier) = ForNode(t.Node);
 
                     feeds[inputName] = new DesiredFeed(inputName, tag,
                         (int)(typeCfg.Engine ?? f.Engine), typeCfg.IntervalSeconds, DataType: 1);
@@ -257,7 +293,7 @@ public static class EmonCmsFeedPlanner
                     if (f.Virtual.Enabled)
                     {
                         var friendly = MetricsHelper.EmonCmsFlowFeedName(t.Node.Label, metric, config);
-                        var virtualTag = string.IsNullOrWhiteSpace(f.Virtual.Tag) ? tag : f.Virtual.Tag!;
+                        var virtualTag = virtualTagOfTier;
                         if (!(string.Equals(friendly, inputName, StringComparison.Ordinal) && string.Equals(virtualTag, tag, StringComparison.Ordinal)))
                             virtuals[friendly] = new DesiredVirtualFeed(friendly, virtualTag, inputName);
                     }
@@ -287,4 +323,44 @@ public static class EmonCmsFeedPlanner
             .Select(st => (st.Process, Feed: feedId(st.Feed)))
             .Where(st => st.Feed is not null)
             .Select(st => $"{st.Process}:{st.Feed}"));
+
+    /// <summary>
+    /// What is stale: an input under one of <paramref name="inputNodes"/> that is not in <paramref name="postedInputs"/>,
+    /// and a feed not in <paramref name="desired"/> that is either under one of <paramref name="storageTags"/> or is a virtual
+    /// feed under one of <paramref name="virtualTags"/> reading one of those feeds or a feed that no longer exists.
+    /// </summary>
+    public static EmonStalePlan Stale(
+        IReadOnlyCollection<string> postedInputs, IReadOnlySet<string> inputNodes, EmonDesiredState desired,
+        IReadOnlyList<EmonInput> inputs, IReadOnlyList<EmonFeed> feeds, IReadOnlySet<string> storageTags, IReadOnlySet<string> virtualTags)
+    {
+        // With nothing sent or planned, everything would look stale; that is a cold start, not a cleanup.
+        if (postedInputs.Count == 0 || desired.Feeds.Count == 0)
+            return new([], [], "Nothing is being sent or provisioned yet, so every input and feed would look stale. Wait for the first poll, then try again.");
+
+        var posted = new HashSet<string>(postedInputs, StringComparer.OrdinalIgnoreCase);
+        var staleInputs = inputs.Where(i => i.Node is not null && inputNodes.Contains(i.Node) && !posted.Contains(i.Name)).ToList();
+
+        var wanted = new HashSet<string>(desired.Feeds.Select(f => f.Name).Concat(desired.Virtuals.Select(v => v.Name)), StringComparer.Ordinal);
+        var byId = feeds.GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First());
+        bool Storage(EmonFeed f) => f.Tag is not null && storageTags.Contains(f.Tag);
+        bool OurVirtual(EmonFeed f)
+        {
+            if (f.Tag is null || !virtualTags.Contains(f.Tag)) return false;
+            return SourceFeedId(f.ProcessList) is { } source && (!byId.TryGetValue(source, out var read) || Storage(read));
+        }
+        var staleFeeds = feeds.Where(f => !wanted.Contains(f.Name) && (Storage(f) || OurVirtual(f))).ToList();
+        return new(staleInputs, staleFeeds);
+    }
+
+    /// <summary>The feed a virtual feed reads: the argument of its first source-feed step, by id_num or key.</summary>
+    public static int? SourceFeedId(string? processList)
+    {
+        foreach (var pair in (processList ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = pair.Split(':', StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && (parts[0] == "53" || parts[0] == ProcessSlot.SourceFeed) && int.TryParse(parts[1], out var id))
+                return id;
+        }
+        return null;
+    }
 }

@@ -6,7 +6,7 @@ import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { tagInput } from './tags.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, cleanupEmonCmsInputs, cleanupEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -870,7 +870,8 @@ function sectionActions(node: any) {
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') add('Test connections', testModbus);
   else if (node.key === 'EmonCMS') {
-    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
+    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
+    add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
     bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
   } else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {

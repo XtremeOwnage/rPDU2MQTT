@@ -467,6 +467,14 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   }), 'Labels for filtering the Energy page, highlighting the diagram and deciding what each destination '
     + 'exports. Type to add one — existing tags complete as you type. A tag never changes a reading.'));
 
+  // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
+  const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
+  emonTag.onchange = () => { node.EmonCmsTag = emonTag.value.trim() || undefined; };
+  grid.appendChild(field('EmonCMS tag', emonTag, 'Tag this node’s EmonCMS feeds are filed under. Blank uses the EmonCMS page’s. {node}, {label} and {kind} are filled in.'));
+  const emonVirtualTag = el('input', { type: 'text', value: node.EmonCmsVirtualTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
+  emonVirtualTag.onchange = () => { node.EmonCmsVirtualTag = emonVirtualTag.value.trim() || undefined; };
+  grid.appendChild(field('EmonCMS virtual-feed tag', emonVirtualTag, 'Tag this node’s EmonCMS virtual feeds are filed under. Blank uses the EmonCMS page’s.'));
+
   // The gauge's ceiling, for the kinds the Energy page draws a dial for.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
     const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });

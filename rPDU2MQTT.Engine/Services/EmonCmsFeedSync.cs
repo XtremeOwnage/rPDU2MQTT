@@ -2,6 +2,7 @@ using System.Text.Json;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
 
@@ -29,13 +30,24 @@ public sealed class EmonCmsFeedSync
         this.live = live;
     }
 
-    /// <summary>Reconcile using the snapshot cache as the data source (the periodic Worker path).</summary>
-    public Task<EmonFeedSyncResult> ReconcileAsync(CancellationToken ct)
+    /// <summary>Every cached snapshot's devices, as one set of PDU data.</summary>
+    public PduData Merged()
     {
         var merged = new PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
-        return ReconcileAsync(merged, ct);
+        return merged;
     }
+
+    /// <summary>The PDU instance each cached device was polled from, keyed by device name.</summary>
+    private Dictionary<string, string> Instances()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in snapshots.All) foreach (var d in s.Data.Devices) map[d.Entity_Name] = s.InstanceId;
+        return map;
+    }
+
+    /// <summary>Reconcile using the snapshot cache as the data source (the periodic Worker path).</summary>
+    public Task<EmonFeedSyncResult> ReconcileAsync(CancellationToken ct) => ReconcileAsync(Merged(), ct);
 
     /// <summary>Reconcile against EmonCMS using the supplied PDU data (lets the GUI button pass data it
     /// resolved with a direct-poll fallback, so it works on a UI-only node with a cold cache).</summary>
@@ -52,7 +64,7 @@ public sealed class EmonCmsFeedSync
             return new(false, "No PDU data yet — wait for the first poll, then try again.");
 
         var flow = config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
-        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow);
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow, Instances());
 
         var inputList = await GetInputs(ct);
         var inputs = inputList.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
@@ -132,6 +144,13 @@ public sealed class EmonCmsFeedSync
             string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag!,
         };
         if (!string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag)) tags.Add(e.Feeds.Virtual.Tag!);
+        // Per-node and per-PDU tags, as the current plan files feeds under them.
+        var merged = Merged();
+        if (Core.Flow.FlowTiers.Any(merged, config))
+        {
+            var planned = EmonCmsFeedPlanner.BuildDesired(merged, config, e.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null, Instances());
+            foreach (var t in planned.Feeds.Select(x => x.Tag).Concat(planned.Virtuals.Select(x => x.Tag))) tags.Add(t);
+        }
 
         int deleted = 0; var errors = new List<string>();
         foreach (var f in (await GetFeeds(ct)).Where(f => tags.Contains(f.Tag ?? "")))
@@ -141,6 +160,63 @@ public sealed class EmonCmsFeedSync
         var msg = $"Deleted {deleted} feed(s) under tag(s) {string.Join(", ", tags)}.";
         if (errors.Count > 0) msg += $" {errors.Count} failed: {string.Join(" | ", errors.Take(3))}";
         return new(errors.Count == 0, msg, deleted);
+    }
+
+    /// <summary>The inputs under this bridge's node(s) it no longer sends, and the feeds under its tags it no longer provisions.</summary>
+    public async Task<EmonStalePlan> FindStaleAsync(PduData merged, CancellationToken ct)
+    {
+        var e = config.EmonCMS;
+        if (string.IsNullOrWhiteSpace(e.Url) || string.IsNullOrWhiteSpace(e.ApiKey))
+            return new([], [], "EmonCMS Url and a read/write ApiKey are required.");
+        if (!Core.Flow.FlowTiers.Any(merged, config))
+            return new([], [], "No PDU data yet — wait for the first poll, then try again.");
+
+        // Input names as the export sends them: every reading, and every flow tier for each exported metric.
+        var posted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in MetricsHelper.EnumerateReadings(merged)) posted.Add(MetricsHelper.EmonCmsInputName(r, config));
+        var flow = e.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null;
+        foreach (var (metric, graph) in flow ?? [])
+            foreach (var t in Core.Flow.FlowTiers.Of(graph, e.NodeTags))
+                posted.Add(MetricsHelper.EmonCmsFlowInputName(t.Node.Id, t.Node.Label, t.Node.Kind, metric, config));
+
+        // The node inputs arrive under: the configured one, and each PDU's own when MQTT splits by device.
+        var nodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { e.Node };
+        if (e.Transport == EmonCmsTransport.Mqtt && MetricsHelper.EmonCmsSplitsByDevice(config))
+            foreach (var r in MetricsHelper.EnumerateReadings(merged)) nodes.Add(r.Device);
+
+        // Every tag the plan files feeds under is this bridge's, so per-node and per-PDU tags are covered too.
+        var desired = EmonCmsFeedPlanner.BuildDesired(merged, config, flow, Instances());
+        var storageTags = new HashSet<string>(desired.Feeds.Select(x => x.Tag), StringComparer.OrdinalIgnoreCase)
+            { string.IsNullOrWhiteSpace(e.Feeds.Tag) ? e.Node : e.Feeds.Tag! };
+        var virtualTags = new HashSet<string>(desired.Virtuals.Select(x => x.Tag), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(e.Feeds.Virtual.Tag)) virtualTags.Add(e.Feeds.Virtual.Tag!);
+        return EmonCmsFeedPlanner.Stale(posted, nodes, desired, await GetInputs(ct), await GetFeeds(ct), storageTags, virtualTags);
+    }
+
+    /// <summary>Delete the stale inputs, feeds, or both, as <see cref="FindStaleAsync"/> finds them now.</summary>
+    public async Task<EmonFeedSyncResult> DeleteStaleAsync(PduData merged, bool inputs, bool feeds, CancellationToken ct)
+    {
+        var plan = await FindStaleAsync(merged, ct);
+        if (plan.Refused is not null) return new(false, plan.Refused);
+
+        int inputsDeleted = 0, feedsDeleted = 0;
+        var errors = new List<string>();
+        if (inputs)
+            foreach (var i in plan.Inputs)
+                try { await PostForm("input/delete.json", new() { ["inputid"] = i.Id.ToString() }, new(), ct); inputsDeleted++; }
+                catch (Exception ex) { errors.Add($"input '{i.Node}/{i.Name}': {ex.Message}"); }
+        if (feeds)
+            foreach (var f in plan.Feeds)
+                try { await PostForm("feed/delete.json", new() { ["id"] = f.Id.ToString() }, new(), ct); feedsDeleted++; }
+                catch (Exception ex) { errors.Add($"feed '{f.Tag}/{f.Name}': {ex.Message}"); }
+
+        var parts = new List<string>();
+        if (inputs) parts.Add($"deleted {inputsDeleted} old input(s)");
+        if (feeds) parts.Add($"deleted {feedsDeleted} old feed(s)");
+        var msg = char.ToUpperInvariant(string.Join(" and ", parts)[0]) + string.Join(" and ", parts)[1..] + ".";
+        if (errors.Count > 0) msg += $" {errors.Count} failed: {string.Join(" | ", errors.Take(3))}";
+        Log.Information($"EmonCMS cleanup: {msg}");
+        return new(errors.Count == 0, msg, feedsDeleted);
     }
 
     private async Task<bool> EnsureFeed(Dictionary<string, EmonFeed> byName, string name, string tag, int engine, int interval, int dataType, CancellationToken ct)
@@ -159,7 +235,7 @@ public sealed class EmonCmsFeedSync
         using var doc = await GetJson("input/list.json", null, ct);
         var list = new List<EmonInput>();
         foreach (var el in doc.RootElement.EnumerateArray())
-            list.Add(new EmonInput(GetInt(el, "id"), GetString(el, "name"), GetString(el, "processList")));
+            list.Add(new EmonInput(GetInt(el, "id"), GetString(el, "name"), GetString(el, "processList"), GetString(el, "nodeid")));
         return list;
     }
 
