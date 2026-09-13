@@ -46,6 +46,13 @@ function setRtState(s: string) {
 // it is down — an "Updating…" that never clears would hide a rollout that actually failed.
 let restartUntil = 0;
 let restartWhy = '';
+const restartWatchers = new Set<() => void>();
+
+/// Told whenever a restart is expected, so something can watch for the bridge coming back.
+export function onExpectRestart(fn: () => void) {
+  restartWatchers.add(fn);
+  return () => restartWatchers.delete(fn);
+}
 
 export function expectRestart(why: string, seconds = 150) {
   restartWhy = why;
@@ -53,6 +60,7 @@ export function expectRestart(why: string, seconds = 150) {
   // Re-render watchers now: the drop usually lands a moment later, but the pill should change the
   // instant the action is taken, not when the socket happens to notice.
   rtStateWatchers.forEach(fn => { try { fn(rtState); } catch { /* as above */ } });
+  restartWatchers.forEach(fn => { try { fn(); } catch { /* as above */ } });
 }
 
 /// The reason we're expecting a gap, or null once the window has passed.

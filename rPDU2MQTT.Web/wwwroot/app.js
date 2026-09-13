@@ -510,6 +510,13 @@ function setRtState(s        ) {
 // it is down — an "Updating…" that never clears would hide a rollout that actually failed.
 let restartUntil = 0;
 let restartWhy = '';
+const restartWatchers = new Set            ();
+
+/// Told whenever a restart is expected, so something can watch for the bridge coming back.
+function onExpectRestart(fn            ) {
+  restartWatchers.add(fn);
+  return () => restartWatchers.delete(fn);
+}
 
 function expectRestart(why        , seconds = 150) {
   restartWhy = why;
@@ -517,6 +524,7 @@ function expectRestart(why        , seconds = 150) {
   // Re-render watchers now: the drop usually lands a moment later, but the pill should change the
   // instant the action is taken, not when the socket happens to notice.
   rtStateWatchers.forEach(fn => { try { fn(rtState); } catch { /* as above */ } });
+  restartWatchers.forEach(fn => { try { fn(); } catch { /* as above */ } });
 }
 
 /// The reason we're expecting a gap, or null once the window has passed.
@@ -10158,11 +10166,65 @@ async function restartNow(settings          ) {
   toast(r.body?.message || (r.ok ? 'Restarting…' : 'Could not restart.'), !!(r.body?.ok ?? r.ok));
 }
 
+// --- Coming back from a restart ----------------------------------------------------------------------
+// The bridge going away is expected — an update, a switch, applying settings. What was not handled is it
+// coming back: the stream stayed down, every page held whatever it had, and the tab sat there stale until
+// someone reloaded it by hand. So the page waits for the bridge and picks itself back up.
+
+let bootVersion                = null;
+let returnWatch      = null;
+let watchingForReturn = false;
+
+/// Poll until the bridge answers again, then carry on where we left off.
+function watchForReturn() {
+  // A flag rather than the timer id: a timer id is only reliably truthy in a browser.
+  if (watchingForReturn) return;
+  watchingForReturn = true;
+  const poll = async () => {
+    let body      = null;
+    // While it is away this throws (connection refused) or answers with an error page; both mean "not yet".
+    try { const r      = await api('/api/status'); body = r && r.ok ? r.body : null; } catch { body = null; }
+    if (!body || !body.version) return;
+    clearInterval(returnWatch);
+    returnWatch = null;
+    watchingForReturn = false;
+    cameBack(body);
+  };
+  returnWatch = setInterval(poll, 2500);
+  setTimeout(poll, 1000);
+}
+
+/// The bridge answered. Reload when it is a different build; otherwise just bring the page up to date.
+function cameBack(body     ) {
+  restartFinished();
+  renderStatus(body);
+
+  const now = body.version || '';
+  if (bootVersion && now && now !== bootVersion) {
+    // Never throw away work the operator has not saved: say what is waiting instead of reloading over it.
+    if (isDirty()) {
+      toast(`The bridge is back on v${now}, but this page is still the old build. Save or discard your `
+          + 'changes, then reload to catch up.', true);
+      return;
+    }
+    toast(`Updated to v${now} — reloading this page.`, true);
+    setTimeout(() => location.reload(), 600);
+    return;
+  }
+
+  toast('The bridge is back.', true);
+  // Sections re-subscribe and refresh off this, the same as a tab switch.
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* sections keep polling */ }
+}
+
 // Paint the app bar from a /api/status body — from the initial fetch, or pushed on the `status` feed.
 function renderStatus(body     ) {
   if (!body) return;
   const set = (id        , fn                  ) => { const e = document.getElementById(id); if (e) fn(e); };
 
+  // What this page was loaded against. A restart that comes back on a different build means the assets in
+  // this tab are the old ones, and no amount of reconnecting fixes that.
+  if (!bootVersion && body.version) bootVersion = body.version;
   set('st-version', e => { e.textContent = 'v' + (body.version || '?'); e.title = body.configSource ? 'Config source: ' + body.configSource : ''; });
   set('st-mqtt', e => {
     e.className = 'pill ' + (body.mqttConnected ? 'good' : 'bad');
@@ -10201,7 +10263,10 @@ function initLiveIndicator() {
     down: ['pill bad', 'Offline', 'The live update stream dropped — retrying. Pages fall back to manual refresh.'],
     idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
   };
+  // Both ways the bridge can go away: one we asked for, and one we only notice by the stream dropping.
+  onExpectRestart(watchForReturn);
   onRealtimeState(s => {
+    if (s === 'down') watchForReturn();
     if (!pill) return;
     // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
     // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
