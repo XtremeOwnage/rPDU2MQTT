@@ -4265,7 +4265,7 @@ function addFlowSection(nav     , sections     ) {
     const links = ensure(flow, 'Links', []);
     ed.innerHTML = '';
 
-    ed.appendChild(el('div', { class: 'desc', text: 'Drag from a node’s right ● onto another node to add a feed (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
+    ed.appendChild(el('div', { class: 'desc', text: 'Drag a node onto another to set what feeds it — the one you drop on becomes its feeder, replacing what it had. Drag from a node’s right ● onto another node to add a feed alongside any it already has (source powers target); click ✕ on a link to remove it. Double-click a custom node to rename it. PDU → outlet links are auto-derived (dashed) until you wire an explicit feeder. Add and configure nodes on the Nodes tab.' }));
 
     const bar2 = el('div', { class: 'ld-toolbar' });
     const save = btn('Save', 'primary');
@@ -4302,7 +4302,11 @@ function addFlowSection(nav     , sections     ) {
     const colX      = {};
     [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
       const outs = outgoing[id] || [];
-      colX[id] = outs.length ? Math.max(0, Math.min(...outs.map((e     ) => colX[e.to])) - 1) : colMemo[id];
+      // Only children already placed count. A cycle (a config wired by hand, or an older build) leaves one
+      // unplaced, and a NaN column put the node in no column at all — every later lookup of its position
+      // was undefined and the page threw instead of drawing.
+      const placed = outs.map((e     ) => colX[e.to]).filter((c     ) => typeof c === 'number');
+      colX[id] = placed.length ? Math.max(0, Math.min(...placed) - 1) : colMemo[id];
     });
     // Never leave an empty left margin if every node pulled off column 0.
     const minC = Math.min(...([...cand.keys()].map(id => colX[id])            ));
@@ -4328,7 +4332,7 @@ function addFlowSection(nav     , sections     ) {
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px', marginTop: '10px', maxHeight: '72vh' } });
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
-    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node’s ● onto another to link.' }));
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas background to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node onto another to set its feeder · drag a node’s ● onto another to add a feed.' }));
     const detachZoom = attachZoom(scroll, svg, W, H);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
     [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
@@ -4341,6 +4345,7 @@ function addFlowSection(nav     , sections     ) {
     const edgeD = (a     , b     ) => { const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, xc = (x1 + x2) / 2; return `M${x1},${y1} C${xc},${y1} ${xc},${y2} ${x2},${y2}`; };
     edges.forEach(e => {
       const a = pos[e.from], b = pos[e.to];
+      if (!a || !b) return;   // nothing to draw between a node that was never placed
       edgeLayer.appendChild(svgEl('path', { d: edgeD(a, b), fill: 'none', stroke: e.custom ? '#5ab0ff' : 'var(--faint)', 'stroke-width': e.custom ? 3.5 : 2, 'stroke-opacity': e.custom ? '0.95' : '0.7', 'stroke-dasharray': e.custom ? '' : '5 4', 'marker-end': `url(#${e.custom ? 'fh-arrow-c' : 'fh-arrow'})`, 'pointer-events': 'none' }));
       if (e.custom) {
         // Drifting dashes along the link, hinting at flow direction.
@@ -4378,8 +4383,14 @@ function addFlowSection(nav     , sections     ) {
     });
 
     // Interactions: drag a node's output port onto another node to add a directed feed.
-    const toUser = (cx        , cy        ) => new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse());
+    // Screen → diagram coordinates. Falls back to the screen point where the browser cannot say (no CTM),
+    // which only costs the rubber-band line its exact anchor.
+    const toUser = (cx        , cy        ) => {
+      try { return new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse()); } catch { return { x: cx, y: cy }; }
+    };
     let linkFrom      = null, tempLine      = null, hovered      = null;
+    // Dragging a node itself, to drop it on whatever should feed it.
+    let dragNode      = null, dragFrom      = null, dragging = false, dragLine      = null;
     // Drag the empty canvas to pan, engaging past a small threshold so a click on a node still registers.
     let panStart      = null, panning = false;
     scroll.style.cursor = 'grab';
@@ -4389,17 +4400,64 @@ function addFlowSection(nav     , sections     ) {
       hovered = id;
       if (hovered && nodeG[hovered]) { const rc = nodeG[hovered].querySelector('rect'); rc.setAttribute('stroke', '#46c46a'); rc.setAttribute('stroke-width', '3'); }
     };
-    const targetUnder = (cx        , cy        ) => { const hit      = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== linkFrom ? gn.dataset.id : null; };
+    const targetUnder = (cx        , cy        , self      ) => { const hit      = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== (self ?? linkFrom) ? gn.dataset.id : null; };
+
+    /// Make `parent` what feeds `child`, in place of whatever fed it before.
+    ///
+    /// Dropping a node on another says "this is where it comes from", so it replaces rather than adds —
+    /// an extra feeder is the ● drag. Replacing is destructive, so existing wiring is named and confirmed.
+    const setParent = (child        , parent        ) => {
+      if (child === parent) return;
+      if (reaches(child, parent)) { toast(`${nm(parent)} is already downstream of ${nm(child)} — that would be a loop.`, false); return; }
+      if (links.some((l     ) => l.From === parent && l.To === child)) { toast(`${nm(parent)} already feeds ${nm(child)}.`, false); return; }
+
+      const existing = links.filter((l     ) => l.To === child);
+      if (existing.length && !confirm(
+        `${nm(child)} is already fed by ${existing.map((l     ) => nm(l.From)).join(', ')}.\n\n`
+        + `Replace that with ${nm(parent)}?\n\n`
+        + `To keep both, cancel and drag ${nm(parent)}’s ● onto ${nm(child)} instead.`)) return;
+      existing.forEach((l     ) => { const i = links.indexOf(l); if (i >= 0) links.splice(i, 1); });
+
+      const derived = autoParent(child);
+      links.push({ From: parent, To: child });
+      toast(existing.length ? `${nm(parent)} now feeds ${nm(child)}, in place of ${existing.map((l     ) => nm(l.From)).join(', ')}.`
+          : derived && derived !== parent ? `${nm(parent)} now feeds ${nm(child)}, in place of the derived ${nm(derived)} link.`
+          : `${nm(parent)} now feeds ${nm(child)}.`, true);
+      renderEditor();
+    };
     const onDown = (e     ) => {
       const portId = e.target.getAttribute && e.target.getAttribute('data-port');
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
       if (rmId) { const i = customNodes.findIndex((n     ) => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
       if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
+      // The node body: dragging it asks what feeds it. Engaged past a threshold below, so a click still
+      // clicks and a double-click still renames.
+      const onNode = e.target.closest ? e.target.closest('g[data-id]') : null;
+      if (onNode && onNode.dataset && onNode.dataset.id) {
+        dragNode = onNode.dataset.id;
+        dragFrom = { x: e.clientX, y: e.clientY };
+        e.preventDefault();
+        return;
+      }
       // Anything else (background, a node body, a label): a potential pan.
       panStart = { x: e.clientX, y: e.clientY, sl: scroll.scrollLeft, st: scroll.scrollTop };
       e.preventDefault();   // don't rubber-band-select node labels while dragging
     };
     const onMove = (e     ) => {
+      if (dragNode) {
+        if (!dragging && Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) <= 4) return;
+        if (!dragging) {
+          dragging = true;
+          scroll.style.cursor = 'grabbing';
+          dragLine = svgEl('path', { d: '', fill: 'none', stroke: '#46c46a', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' });
+          edgeLayer.appendChild(dragLine);
+        }
+        const u = toUser(e.clientX, e.clientY), a = pos[dragNode];
+        // Drawn the way the feed will run: from where it would come from, into this node's left edge.
+        dragLine.setAttribute('d', `M${u.x},${u.y} L${a.x},${a.y + NH / 2}`);
+        highlight(targetUnder(e.clientX, e.clientY, dragNode));
+        return;
+      }
       if (panStart && !linkFrom) {
         const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
         if (panning || Math.hypot(dx, dy) > 4) {
@@ -4414,6 +4472,15 @@ function addFlowSection(nav     , sections     ) {
       highlight(targetUnder(e.clientX, e.clientY));
     };
     const onUp = (e     ) => {
+      if (dragNode) {
+        const child = dragNode, tgt = dragging ? targetUnder(e.clientX, e.clientY, dragNode) : null;
+        if (dragLine) dragLine.remove();
+        dragLine = null; dragNode = null; dragging = false;
+        scroll.style.cursor = 'grab';
+        highlight(null);
+        if (tgt) setParent(child, tgt);
+        return;
+      }
       if (panStart) { const wasPanning = panning; panStart = null; panning = false; scroll.style.cursor = 'grab'; if (wasPanning) return; }
       if (!linkFrom) return;
       const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
