@@ -678,7 +678,16 @@
      editor) the table has its own scroll container, so `top: var(--appbar-h)` pinned the header to the
      viewport instead — it detached and parked on top of a row, hiding the very row being edited (#292).
      The sheet is short and scrolls itself; it does not need a pinned header. */
-  .sheet table.ld th { position:static; }
+     The overlay panel is `.sheet-panel`, which this selector missed: inside the MQTT explorer the header
+     detached and floated over the rows exactly as described there. */
+  .sheet table.ld th, .sheet-panel table.ld th { position:static; }
+
+  /* What a topic published, opened under its row in the MQTT explorer. */
+  .payload {
+    margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+    font:12px/1.5 var(--mono); color:var(--fg);
+  }
+  .payload-row td { background:var(--panel2); }
 
   table.ld th.num, table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); }
   table.ld tbody tr:hover td { background:var(--panel2); }

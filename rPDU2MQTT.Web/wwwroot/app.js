@@ -5775,6 +5775,22 @@ function explorerFooter(picked                            , suggestId           
   return { bar, sync };
 }
 
+/// The numeric fields of a JSON payload, from either shape the API returns: the topic list gives dotted
+/// paths, the single-topic detail gives objects.
+function fieldNames(fields     )           {
+  return (fields || []).map((f     ) => (typeof f === 'string' ? f : f?.field)).filter(Boolean);
+}
+
+/// The payload as it reads: JSON indented, anything else exactly as it was sent.
+function prettyPayload(payload        ) {
+  try { return JSON.stringify(JSON.parse(payload), null, 2); } catch { return payload; }
+}
+
+/// The value at a dotted path inside a parsed payload.
+function atPath(obj     , path        ) {
+  return path.split('.').reduce((o     , k        ) => (o == null ? o : o[k]), obj);
+}
+
 /// A node id from free text: lower case, with anything EmonCMS or MQTT would not take replaced.
 function explorerSlug(s        ) {
   return String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -5902,7 +5918,7 @@ function openMqttExplorer() {
 
   const picked = new Map                       ();
   const pick = (t     ) => {
-    const fields           = (t.fields || []).map((f     ) => f.field);
+    const fields = fieldNames(t.fields);
     picked.set(t.topic, {
       key: t.topic, what: t.topic, fields,
       source: { Type: 'mqtt', Topic: t.topic, Metric: t.metric || 'realpower', Unit: t.unit || undefined, JsonField: fields.length === 1 ? fields[0] : undefined },
@@ -5917,7 +5933,29 @@ function openMqttExplorer() {
   };
 
   let rows        = [];
+  const showing = new Set        ();   // topics showing their whole payload
   const open = new Set        ();      // branches showing their children
+
+  /// What a topic actually published, under its row: the payload in full, and the fields worth binding.
+  const payloadRow = (t     ) => {
+    const cell = el('td');
+    cell.setAttribute('colspan', '4');
+    cell.appendChild(el('pre', { class: 'payload', text: prettyPayload(t.payload || String(t.value ?? '')) }));
+    const names = fieldNames(t.fields);
+    if (names.length) {
+      let parsed      = null;
+      try { parsed = JSON.parse(t.payload || ''); } catch { parsed = null; }
+      const list = el('div', { class: 'desc', style: { margin: '6px 0 0' } });
+      list.appendChild(el('span', { text: 'Numeric fields: ' }));
+      names.forEach((f, i) => {
+        const v = parsed ? atPath(parsed, f) : undefined;
+        list.append(el('code', { text: f + (v != null && typeof v !== 'object' ? ` = ${v}` : '') }));
+        if (i < names.length - 1) list.append(', ');
+      });
+      cell.appendChild(list);
+    }
+    return el('tr', { class: 'payload-row' }, cell);
+  };
   const decided = new Set        ();   // branches the reader has opened or closed themselves
 
   const drawBranch = (start           , depth        ) => {
@@ -5950,11 +5988,19 @@ function openMqttExplorer() {
     if (branch) name.append(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: `${topics.length} topic(s)` }));
 
     const t = n.row;
+    const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
+    // A truncated line of JSON tells you nothing, and there is nowhere else to read it.
+    if (t && (t.payload || t.value != null)) {
+      value.title = t.payload || '';
+      value.style.cursor = 'pointer';
+      value.onclick = () => { showing.has(t.topic) ? showing.delete(t.topic) : showing.add(t.topic); draw(); };
+    }
     tbody.appendChild(el('tr', {},
       el('td', {}, box),
       name,
-      el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' }),
-      el('td', { text: t ? (t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+      value,
+      el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+    if (t && showing.has(t.topic)) tbody.appendChild(payloadRow(t));
 
     if (branch && open.has(n.path)) n.children.forEach(c => drawBranch(c, depth + 1));
   };
