@@ -97,6 +97,18 @@ if (!/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(asked[0])) fail(`the
 // Across days, auto means one total per day, so no step is sent.
 if (/step=/.test(asked[0])) fail(`a per-day window was sampled instead of totalled: ${asked[0]}`);
 
+// The page opens as stacked areas.
+const chartTypeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'area'));
+const stackedBox = query(sec, 'input', true).find(i => i.type === 'checkbox');
+if (!chartTypeSel || chartTypeSel.value !== 'area') fail(`the page does not open as area charts: ${chartTypeSel?.value}`);
+if (!stackedBox || !stackedBox.checked) fail('the page does not open stacked');
+if (!['polygon', 'circle'].flatMap(t => query(query(sec, 'svg', true)[0], t, true)).some(e => e.attrs.class === 'trend-area'))
+  fail('the default chart drew no area');
+// The assertions below read bars.
+chartTypeSel.value = 'bar';
+chartTypeSel.onchange({});
+await new Promise(r => setTimeout(r, 50));
+
 const charts = query(sec, 'svg', true);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
 if (!headings.includes('Daily energy by node')) fail(`no "Daily energy by node" chart (got: ${headings.join(', ')})`);

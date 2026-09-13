@@ -69,6 +69,12 @@ const headings = query(sec, 'h3', true).map(h => h.textContent);
 for (const want of ['Grid per day', 'Self-sufficiency per day', 'Where the day’s energy came from'])
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
+// The page opens as stacked areas.
+const chartTypeSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'area'));
+if (!chartTypeSel || chartTypeSel.value !== 'area') fail(`the page does not open as area charts: ${chartTypeSel?.value}`);
+if (!['polygon', 'circle'].flatMap(t => query(charts[headings.indexOf('Grid per day')], t, true)).some(e => e.attrs.class === 'trend-area'))
+  fail('the grid chart does not open as a stacked area');
+
 // Nothing here is about a selection: the per-node chart, its picker and its totals are the Node Trends page.
 if (headings.some(h => /by node/.test(h))) fail(`a per-node chart is drawn on the whole-system page: ${headings.join(', ')}`);
 const buttons = query(sec, 'button', true).map(b => b.textContent);

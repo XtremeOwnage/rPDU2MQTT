@@ -296,7 +296,9 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       const lines: Line[] = series.map((s: any, i: number) => ({ label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s) }));
       const legend = overlay ? [...lines, { ...overlay, label: `${overlay.label} (overlay)` }] : lines;
       const gaps = p.section(byNodeTitle(p),
-        'The nodes selected above.' + (partial ? ' The faded bar is today, still in progress — it counts in the totals below, so far.' : ''),
+        'The nodes selected above.' + (!partial ? ''
+          : p.kind() === 'bar' ? ' The faded bar is today, still in progress — it counts in the totals below, so far.'
+          : ' The last day is today, still in progress — it counts in the totals below, so far.'),
         barChart({ days, lines, units, stacked: p.stacked(), kind: p.kind(), partial, fitTo: p.fitTo(), height: p.leadHeight(), overlay }), legend);
 
       drawInsights(p, series, days, units, partial);

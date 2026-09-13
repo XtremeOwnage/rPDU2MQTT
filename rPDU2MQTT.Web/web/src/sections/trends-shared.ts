@@ -164,6 +164,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
 
   const chartSel = el('select', { title: 'Draw the series as bars, lines or filled areas.' }) as HTMLSelectElement;
   [['bar', 'bars'], ['line', 'lines'], ['area', 'areas']].forEach(([v, t]) => chartSel.appendChild(el('option', { value: v, text: t })));
+  // Both dashboards open as stacked areas.
+  chartSel.value = 'area';
   const stackBox = el('input') as HTMLInputElement;
   stackBox.type = 'checkbox';
   stackBox.checked = true;
