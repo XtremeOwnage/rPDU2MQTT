@@ -130,4 +130,67 @@ public class MqttImportProfileTests
         // A built-in tags nothing of its own.
         Assert.Empty(MqttTopicProfile.Resolve("esphome", null)!.Tags ?? []);
     }
+
+    /// <summary>
+    /// One ESPHome node reporting many channels names both in a single segment:
+    /// esphome/devices/n30/sensor/n30_2_1_current/state is channel n30_2_1 measuring current.
+    /// </summary>
+    [Fact]
+    public void APlaceholderPairInOneSegment_SplitsIntoChannelAndMeasure()
+    {
+        var p = MqttTopicProfile.Resolve("esphome_channels", null);
+
+        var found = MqttTopicProfile.Scan(p!, [
+            ("esphome/devices/n30/sensor/n30_2_1_current/state", "1.139"),
+            ("esphome/devices/n30/sensor/bl0910_1_frequency/state", "60.01"),
+            // Not one of ours: no metric maps it, so it is not offered for import.
+            ("esphome/devices/n30/sensor/bl0910_1_tps1/state", "22.4"),
+        ]);
+
+        Assert.Equal(2, found.Count);
+        var current = found.Single(m => m.Measure == "current");
+        Assert.Equal("n30_2_1", current.Device);
+        Assert.Equal("current", current.Metric);
+        Assert.Equal("bl0910_1", found.Single(m => m.Measure == "frequency").Device);
+    }
+
+    /// <summary>
+    /// Where the segment splits is ambiguous, so the metric map decides it: n30_2_1_apparent_power is not
+    /// channel 'n30_2_1_apparent' measuring 'power'.
+    /// </summary>
+    [Fact]
+    public void AMeasureCarryingTheSeparator_IsResolvedByTheMetricMap()
+    {
+        var p = MqttTopicProfile.Resolve("esphome_channels", null);
+
+        var m = MqttTopicProfile.Scan(p!, [("esphome/devices/n30/sensor/n30_2_1_apparent_power/state", "12")]).Single();
+
+        Assert.Equal("n30_2_1", m.Device);
+        Assert.Equal("apparent_power", m.Measure);
+        Assert.Equal("apparentpower", m.Metric);
+    }
+
+    /// <summary>A segment that does not carry both parts is not this profile's shape.</summary>
+    [Fact]
+    public void ASingleSensorTopic_DoesNotMatchTheMultiChannelShape()
+        => Assert.Empty(MqttTopicProfile.Scan(
+            MqttTopicProfile.Resolve("esphome_channels", null)!,
+            [("esphome/devices/fridge/sensor/power/state", "97.6")]));
+
+    /// <summary>The other order, and a profile of the operator's own: the measure leads.</summary>
+    [Fact]
+    public void TheMeasureMayComeFirstInTheSegment()
+    {
+        var profile = new MqttImportProfile
+        {
+            Name = "Leading", Filter = "x/#", Pattern = "x/{measure}-{device}",
+            Metrics = new() { ["power"] = "realpower" },
+        };
+
+        var m = MqttTopicProfile.Scan(MqttTopicProfile.Resolve("custom:Leading", Configured(profile))!,
+                                      [("x/power-rack_1", "41")]).Single();
+
+        Assert.Equal("rack_1", m.Device);
+        Assert.Equal("power", m.Measure);
+    }
 }

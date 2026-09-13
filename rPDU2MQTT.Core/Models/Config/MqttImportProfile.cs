@@ -18,7 +18,7 @@ public class MqttImportProfile
     [Description("Subscription filter to browse, e.g. 'tele/#'. Narrow it: a broker's ACL may refuse '#'.")]
     public string Filter { get; set; } = "";
 
-    [Description("Topic shape, with {device} and {measure} marking the parts to capture and '+' matching any single segment. e.g. 'tele/{device}/SENSOR/{measure}'.")]
+    [Description("Topic shape, with {device} and {measure} marking the parts to capture and '+' matching any single segment, e.g. 'tele/{device}/SENSOR/{measure}'. Both may share one segment where a publisher names its channel and its measure together: 'esphome/devices/+/sensor/{device}_{measure}/state' reads 'n30_2_1_current' as channel 'n30_2_1' measuring current. Where such a segment splits is decided by the Metrics map below, so a measure that itself contains the separator (apparent_power) still resolves.")]
     public string Pattern { get; set; } = "";
 
     [Description("Field holding the value when the payload is JSON — dotted for nesting. Leave blank when the payload is the bare number.")]

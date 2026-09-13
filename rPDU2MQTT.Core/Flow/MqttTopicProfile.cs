@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>One reading matched from a topic pattern.</summary>
@@ -28,7 +30,11 @@ public static class MqttTopicProfile
     /// <param name="Id">Stable key used by the API and the GUI.</param>
     /// <param name="Label">What the picker calls it.</param>
     /// <param name="Filter">The subscription filter to browse.</param>
-    /// <param name="Pattern">Slash-delimited, with <c>{device}</c>, <c>{measure}</c> and <c>+</c> wildcards.</param>
+    /// <param name="Pattern">
+    /// Slash-delimited, with <c>{device}</c>, <c>{measure}</c> and <c>+</c> wildcards. A placeholder is
+    /// usually a whole segment; both may share one, as <c>{device}_{measure}</c>, where a publisher names
+    /// its channel and its measure together.
+    /// </param>
     /// <param name="JsonField">Field holding the value, when the payload is JSON.</param>
     /// <param name="Metrics">Measure -> our metric name. Measures absent from this map are not readings we roll up.</param>
     /// <param name="Tags">Tags every node imported through this profile carries.</param>
@@ -64,6 +70,9 @@ public static class MqttTopicProfile
     public static readonly IReadOnlyList<Profile> BuiltIn =
     [
         new("esphome", "ESPHome", "esphome/#", "esphome/devices/{device}/sensor/{measure}/state", null, EsphomeMetrics),
+        // One ESPHome node reporting many channels names each one in the sensor segment, e.g.
+        // 'esphome/devices/n30/sensor/n30_2_1_current/state' — channel n30_2_1, measuring current.
+        new("esphome_channels", "ESPHome (multi-channel)", "esphome/#", "esphome/devices/+/sensor/{device}_{measure}/state", null, EsphomeMetrics),
         new("zwavejs", "Z-Wave JS", "zwave/#", "zwave/+/{device}/50/+/value/{measure}", "value", ZwaveMetrics),
     ];
 
@@ -116,6 +125,11 @@ public static class MqttTopicProfile
             if (seg == "{device}") { device = tp[i]; continue; }
             if (seg == "{measure}") { measure = tp[i]; continue; }
             if (seg == "+") continue;
+            if (seg.Contains('{'))
+            {
+                if (!Capture(seg, tp[i], metrics, ref device, ref measure)) return null;
+                continue;
+            }
             if (!string.Equals(seg, tp[i], StringComparison.OrdinalIgnoreCase)) return null;
         }
         if (device.Length == 0 || measure.Length == 0) return null;
@@ -128,6 +142,73 @@ public static class MqttTopicProfile
         if (string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase))
             (metric, accumulation) = ("energy", "period");
         return new PatternMatch(device, measure, topic, metric, jsonField, sample, accumulation);
+    }
+
+    /// A segment holding literals and up to two placeholders, e.g. <c>{device}_{measure}</c>.
+    private static readonly Regex SegmentShape = new(
+        @"^(?<pre>[^{}]*)\{(?<first>device|measure)\}(?:(?<mid>[^{}]*)\{(?<second>device|measure)\})?(?<post>[^{}]*)$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// One segment that carries more than a bare placeholder.
+    ///
+    /// <para>
+    /// A publisher that numbers its channels puts the device and the measure in one segment:
+    /// <c>esphome/devices/n30/sensor/n30_2_1_current/state</c> is channel <c>n30_2_1</c> reporting current,
+    /// written <c>{device}_{measure}</c>. Where that splits is ambiguous — <c>n30_2_1_apparent_power</c> is
+    /// not channel <c>n30_2_1_apparent</c> measuring <c>power</c> — so the profile's own metric map decides:
+    /// the split whose measure it names wins. With nothing to go on, the measure is the last part for
+    /// <c>{device}_{measure}</c> and the first for <c>{measure}_{device}</c>.
+    /// </para>
+    /// </summary>
+    private static bool Capture(string pattern, string segment, IReadOnlyDictionary<string, string>? metrics,
+                               ref string device, ref string measure)
+    {
+        var shape = SegmentShape.Match(pattern);
+        if (!shape.Success) return false;
+
+        var pre = shape.Groups["pre"].Value;
+        var post = shape.Groups["post"].Value;
+        if (!segment.StartsWith(pre, StringComparison.OrdinalIgnoreCase)) return false;
+        if (!segment.EndsWith(post, StringComparison.OrdinalIgnoreCase)) return false;
+        var inner = segment[pre.Length..(segment.Length - post.Length)];
+        if (inner.Length == 0) return false;
+
+        var first = shape.Groups["first"].Value;
+        if (!shape.Groups["second"].Success)
+        {
+            Assign(first, inner, ref device, ref measure);
+            return true;
+        }
+
+        // Two placeholders need something between them to split on; '{device}{measure}' says nothing.
+        var mid = shape.Groups["mid"].Value;
+        if (mid.Length == 0) return false;
+        var second = shape.Groups["second"].Value;
+        var measureFirst = first == "measure";
+
+        var splits = new List<(string First, string Second)>();
+        for (var at = inner.IndexOf(mid, StringComparison.OrdinalIgnoreCase); at >= 0;
+             at = inner.IndexOf(mid, at + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            var left = inner[..at];
+            var right = inner[(at + mid.Length)..];
+            if (left.Length > 0 && right.Length > 0) splits.Add((left, right));
+        }
+        if (splits.Count == 0) return false;
+
+        var chosen = splits.FirstOrDefault(s => metrics?.ContainsKey(measureFirst ? s.First : s.Second) == true);
+        if (chosen == default) chosen = measureFirst ? splits[0] : splits[^1];
+
+        Assign(first, chosen.First, ref device, ref measure);
+        Assign(second, chosen.Second, ref device, ref measure);
+        return true;
+    }
+
+    private static void Assign(string placeholder, string value, ref string device, ref string measure)
+    {
+        if (placeholder == "device") device = value;
+        else measure = value;
     }
 
     /// <summary>
