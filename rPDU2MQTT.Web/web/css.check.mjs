@@ -49,6 +49,13 @@ for (const box of scrollBoxes) {
   if (!unsticks) fail(`.${box} scrolls around table.ld without unsticking its header — it will sit on row 1`);
 }
 
+// The same trap, one the scan above cannot see: the overlay panel sets its overflow in an inline style,
+// so it never appears in the stylesheet as a scroll box. Every explorer and the node editor render a
+// table.ld into it, and its header floated over the rows until the rule below named it (the rule existed,
+// but for `.sheet`, which nothing carries).
+if (!/\.sheet-panel\s+table\.ld\s+th\s*(,[^{]*)?\{[^}]*position:\s*static/.test(css))
+  fail('.sheet-panel scrolls around its tables without unsticking their headers — the header will float over the rows');
+
 // A phone fits about one and a half of the app bar's three groups. Without a breakpoint the brand's
 // nowrap text overflowed its shrunk box and ran underneath the status pills, and the build string
 // (v0.0.0-feat-gui-enhancements-395.1185+71ed512) was still asking for its full width (#395).
@@ -93,5 +100,5 @@ if (/margin\s*:\s*0\s+auto/.test(mainRule[2]))
   fail('main has margin:0 auto inside a flex row — the free space becomes a gutter instead of column width');
 
 console.log('css: a sticky table header is not trapped inside its own table nor inside a box that scrolls '
-  + 'around it, the corners are still round, the app bar gives way on a phone, and [hidden] outranks any '
+  + 'around it — including the overlay panel, which scrolls by inline style — the corners are still round, the app bar gives way on a phone, and [hidden] outranks any '
   + 'component that sets display so el.hidden actually hides');

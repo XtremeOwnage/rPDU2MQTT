@@ -94,6 +94,11 @@ public sealed class SchemaNode
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
     public string? KeyType { get; set; }
+
+    /// <summary>Headings for a dictionary's key and value columns, and a worked entry — see <c>MapColumnsAttribute</c>.</summary>
+    public string? KeyLabel { get; set; }
+    public string? ValueLabel { get; set; }
+    public string? MapExample { get; set; }
 }
 
 /// <summary>When a setting applies: the sibling property that decides, and the values it applies to.</summary>
@@ -310,6 +315,15 @@ public static class ConfigSchema
             node.EnumDescriptions = EnumDescriptionsOf(Nullable.GetUnderlyingType(type) ?? type, node.EnumValues);
         }
 
+        // What the two sides of a map hold. A dictionary's rows are otherwise unlabelled: nothing on the
+        // page says which side is the thing being matched and which is what it supplies.
+        if (prop.GetCustomAttribute<MapColumnsAttribute>() is { } cols)
+        {
+            node.KeyLabel = cols.KeyLabel;
+            node.ValueLabel = cols.ValueLabel;
+            node.MapExample = cols.Example;
+        }
+
         // A closed set of answers for a collection's items. The element of a list and the value of a
         // dictionary have no property to annotate, so this is where their choices arrive.
         if (node.ValueSchema is { } vs)
@@ -321,7 +335,9 @@ public static class ConfigSchema
             }
             else if (prop.GetCustomAttribute<MetricItemChoicesAttribute>() is not null)
             {
-                vs.EnumValues = BindableMetrics;
+                // The bindable metrics plus the daily metric: an import profile uses it to say the device
+                // zeroes this counter each day, which the import turns into energy with a period counter.
+                vs.EnumValues = [.. BindableMetrics, Core.Flow.EnergyPeriod.Metric];
                 vs.Type = "enum";
             }
             else if (prop.GetCustomAttribute<TagChoicesAttribute>() is not null)

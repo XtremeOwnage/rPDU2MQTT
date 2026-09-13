@@ -29,17 +29,23 @@ const importable = {
 // Topic-matched readings state no unit: esphome/.../energy_d/state = 3063.783 is Wh or kWh depending only
 // on the value. The panel must ask rather than assume.
 const pattern = {
-  ok: true, scanned: 68, profile: 'esphome',
+  ok: true, scanned: 68, profile: 'esphome', tags: ['esphome'],
   readings: [
     { id: 'esphome_deep_freezer_energy_d', label: 'deep_freezer energy_d', device: 'deep_freezer',
       topic: 'esphome/devices/deep_freezer/sensor/energy_d/state', metric: 'energy', unit: null,
-      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '3063.783', unsupported: null },
+      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '3063.783', unsupported: null,
+      accumulation: 'period' },
     { id: 'esphome_fridge_energy_d', label: 'fridge energy_d', device: 'fridge',
       topic: 'esphome/devices/fridge/sensor/energy_d/state', metric: 'energy', unit: null,
-      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '1365.109', unsupported: null },
+      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '1365.109', unsupported: null,
+      accumulation: 'period' },
       { id: 'esphome_fridge_power', label: 'fridge power', device: 'fridge',
       topic: 'esphome/devices/fridge/sensor/power/state', metric: 'realpower', unit: null,
       units: ['W', 'kW', 'MW'], canonicalUnit: 'W', jsonField: null, sample: '97.6', unsupported: null },
+    // A lifetime total: the profile says nothing about it, so the page must ask rather than assume daily.
+    { id: 'esphome_chest_freezer_energy', label: 'chest_freezer energy', device: 'chest_freezer',
+      topic: 'esphome/devices/chest_freezer/sensor/energy/state', metric: 'energy', unit: null,
+      units: ['kWh', 'Wh', 'MWh'], canonicalUnit: 'kWh', jsonField: null, sample: '5120.4', unsupported: null },
     // Sanitises to 'main_panel', which is an unrelated node already in the config.
     { id: 'esphome_main_panel_power', label: 'main panel power', device: 'main panel',
       topic: 'esphome/devices/main_panel/sensor/power/state', metric: 'realpower', unit: null,
@@ -63,7 +69,8 @@ const builtIn = {
   profile: {
     id: 'esphome', label: 'ESPHome', filter: 'esphome/#',
     pattern: 'esphome/devices/{device}/sensor/{measure}/state', jsonField: null,
-    metrics: { power: 'realpower', energy_d: 'energy' },
+    metrics: { power: 'realpower', energy_d: 'energy_d' },
+    tags: ['esphome'],
   },
 };
 
@@ -105,6 +112,10 @@ const addButton = () => {
   return b;
 };
 if (!buttons().some(b => b.textContent === 'Scan broker')) fail('the MQTT Import page rendered no scan control');
+// The broker tree is reachable from here too: a profile only matches the shapes it knows. Scoped to this
+// page — the MQTT page has a button of the same name, so an unscoped search proves nothing about this one.
+if (!query(page(), 'button', true).some(b => b.textContent === 'Explore topics'))
+  fail('the MQTT Import page has no Explore topics button');
 
 buttons().find(b => b.textContent === 'Scan broker').click();
 await new Promise(r => setTimeout(r, 200));
@@ -173,6 +184,12 @@ if (!unitOpts.includes('Wh') || !unitOpts.includes('kWh'))
   fail(`the unit list does not come from the metric's converter table: ${unitOpts.join(', ')}`);
 if (unitBox.value !== 'kWh') fail(`expected the canonical unit as the default, got '${unitBox.value}'`);
 
+// A counter the profile says the device zeroes each day is imported as one, not as a lifetime total.
+const counterOf = (row) => query(row, 'select', true)[1];
+if (counterOf(patRow)?.value !== 'period') fail(`a daily-reset counter defaulted to '${counterOf(patRow)?.value}'`);
+const instantRow = query(page(), 'tr', true).find(r => r.textContent.includes('fridge power'));
+if (counterOf(instantRow)) fail('a power reading was given a counter control');
+
 // Wire the imports into an existing node, so they join the hierarchy rather than sitting apart from it.
 const feeds = query(getEl('sections'), 'select', true)
   .find(sl => (sl.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'main_panel'));
@@ -220,7 +237,17 @@ const imported = cfg.EnergyFlow.Nodes.find(n => n.Id === 'deep_freezer');
 if (!imported) fail('the topic-matched reading was not added');
 const energySrc = (imported.Sources || []).find(x => x.Metric === 'energy') || {};
 if (energySrc.Unit !== 'Wh') fail('the unit set in bulk was not carried onto the binding');
-if (energySrc.Accumulation !== 'lifetime') fail('an imported energy counter must default to lifetime');
+// The profile said this device zeroes it each day, so it is imported as a period counter…
+if (energySrc.Accumulation !== 'period') fail(`a daily-reset counter was imported as '${energySrc.Accumulation}'`);
+// …and one the profile says nothing about still defaults to lifetime.
+const lifetime = cfg.EnergyFlow.Nodes.find(n => n.Id === 'chest_freezer');
+if (!lifetime) fail('the lifetime energy reading was not imported');
+if ((lifetime.Sources || [])[0]?.Accumulation !== 'lifetime')
+  fail(`an energy counter nothing spoke for was imported as '${(lifetime.Sources || [])[0]?.Accumulation}'`);
+
+// A profile's own tags go on what it imports, beside the tag typed on the page.
+if (JSON.stringify((imported.Tags || []).slice().sort()) !== JSON.stringify(['esphome', 'imported']))
+  fail(`the profile's tags did not reach the imported node: ${JSON.stringify(imported.Tags)}`);
 
 // One node per device with a source per metric, not one node per reading. The fridge publishes two.
 const fridge = cfg.EnergyFlow.Nodes.find(n => n.Id === 'fridge');
@@ -265,6 +292,8 @@ const copied = ((cfg.MQTT || {}).ImportProfiles || []).find(p => p.Name === 'ESP
 if (!copied) fail('copying a built-in profile put nothing into MQTT.ImportProfiles');
 if (copied.Pattern !== 'esphome/devices/{device}/sensor/{measure}/state') fail('the copied profile lost its pattern');
 if (!copied.Metrics || copied.Metrics.power !== 'realpower') fail('the copied profile lost its metric map');
+if (JSON.stringify(copied.Tags) !== JSON.stringify(['esphome'])) fail(`the copied profile lost its tags: ${JSON.stringify(copied.Tags)}`);
 
-console.log('discover: both scans import; refusals shown with a reason; units default and set in bulk; '
-  + 'imported nodes are wired to the chosen feeder; a built-in profile copies into config');
+console.log('discover: both scans import; refusals shown with a reason; units default and set in bulk; a '
+  + 'profile\'s daily-reset counters import as such and the rest default to lifetime; imported nodes are '
+  + 'wired to the chosen feeder; the broker tree is reachable; a built-in profile copies into config');

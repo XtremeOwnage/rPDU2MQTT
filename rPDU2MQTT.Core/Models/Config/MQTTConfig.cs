@@ -25,7 +25,7 @@ public class MQTTConfig
     /// <summary>
     /// Topic shapes for the MQTT Import page, in addition to the built-in ESPHome and Z-Wave JS profiles.
     /// </summary>
-    [Description("Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.")]
+    [Description("How to read another publisher's topics on the MQTT Import page, for publishers with no built-in profile (ESPHome and Z-Wave JS are built in). A profile says which topics to look at and what each one measures, so the page can offer them as energy-flow nodes. For a publisher sending 'tele/kitchen/SENSOR/Power', the pattern 'tele/{device}/SENSOR/{measure}' captures device 'kitchen' and measure 'Power', and a Metrics entry of Power -> realpower says what that measure is.")]
     public List<MqttImportProfile> ImportProfiles { get; set; } = new();
 
     [Required(ErrorMessage = "ParentTopic is required.")]

@@ -156,6 +156,10 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
 // The open node editor, as a modal over the table (#292).
 export let nodeModal: { id: string, body: any, close: () => void } | null = null;
 
+// A node another page created, opened in the editor the next time the Nodes page loads.
+let editOnOpen: string | null = null;
+export function editNodeOnNextOpen(id: string) { editOnOpen = id; }
+
 export function closeNodeModal() {
   const m = nodeModal;
   nodeModal = null;
@@ -335,6 +339,7 @@ export function addNodesSection(nav: any, sections: any) {
     migrateEnergyFlow(flow);
     const customNodes = ensure(flow, 'Nodes', []);
     const links = ensure(flow, 'Links', []);
+    if (editOnOpen) { editing.id = editOnOpen; editOnOpen = null; }
     count.textContent = `${customNodes.length} node(s)`;
     ed.innerHTML = '';
 

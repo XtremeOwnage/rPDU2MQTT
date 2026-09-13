@@ -4,6 +4,7 @@ import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
 import { loadNodeTemplates, instantiateTemplate } from '../node-templates.js';
+import { openMqttExplorer } from './explorer.js';
 
 // The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit.
 function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
@@ -34,11 +35,15 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   (flow.Nodes || []).forEach((n: any) =>
     feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
   const scan = btn('Scan broker', 'primary');
+  // The same broker tree as the MQTT page: what a profile does not match is still findable here.
+  const browse = btn('Explore topics');
+  browse.title = 'Browse every topic on the broker as a tree, and create a node from the ones a profile does not match.';
+  browse.onclick = () => openMqttExplorer();
   const addBtn = btn('Add selected', 'primary');
   const copyBtn = btn('Copy this profile to config');
   copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
                 + 'metric map can be edited.';
-  bar.append(srcSel, scan,
+  bar.append(srcSel, scan, browse,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
   const note = el('div', { class: 'desc' });
@@ -224,12 +229,15 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       toast(`'${p.label}' is already in ImportProfiles.`, false);
       return;
     }
-    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined, Metrics: p.metrics });
+    list.push({ Name: p.label, Filter: p.filter, Pattern: p.pattern, JsonField: p.jsonField || undefined,
+                Metrics: p.metrics, Tags: (p.tags || []).length ? [...p.tags] : undefined });
     toast(`Copied '${p.label}' into MQTT → ImportProfiles. Edit it there, then Save.`, true);
     refreshDirty();
   };
 
   let found: any[] = [];
+  // Tags the chosen profile puts on everything imported through it, beside the one typed above.
+  let profileTags: string[] = [];
   scan.onclick = async () => {
     const src = srcSel.value;
     note.textContent = 'Scanning the broker…';
@@ -238,7 +246,9 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
       : '/api/mqtt/importable/pattern?profile=' + encodeURIComponent(src));
     if (!r.body || !r.body.ok) { note.textContent = (r.body && r.body.message) || 'Could not scan.'; return; }
     found = r.body.readings || [];
-    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`;
+    profileTags = r.body.tags || [];
+    note.textContent = `${found.length} reading(s) from ${r.body.scanned} retained topic(s).`
+      + (profileTags.length ? ` This profile tags what it imports: ${profileTags.join(', ')}.` : '');
     render(found);
   };
 
@@ -293,7 +303,8 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
         Mode: 'none',
         Sources: sources,
       };
-      if (tag) node.Tags = [tag];
+      const tags = [...new Set([...(tag ? [tag] : []), ...profileTags])];
+      if (tags.length) node.Tags = tags;
       nodes.push(node);
       added++;
       // One link per node, in the direction chosen.

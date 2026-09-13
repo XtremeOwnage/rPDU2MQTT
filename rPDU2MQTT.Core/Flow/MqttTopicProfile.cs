@@ -7,8 +7,10 @@ namespace rPDU2MQTT.Core.Flow;
 /// <param name="Metric">Our metric name, or null when the measure is not one we roll up.</param>
 /// <param name="JsonField">Field to read from a JSON payload, or null when the payload is the bare value.</param>
 /// <param name="Sample">The last payload seen, so the operator can confirm the unit before importing.</param>
+/// <param name="Accumulation">How the counter accumulates — 'period' for one the device zeroes each day, else null.</param>
 public readonly record struct PatternMatch(
-    string Device, string Measure, string Topic, string? Metric, string? JsonField, string? Sample);
+    string Device, string Measure, string Topic, string? Metric, string? JsonField, string? Sample,
+    string? Accumulation = null);
 
 /// <summary>
 /// Matches readings by topic shape, for publishers that do not announce Home Assistant discovery.
@@ -29,17 +31,19 @@ public static class MqttTopicProfile
     /// <param name="Pattern">Slash-delimited, with <c>{device}</c>, <c>{measure}</c> and <c>+</c> wildcards.</param>
     /// <param name="JsonField">Field holding the value, when the payload is JSON.</param>
     /// <param name="Metrics">Measure -> our metric name. Measures absent from this map are not readings we roll up.</param>
+    /// <param name="Tags">Tags every node imported through this profile carries.</param>
     public sealed record Profile(
         string Id, string Label, string Filter, string Pattern, string? JsonField,
-        IReadOnlyDictionary<string, string> Metrics);
+        IReadOnlyDictionary<string, string> Metrics, IReadOnlyList<string>? Tags = null);
 
     private static readonly Dictionary<string, string> EsphomeMetrics = new(StringComparer.OrdinalIgnoreCase)
     {
         ["power"] = "realpower",
         ["apparent_power"] = "apparentpower",
         ["energy"] = "energy",
-        ["energy_d"] = "energy",
-        ["daily_energy"] = "energy",
+        // ESPHome zeroes these each day, so they are the day's own figure rather than a lifetime counter.
+        ["energy_d"] = EnergyPeriod.Metric,
+        ["daily_energy"] = EnergyPeriod.Metric,
         ["total_energy"] = "energy",
         ["current"] = "current",
         ["voltage"] = "voltage",
@@ -88,7 +92,8 @@ public static class MqttTopicProfile
 
         return new Profile(id, string.IsNullOrWhiteSpace(p.Name) ? "Custom" : p.Name, filter, p.Pattern.Trim(),
                            string.IsNullOrWhiteSpace(p.JsonField) ? null : p.JsonField.Trim(),
-                           new Dictionary<string, string>(p.Metrics ?? new(), StringComparer.OrdinalIgnoreCase));
+                           new Dictionary<string, string>(p.Metrics ?? new(), StringComparer.OrdinalIgnoreCase),
+                           (p.Tags ?? new()).Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).ToList());
     }
 
     /// <summary>
@@ -117,7 +122,12 @@ public static class MqttTopicProfile
 
         string? metric = null;
         metrics?.TryGetValue(measure, out metric);
-        return new PatternMatch(device, measure, topic, metric, jsonField, sample);
+        // A profile names the daily metric to say "this counter resets each day"; a binding carries that as
+        // energy with a period counter, which is what the daily metric is derived from.
+        string? accumulation = null;
+        if (string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase))
+            (metric, accumulation) = ("energy", "period");
+        return new PatternMatch(device, measure, topic, metric, jsonField, sample, accumulation);
     }
 
     /// <summary>

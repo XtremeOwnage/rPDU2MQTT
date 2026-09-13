@@ -361,6 +361,29 @@
   .map-entry > .head { display:flex; gap:var(--sp-2); align-items:center; margin-bottom:6px; }
   .map-entry .key { max-width:240px; font-family:var(--mono); font-size:12.5px; }
 
+  /* Column headings over a map of scalars, lined up with the row below. */
+  .map-head {
+    display:flex; gap:var(--sp-2); padding:0 var(--sp-3); margin-top:var(--sp-2);
+    color:var(--muted); font-size:11px; font-weight:650; letter-spacing:.02em; text-transform:uppercase;
+  }
+  .map-head > span:first-child { flex:0 0 clamp(140px, 30%, 240px); }
+  .map-head > span:last-child { flex:1; }
+  .map-example { font-style:italic; }
+  @media (max-width:700px) { .map-head { display:none; } }
+
+  /* A map of scalars: key, value and Remove on one line, rather than a card each. */
+  .map-entry.inline {
+    display:flex; align-items:center; gap:var(--sp-2);
+    padding:var(--sp-2) var(--sp-3); margin:var(--sp-2) 0;
+  }
+  .map-entry.inline .key { flex:0 0 clamp(140px, 30%, 240px); }
+  .map-entry.inline > .field { flex:1; min-width:0; margin:0; }
+  .map-entry.inline > .field > select, .map-entry.inline > .field > input { width:100%; }
+  @media (max-width:700px) {
+    .map-entry.inline { flex-wrap:wrap; }
+    .map-entry.inline .key { flex:1 1 100%; }
+  }
+
   /* Template-variable chips under a templated field. */
   .tpl-vars { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px; }
   .tpl-chip {
@@ -655,7 +678,16 @@
      editor) the table has its own scroll container, so `top: var(--appbar-h)` pinned the header to the
      viewport instead — it detached and parked on top of a row, hiding the very row being edited (#292).
      The sheet is short and scrolls itself; it does not need a pinned header. */
-  .sheet table.ld th { position:static; }
+     The overlay panel is `.sheet-panel`, which this selector missed: inside the MQTT explorer the header
+     detached and floated over the rows exactly as described there. */
+  .sheet table.ld th, .sheet-panel table.ld th { position:static; }
+
+  /* What a topic published, opened under its row in the MQTT explorer. */
+  .payload {
+    margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+    font:12px/1.5 var(--mono); color:var(--fg);
+  }
+  .payload-row td { background:var(--panel2); }
 
   table.ld th.num, table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); }
   table.ld tbody tr:hover td { background:var(--panel2); }
@@ -713,6 +745,8 @@
     border-left:3px solid var(--muted); border-radius:var(--r); box-shadow:var(--shadow-lg);
     animation:rpdu-toast-in .2s var(--ease);
   }
+  /* A rejection the server explained comes back as several lines; they are the explanation. */
+  .toast-msg { white-space:pre-line; }
   .toast.good { border-left-color:var(--good); }
   .toast.bad  { border-left-color:var(--bad); }
   .toast.leaving { animation:rpdu-toast-out .18s var(--ease) forwards; }

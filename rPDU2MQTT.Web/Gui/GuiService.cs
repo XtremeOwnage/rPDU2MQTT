@@ -750,7 +750,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                return Results.Json(new { ok = false, message = $"Failed to save config: {ex.Message}" }, statusCode: 500);
+                // A rejection the API server explained is reported in words; anything else as it came.
+                var explained = Startup.ConfigSources.KubernetesSaveError.Explain(ex);
+                return Results.Json(new { ok = false, message = explained ?? $"Failed to save config: {ex.Message}" }, statusCode: 500);
             }
         });
 
@@ -1285,6 +1287,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                     ok = true,
                     scanned = samples.Count,
                     profile = profile.Id,
+                    tags = profile.Tags ?? [],
                     readings = matches.Select(m => new
                     {
                         id = Core.Flow.MqttDiscoveryImport.NodeId($"{profile.Id}_{m.Device}_{m.Measure}"),
@@ -1294,6 +1297,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         units = Core.Flow.FlowUnits.UnitsFor(m.Metric ?? ""),
                         canonicalUnit = Core.Flow.FlowUnits.Canonical(m.Metric ?? ""),
                         jsonField = m.JsonField, sample = m.Sample, unsupported = (string?)null,
+                        accumulation = m.Accumulation,
                     }),
                 }, ConfigSchema.Json);
             }
@@ -1308,7 +1312,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new
             {
                 ok = true,
-                profile = new { id = p.Id, label = p.Label, filter = p.Filter, pattern = p.Pattern, jsonField = p.JsonField, metrics = p.Metrics },
+                profile = new { id = p.Id, label = p.Label, filter = p.Filter, pattern = p.Pattern, jsonField = p.JsonField, metrics = p.Metrics, tags = p.Tags ?? [] },
             }, ConfigSchema.Json);
         });
 
