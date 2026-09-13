@@ -361,6 +361,19 @@
   .map-entry > .head { display:flex; gap:var(--sp-2); align-items:center; margin-bottom:6px; }
   .map-entry .key { max-width:240px; font-family:var(--mono); font-size:12.5px; }
 
+  /* A map of scalars: key, value and Remove on one line, rather than a card each. */
+  .map-entry.inline {
+    display:flex; align-items:center; gap:var(--sp-2);
+    padding:var(--sp-2) var(--sp-3); margin:var(--sp-2) 0;
+  }
+  .map-entry.inline .key { flex:0 0 clamp(140px, 30%, 240px); }
+  .map-entry.inline > .field { flex:1; min-width:0; margin:0; }
+  .map-entry.inline > .field > select, .map-entry.inline > .field > input { width:100%; }
+  @media (max-width:700px) {
+    .map-entry.inline { flex-wrap:wrap; }
+    .map-entry.inline .key { flex:1 1 100%; }
+  }
+
   /* Template-variable chips under a templated field. */
   .tpl-vars { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px; }
   .tpl-chip {

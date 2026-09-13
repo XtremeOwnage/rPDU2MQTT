@@ -9065,7 +9065,8 @@ function renderNode(node     , obj     , container     , path           = []) {
     // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
     // like "Enabled", which several unrelated nested sections legitimately share.
     f.dataset.path = here.join('.');
-    const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab);
+    // A blank label means something beside the control already names it — a dictionary row's key.
+    if (node.label !== '') { const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab); }
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = node.radio ? radioGroup(node, obj) : scalarInput(node, obj);
     // A masked field with no way to read it back is how a mistyped credential survives three attempts.
@@ -9122,8 +9123,10 @@ function labelFor(value        ) { return TYPE_LABELS[value] || value; }
 
 // Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
 // the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
-function renderValue(valueSchema     , holder     , keyName     , container     , path          ) {
-  const node = Object.assign({}, valueSchema, { key: keyName, label: 'value' });
+/// Returns the node the control is bound to, so a renamed key can be rebound to its own value.
+function renderValue(valueSchema     , holder     , keyName     , container     , path          , inline = false) {
+  // Inline, the key sits beside the value and a second label saying "value" is noise.
+  const node = Object.assign({}, valueSchema, { key: keyName, label: inline ? '' : 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
     // A dictionary/list entry's fields (e.g. each PDU instance): scalars in columns, collections full-width.
@@ -9131,6 +9134,7 @@ function renderValue(valueSchema     , holder     , keyName     , container     
   } else {
     renderNode(node, holder, container, path.slice(0, -1));
   }
+  return node;
 }
 
 function renderMap(node     , mapObj     , path          ) {
@@ -9139,16 +9143,37 @@ function renderMap(node     , mapObj     , path          ) {
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
   const entries = document.createElement('div'); fs.appendChild(entries);
 
+  // A map of scalars is one row per entry — key, value, Remove. Only a map of objects (each PDU, each
+  // Modbus connection) has enough in it to be worth a card of its own.
+  const inline = !node.valueSchema || node.valueSchema.type !== 'object';
+
   const drawEntry = (key        ) => {
-    const wrap = document.createElement('div'); wrap.className = 'map-entry';
-    const head = document.createElement('div'); head.className = 'head';
+    const wrap = document.createElement('div'); wrap.className = 'map-entry' + (inline ? ' inline' : '');
     const keyIn = document.createElement('input'); keyIn.className = 'key'; keyIn.type = 'text'; keyIn.value = key;
-    keyIn.onchange = () => { if (keyIn.value && keyIn.value !== key) { mapObj[keyIn.value] = mapObj[key]; delete mapObj[key]; key = keyIn.value; refreshDirty(); } };
     const del = btn('Remove', 'danger');
     del.onclick = () => { delete mapObj[key]; entries.removeChild(wrap); refreshDirty(); };
-    head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
     if (mapObj[key] == null) mapObj[key] = (node.valueSchema && node.valueSchema.type === 'object') ? {} : '';
-    renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
+
+    let bound     ;
+    if (inline) {
+      wrap.appendChild(keyIn);
+      bound = renderValue(node.valueSchema, mapObj, key, wrap, [...path, key], true);
+      wrap.appendChild(del);
+    } else {
+      const head = document.createElement('div'); head.className = 'head';
+      head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
+      bound = renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
+    }
+    // Renaming the key moves the value with it, and the control follows — bound to the old key it would
+    // write the entry straight back under the name that was just changed.
+    keyIn.onchange = () => {
+      if (!keyIn.value || keyIn.value === key) return;
+      mapObj[keyIn.value] = mapObj[key];
+      delete mapObj[key];
+      key = keyIn.value;
+      if (bound) bound.key = key;
+      refreshDirty();
+    };
     entries.appendChild(wrap);
   };
 
