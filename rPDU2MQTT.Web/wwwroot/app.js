@@ -7603,6 +7603,13 @@ function addTrendsSection(nav     , sections     ) {
 // ── sections/node-trends.ts ─────────────────────────────────────
 // Node Trends: each selected node's own series over the chosen window, with its totals.
 
+/// Most nodes drawn in their own colour; past this the smallest are drawn together as one series.
+const OWN_COLOURS = 7;
+/// The categorical order, defined in styles.css for each theme.
+const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
+  'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
+const OTHER_COLOUR = 'var(--faint)';
+
 function addNodeTrendsSection(nav     , sections     ) {
   const off = new Set        ();
   const sort = { col: 1, desc: true };
@@ -7610,6 +7617,8 @@ function addNodeTrendsSection(nav     , sections     ) {
   let overlayId = '';
   let pending                                                                         = null;
   let page            ;
+  // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
+  let colours = new Map                ();
 
   const tagRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
   const search = el('input', { class: 'trend-search' })                    ;
@@ -7632,6 +7641,25 @@ function addNodeTrendsSection(nav     , sections     ) {
     const kinds = new Set(all().map((s     ) => s.kind));
     const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
     if (preferred.length >= 2) all().forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
+  };
+
+  // A node's weight in the window, for choosing which get their own colour.
+  const weight = (s     ) => (s.values                     ).reduce((a        , v) => a + Math.abs(v ?? 0), 0);
+
+  // Colour follows the node: its slot is its position among every node, moved on only if a drawn node holds it.
+  const assignColours = (selected       ) => {
+    const own = selected.length > OWN_COLOURS + 1
+      ? [...selected].sort((a, b) => weight(b) - weight(a)).slice(0, OWN_COLOURS)
+      : selected;
+    const taken = new Set        ();
+    colours = new Map();
+    [...own].sort((a, b) => all().indexOf(a) - all().indexOf(b)).forEach((s     ) => {
+      let slot = all().indexOf(s) % SERIES.length;
+      while (taken.has(slot)) slot = (slot + 1) % SERIES.length;
+      taken.add(slot);
+      colours.set(s.node, SERIES[slot]);
+    });
+    return { own, rest: selected.filter((s     ) => !colours.has(s.node)) };
   };
 
   const drawTags = () => {
@@ -7664,7 +7692,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
       chip.title = (on ? 'On the chart — click to take it off' : 'Off the chart — click to add it')
         + ((s.tags || []).length ? `\ntags: ${(s.tags || []).join(', ')}` : '');
-      if (on) chip.style.borderColor = colorFor(s.kind, i);
+      if (on && colours.has(s.node)) chip.style.borderColor = colours.get(s.node) ;
       chip.onclick = () => { if (on) off.add(s.node); else off.delete(s.node); page.draw(); };
       picker.appendChild(chip);
     });
@@ -7772,7 +7800,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     const body = p.body();
     const step = Number(body.stepSeconds) || 0;
     const width = p.fitTo();
-    const color = (s     ) => colorFor(s.kind, all().indexOf(s));
+    const color = (s     ) => colours.get(s.node) || OTHER_COLOUR;
     const readings = (s     ) => (s.values                     )
       .map((v, d) => [v, d]                           ).filter(([v]) => v != null)                      ;
     // Return lanes are energy going back, not a node's own use, so none of these rank them.
@@ -7871,8 +7899,9 @@ function addNodeTrendsSection(nav     , sections     ) {
       return true;
     },
     render: (p) => {
-      drawTags(); drawPicker(); table.innerHTML = '';
       const body = p.body();
+      const fold = assignColours(body?.ok ? shown() : []);
+      drawTags(); drawPicker(); table.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();
@@ -7892,7 +7921,11 @@ function addNodeTrendsSection(nav     , sections     ) {
         return;
       }
 
-      const lines         = series.map((s     , i        ) => ({ label: s.label || s.node, color: colorFor(s.kind, i), values: signed(s) }));
+      const lines         = fold.own.map((s     ) => ({ label: s.label || s.node, color: colours.get(s.node) , values: signed(s) }));
+      // The rest are one series, so every drawn series can be told apart; the table below still lists each.
+      if (fold.rest.length)
+        lines.push({ label: `Other (${fold.rest.length} nodes)`, color: OTHER_COLOUR,
+          values: days.map((_, d) => sumKnown(fold.rest.map((s     ) => signed(s)[d]))) });
       const legend = overlay ? [...lines, { ...overlay, label: `${overlay.label} (overlay)` }] : lines;
       const gaps = p.section(byNodeTitle(p),
         'The nodes selected above.' + (!partial ? ''
