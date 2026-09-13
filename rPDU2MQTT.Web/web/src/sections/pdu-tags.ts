@@ -22,8 +22,8 @@ function ruleTags(match: string) {
   });
 }
 
-/// The tags panel for the PDU page; it reads the discovered PDUs and outlets when the page is opened.
-export function renderPduTags(sec: any): HTMLElement {
+/// The tags panel for the PDU page, and the load that reads the discovered PDUs and outlets into it.
+export function renderPduTags(): { el: HTMLElement; load: () => Promise<void> } {
   const box = el('div', { class: 'pdu-tags', style: { margin: '18px 0' } });
   let graph: any = null;
 
@@ -66,6 +66,5 @@ export function renderPduTags(sec: any): HTMLElement {
   };
 
   draw();
-  window.addEventListener('rpdu:activate', () => { if (sec.classList.contains('active')) load(); });
-  return box;
+  return { el: box, load };
 }

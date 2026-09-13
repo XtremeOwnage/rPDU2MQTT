@@ -508,7 +508,12 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     link.onclick = () => activate(link, sec);
   }
   // The PDU page is where anything about the PDUs is looked for, their tags included.
-  if (node.key === 'Pdus') sec.appendChild(renderPduTags(sec));
+  if (node.key === 'Pdus') {
+    const tags = renderPduTags();
+    sec.appendChild(tags.el);
+    const open = link.onclick;
+    link.onclick = (ev: any) => { open?.call(link, ev); tags.load(); };
+  }
   return link;
 }
 

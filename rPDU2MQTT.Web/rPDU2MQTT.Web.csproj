@@ -34,32 +34,8 @@
 	<ItemGroup>
 		<GuiSource Include="web\src\**\*.ts" />
 		<GuiSource Include="web\styles.css" />
-		<GuiSource Include="web\build.mjs" />
-		<GuiSource Include="web\smoke.mjs" />
-		<GuiSource Include="web\domstub.mjs" />
-		<GuiSource Include="web\layout.check.mjs" />
-		<GuiSource Include="web\sankey.check.mjs" />
-			<GuiSource Include="web\update.check.mjs" />
-			<GuiSource Include="web\animation.check.mjs" />
-			<GuiSource Include="web\gauge.check.mjs" />
-			<GuiSource Include="web\contradiction.check.mjs" />
-			<GuiSource Include="web\tags.check.mjs" />
-			<GuiSource Include="web\discover.check.mjs" />
-			<GuiSource Include="web\accumulation.check.mjs" />
-			<GuiSource Include="web\energyshow.check.mjs" />
-			<GuiSource Include="web\history.check.mjs" />
-			<GuiSource Include="web\trends.check.mjs" />
-			<GuiSource Include="web\node-trends.check.mjs" />
-			<GuiSource Include="web\mobile.check.mjs" />
-			<GuiSource Include="web\sparkline.check.mjs" />
-			<GuiSource Include="web\drilldown.check.mjs" />
-			<GuiSource Include="web\emoncms.check.mjs" />
-			<GuiSource Include="web\units.check.mjs" />
-			<GuiSource Include="web\ribbons.check.mjs" />
-			<GuiSource Include="web\nocross.check.mjs" />
-			<GuiSource Include="web\flowwidth.check.mjs" />
-			<GuiSource Include="web\flowcontrols.check.mjs" />
-			<GuiSource Include="web\flowscroll.check.mjs" />
+		<!-- Every check and the DOM stub: a check edited on its own still re-runs the GUI build and checks. -->
+		<GuiSource Include="web\*.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
 	</ItemGroup>
 

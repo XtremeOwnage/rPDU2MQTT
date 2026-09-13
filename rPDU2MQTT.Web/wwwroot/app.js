@@ -8450,8 +8450,8 @@ function ruleTags(match        ) {
   });
 }
 
-/// The tags panel for the PDU page; it reads the discovered PDUs and outlets when the page is opened.
-function renderPduTags(sec     )              {
+/// The tags panel for the PDU page, and the load that reads the discovered PDUs and outlets into it.
+function renderPduTags()                                                 {
   const box = el('div', { class: 'pdu-tags', style: { margin: '18px 0' } });
   let graph      = null;
 
@@ -8494,8 +8494,7 @@ function renderPduTags(sec     )              {
   };
 
   draw();
-  window.addEventListener('rpdu:activate', () => { if (sec.classList.contains('active')) load(); });
-  return box;
+  return { el: box, load };
 }
 
 // ── config-form.ts ──────────────────────────────────────────────
@@ -8985,7 +8984,12 @@ function renderConfigSection(node     , nav     , sections     ) {
     link.onclick = () => activate(link, sec);
   }
   // The PDU page is where anything about the PDUs is looked for, their tags included.
-  if (node.key === 'Pdus') sec.appendChild(renderPduTags(sec));
+  if (node.key === 'Pdus') {
+    const tags = renderPduTags();
+    sec.appendChild(tags.el);
+    const open = link.onclick;
+    link.onclick = (ev     ) => { open?.call(link, ev); tags.load(); };
+  }
   return link;
 }
 
