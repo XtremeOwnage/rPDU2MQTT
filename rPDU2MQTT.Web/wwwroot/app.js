@@ -5842,10 +5842,40 @@ function openCreateNodeDialog(bindings                 , suggestedId        , cl
   };
 }
 
+/// The topics as a tree of their '/' segments; a segment that is itself a topic carries its reading.
+
+function buildTopicTree(rows       )            {
+  const root            = { name: '', path: '', children: new Map() };
+  rows.forEach(r => {
+    let cur = root;
+    const segs = String(r.topic || '').split('/');
+    segs.forEach((seg, i) => {
+      let next = cur.children.get(seg);
+      if (!next) { next = { name: seg, path: segs.slice(0, i + 1).join('/'), children: new Map() }; cur.children.set(seg, next); }
+      cur = next;
+    });
+    cur.row = r;
+  });
+  return root;
+}
+
+/// Every topic at or beneath this branch — what ticking the branch ticks.
+function treeTopics(n           , out        = [])        {
+  if (n.row) out.push(n.row);
+  n.children.forEach(c => treeTopics(c, out));
+  return out;
+}
+
+/// Every branch path, for expand/collapse all.
+function treeBranches(n           , out           = [])           {
+  n.children.forEach(c => { if (c.children.size) out.push(c.path); treeBranches(c, out); });
+  return out;
+}
+
 /// The MQTT explorer: search the broker's live topics and tick the ones to create a node from.
 function openMqttExplorer() {
   const { body, close } = overlay('MQTT explorer');
-  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open. Tick readings, then create a node with a binding for each.' }));
+  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open, as a tree of their topic segments. Ticking a branch ticks every topic under it; create a node with a binding for each ticked reading.' }));
 
   const filterBar = el('div', { class: 'ld-toolbar' });
   const filterIn = el('input', { type: 'text', value: '#', placeholder: '# (everything)', style: { width: '220px' } })                    ;
@@ -5856,8 +5886,10 @@ function openMqttExplorer() {
 
   const bar = el('div', { class: 'ld-toolbar' });
   const search = el('input', { type: 'search', placeholder: 'filter the shown topics…', style: { width: '320px' } })                    ;
+  const expandAll = btn('Expand all');
+  const collapseAll = btn('Collapse all');
   const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
-  bar.append(search, status);
+  bar.append(search, expandAll, collapseAll, status);
   body.appendChild(bar);
 
   const tbl = el('table', { class: 'ld' });
@@ -5869,6 +5901,13 @@ function openMqttExplorer() {
   body.appendChild(tbl);
 
   const picked = new Map                       ();
+  const pick = (t     ) => {
+    const fields           = (t.fields || []).map((f     ) => f.field);
+    picked.set(t.topic, {
+      key: t.topic, what: t.topic, fields,
+      source: { Type: 'mqtt', Topic: t.topic, Metric: t.metric || 'realpower', Unit: t.unit || undefined, JsonField: fields.length === 1 ? fields[0] : undefined },
+    });
+  };
   // The deepest topic prefix every ticked topic shares, as the suggested id.
   const suggestId = () => {
     const parts = [...picked.keys()].map(t => t.split('/'));
@@ -5876,30 +5915,56 @@ function openMqttExplorer() {
     for (let i = 0; parts.length && parts.every(p => p.length > i + 1 && p[i] === parts[0][i]); i++) common.push(parts[0][i]);
     return explorerSlug(common[common.length - 1] || '');
   };
+
   let rows        = [];
+  const open = new Set        ();      // branches showing their children
+  const decided = new Set        ();   // branches the reader has opened or closed themselves
+
+  const drawBranch = (n           , depth        ) => {
+    const topics = treeTopics(n);
+    const branch = n.children.size > 0;
+    // A small branch opens itself, a big one waits to be asked, and either way the reader's choice sticks.
+    if (branch && !decided.has(n.path) && topics.length <= 25) open.add(n.path);
+
+    const box = el('input', { type: 'checkbox', title: branch ? `Tick the ${topics.length} topic(s) under ${n.path}` : n.path })                    ;
+    box.checked = topics.length > 0 && topics.every(t => picked.has(t.topic));
+    (box       ).indeterminate = !box.checked && topics.some(t => picked.has(t.topic));
+    box.onchange = () => {
+      topics.forEach(t => box.checked ? pick(t) : picked.delete(t.topic));
+      draw();
+      footer.sync();
+    };
+
+    const name = el('td', { style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    if (branch) {
+      const toggle = el('span', { text: open.has(n.path) ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
+      toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
+      name.appendChild(toggle);
+    }
+    name.append(el('code', { text: n.name }));
+    if (branch) name.append(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: `${topics.length} topic(s)` }));
+
+    const t = n.row;
+    tbody.appendChild(el('tr', {},
+      el('td', {}, box),
+      name,
+      el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' }),
+      el('td', { text: t ? (t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+
+    if (branch && open.has(n.path)) n.children.forEach(c => drawBranch(c, depth + 1));
+  };
+
   const draw = () => {
     tbody.innerHTML = '';
-    rows.forEach((t     ) => {
-      const box = el('input', { type: 'checkbox' })                    ;
-      box.checked = picked.has(t.topic);
-      box.onchange = () => {
-        if (!box.checked) picked.delete(t.topic);
-        else {
-          const fields           = (t.fields || []).map((f     ) => f.field);
-          picked.set(t.topic, {
-            key: t.topic, what: t.topic, fields,
-            source: { Type: 'mqtt', Topic: t.topic, Metric: t.metric || 'realpower', Unit: t.unit || undefined, JsonField: fields.length === 1 ? fields[0] : undefined },
-          });
-        }
-        footer.sync();
-      };
-      tbody.appendChild(el('tr', {},
-        el('td', {}, box),
-        el('td', {}, el('code', { text: t.topic })),
-        el('td', { class: 'num', text: t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48) }),
-        el('td', { text: t.isJson ? `JSON · ${(t.fields || []).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—') })));
-    });
+    buildTopicTree(rows).children.forEach(c => drawBranch(c, 0));
   };
+  const setAll = (opened         ) => {
+    treeBranches(buildTopicTree(rows)).forEach(path => { decided.add(path); opened ? open.add(path) : open.delete(path); });
+    draw();
+  };
+  expandAll.onclick = () => setAll(true);
+  collapseAll.onclick = () => setAll(false);
+
   const footer = explorerFooter(picked, suggestId, draw, close);
   body.appendChild(footer.bar);
 

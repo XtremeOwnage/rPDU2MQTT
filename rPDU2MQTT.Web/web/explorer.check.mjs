@@ -53,10 +53,24 @@ await exploreTopics.onclick();
 await wait(80);
 let explorer = sheet('MQTT explorer');
 if (!explorer) fail('Explore topics did not open the MQTT explorer');
-const boxes = query(explorer, 'input[type=checkbox]', true);
-if (boxes.length !== 2) fail(`expected a checkbox per topic, found ${boxes.length}`);
+// The topics are a tree of their segments, not a flat list: solar > pv > power/energy.
+const treeRow = (name) => query(explorer, 'tr', true).find(r => query(r, 'code', true).some(c => c.textContent === name));
+for (const seg of ['solar', 'pv', 'power', 'energy'])
+  if (!treeRow(seg)) fail(`the topic tree has no row for "${seg}"; rows: ${query(explorer, 'tr', true).map(r => query(r, 'code')?.textContent).join(', ')}`);
+if (!/2 topic\(s\)/.test(treeRow('solar').textContent)) fail(`a branch does not say how many topics are under it: ${treeRow('solar').textContent}`);
 if (!button(explorer, 'Create node').disabled) fail('Create node is enabled with nothing ticked');
-boxes.forEach(b => { b.checked = true; b.onchange(); });
+
+// Collapsing a branch hides what is under it, and opening it again brings it back.
+const toggleOf = (name) => query(treeRow(name), 'span', true)[0];
+toggleOf('solar').onclick();
+if (treeRow('power')) fail('collapsing a branch left its topics on show');
+toggleOf('solar').onclick();
+if (!treeRow('power')) fail('re-opening a branch did not bring its topics back');
+
+// Ticking a branch ticks every topic under it.
+const branchBox = query(treeRow('solar'), 'input[type=checkbox]', true)[0];
+branchBox.checked = true; branchBox.onchange();
+if (!query(treeRow('power'), 'input[type=checkbox]', true)[0].checked) fail('ticking a branch did not tick the topics under it');
 button(explorer, 'Create node').onclick();
 let dialog = sheet('Create node');
 if (!dialog) fail('Create node did not open the create dialog');
@@ -99,6 +113,7 @@ const src = nodes().find(n => n.Id === 'meter')?.Sources?.[0];
 if (!src || src.Type !== 'modbus' || src.Connection !== 'meter_gw' || src.Register !== 0 || src.DataType !== 'uint32' || src.RegisterType !== undefined)
   fail(`the Modbus binding is not the ticked register: ${JSON.stringify(src)}`);
 
-console.log('explorer: the MQTT and Modbus pages explore topics and registers, ticked readings become a new node '
-  + 'with a binding each, an existing id is refused, and the node opens in the node editor');
+console.log('explorer: the MQTT page shows the broker as a topic tree that opens, closes and ticks a whole branch, '
+  + 'the Modbus page explores registers, ticked readings become a new node with a binding each, an existing id is '
+  + 'refused, and the node opens in the node editor');
 process.exit(0);
