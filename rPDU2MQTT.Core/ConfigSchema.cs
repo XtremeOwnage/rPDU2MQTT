@@ -321,7 +321,9 @@ public static class ConfigSchema
             }
             else if (prop.GetCustomAttribute<MetricItemChoicesAttribute>() is not null)
             {
-                vs.EnumValues = BindableMetrics;
+                // The bindable metrics plus the daily metric: an import profile uses it to say the device
+                // zeroes this counter each day, which the import turns into energy with a period counter.
+                vs.EnumValues = [.. BindableMetrics, Core.Flow.EnergyPeriod.Metric];
                 vs.Type = "enum";
             }
             else if (prop.GetCustomAttribute<TagChoicesAttribute>() is not null)

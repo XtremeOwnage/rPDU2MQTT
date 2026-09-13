@@ -4,6 +4,7 @@ import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
 import { loadNodeTemplates, instantiateTemplate } from '../node-templates.js';
+import { openMqttExplorer } from './explorer.js';
 
 // The "Import device template" panel: pick a template, set an id prefix + Modbus host/unit.
 function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
@@ -34,11 +35,15 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
   (flow.Nodes || []).forEach((n: any) =>
     feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
   const scan = btn('Scan broker', 'primary');
+  // The same broker tree as the MQTT page: what a profile does not match is still findable here.
+  const browse = btn('Explore topics');
+  browse.title = 'Browse every topic on the broker as a tree, and create a node from the ones a profile does not match.';
+  browse.onclick = () => openMqttExplorer();
   const addBtn = btn('Add selected', 'primary');
   const copyBtn = btn('Copy this profile to config');
   copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
                 + 'metric map can be edited.';
-  bar.append(srcSel, scan,
+  bar.append(srcSel, scan, browse,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
   const note = el('div', { class: 'desc' });

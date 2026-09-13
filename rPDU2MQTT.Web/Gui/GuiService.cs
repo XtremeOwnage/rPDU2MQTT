@@ -1294,6 +1294,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         units = Core.Flow.FlowUnits.UnitsFor(m.Metric ?? ""),
                         canonicalUnit = Core.Flow.FlowUnits.Canonical(m.Metric ?? ""),
                         jsonField = m.JsonField, sample = m.Sample, unsupported = (string?)null,
+                        accumulation = m.Accumulation,
                     }),
                 }, ConfigSchema.Json);
             }

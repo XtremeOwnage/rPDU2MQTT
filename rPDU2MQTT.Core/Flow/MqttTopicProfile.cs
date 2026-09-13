@@ -7,8 +7,10 @@ namespace rPDU2MQTT.Core.Flow;
 /// <param name="Metric">Our metric name, or null when the measure is not one we roll up.</param>
 /// <param name="JsonField">Field to read from a JSON payload, or null when the payload is the bare value.</param>
 /// <param name="Sample">The last payload seen, so the operator can confirm the unit before importing.</param>
+/// <param name="Accumulation">How the counter accumulates — 'period' for one the device zeroes each day, else null.</param>
 public readonly record struct PatternMatch(
-    string Device, string Measure, string Topic, string? Metric, string? JsonField, string? Sample);
+    string Device, string Measure, string Topic, string? Metric, string? JsonField, string? Sample,
+    string? Accumulation = null);
 
 /// <summary>
 /// Matches readings by topic shape, for publishers that do not announce Home Assistant discovery.
@@ -38,8 +40,9 @@ public static class MqttTopicProfile
         ["power"] = "realpower",
         ["apparent_power"] = "apparentpower",
         ["energy"] = "energy",
-        ["energy_d"] = "energy",
-        ["daily_energy"] = "energy",
+        // ESPHome zeroes these each day, so they are the day's own figure rather than a lifetime counter.
+        ["energy_d"] = EnergyPeriod.Metric,
+        ["daily_energy"] = EnergyPeriod.Metric,
         ["total_energy"] = "energy",
         ["current"] = "current",
         ["voltage"] = "voltage",
@@ -117,7 +120,12 @@ public static class MqttTopicProfile
 
         string? metric = null;
         metrics?.TryGetValue(measure, out metric);
-        return new PatternMatch(device, measure, topic, metric, jsonField, sample);
+        // A profile names the daily metric to say "this counter resets each day"; a binding carries that as
+        // energy with a period counter, which is what the daily metric is derived from.
+        string? accumulation = null;
+        if (string.Equals(metric, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase))
+            (metric, accumulation) = ("energy", "period");
+        return new PatternMatch(device, measure, topic, metric, jsonField, sample, accumulation);
     }
 
     /// <summary>

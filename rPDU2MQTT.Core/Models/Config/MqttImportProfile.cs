@@ -24,7 +24,7 @@ public class MqttImportProfile
     [Description("Field holding the value when the payload is JSON — dotted for nesting. Leave blank when the payload is the bare number.")]
     public string? JsonField { get; set; }
 
-    [Description("Captured {measure} -> the metric it supplies. Measures not listed are ignored.")]
+    [Description("Captured {measure} -> the metric it supplies. Measures not listed are ignored. Choose 'energy_d' for a counter the device zeroes each day (e.g. ESPHome's energy_d); it is imported as energy with a daily-reset counter.")]
     // The choices come from the unit table rather than a list written out here, so a metric added there is
     // offered here without this file changing — and cannot be offered here without being understood there.
     [MetricItemChoices]

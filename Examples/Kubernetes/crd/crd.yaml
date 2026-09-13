@@ -88,7 +88,8 @@ spec:
                             - frequency
                             - powerfactor
                             - soc
-                          description: Captured {measure} -> the metric it supplies. Measures not listed are ignored.
+                            - energy_d
+                          description: Captured {measure} -> the metric it supplies. Measures not listed are ignored. Choose 'energy_d' for a counter the device zeroes each day (e.g. ESPHome's energy_d); it is imported as energy with a daily-reset counter.
                     description: Custom topic shapes for the MQTT Import page, for publishers with no built-in profile.
                   ParentTopic:
                     type: string

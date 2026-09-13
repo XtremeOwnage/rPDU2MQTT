@@ -44,9 +44,11 @@ public class ItemChoicesTests
             .ValueSchema!.Properties!.Single(p => p.Key == "Sources")
             .ValueSchema!.Properties!.Single(p => p.Key == "Metric").EnumValues!;
 
-        Assert.Equal(bindable.Where(v => v != "").ToArray(), metrics.ValueSchema.EnumValues);
-        // energy_d is derived from a counter's rise, not something a device publishes to bind to.
-        Assert.DoesNotContain("energy_d", metrics.ValueSchema.EnumValues!);
+        // Plus the daily metric: a profile names it to say the device zeroes this counter each day, which
+        // the import turns into energy with a period counter.
+        Assert.Equal([.. bindable.Where(v => v != ""), "energy_d"], metrics.ValueSchema.EnumValues);
+        // A binding itself still cannot be energy_d — that is derived from a counter's rise, not published.
+        Assert.DoesNotContain("energy_d", bindable);
         Assert.Contains("energy_d", FlowUnits.Metrics);
     }
 

@@ -80,4 +80,39 @@ public class MqttImportProfileTests
 
         Assert.Equal("realpower", m!.Value.Metric);
     }
+
+    /// <summary>A measure mapped to the daily metric is a counter the device zeroes each day.</summary>
+    [Fact]
+    public void AMeasureMappedToTheDailyMetric_ImportsAsEnergyWithAPeriodCounter()
+    {
+        var p = MqttTopicProfile.Resolve("esphome", null);
+
+        var found = MqttTopicProfile.Scan(p!, [
+            ("esphome/devices/fridge/sensor/energy_d/state", "70.688"),
+            ("esphome/devices/fridge/sensor/energy/state", "1200.5"),
+        ]);
+
+        var daily = found.Single(m => m.Measure == "energy_d");
+        Assert.Equal("energy", daily.Metric);
+        Assert.Equal("period", daily.Accumulation);
+
+        // A lifetime counter is left alone: only the profile saying so makes it a daily one.
+        var lifetime = found.Single(m => m.Measure == "energy");
+        Assert.Equal("energy", lifetime.Metric);
+        Assert.Null(lifetime.Accumulation);
+    }
+
+    /// <summary>A profile of the operator's own says it the same way.</summary>
+    [Fact]
+    public void AConfiguredProfileCanDeclareADailyResetCounter()
+    {
+        var profile = Tasmota();
+        profile.Metrics["Today"] = "energy_d";
+
+        var p = MqttTopicProfile.Resolve("custom:Tasmota", Configured(profile));
+        var m = MqttTopicProfile.Scan(p!, [("tele/kitchen/SENSOR/Today", "0.9")]).Single();
+
+        Assert.Equal("energy", m.Metric);
+        Assert.Equal("period", m.Accumulation);
+    }
 }

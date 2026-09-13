@@ -7064,11 +7064,15 @@ function renderDiscoverPanel(flow     , rerender            )              {
   (flow.Nodes || []).forEach((n     ) =>
     feedSel.appendChild(el('option', { value: n.Id, text: n.Label || n.Id })));
   const scan = btn('Scan broker', 'primary');
+  // The same broker tree as the MQTT page: what a profile does not match is still findable here.
+  const browse = btn('Explore topics');
+  browse.title = 'Browse every topic on the broker as a tree, and create a node from the ones a profile does not match.';
+  browse.onclick = () => openMqttExplorer();
   const addBtn = btn('Add selected', 'primary');
   const copyBtn = btn('Copy this profile to config');
   copyBtn.title = 'Write the selected built-in profile into MQTT.ImportProfiles, where its pattern and '
                 + 'metric map can be edited.';
-  bar.append(srcSel, scan,
+  bar.append(srcSel, scan, browse,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Wire as:' }), dirSel, feedSel,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'Tag as:' }), tagIn, addBtn, copyBtn);
   const note = el('div', { class: 'desc' });
