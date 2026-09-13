@@ -5749,60 +5749,6 @@ function addTagsSection(nav     , sections     ) {
   const link = navLink(nav, 'Tags', '#');
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
-  // The live graph, for the PDUs and outlets the bridge has discovered.
-  let graph      = null;
-
-  // A tag box for the rule whose pattern is exactly `match`; the rule exists only while it carries a tag.
-  const ruleTags = (match        ) => {
-    const rules = () => ensure(ensure(state.data, 'EnergyFlow', {}), 'AutoTags', []);
-    const find = () => rules().find((x     ) => String(x.Match || '').trim().toLowerCase() === match.toLowerCase());
-    const arr           = [...(find()?.Tags || [])];
-    return tagInput(arr, {
-      placeholder: 'add tag',
-      onChange: () => {
-        const list = rules();
-        const rule = find();
-        if (!arr.length) { if (rule) list.splice(list.indexOf(rule), 1); }
-        else if (rule) rule.Tags = [...arr];
-        else list.push({ Match: match, Tags: [...arr] });
-        refreshDirty();
-      },
-    });
-  };
-
-  const pduTags = () => {
-    const box = el('div', { style: { margin: '18px 0' } });
-    box.appendChild(el('h3', { text: 'PDU tags', style: { margin: '4px 0', fontSize: '15px' } }));
-    box.appendChild(el('div', { class: 'desc', text:
-      'Tags for what the PDUs report. Every PDU and every outlet can carry default tags, and each one its own '
-      + 'on top of them. Patterns covering part of a PDU are on the Nodes page. Circuits are not nodes in the '
-      + 'energy flow, so they cannot carry tags yet.' }));
-
-    const defaults = el('table', { class: 'ld' });
-    defaults.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'Applies to' }), el('th', { text: 'Default tags' }))));
-    const dbody = el('tbody');
-    ([['All PDUs', 'pdu:*'], ['All outlets', 'outlet:*']]                      ).forEach(([name, match]) =>
-      dbody.appendChild(el('tr', { 'data-match': match }, el('td', { text: name }), el('td', {}, ruleTags(match)))));
-    defaults.appendChild(dbody);
-    box.appendChild(defaults);
-
-    const derived = (graph?.nodes || [])
-      .filter((n     ) => /^(pdu|outlet):/.test(String(n.id || '')))
-      .sort((a     , b     ) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
-    if (!derived.length) {
-      box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' },
-        text: 'No PDU or outlet has been reported yet, so there is nothing to tag individually.' }));
-      return box;
-    }
-    const items = el('table', { class: 'ld', style: { marginTop: '10px' } });
-    items.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'PDU or outlet' }), el('th', { text: 'Id' }), el('th', { text: 'Its own tags' }))));
-    const ibody = el('tbody');
-    derived.forEach((n     ) => ibody.appendChild(el('tr', { 'data-match': n.id },
-      el('td', { text: n.label || n.id }), el('td', { class: 'desc', text: n.id }), el('td', {}, ruleTags(n.id)))));
-    items.appendChild(ibody);
-    box.appendChild(items);
-    return box;
-  };
 
   const render = () => {
     sec.innerHTML = '';
@@ -5837,7 +5783,10 @@ function addTagsSection(nav     , sections     ) {
       'A tag defined here exists before anything carries it, so a filter can be set up ahead of the nodes '
       + 'it will select. Typing one straight onto a node still works and still appears below.' }));
 
-    sec.appendChild(pduTags());
+    sec.appendChild(el('div', { class: 'desc' },
+      el('span', { text: 'Default and per-outlet tags for the PDUs are set on the ' }),
+      el('a', { text: 'Vertiv rPDU page', onclick: () => (document.querySelector('nav a[data-label="Vertiv rPDU"]')       )?.click() }),
+      el('span', { text: '.' })));
 
     const tags = knownTags();
     if (!tags.length) {
@@ -5928,11 +5877,7 @@ function addTagsSection(nav     , sections     ) {
           + 'it on a destination’s Include or Exclude list to give it an effect.' }));
   };
 
-  link.onclick = async () => {
-    render(); activate(link, sec);
-    try { const r      = await api('/api/flow'); graph = r?.body?.ok ? r.body : null; } catch { graph = null; }
-    render();
-  };
+  link.onclick = () => { render(); activate(link, sec); };
   render();
 }
 
@@ -8484,6 +8429,75 @@ const FEATURE_LABELS                         = {
   Cache: 'Persistent cache (Valkey/Redis)',
 };
 
+// ── sections/pdu-tags.ts ────────────────────────────────────────
+// PDU tags: default tags for every PDU and outlet, and each one's own, kept as the EnergyFlow tag rules.
+
+/// A tag box for the rule whose pattern is exactly `match`; the rule exists only while it carries a tag.
+function ruleTags(match        ) {
+  const rules = () => ensure(ensure(state.data, 'EnergyFlow', {}), 'AutoTags', []);
+  const find = () => rules().find((x     ) => String(x.Match || '').trim().toLowerCase() === match.toLowerCase());
+  const arr           = [...(find()?.Tags || [])];
+  return tagInput(arr, {
+    placeholder: 'add tag',
+    onChange: () => {
+      const list = rules();
+      const rule = find();
+      if (!arr.length) { if (rule) list.splice(list.indexOf(rule), 1); }
+      else if (rule) rule.Tags = [...arr];
+      else list.push({ Match: match, Tags: [...arr] });
+      refreshDirty();
+    },
+  });
+}
+
+/// The tags panel for the PDU page; it reads the discovered PDUs and outlets when the page is opened.
+function renderPduTags(sec     )              {
+  const box = el('div', { class: 'pdu-tags', style: { margin: '18px 0' } });
+  let graph      = null;
+
+  const draw = () => {
+    box.innerHTML = '';
+    box.appendChild(el('h3', { text: 'Tags', style: { margin: '4px 0', fontSize: '15px' } }));
+    box.appendChild(el('div', { class: 'desc', text:
+      'Tags for what the PDUs report. Every PDU and every outlet can carry default tags, and each one its own '
+      + 'on top of them. Patterns covering part of a PDU are on the Nodes page, and every tag is listed on the '
+      + 'Tags page. Circuits are not nodes in the energy flow, so they cannot carry tags yet.' }));
+
+    const defaults = el('table', { class: 'ld' });
+    defaults.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'Applies to' }), el('th', { text: 'Default tags' }))));
+    const dbody = el('tbody');
+    ([['All PDUs', 'pdu:*'], ['All outlets', 'outlet:*']]                      ).forEach(([name, match]) =>
+      dbody.appendChild(el('tr', {}, el('td', { text: name }), el('td', {}, ruleTags(match)))));
+    defaults.appendChild(dbody);
+    box.appendChild(defaults);
+
+    const derived = (graph?.nodes || [])
+      .filter((n     ) => /^(pdu|outlet):/.test(String(n.id || '')))
+      .sort((a     , b     ) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    if (!derived.length) {
+      box.appendChild(el('div', { class: 'desc', style: { marginTop: '8px' },
+        text: 'No PDU or outlet has been reported yet, so there is nothing to tag individually.' }));
+      return;
+    }
+    const items = el('table', { class: 'ld', style: { marginTop: '10px' } });
+    items.appendChild(el('thead', {}, el('tr', {}, el('th', { text: 'PDU or outlet' }), el('th', { text: 'Id' }), el('th', { text: 'Its own tags' }))));
+    const ibody = el('tbody');
+    derived.forEach((n     ) => ibody.appendChild(el('tr', {},
+      el('td', { text: n.label || n.id }), el('td', { class: 'desc', text: n.id }), el('td', {}, ruleTags(n.id)))));
+    items.appendChild(ibody);
+    box.appendChild(items);
+  };
+
+  const load = async () => {
+    try { const r      = await api('/api/flow'); graph = r?.body?.ok ? r.body : null; } catch { graph = null; }
+    draw();
+  };
+
+  draw();
+  window.addEventListener('rpdu:activate', () => { if (sec.classList.contains('active')) load(); });
+  return box;
+}
+
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
@@ -8970,6 +8984,8 @@ function renderConfigSection(node     , nav     , sections     ) {
     else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
   }
+  // The PDU page is where anything about the PDUs is looked for, their tags included.
+  if (node.key === 'Pdus') sec.appendChild(renderPduTags(sec));
   return link;
 }
 

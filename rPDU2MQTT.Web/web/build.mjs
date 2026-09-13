@@ -57,6 +57,7 @@ const MODULES = [
   'sections/ha-cleanup.ts',
   'sections/home.ts',
   'sections/features.ts',
+  'sections/pdu-tags.ts',
   'config-form.ts',
   'actions.ts',
   'main.ts',
