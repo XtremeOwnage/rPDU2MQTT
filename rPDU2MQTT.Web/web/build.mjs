@@ -50,6 +50,7 @@ const MODULES = [
   'sections/overview.ts',
   'sections/mqtt-import.ts',
   'sections/nodedata.ts',
+  'sections/timeline.ts',
   'sections/trends-shared.ts',
   'sections/trends.ts',
   'sections/node-trends.ts',

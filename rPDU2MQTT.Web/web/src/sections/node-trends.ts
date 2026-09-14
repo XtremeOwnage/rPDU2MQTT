@@ -285,6 +285,18 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     icon: '▥',
     stackable: true,
     controls: () => [el('label', { class: 'ld-inst' }, 'overlay ', overlaySel)],
+    // The selected nodes across the whole loaded range, in the colours the chart below gives them.
+    timeline: (_p, whole) => {
+      const selected = (whole?.series || []).filter((s: any) => !off.has(s.node));
+      const lines: Line[] = selected.filter((s: any) => colours.has(s.node))
+        .map((s: any) => ({ label: s.label || s.node, color: colours.get(s.node)!, values: signed(s) }));
+      const rest = selected.filter((s: any) => !colours.has(s.node));
+      if (rest.length) {
+        const n = rest[0].values.length;
+        lines.push({ label: 'Other', color: OTHER_COLOUR, values: Array.from({ length: n }, (_, d) => sumKnown(rest.map((s: any) => signed(s)[d]))) });
+      }
+      return lines;
+    },
     above: () => [tagRow, searchRow, picker],
     below: () => [table],
     loaded: () => {

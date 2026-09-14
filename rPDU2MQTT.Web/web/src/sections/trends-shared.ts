@@ -2,6 +2,7 @@
 import { api, btn, el, activate, navLink, instanceSelector, withInstance } from '../helpers.js';
 import { hideCard, type Line } from '../charts.js';
 import { periodRow, periodWindow, type PeriodKey } from '../history-control.js';
+import { timelineStrip, type Span } from './timeline.js';
 
 export type Metric = { metric: string; units: string; epoch?: string };
 
@@ -88,6 +89,8 @@ export type TrendsSpec = {
   loaded?: (page: TrendsPage) => void;
   /// On landing here; true when the page started its own load.
   activated?: (page: TrendsPage) => boolean;
+  /// The lines drawn on the timeline over the whole loaded range. A page that gives none has no timeline.
+  timeline?: (page: TrendsPage, whole: any) => Line[];
 };
 
 export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
@@ -103,8 +106,15 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
-  const charts = el('div');
+  const charts = el('div', { class: 'trend-charts' });
   let body: any = null;
+  // The whole range as loaded, and the stretch of it picked on the timeline. `body` is whichever is shown.
+  let whole: any = null;
+  let picked: Span | null = null;
+  const strip = spec.timeline
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } })
+    : null;
+  const unpick = () => { picked = null; strip?.clear(); };
 
   const rangeSel = el('select', { title: 'How far back to chart.' }) as HTMLSelectElement;
   RANGES.forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
@@ -184,13 +194,14 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
       rangeSel.appendChild(el('option', { value: range, text }));
     }
     rangeSel.value = range;
+    unpick();
     syncIntervals();
     const energy = energyFor(range);
     if (energy) { metricSel.value = energy.metric; metricChosen = true; }
     periods.mark(key);
     load();
   });
-  rangeSel.onchange = () => { periods.mark(null); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
   const toDeltas = (b: any) => {
@@ -268,7 +279,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   };
 
   const statusLine = (gaps: number) => {
-    const p = plan();
+    // A picked stretch is fitted by its own length, not the range's.
+    const p = picked ? { asked: null, used: null } : plan();
     const widened = p.asked != null && p.used != null && p.used > p.asked
       ? ` · interval widened from ${durationText(p.asked)} to ${durationText(p.used)} to fit the chart` : '';
     const capped = body?.requestedStepSeconds && body?.stepSeconds > body.requestedStepSeconds
@@ -284,11 +296,52 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     const clean = value.replace(/&step=\d+/g, '');
     if (!RANGES.some(r => r.value === clean)) return;
     rangeSel.value = clean;
+    unpick();
     syncIntervals();
     if (!metricChosen) metricSel.value = impliedMetric();
   };
 
-  const draw = () => { hideCard(); charts.innerHTML = ''; describe(); spec.render(page); };
+  /// Where each loaded value sits in time, and the range the timeline spans. A day's total belongs to the day it ends.
+  const placed = (b: any): { points: number[]; bounds: Span } | null => {
+    const ends = ((b?.at || []) as string[]).map(iso => new Date(iso).getTime());
+    if (!ends.length) return null;
+    if (b.days) return { points: ends.map(t => t - 43_200_000), bounds: { from: ends[0] - 86_400_000, to: ends[ends.length - 1] } };
+    return ends.length > 1 ? { points: ends, bounds: { from: ends[0], to: ends[ends.length - 1] } } : null;
+  };
+
+  const drawStrip = () => {
+    if (!strip) return;
+    const where = whole?.ok ? placed(whole) : null;
+    strip.el.hidden = !where;
+    if (where) strip.draw({ lines: spec.timeline!(page, whole), points: where.points, bounds: where.bounds, width: fitTo() });
+  };
+
+  const draw = () => { hideCard(); charts.innerHTML = ''; describe(); spec.render(page); drawStrip(); };
+
+  /// The stretch picked on the timeline, sampled finely enough to fill the chart.
+  const loadPicked = async () => {
+    const span = picked;
+    if (!span) return;
+    status.textContent = 'loading…';
+    const seconds = Math.max(60, (span.to - span.from) / 1000);
+    const fit = stepToFit(seconds, maxPoints());
+    const choice = intervalSel.value;
+    const step = choice === 'auto' || choice === 'day' ? fit : Math.max(Number(choice), fit);
+    const query = `from=${encodeURIComponent(new Date(span.from).toISOString())}`
+      + `&to=${encodeURIComponent(new Date(span.to).toISOString())}`
+      + `&step=${step}&metric=${encodeURIComponent(metricSel.value)}`;
+    let r: any;
+    try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
+    catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
+    // A newer pick is already on its way; this answer is for a window nobody is looking at.
+    if (picked !== span) return;
+    const b = r.body;
+    const epoch = epochOf(metricSel.value);
+    if (b?.ok && (epoch === 'lifetime' || epoch === 'period')) toDeltas(b);
+    body = b?.ok ? b : whole;
+    draw();
+    if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
+  };
 
   const load = async () => {
     status.textContent = 'loading…';
@@ -309,12 +362,15 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
       (body.series || []).forEach((x: any) => { x.values = x.values.slice(1); });
     }
     if (!body?.ok) {
+      whole = null;
       draw();
       status.textContent = '';
       charts.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: body?.message || 'Could not load the series.' }));
       return;
     }
+    whole = body;
     spec.loaded?.(page);
+    if (picked) { await loadPicked(); return; }
     draw();
   };
 
@@ -334,6 +390,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     ...(spec.controls?.(page) || []),
     instSel.wrap, status);
   sec.appendChild(bar);
+  if (strip) sec.appendChild(strip.el);
   (spec.above?.(page) || []).forEach(x => sec.appendChild(x));
   sec.appendChild(charts);
   (spec.below?.(page) || []).forEach(x => sec.appendChild(x));
