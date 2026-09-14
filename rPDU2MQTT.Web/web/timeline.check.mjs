@@ -105,6 +105,20 @@ if (!headings().includes('Energy by node') || headings().includes('Daily energy 
 if (frame().attrs.visibility !== 'visible') fail('the picked window is not drawn on the timeline');
 if (wholeButton()?.hidden !== false) fail('there is no way back to the whole range');
 
+// Each edge carries a grip, drawn where the window ends.
+const grips = () => query(svg(), 'rect', true).filter(r => r.attrs.class === 'trend-timeline-grip');
+if (grips().length !== 2 || grips().some(g => g.attrs.visibility !== 'visible')) fail('the window has no visible grips on its edges');
+const middleOf = (g) => Number(g.attrs.x) + Number(g.attrs.width) / 2;
+if (Math.abs(middleOf(grips()[0]) - 100) > 1 || Math.abs(middleOf(grips()[1]) - 600) > 1)
+  fail(`the grips are not on the window's edges: ${grips().map(middleOf).join(', ')}`);
+
+// The cursor says what a press would do before it is made: resize near an edge, grab inside, draw outside.
+const hoverAt = (px) => { const s = boxed(); s._on.pointermove[0]({ clientX: px, clientY: 30 }); return s.style.cursor; };
+if (hoverAt(610) !== 'ew-resize') fail(`10 px off the right edge does not offer to resize: ${hoverAt(610)}`);
+if (hoverAt(92) !== 'ew-resize') fail(`8 px off the left edge does not offer to resize: ${hoverAt(92)}`);
+if (hoverAt(350) !== 'grab') fail(`inside the window does not offer to move it: ${hoverAt(350)}`);
+if (hoverAt(1000) !== 'crosshair') fail(`outside the window does not offer to draw one: ${hoverAt(1000)}`);
+
 // A click inside the window that jitters a pixel is still a click: the window stays put and nothing is fetched again.
 const beforeClick = picks().length;
 await drag(350, 351);
@@ -117,11 +131,11 @@ near(moved.from, s.from + (100 / 1200) * range, 'moving the window moves its sta
 near(moved.to - moved.from, s.to - s.from, 'moving the window keeps its length');
 s = moved;
 
-// Drag its right edge: only that end moves.
-await drag(700, 900);
+// Drag its right edge, from 10 px off it: only that end moves.
+await drag(710, 900);
 const resized = spanOf(picks().at(-1));
 near(resized.from, s.from, 'resizing the right edge left the start alone');
-near(resized.to, at(900), 'resizing the right edge moves the end');
+near(resized.to, at(900) + (at(700) - at(710)), 'resizing the right edge moves the end by the drag');
 s = resized;
 
 // Scroll over it to zoom: the window narrows about the pointer.
@@ -172,7 +186,49 @@ await tick();
 const pinched = spanOf(picks().at(-1));
 if (!(pinched.to - pinched.from < beforePinch.to - beforePinch.from)) fail('spreading two fingers did not narrow the window');
 
+// The axis names the time: dates at midnight, and each label is the period it names.
+const ticks = () => query(strip(), 'button', true).filter(b => String(b.className || '').includes('trend-timeline-tick'));
+if (ticks().length < 5) fail(`the timeline has no time axis worth reading: ${ticks().length} labels`);
+const dateTick = ticks().find(b => String(b.className).includes('major'));
+if (!dateTick) fail('no label marks a date on the axis');
+dateTick.onclick();
+await tick();
+const day = spanOf(picks().at(-1));
+if (day.to - day.from !== 86_400_000) fail(`clicking a date did not show that day: ${(day.to - day.from) / 3_600_000} h`);
+if (new Date(day.from).getHours() !== 0 || new Date(day.from).getMinutes() !== 0) fail(`the day shown does not start at midnight: ${new Date(day.from)}`);
+
+// A length, snapped to a clean boundary, about the window's middle.
+const toolButton = (text) => query(strip(), 'button', true).find(b => b.textContent === text);
+toolButton('6 h').onclick();
+await tick();
+const six = spanOf(picks().at(-1));
+if (six.to - six.from !== 6 * 3_600_000) fail(`6 h picked ${(six.to - six.from) / 3_600_000} h`);
+if (new Date(six.from).getMinutes() !== 0) fail('6 h did not start on the hour');
+if (!(six.from >= day.from && six.to <= day.to)) fail('6 h was not taken from the middle of the window it narrowed');
+// The dashboard redraws the strip after every pick. This strip's box is the stub's 100 px — a phone's worth — where
+// 8 px of a week is thirteen hours, far wider than 6 h; the window must survive that redraw all the same.
+if (frame().attrs.visibility !== 'visible') fail('a 6 h window vanished when the dashboard redrew the strip');
+
+// Stepping moves the window by its own length.
+toolButton('◀').onclick();
+await tick();
+const back = spanOf(picks().at(-1));
+if (back.from !== six.from - 6 * 3_600_000 || back.to !== six.from) fail(`◀ did not step back one window: ${new Date(back.from)} → ${new Date(back.to)}`);
+toolButton('▶').onclick();
+await tick();
+if (spanOf(picks().at(-1)).from !== six.from) fail('▶ did not step forward one window');
+// A length whose middle is not on an hour is still started on one: 12:00 less half an hour is 11:30, shown from 11:00.
+toolButton('1 h').onclick();
+await tick();
+const hour = spanOf(picks().at(-1));
+if (hour.to - hour.from !== 3_600_000) fail(`1 h picked ${(hour.to - hour.from) / 60_000} min`);
+if (new Date(hour.from).getMinutes() !== 0) fail(`1 h did not start on the hour: ${new Date(hour.from)}`);
+toolButton('6 h').onclick();
+await tick();
+if (!/\(6 h\)/.test(query(strip(), '.desc').textContent)) fail(`the window's length is not shown: ${query(strip(), '.desc').textContent}`);
+
 console.log('timeline: Node Trends draws the whole range above the dashboard; dragging across it picks a stretch '
   + 'the dashboard then shows, fetched at its own step; the window moves, resizes by either edge, zooms about the '
-  + 'pointer, pans and pinches; a click picks nothing; double-click and a range change return to the whole range');
+  + 'pointer, pans and pinches; its edges carry grips and a 12 px grab zone the cursor announces; the axis names '
+  + 'dates and times, each a period to click; lengths snap to hours and midnights; ◀ ▶ step by the window; a click picks nothing; double-click and a range change return to the whole range');
 process.exit(0);
