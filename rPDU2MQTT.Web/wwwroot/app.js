@@ -7744,7 +7744,7 @@ function timelineStrip(onPick                             ) {
   let span              = null;
   let svg      = null;
   let shadeL     , shadeR     , frame     , edgeL     , edgeR     , gripL     , gripR     ;
-  let earlier      = null, later      = null, whole      = null;
+  let earlier      = null, later      = null, zoomOut      = null, whole      = null;
 
   const width = () => data?.width || 1200;
   const t0 = () => data .bounds.from;
@@ -7766,8 +7766,8 @@ function timelineStrip(onPick                             ) {
   };
 
   /// As `bounded`, and refused when a drag has made it narrower than an edge can be grabbed back from. Only a
-  /// drag is held to that: a length picked by button or label can be narrower than a pointer can draw on a
-  /// small screen, and is still the window asked for.
+  /// drag is held to that: a zoom, or a length picked by button or label, can be narrower than a pointer can
+  /// draw on a small screen, and is still the window asked for.
   const inRange = (s      )              => {
     const b = bounded(s);
     return b && b.to - b.from >= ((NARROWEST_PX * unit()) / width()) * (t1() - t0()) ? b : null;
@@ -7778,7 +7778,7 @@ function timelineStrip(onPick                             ) {
     const w = (s.to - s.from) * factor;
     if (w >= t1() - t0()) return null;
     const from = Math.min(Math.max(t0(), at - (at - s.from) * factor), t1() - w);
-    return inRange({ from, to: from + w }) ?? s;
+    return bounded({ from, to: from + w }) ?? s;
   };
 
   /// `s` moved by `dt`, the same length, stopped at either end of the range.
@@ -7808,8 +7808,9 @@ function timelineStrip(onPick                             ) {
 
   const paint = () => {
     note.textContent = span
-      ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}).`
-      : 'The whole range. Drag across it, click a date or time below it, or pick a length.';
+      ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
+      : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
+    if (zoomOut) zoomOut.disabled = !span;
     if (earlier) earlier.disabled = !span || span.from <= t0();
     if (later) later.disabled = !span || span.to >= t1();
     if (whole) whole.hidden = !span;
@@ -7869,7 +7870,7 @@ function timelineStrip(onPick                             ) {
         const dir = (ev.deltaX || ev.deltaY || 0) > 0 ? 1 : -1;
         span = shifted(span, dir * (span.to - span.from) * 0.15);
       } else {
-        span = zoomed(span ?? { from: t0(), to: t1() }, tOf(pxOf(ev)), (ev.deltaY || 0) < 0 ? 0.8 : 1.25);
+        span = zoomed(span ?? { from: t0(), to: t1() }, tOf(pxOf(ev)), (ev.deltaY || 0) < 0 ? 0.7 : 1 / 0.7);
       }
       paint();
       // A scroll arrives as a burst of events; the dashboard follows once it stops.
@@ -7877,7 +7878,15 @@ function timelineStrip(onPick                             ) {
       wheelTimer = setTimeout(() => onPick(span), 300);
     }, { passive: false });
 
-    s.addEventListener('dblclick', () => { if (span) { span = null; settle(); } });
+    // Double-click zooms in about the pointer, as a map does. Outside the window it zooms into that part of the
+    // whole range instead, so any section is two clicks away.
+    s.addEventListener('dblclick', (ev     ) => {
+      if (!data) return;
+      const at = tOf(pxOf(ev));
+      const base = span && at >= span.from && at <= span.to ? span : { from: t0(), to: t1() };
+      span = zoomed(base, at, 1 / 3);
+      settle();
+    });
   };
 
   window.addEventListener('pointermove', (ev     ) => {
@@ -7967,7 +7976,17 @@ function timelineStrip(onPick                             ) {
     later = btn('▶');
     later.title = 'Move the window forward by its own length';
     later.onclick = () => { if (span) { span = shifted(span, span.to - span.from); settle(); } };
-    tools.append(earlier, later);
+    const zoomIn = btn('+');
+    zoomIn.title = 'Zoom in: half the length, about the middle';
+    zoomIn.onclick = () => {
+      const base = span ?? { from: t0(), to: t1() };
+      span = zoomed(base, (base.from + base.to) / 2, 0.5);
+      settle();
+    };
+    zoomOut = btn('−');
+    zoomOut.title = 'Zoom out: twice the length, about the middle. Past the whole range, shows all of it.';
+    zoomOut.onclick = () => { if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); } };
+    tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
       const b = btn(text);
       b.title = `Show ${lengthText(size)}` + (size >= DAY ? ', from midnight' : ', from the start of an hour');

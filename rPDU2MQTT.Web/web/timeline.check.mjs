@@ -154,9 +154,26 @@ const panned = spanOf(picks().at(-1));
 near(panned.to - panned.from, zoomed.to - zoomed.from, 'panning keeps the length');
 if (!(panned.from > zoomed.from)) fail('shift-scrolling did not pan the window');
 
-// Double-click: back to the whole range, without fetching a stretch.
+// Double-click zooms in about the pointer, as a map does: to a third of the length, around where it landed.
+const pxAt = (t) => ((t - t0) / range) * 1200;
+const inside = (panned.from + panned.to) / 2;
+boxed()._on.dblclick[0]({ clientX: pxAt(inside) });
+await tick();
+const dz = spanOf(picks().at(-1));
+near(dz.to - dz.from, (panned.to - panned.from) / 3, 'double-clicking the window zooms in to a third');
+if (!(dz.from <= inside && inside <= dz.to)) fail('double-clicking zoomed away from where it was clicked');
+
+// Double-clicking outside the window zooms into that part of the whole range instead: any section is two clicks away.
+const far = pxAt(inside) < 600 ? 1100 : 100;
+boxed()._on.dblclick[0]({ clientX: far });
+await tick();
+const jumped = spanOf(picks().at(-1));
+near(jumped.to - jumped.from, range / 3, 'double-clicking outside the window zooms into the whole range');
+if (!(jumped.from <= at(far) && at(far) <= jumped.to)) fail('double-clicking outside the window did not go to where it was clicked');
+
+// Show the whole range clears it, without fetching a stretch.
 const count = picks().length;
-svg()._on.dblclick[0]({});
+wholeButton().onclick();
 await tick();
 if (picks().length !== count) fail('clearing the window fetched a stretch');
 if (!headings().includes('Daily energy by node')) fail(`clearing the window did not bring the whole range back: ${headings().join(', ')}`);
@@ -209,6 +226,17 @@ if (!(six.from >= day.from && six.to <= day.to)) fail('6 h was not taken from th
 // 8 px of a week is thirteen hours, far wider than 6 h; the window must survive that redraw all the same.
 if (frame().attrs.visibility !== 'visible') fail('a 6 h window vanished when the dashboard redrew the strip');
 
+// + halves the window about its middle, − doubles it, and zooming out past the whole range shows all of it.
+toolButton('+').onclick();
+await tick();
+const halved = spanOf(picks().at(-1));
+if (halved.to - halved.from !== 3 * 3_600_000) fail(`+ zoomed to ${(halved.to - halved.from) / 3_600_000} h, not 3 h`);
+if ((halved.from + halved.to) / 2 !== (six.from + six.to) / 2) fail('+ did not zoom about the middle');
+toolButton('−').onclick();
+await tick();
+const doubled = spanOf(picks().at(-1));
+if (doubled.from !== six.from || doubled.to !== six.to) fail(`− did not undo + : ${new Date(doubled.from)} → ${new Date(doubled.to)}`);
+
 // Stepping moves the window by its own length.
 toolButton('◀').onclick();
 await tick();
@@ -226,9 +254,11 @@ if (new Date(hour.from).getMinutes() !== 0) fail(`1 h did not start on the hour:
 toolButton('6 h').onclick();
 await tick();
 if (!/\(6 h\)/.test(query(strip(), '.desc').textContent)) fail(`the window's length is not shown: ${query(strip(), '.desc').textContent}`);
+for (let i = 0; i < 6 && frame().attrs.visibility === 'visible'; i++) { toolButton('−').onclick(); await tick(); }
+if (frame().attrs.visibility !== 'hidden' || !headings().includes('Daily energy by node')) fail('zooming out past the whole range did not show all of it');
 
 console.log('timeline: Node Trends draws the whole range above the dashboard; dragging across it picks a stretch '
   + 'the dashboard then shows, fetched at its own step; the window moves, resizes by either edge, zooms about the '
-  + 'pointer, pans and pinches; its edges carry grips and a 12 px grab zone the cursor announces; the axis names '
-  + 'dates and times, each a period to click; lengths snap to hours and midnights; ◀ ▶ step by the window; a click picks nothing; double-click and a range change return to the whole range');
+  + 'pointer (faster), zooms in on a double-click, pans and pinches; + and − halve and double it, zooming out past the range shows all of it; its edges carry grips and a 12 px grab zone the cursor announces; the axis names '
+  + 'dates and times, each a period to click; lengths snap to hours and midnights; ◀ ▶ step by the window; a click picks nothing; Show the whole range and a range change return to the whole range');
 process.exit(0);
