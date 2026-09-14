@@ -109,6 +109,13 @@
   .trend-card { min-width:180px; }
   .trend-card .nh-total { border-top:1px solid var(--line); margin-top:2px; padding-top:3px; font-weight:600; }
   .trend-swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:baseline; }
+  /* The timeline over a trends dashboard: the whole range, and the window that picks part of it. */
+  .trend-timeline { margin:var(--sp-3) 0 var(--sp-2); padding:var(--sp-2) var(--sp-3); border:1px solid var(--line); border-radius:var(--r); background:var(--panel); }
+  .trend-timeline-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); flex-wrap:wrap; margin-bottom:6px; }
+  .trend-timeline-svg { display:block; width:100%; height:72px; cursor:crosshair; touch-action:none; user-select:none; }
+  .trend-timeline-shade { fill:var(--bg); fill-opacity:.6; pointer-events:none; }
+  .trend-timeline-window { fill:var(--accent); fill-opacity:.1; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; pointer-events:none; }
+  .trend-timeline-edge { fill:var(--accent); pointer-events:none; }
   th.sortable { cursor:pointer; user-select:none; }
   th.sortable:hover { color:var(--fg); }
   /* The verdict from a section's test button, kept on the page after the toast has gone. */

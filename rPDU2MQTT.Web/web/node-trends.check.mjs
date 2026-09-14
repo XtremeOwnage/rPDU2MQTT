@@ -98,6 +98,8 @@ await new Promise(r => setTimeout(r, 300));
 
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!sec) fail('clicking Node Trends activated no section');
+// Charts are found by position, so they are looked for among the charts: the timeline's own svg sits above them.
+const chartsOf = (s) => query(s, '.trend-charts') || s;
 if (!asked.length) fail('the page charted nothing — no series was requested');
 // Thirty days of the energy counter: one more day-end is asked for, so the first day has a reading before it.
 if (!/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(asked[0])) fail(`the default range was not requested as the energy counter: ${asked[0]}`);
@@ -109,14 +111,14 @@ const chartTypeSel = query(sec, 'select', true).find(x => (x.children || []).som
 const stackedBox = query(sec, 'input', true).find(i => i.type === 'checkbox');
 if (!chartTypeSel || chartTypeSel.value !== 'area') fail(`the page does not open as area charts: ${chartTypeSel?.value}`);
 if (!stackedBox || !stackedBox.checked) fail('the page does not open stacked');
-if (!['polygon', 'circle'].flatMap(t => query(query(sec, 'svg', true)[0], t, true)).some(e => e.attrs.class === 'trend-area'))
+if (!['polygon', 'circle'].flatMap(t => query(query(chartsOf(sec), 'svg', true)[0], t, true)).some(e => e.attrs.class === 'trend-area'))
   fail('the default chart drew no area');
 // The assertions below read bars.
 chartTypeSel.value = 'bar';
 chartTypeSel.onchange({});
 await new Promise(r => setTimeout(r, 50));
 
-const charts = query(sec, 'svg', true);
+const charts = query(chartsOf(sec), 'svg', true);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
 if (!headings.includes('Daily energy by node')) fail(`no "Daily energy by node" chart (got: ${headings.join(', ')})`);
 // The whole-system charts are the Trends page's, not this one's.
@@ -125,7 +127,7 @@ for (const other of ['Grid per day', 'Self-sufficiency per day'])
 
 // --- Comparing the selected nodes ---------------------------------------------------------------------
 // Solar 159, battery out 32, grid import 27 kWh: 218 between them. Charge and export go back, so they are not ranked.
-const chartNamed = (title) => { const hs = query(sec, 'h3', true).map(h => h.textContent); return query(sec, 'svg', true)[hs.indexOf(title)]; };
+const chartNamed = (title) => { const hs = query(sec, 'h3', true).map(h => h.textContent); return query(chartsOf(sec), 'svg', true)[hs.indexOf(title)]; };
 const largest = chartNamed('Total energy by node');
 if (!largest) fail(`no "Total energy by node" chart (got: ${headings.join(', ')})`);
 const rankText = query(largest, 'text', true).map(t => t.textContent);
@@ -178,10 +180,10 @@ query(sec, 'button', true).find(b => b.textContent === 'All').click();
 await new Promise(r => setTimeout(r, 50));
 
 // The period in progress is faded and said in words.
-const todayHit = query(query(sec, 'svg', true)[0], 'rect', true).find(h => (h.attrs.class || '') === 'trend-hit' && h.attrs['data-day'] === '2026-08-07');
+const todayHit = query(query(chartsOf(sec), 'svg', true)[0], 'rect', true).find(h => (h.attrs.class || '') === 'trend-hit' && h.attrs['data-day'] === '2026-08-07');
 todayHit.dispatch('mouseenter', { clientX: 5, clientY: 5 });
 if (!/so far|in progress/.test(query(sandbox.document.body, '.trend-card').textContent)) fail('the unfinished day is not marked');
-if (!query(query(sec, 'svg', true)[0], 'rect', true).some(r => r.attrs.opacity === '0.55')) fail('the unfinished day is drawn exactly like a finished one');
+if (!query(query(chartsOf(sec), 'svg', true)[0], 'rect', true).some(r => r.attrs.opacity === '0.55')) fail('the unfinished day is drawn exactly like a finished one');
 
 const status = query(sec, 'span', true).map(s => s.textContent).join(' ');
 if (!/2 with no reading/.test(status)) fail(`the missing days are not counted: ${status.slice(0, 200)}`);
@@ -227,7 +229,7 @@ if (!query(sec, 'h3', true).map(h => h.textContent).includes('Power by node')) f
 
 // Ten outlets selected: the seven largest in their own colours, the smallest three as one Other series,
 // and no two drawn series sharing a colour.
-const outletFills = query(query(sec, 'svg', true)[0], 'rect', true).filter(r => !r.attrs.class).map(r => r.attrs.fill);
+const outletFills = query(query(chartsOf(sec), 'svg', true)[0], 'rect', true).filter(r => !r.attrs.class).map(r => r.attrs.fill);
 const distinct = new Set(outletFills);
 if (distinct.size !== 8) fail(`expected 7 node colours and Other, drew ${distinct.size}: ${[...distinct].join(', ')}`);
 if (!distinct.has('var(--faint)')) fail('the smallest outlets are not drawn together as Other');
@@ -287,7 +289,7 @@ rangeSel.value = 'today=1&back=1';
 rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 if (!/back=1/.test(decodeURIComponent(asked.at(-1)))) fail(`yesterday was not asked for as the previous period: ${asked.at(-1)}`);
-const dayChart = query(sec, 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
+const dayChart = query(chartsOf(sec), 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
 if (!(Number(dayChart.attrs.width) > 0 && Number(dayChart.attrs.width) <= 1200)) fail(`a day of samples was drawn ${dayChart.attrs.width}px wide`);
 const axis = query(dayChart, 'text', true).filter(t => t.attrs['text-anchor'] === 'middle').map(t => t.textContent).filter(Boolean);
 if (axis.length < 8) fail(`a day of samples carries ${axis.length} axis label(s)`);
@@ -301,10 +303,10 @@ if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus)) fail(`the status line d
 const dayHeads = query(sec, 'h3', true).map(h => h.textContent);
 for (const want of ['Peak power by node', 'Average power by hour of day', 'Base load by node'])
   if (!dayHeads.includes(want)) fail(`no "${want}" chart for a day of power samples (got: ${dayHeads.join(', ')})`);
-const hourChart = query(sec, 'svg', true)[dayHeads.indexOf('Average power by hour of day')];
+const hourChart = query(chartsOf(sec), 'svg', true)[dayHeads.indexOf('Average power by hour of day')];
 if (query(hourChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit').length !== 24) fail('the hour-of-day chart does not have an hour per slot');
 if (!query(hourChart, 'polyline', true).some(e => e.attrs.class === 'trend-line')) fail('the hour-of-day chart drew no line');
-const alwaysText = query(query(sec, 'svg', true)[dayHeads.indexOf('Base load by node')], 'text', true).map(t => t.textContent);
+const alwaysText = query(query(chartsOf(sec), 'svg', true)[dayHeads.indexOf('Base load by node')], 'text', true).map(t => t.textContent);
 if (!alwaysText.includes('Grid') || !alwaysText.some(t => t.startsWith('400 W'))) fail(`the grid's steady draw is not shown: ${alwaysText.join(' | ')}`);
 if (alwaysText.includes('Solar')) fail('solar, which reaches zero, is listed with a base load');
 
@@ -352,12 +354,12 @@ if (!nodeChips().some(t => t.includes('Grid'))) fail('clearing the filter did no
 const overlaySel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.textContent === 'nothing'));
 if (!overlaySel) fail('no overlay control');
 if (overlaySel.value !== '') fail('the overlay does not default to nothing');
-if (query(query(sec, 'svg', true)[0], 'polyline', true).concat(query(query(sec, 'svg', true)[0], 'circle', true))
+if (query(query(chartsOf(sec), 'svg', true)[0], 'polyline', true).concat(query(query(chartsOf(sec), 'svg', true)[0], 'circle', true))
   .some(e => e.attrs.class === 'trend-overlay')) fail('an overlay was drawn before one was chosen');
 overlaySel.value = 'grid';
 overlaySel.onchange({});
 await new Promise(r => setTimeout(r, 50));
-const lead = query(sec, 'svg', true)[0];
+const lead = query(chartsOf(sec), 'svg', true)[0];
 if (!query(lead, 'polyline', true).concat(query(lead, 'circle', true)).some(e => e.attrs.class === 'trend-overlay')) fail('choosing an overlay drew no line');
 if (!sec.textContent.includes('Grid (overlay)')) fail('the overlay is not named in the legend');
 overlaySel.value = '';
@@ -400,19 +402,19 @@ const marks = (svg, cls) => ['polyline', 'polygon', 'circle'].flatMap(t => query
 chartSel.value = 'line';
 chartSel.onchange({});
 await new Promise(r => setTimeout(r, 50));
-const lineSvg = query(sec, 'svg', true)[0];
+const lineSvg = query(chartsOf(sec), 'svg', true)[0];
 if (!marks(lineSvg, 'trend-line').length) fail('choosing lines drew no line');
 if (query(lineSvg, 'rect', true).some(r => !r.attrs.class)) fail('choosing lines still drew bars');
 if (!stackBox.disabled) fail('stacking is offered for lines, which are never stacked');
 chartSel.value = 'area';
 chartSel.onchange({});
 await new Promise(r => setTimeout(r, 50));
-if (!marks(query(sec, 'svg', true)[0], 'trend-area').length) fail('choosing areas drew no area');
+if (!marks(query(chartsOf(sec), 'svg', true)[0], 'trend-area').length) fail('choosing areas drew no area');
 if (stackBox.disabled) fail('stacking is not offered for areas');
 chartSel.value = 'bar';
 chartSel.onchange({});
 await new Promise(r => setTimeout(r, 50));
-if (!query(query(sec, 'svg', true)[0], 'rect', true).some(r => !r.attrs.class)) fail('going back to bars drew no bars');
+if (!query(query(chartsOf(sec), 'svg', true)[0], 'rect', true).some(r => !r.attrs.class)) fail('going back to bars drew no bars');
 
 console.log('node trends: per-node chart over the chosen range with empty days marked and counted; tags, a text filter '
   + 'and chips select what is charted; totals cover the days that reported; power within a day on a clock axis '

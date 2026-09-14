@@ -27,6 +27,20 @@ public static class SeriesWindow
         return Math.Max(step, needed);
     }
 
+    /// <summary>
+    /// The window between two instants: oldest first, no longer than <see cref="MaxMinutes"/> (the older end is
+    /// moved up to fit), or null when either end is missing or they are less than a step apart.
+    /// </summary>
+    public static (DateTime From, DateTime To)? Between(DateTime? from, DateTime? to)
+    {
+        if (from is null || to is null) return null;
+        var (a, b) = from.Value <= to.Value ? (from.Value, to.Value) : (to.Value, from.Value);
+        if ((b - a).TotalSeconds < MinStepSeconds) return null;
+        var longest = TimeSpan.FromMinutes(MaxMinutes);
+        if (b - a > longest) a = b - longest;
+        return (a, b);
+    }
+
     /// <summary>Instants from <paramref name="start"/> to <paramref name="end"/> at the fitted step, oldest first, never empty.</summary>
     public static IReadOnlyList<DateTime> Instants(DateTime start, DateTime end, int stepSeconds)
     {

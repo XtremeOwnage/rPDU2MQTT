@@ -1753,6 +1753,18 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : DateTime.UtcNow;
 
+            // A stretch picked on a timeline: any two instants, sampled at a step that fits them.
+            DateTime? Instant(string key) => DateTime.TryParse(ctx.Request.Query[key].ToString(), null,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var instant)
+                ? instant : null;
+            if (SeriesWindow.Between(Instant("from"), Instant("to")) is { } picked)
+            {
+                var stepPicked = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var sp) ? sp : null, 300);
+                var metricPicked = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
+                return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricPicked,
+                    SeriesWindow.Instants(picked.From, picked.To, stepPicked), null, null, ctx.RequestAborted, stepPicked), ConfigSchema.Json);
+            }
+
             // Two shapes of question, and they are not the same question.
             if (ctx.Request.Query["today"] == "1")
             {

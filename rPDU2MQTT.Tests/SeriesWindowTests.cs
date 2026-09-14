@@ -46,4 +46,19 @@ public class SeriesWindowTests
         Assert.Single(SeriesWindow.Instants(T0, T0.AddSeconds(30), 3600));
         Assert.Single(SeriesWindow.Instants(T0.AddMinutes(1), T0, 3600));
     }
+
+    /// <summary>A stretch picked on a timeline: the ends in either order, capped at a year, and refused when half-given or shorter than a step.</summary>
+    [Fact]
+    public void Between_OrdersTheEnds_CapsTheLength_AndRefusesWhatIsNotAWindow()
+    {
+        Assert.Equal((T0, T0.AddHours(6)), SeriesWindow.Between(T0.AddHours(6), T0)!.Value);
+
+        var capped = SeriesWindow.Between(T0, T0.AddDays(400))!.Value;
+        Assert.Equal(T0.AddDays(400), capped.To);
+        Assert.Equal(TimeSpan.FromMinutes(SeriesWindow.MaxMinutes), capped.To - capped.From);
+
+        Assert.Null(SeriesWindow.Between(T0, T0.AddSeconds(30)));
+        Assert.Null(SeriesWindow.Between(T0, null));
+        Assert.Null(SeriesWindow.Between(null, T0));
+    }
 }
