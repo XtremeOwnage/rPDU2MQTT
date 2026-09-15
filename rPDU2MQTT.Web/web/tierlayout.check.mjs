@@ -94,8 +94,8 @@ if (!(x('b_living') < x('pdu1'))) fail('the PDU is not right of the breaker feed
 if (x('g_breaker') !== x('sub_panel'))
   fail(`a breaker under a panel with nothing nested was pushed past another branch's sub-panel (x=${x('g_breaker')}; the column beside its panel is x=${x('sub_panel')})`);
 
-// Every column follows the hierarchy: what one node feeds stays together, and a panel's own loads come after
-// its sub-branches, so its ribbons do not have to cross them.
+// Every column follows the hierarchy: what one node feeds stays together, and a panel's own loads come first,
+// where its longest ribbons run straightest.
 const lastCol = [...tiers.bars.entries()].filter(([, b]) => b.x === right).sort((a, b) => a[1].y - b[1].y).map(([id]) => id);
 const together = (ids, what) => {
   const at = ids.map(id => lastCol.indexOf(id)).sort((a, b) => a - b);
@@ -105,10 +105,10 @@ const together = (ids, what) => {
 together(['n30', 'dell'], "the breaker's loads");
 together(['hvac', 'hall_light'], "the sub-panel's loads");
 together(['fridge', 'office', 'n30', 'dell', 'hvac', 'hall_light', 'fan'], "the main panel's loads");
-const ownFirst = Math.min(...['fridge', 'office'].map(id => lastCol.indexOf(id)));
-const branchesLast = Math.max(...['n30', 'dell', 'hvac', 'hall_light', 'fan'].map(id => lastCol.indexOf(id)));
-if (ownFirst < branchesLast)
-  fail(`the main panel's own loads sit among its circuits' loads rather than after them: ${lastCol.join(', ')}`);
+const ownLast = Math.max(...['fridge', 'office'].map(id => lastCol.indexOf(id)));
+const branchesFirst = Math.min(...['n30', 'dell', 'hvac', 'hall_light', 'fan'].map(id => lastCol.indexOf(id)));
+if (ownLast > branchesFirst)
+  fail(`the main panel's own loads are not above its circuits' loads, where their long ribbons run straightest: ${lastCol.join(', ')}`);
 
 // A link that skips columns is still ONE band: drawn hop by hop it left a stripe at every column it crossed.
 const fridge = tiers.ribbons.filter(r => r.src === 'main_panel' && r.dst === 'fridge');
@@ -154,6 +154,22 @@ for (const [cx, col] of byCol) {
   for (let i = 1; i < col.length; i++)
     if (col[i].y < col[i - 1].y + col[i - 1].h) fail(`"${col[i - 1].id}" and "${col[i].id}" overlap at x=${cx}`);
 }
+
+// A long ribbon spreads its descent across the columns it crosses, rather than taking it all in one and running
+// flat through the rest.
+let descending = 0;
+for (const r of tiers.ribbons) {
+  const top = r.d.slice(0, r.d.indexOf(' L'));
+  const ys = [+top.match(/^M[\d.-]+,([\d.-]+)/)[1], ...[...top.matchAll(/C[\d.-]+,[\d.-]+ [\d.-]+,[\d.-]+ [\d.-]+,([\d.-]+)/g)].map(m => +m[1])];
+  if (ys.length < 4) continue;
+  const total = Math.abs(ys.at(-1) - ys[0]);
+  if (total < 40) continue;
+  descending++;
+  const steepest = Math.max(...ys.slice(1).map((y, i) => Math.abs(y - ys[i])));
+  if (steepest > total * 0.8)
+    fail(`${r.src} -> ${r.dst} takes ${steepest.toFixed(0)} of its ${total.toFixed(0)}px descent in a single column`);
+}
+if (!descending) fail('the fixture has no long ribbon descending across several columns to check');
 
 // Ribbons crossing a column side by side are laid as one wide band. Lanes with no bar between them may sit
 // closer than bars do — closer than the 6 px gap — and none overlap.

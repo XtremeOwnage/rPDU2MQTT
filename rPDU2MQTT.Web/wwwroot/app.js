@@ -3792,6 +3792,8 @@ function addFlowSection(nav     , sections     ) {
     const minCol = Math.min(...nodes.map((n     ) => colMemo[n.id]));
     if (minCol > 0) nodes.forEach((n     ) => { colMemo[n.id] -= minCol; });
 
+    // Each pass-through: its first and last hop, and the waypoints between.
+    const chains                                              = [];
     // Preview layout: a link that skips columns gets a waypoint in each column it crosses, so its ribbon has a
     // lane there rather than cutting across whatever sits in between.
     if (flowLayout === 'tiers') {
@@ -3800,14 +3802,18 @@ function addFlowSection(nav     , sections     ) {
         const a = colMemo[l.source], b = colMemo[l.target];
         if (a == null || b == null || b - a <= 1) { laid.push(l); return; }
         let prev = l.source;
+        const segs        = [], ids           = [];
         for (let c = a + 1; c < b; c++) {
           const id = `${l.source}→${l.target}@${c}`;
           const way = { id, to: l.target, label: '', kind: 'passthrough', passthrough: true, value: l.known === false ? null : l.value };
           ways.push(way); colMemo[id] = c; byId[id] = way;
-          laid.push({ ...l, source: prev, target: id, orig: l });
+          const seg = { ...l, source: prev, target: id, orig: l };
+          laid.push(seg); segs.push(seg); ids.push(id);
           prev = id;
         }
-        laid.push({ ...l, source: prev, target: l.target, orig: l });
+        const lastSeg = { ...l, source: prev, target: l.target, orig: l };
+        laid.push(lastSeg); segs.push(lastSeg);
+        chains.push({ first: segs[0], last: lastSeg, ways: ids });
       });
       if (ways.length) {
         nodes = [...nodes, ...ways];
@@ -3916,8 +3922,9 @@ function addFlowSection(nav     , sections     ) {
     // moved.
     /// By kind: every column in the order of one walk down the hierarchy. A branch is laid out in full before the
     /// next begins, so what a node feeds stays together in every column it reaches, and no two ribbons between
-    /// neighbouring columns cross — the averaging sweeps below only make that likely. Children that feed further
-    /// come first, then the loads, biggest first; a panel's unmeasured remainder last. A node with several
+    /// neighbouring columns cross — the averaging sweeps below only make that likely. A node's own loads come
+    /// first, biggest first: they are its longest ribbons, and at the top of its group they run nearly straight
+    /// instead of diving under everything else. Then what feeds further; a panel's remainder last. A node with several
     /// feeders is walked from the one supplying most of it, and a waypoint sits with the branch it leads to.
     const hierarchyOrder = () => {
       const ord                         = {};
@@ -3930,7 +3937,7 @@ function addFlowSection(nav     , sections     ) {
         ord[id] = next++;
         ((cardOut[id] || [])         ).map((l     ) => l.target)
           .filter((t        ) => primaryFeeder(t) === id)
-          .sort((a        , b        ) => (Number(feedsOn(b)) - Number(feedsOn(a))) || (remainder(a) - remainder(b)) || (nodeValue(b) - nodeValue(a)))
+          .sort((a        , b        ) => (Number(feedsOn(a)) - Number(feedsOn(b))) || (remainder(a) - remainder(b)) || (nodeValue(b) - nodeValue(a)))
           .forEach(visit);
       };
       folded.nodes.filter((n     ) => !((cardIn[n.id] || [])         ).length).map((n     ) => n.id)
@@ -4101,6 +4108,26 @@ function addFlowSection(nav     , sections     ) {
       for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
     }
     cols.forEach((cn       ) => { if (cn && cn.length) separate(cn); });
+
+    // By kind: each waypoint lies on the straight line from where its ribbon leaves its source to where it arrives.
+    // Placed only against its neighbours, a lane took a ribbon's whole descent in one column and held flat through
+    // the rest — against a tall last column, a dive at the end. Columns are separated again after each move, which
+    // keeps their order, and a few rounds let the ends and the lanes settle against each other.
+    if (flowLayout === 'tiers' && chains.length) {
+      for (let pass = 0; pass < 3; pass++) {
+        const at = attachments();
+        chains.forEach(ch => {
+          const a = at.get(ch.first), b = at.get(ch.last);
+          if (!a || !b) return;
+          const x0 = pos[ch.first.source].x + nodeW, x1 = pos[ch.last.target].x;
+          ch.ways.forEach(w => {
+            const f = (pos[w].x + nodeW / 2 - x0) / ((x1 - x0) || 1);
+            pos[w].y = a.from + (b.to - a.from) * f - rowOf(w) / 2;
+          });
+        });
+        cols.forEach((cn       ) => { if (cn && cn.length) separate(cn); });
+      }
+    }
     bottom = Math.max(bottom, ...cols.filter(Boolean).flatMap((cn       ) => cn.map((n     ) => pos[n.id].y + rowOf(n.id))));
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
