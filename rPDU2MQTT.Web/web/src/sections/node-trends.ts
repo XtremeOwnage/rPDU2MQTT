@@ -1,5 +1,6 @@
 // Node Trends: each selected node's own series over the chosen window, with its totals.
 import { btn, el, formatNum } from '../helpers.js';
+import { kindMeta } from '../flow-vocabulary.js';
 import { barChart, rankChart, type Line } from '../charts.js';
 import { takeFocus } from '../state.js';
 import { trendsPage, signed, isReturn, type TrendsPage } from './trends-shared.js';
@@ -37,12 +38,61 @@ export function addNodeTrendsSection(nav: any, sections: any) {
   const matches = (s: any) => !filter
     || [s.label, s.node, ...(s.tags || [])].some(t => String(t || '').toLowerCase().includes(filter));
 
-  // The selection the page opens with: the leaves the Energy board treats as the whole picture.
-  const resetSelection = () => {
+  const kindOf = (s: any): string => s.kind || 'node';
+  const KINDS_KEY = 'rpdu-node-trends-kinds';
+  /// The kinds the page opens on when none were chosen: one that splits the total without counting it twice,
+  /// circuits where there are any. Grid beside everything it feeds counts the same energy at every tier.
+  const DEFAULT_KINDS = ['breaker', 'load', 'outlet', 'panel', 'pdu'];
+
+  // The selection the page opens with: the kinds last chosen here, or the default.
+  const resetSelection = (useSaved = true) => {
     off.clear();
-    const kinds = new Set(all().map((s: any) => s.kind));
+    const kinds = new Set(all().map(kindOf));
+    let saved: string[] = [];
+    if (useSaved) {
+      try { saved = JSON.parse(localStorage.getItem(KINDS_KEY) || '[]').filter((k: string) => kinds.has(k)); }
+      catch { saved = []; }
+    }
+    const one = DEFAULT_KINDS.find(k => kinds.has(k));
+    // An install with none of those is sources and loads only, charted as before.
     const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
-    if (preferred.length >= 2) all().forEach((s: any) => { if (!preferred.includes(s.kind)) off.add(s.node); });
+    const pick = saved.length ? saved : one ? [one] : preferred.length >= 2 ? preferred : [];
+    if (pick.length) all().forEach((s: any) => { if (!pick.includes(kindOf(s))) off.add(s.node); });
+  };
+
+  /// The kinds wholly on the chart, remembered so the page opens as it was left.
+  const saveKinds = () => {
+    const kinds = [...new Set(all().map(kindOf))];
+    const on = kinds.filter(k => all().filter((s: any) => kindOf(s) === k).every((s: any) => !off.has(s.node)));
+    try { localStorage.setItem(KINDS_KEY, JSON.stringify(on)); } catch { /* private mode: this session only */ }
+  };
+
+  const KIND_ORDER = ['grid', 'solar', 'battery', 'inverter', 'panel', 'breaker', 'pdu', 'outlet', 'load', 'node', 'unmeasured'];
+  const kindName = (k: string) => k === 'pdu' ? 'PDU' : k === 'outlet' ? 'Outlet' : k === 'unmeasured' ? 'Unmeasured'
+    : kindMeta(k)[0] === k ? kindMeta(k)[1] : k;
+
+  /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
+  const kindRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const drawKinds = () => {
+    kindRow.innerHTML = '';
+    const kinds = [...new Set(all().map(kindOf))]
+      .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+    if (kinds.length < 2) return;
+    kindRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Kinds:' }));
+    kinds.forEach(kind => {
+      const members = all().filter((s: any) => kindOf(s) === kind);
+      const allOn = members.every((s: any) => !off.has(s.node));
+      const chip = btn(`${allOn ? '● ' : '○ '}${kindName(kind)} (${members.length})`);
+      if (allOn) chip.classList.add('chip-on');
+      chip.title = `${allOn ? 'Take' : 'Add'} the ${members.length} ${kindName(kind).toLowerCase()} node(s) ${allOn ? 'off' : 'to'} the chart. `
+        + 'Kinds combine; one kind at a time charts the total once.';
+      chip.onclick = () => {
+        members.forEach((s: any) => allOn ? off.add(s.node) : off.delete(s.node));
+        saveKinds();
+        page.draw();
+      };
+      kindRow.appendChild(chip);
+    });
   };
 
   // A node's weight in the window, for choosing which get their own colour.
@@ -112,8 +162,12 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
     none.onclick = () => { visible.forEach((s: any) => off.add(s.node)); page.draw(); };
     const reset = btn('Reset', 'primary');
-    reset.title = 'Back to the default selection: solar, battery, grid and the loads.';
-    reset.onclick = () => { resetSelection(); page.draw(); };
+    reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
+    reset.onclick = () => {
+      try { localStorage.removeItem(KINDS_KEY); } catch { /* private mode */ }
+      resetSelection(false);
+      page.draw();
+    };
     picker.append(allBtn, none, reset);
   };
   search.oninput = () => { filter = search.value.trim().toLowerCase(); drawPicker(); };
@@ -297,7 +351,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       }
       return lines;
     },
-    above: () => [tagRow, searchRow, picker],
+    above: () => [kindRow, tagRow, searchRow, picker],
     below: () => [table],
     loaded: () => {
       if (pending) {
@@ -321,7 +375,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     render: (p) => {
       const body = p.body();
       const fold = assignColours(body?.ok ? shown() : []);
-      drawTags(); drawPicker(); table.innerHTML = '';
+      drawKinds(); drawTags(); drawPicker(); table.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();

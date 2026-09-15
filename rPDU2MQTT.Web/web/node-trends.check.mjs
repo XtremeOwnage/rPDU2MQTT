@@ -343,7 +343,8 @@ const search = query(sec, 'input', true).find(i => i.type === 'search');
 if (!search) fail('no node filter');
 search.value = 'sol';
 search.oninput();
-const nodeChips = () => query(sec, 'button', true).map(b => b.textContent || '').filter(t => /^[●○] /.test(t));
+// Node chips only: the kind chips above them carry a count, "● Grid (1)", and are not what the filter narrows.
+const nodeChips = () => query(sec, 'button', true).map(b => b.textContent || '').filter(t => /^[●○] /.test(t) && !/ \(\d+\)$/.test(t));
 if (!nodeChips().some(t => t.includes('Solar'))) fail(`filtering by "sol" hid Solar: ${nodeChips().join(' | ')}`);
 if (nodeChips().some(t => t.includes('Grid'))) fail(`filtering by "sol" still lists Grid: ${nodeChips().join(' | ')}`);
 search.value = '';
