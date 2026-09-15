@@ -12,13 +12,19 @@ export type Range = { value: string; text: string; wants: 'power' | 'energy'; se
 export const RANGES: Range[] = [
   { value: 'today=1', text: 'today so far', wants: 'power', seconds: 86_400 },
   { value: 'today=1&back=1', text: 'yesterday', wants: 'power', seconds: 86_400 },
+  { value: 'minutes=60', text: 'last hour', wants: 'power', seconds: 3_600 },
+  { value: 'minutes=180', text: 'last 3 hours', wants: 'power', seconds: 10_800 },
   { value: 'minutes=360', text: 'last 6 hours', wants: 'power', seconds: 21_600 },
+  { value: 'minutes=720', text: 'last 12 hours', wants: 'power', seconds: 43_200 },
   { value: 'minutes=1440', text: 'last 24 hours', wants: 'power', seconds: 86_400 },
   { value: 'days=7', text: 'last 7 days', wants: 'energy', seconds: 7 * 86_400 },
   { value: 'days=14', text: 'last 14 days', wants: 'energy', seconds: 14 * 86_400 },
   { value: 'days=30', text: 'last 30 days', wants: 'energy', seconds: 30 * 86_400 },
   { value: 'days=90', text: 'last 90 days', wants: 'energy', seconds: 90 * 86_400 },
 ];
+
+/// The recent windows offered as one click beside the calendar periods.
+export const RECENT: [string, string][] = [['minutes=60', 'Last hour'], ['minutes=360', 'Last 6 hours'], ['minutes=1440', 'Last 24 hours']];
 
 /// Auto fits the samples to the chart; per day is one total for each day.
 export const INTERVALS: [string, string][] = [
@@ -112,7 +118,11 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   let whole: any = null;
   let picked: Span | null = null;
   const strip = spec.timeline
-    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } })
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
+      can: () => !!spanOfRange(rangeSel.value) || !!wider(),
+      go: () => { const r = wider(); if (r) useRange(r); },
+      zoomTo: (s) => useRange(customRange(s)),
+    })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
@@ -124,6 +134,39 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const rangeOf = (): Range => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
   const multiDay = () => rangeSel.value.startsWith('days=');
+  /// The two instants of a zoomed-to range, or null for any other range.
+  const spanOfRange = (value: string): Span | null => {
+    const m = /^from=([^&]+)&to=([^&]+)$/.exec(value);
+    if (!m) return null;
+    const from = Date.parse(decodeURIComponent(m[1])), to = Date.parse(decodeURIComponent(m[2]));
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
+  };
+  /// A range of two instants, listed in the dropdown so it reads back there.
+  const customRange = (s: Span): Range => {
+    const value = `from=${encodeURIComponent(new Date(s.from).toISOString())}&to=${encodeURIComponent(new Date(s.to).toISOString())}`;
+    const at = (t: number) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const range: Range = { value, text: `${at(s.from)} → ${at(s.to)}`, wants: rate() ? 'power' : 'energy', seconds: Math.round((s.to - s.from) / 1000) };
+    if (!added.has(value)) { added.set(value, range); rangeSel.appendChild(el('option', { value, text: range.text })); }
+    return range;
+  };
+  // Only the zoomed-to range being shown stays listed.
+  const useRange = (r: Range) => {
+    rangeSel.value = r.value;
+    Array.from(rangeSel.children).forEach((o: any) => {
+      if (o.value !== r.value && spanOfRange(o.value)) { added.delete(o.value); o.remove(); }
+    });
+    rangeSel.onchange!({} as any);
+  };
+  // The next longer range, which zooming out past the whole timeline loads: a zoomed-to range doubles about its middle.
+  const wider = (): Range | undefined => {
+    const custom = spanOfRange(rangeSel.value);
+    if (!custom) return RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
+    const w = 2 * (custom.to - custom.from);
+    const longest = RANGES[RANGES.length - 1];
+    if (w >= longest.seconds * 1000) return longest;
+    const to = Math.min(Date.now(), (custom.from + custom.to) / 2 + w / 2);
+    return customRange({ from: to - w, to });
+  };
 
   const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' }) as HTMLSelectElement;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));
@@ -199,9 +242,19 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     const energy = energyFor(range);
     if (energy) { metricSel.value = energy.metric; metricChosen = true; }
     periods.mark(key);
+    markRecent();
     load();
   });
-  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  // A recent window is a range the dropdown already lists, so picking one reads back there too.
+  const recentButtons = RECENT.map(([value, label]) => {
+    const b = btn(label);
+    b.title = `Chart the ${label.toLowerCase()} up to now.`;
+    b.onclick = () => { rangeSel.value = value; rangeSel.onchange!({} as any); };
+    return b;
+  });
+  periods.row.append(...recentButtons);
+  const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
+  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
   const toDeltas = (b: any) => {

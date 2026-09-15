@@ -43,7 +43,10 @@ function snapped(t: number, size: number) {
   return d.getTime();
 }
 
-export function timelineStrip(onPick: (span: Span | null) => void) {
+/// A longer range the page can load when zooming out past the whole of this one.
+export type Widen = { can: () => boolean; go: () => void; zoomTo?: (s: Span) => void };
+
+export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen) {
   const box = el('div', { class: 'trend-timeline' });
   const head = el('div', { class: 'trend-timeline-head' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
@@ -56,7 +59,7 @@ export function timelineStrip(onPick: (span: Span | null) => void) {
   let span: Span | null = null;
   let svg: any = null;
   let shadeL: any, shadeR: any, frame: any, edgeL: any, edgeR: any, gripL: any, gripR: any;
-  let earlier: any = null, later: any = null, zoomOut: any = null, whole: any = null;
+  let earlier: any = null, later: any = null, zoomOut: any = null, whole: any = null, toRange: any = null;
 
   const width = () => data?.width || 1200;
   const t0 = () => data!.bounds.from;
@@ -122,10 +125,11 @@ export function timelineStrip(onPick: (span: Span | null) => void) {
     note.textContent = span
       ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
       : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
-    if (zoomOut) zoomOut.disabled = !span;
+    if (zoomOut) zoomOut.disabled = !span && !widen?.can();
     if (earlier) earlier.disabled = !span || span.from <= t0();
     if (later) later.disabled = !span || span.to >= t1();
     if (whole) whole.hidden = !span;
+    if (toRange) toRange.hidden = !span;
     if (!svg) return;
     const on = !!span;
     const xl = on ? xOf(span!.from) : 0;
@@ -181,6 +185,12 @@ export function timelineStrip(onPick: (span: Span | null) => void) {
         if (!span) return;
         const dir = (ev.deltaX || ev.deltaY || 0) > 0 ? 1 : -1;
         span = shifted(span, dir * (span.to - span.from) * 0.15);
+      } else if (!span && (ev.deltaY || 0) > 0) {
+        // Out past the whole range loads a longer one, once the burst stops.
+        if (!widen?.can()) return;
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => widen.go(), 300);
+        return;
       } else {
         span = zoomed(span ?? { from: t0(), to: t1() }, tOf(pxOf(ev)), (ev.deltaY || 0) < 0 ? 0.7 : 1 / 0.7);
       }
@@ -296,8 +306,11 @@ export function timelineStrip(onPick: (span: Span | null) => void) {
       settle();
     };
     zoomOut = btn('−');
-    zoomOut.title = 'Zoom out: twice the length, about the middle. Past the whole range, shows all of it.';
-    zoomOut.onclick = () => { if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); } };
+    zoomOut.title = 'Zoom out: twice the length, about the middle. At the whole range, loads the next longer range.';
+    zoomOut.onclick = () => {
+      if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); }
+      else widen?.go();
+    };
     tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
       const b = btn(text);
@@ -305,6 +318,12 @@ export function timelineStrip(onPick: (span: Span | null) => void) {
       b.onclick = () => { const s = sized(size); if (s) { span = s; settle(); } };
       tools.appendChild(b);
     });
+    if (widen?.zoomTo) {
+      toRange = btn('Zoom to selection');
+      toRange.title = 'Make the picked window the time range, so the timeline and the dashboard both cover just that stretch.';
+      toRange.onclick = () => { if (span) widen.zoomTo!(span); };
+      tools.appendChild(toRange);
+    }
     whole = btn('Show the whole range');
     whole.onclick = () => { span = null; settle(); };
     tools.appendChild(whole);
