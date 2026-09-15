@@ -140,8 +140,8 @@ public class EnergyFlowGroup
     public string Label { get; set; } = "";
 
     [DefaultValue("node")]
-    [Description("What the group represents, for diagram styling: 'node', 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'.")]
-    [AllowedValues("node", "panel", "inverter", "battery", "solar", "grid", "load")]
+    [Description("What the group represents, for diagram styling: 'node', 'panel', 'breaker', 'inverter', 'battery', 'solar', 'grid', or 'load'.")]
+    [AllowedValues("node", "panel", "breaker", "inverter", "battery", "solar", "grid", "load")]
     public string Kind { get; set; } = "node";
 
     [Description("The ids of the member nodes this group aggregates.")]
@@ -174,8 +174,8 @@ public class EnergyFlowNode
     /// is the plain virtual node it has always been.
     /// </summary>
     [DefaultValue("node")]
-    [Description("What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers.")]
-    [AllowedValues("node", "panel", "inverter", "battery", "solar", "grid", "load")]
+    [Description("What this node represents: 'node' (generic), 'panel', 'breaker' (a circuit that feeds other nodes), 'inverter', 'battery', 'solar', 'grid', or 'load' (where power is used, so it feeds nothing). Drives styling and the fields the editor offers.")]
+    [AllowedValues("node", "panel", "breaker", "inverter", "battery", "solar", "grid", "load")]
     public string Kind { get; set; } = "node";
 
     /// <summary>

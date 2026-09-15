@@ -1009,12 +1009,15 @@ const sourceMetricKey = (src     ) => { const m = src.Metric || 'realpower'; ret
 const NODE_KINDS                               = [
   ['node', 'Virtual node', SOURCE_METRICS],
   ['panel', 'Electrical panel', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
+  ['breaker', 'Breaker / circuit', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
   ['inverter', 'Inverter', SOURCE_METRICS],
   ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage', 'soc']],
   ['solar', 'Solar / PV', ['realpower', 'energy', 'current', 'voltage']],
   ['grid', 'Grid', SOURCE_METRICS],
   ['load', 'Load', ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'powerfactor']],
 ];
+/// A load is where power is used, so it feeds nothing; a circuit that feeds other nodes is a breaker.
+const feedsNothing = (kind         ) => kind === 'load';
 const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
@@ -1371,6 +1374,7 @@ const KIND_COLOR                         = {
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
   panel: '#c98b3f',
+  breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
 const colorFor = (kind        , i        ) =>
@@ -4416,6 +4420,10 @@ function addFlowSection(nav     , sections     ) {
     /// an extra feeder is the ● drag. Replacing is destructive, so existing wiring is named and confirmed.
     const setParent = (child        , parent        ) => {
       if (child === parent) return;
+      if (feedsNothing((cand.get(parent) || {}).kind)) {
+        toast(`${nm(parent)} is a load, and a load does not feed anything. If it is a circuit that feeds ${nm(child)}, set its kind to Breaker.`, false);
+        return;
+      }
       if (reaches(child, parent)) { toast(`${nm(parent)} is already downstream of ${nm(child)} — that would be a loop.`, false); return; }
       if (links.some((l     ) => l.From === parent && l.To === child)) { toast(`${nm(parent)} already feeds ${nm(child)}.`, false); return; }
 
@@ -4494,6 +4502,7 @@ function addFlowSection(nav     , sections     ) {
       const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
       if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
       if (!tgt || src === tgt) return;
+      if (feedsNothing((cand.get(src) || {}).kind)) { toast(`${nm(src)} is a load, and a load does not feed anything. If it is a circuit, set its kind to Breaker.`, false); return; }
       if (reaches(tgt, src)) { toast('That would create a feeder loop.', false); return; }
       if (links.some((l     ) => l.From === src && l.To === tgt)) { toast('That feed already exists.', false); return; }
       links.push({ From: src, To: tgt });
@@ -5393,7 +5402,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
 
   // --- Feeders & children (wiring) — the parent/child specification, alongside the visual Flow tab. ---
   box.appendChild(el('h5', { text: 'Feeders & children', style: { margin: '12px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab.', style: { margin: '0 0 6px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab. Loads are not offered as feeders: a load uses power rather than passing it on, and a circuit that feeds other nodes is a Breaker.', style: { margin: '0 0 6px' } }));
 
   const nm = (id        ) => (cand.get(id) || {}).label || id;
   const addLink = (from        , to        ) => {
@@ -5402,7 +5411,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
     links.push({ From: from, To: to });
   };
   const removeLink = (from        , to        ) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
-  const wireRow = (title        , current          , onAdd                     , onRemove                     ) => {
+  const wireRow = (title        , current          , onAdd                     , onRemove                     , offer                          = () => true) => {
     const row = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '3px 0' } });
     row.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: title }));
     current.forEach(other => {
@@ -5412,7 +5421,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
       chip.append(nm(other), x); row.appendChild(chip);
     });
     // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets.
-    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
+    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id) && offer(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
     const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } })                    ;
     const sel = el('select', { style: { width: 'auto' } })                     ;
     const matches = () => {
@@ -5436,7 +5445,8 @@ function renderNodeEditor(node     , links       , cand                  , reren
     row.append(search, sel);
     return row;
   };
-  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
+  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
+    id => !feedsNothing((cand.get(id) || {}).kind)));
   box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
 
   return box;
@@ -5673,7 +5683,8 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
       const sel = el('select', { style: { width: 'auto' } })                     ;
       sel.appendChild(el('option', { value: '', text: '— none —' }));
       [...cand.keys()]
-        .filter(id => id !== n.Id && !String(id).includes('#'))
+        // A load uses power rather than passing it on; the feeder already wired stays listed so it still shows.
+        .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
         .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
         .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
       sel.value = incoming[0] || '';

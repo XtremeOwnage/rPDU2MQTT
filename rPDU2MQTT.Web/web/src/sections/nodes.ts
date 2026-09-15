@@ -2,7 +2,7 @@
 import { api, btn, el, ensure, activate, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
-import { kindMeta, NODE_KINDS } from '../flow-vocabulary.js';
+import { feedsNothing, kindMeta, NODE_KINDS } from '../flow-vocabulary.js';
 import { flowGroups } from '../flow-view.js';
 import { renderImportPanel } from '../node-templates.js';
 import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
@@ -237,7 +237,8 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
       const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
       sel.appendChild(el('option', { value: '', text: '— none —' }));
       [...cand.keys()]
-        .filter(id => id !== n.Id && !String(id).includes('#'))
+        // A load uses power rather than passing it on; the feeder already wired stays listed so it still shows.
+        .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
         .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
         .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
       sel.value = incoming[0] || '';

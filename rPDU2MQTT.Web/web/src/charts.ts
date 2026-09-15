@@ -10,6 +10,7 @@ export const KIND_COLOR: Record<string, string> = {
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
   panel: '#c98b3f',
+  breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
 export const colorFor = (kind: string, i: number) =>

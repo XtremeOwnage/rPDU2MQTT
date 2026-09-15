@@ -247,7 +247,7 @@ public static class FlowGraphBuilder
         // panel, a PDU, a metered circuit. Named kinds only — an unclassified node says nothing either way
         // and keeps conservation down a single path; set its Kind to say what it is.
         bool Distributes(string id)
-            => kind.TryGetValue(id, out var k) && k is "panel" or "pdu" or "outlet" or "load";
+            => kind.TryGetValue(id, out var k) && k is "panel" or "breaker" or "pdu" or "outlet" or "load";
 
         // Which unmeasured feeders may supply what a node still needs after its measured feeders are counted.
         var expectsReading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

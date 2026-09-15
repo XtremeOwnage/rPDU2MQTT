@@ -7,7 +7,7 @@ import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
-  NODE_KINDS, NODE_MODES, SIGNED_METRICS, sourceTypes,
+  NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes,
   isAdditiveMetric, kindMeta, metricLabel, metricMeta, sourceMetricKey,
 } from '../flow-vocabulary.js';
 
@@ -854,7 +854,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
 
   // --- Feeders & children (wiring) — the parent/child specification, alongside the visual Flow tab. ---
   box.appendChild(el('h5', { text: 'Feeders & children', style: { margin: '12px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab.', style: { margin: '0 0 6px' } }));
+  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab. Loads are not offered as feeders: a load uses power rather than passing it on, and a circuit that feeds other nodes is a Breaker.', style: { margin: '0 0 6px' } }));
 
   const nm = (id: string) => (cand.get(id) || {}).label || id;
   const addLink = (from: string, to: string) => {
@@ -863,7 +863,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     links.push({ From: from, To: to });
   };
   const removeLink = (from: string, to: string) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
-  const wireRow = (title: string, current: string[], onAdd: (o: string) => void, onRemove: (o: string) => void) => {
+  const wireRow = (title: string, current: string[], onAdd: (o: string) => void, onRemove: (o: string) => void, offer: (id: string) => boolean = () => true) => {
     const row = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '3px 0' } });
     row.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: title }));
     current.forEach(other => {
@@ -873,7 +873,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
       chip.append(nm(other), x); row.appendChild(chip);
     });
     // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets.
-    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
+    const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id) && offer(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
     const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
     const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
     const matches = () => {
@@ -897,7 +897,8 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     row.append(search, sel);
     return row;
   };
-  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id)));
+  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
+    id => !feedsNothing((cand.get(id) || {}).kind)));
   box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
 
   return box;
