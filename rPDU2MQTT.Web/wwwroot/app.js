@@ -3594,10 +3594,10 @@ function addFlowSection(nav     , sections     ) {
     const cols        = [];
     nodes.forEach((n     ) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
-    // The vertical gap between two bars in a column. It is a readability floor, not decoration: a node
-    // carries a name and a figure on one 11px line, and two bars closer than this put one row's text
-    // against the next row's bar.
-    const gap = 14;
+    // The vertical gap between two rows in a column. Text is kept apart by each row being at least a label
+    // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
+    // column of thirty circuits was mostly empty space.
+    const gap = 6;
     // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
     // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
@@ -3620,8 +3620,8 @@ function addFlowSection(nav     , sections     ) {
     const colX = (c        ) => leftPad + (maxCol > 0 ? c * ((W - leftPad - rightGutter - nodeW) / maxCol) : 0);
 
     const pos      = {};
-    // Every node's label needs a full text line, whatever its bar height.
-    const labelRow = 15;
+    // Every node's label needs a full text line, whatever its bar height: 11px text and its 3px halo.
+    const labelRow = 14;
 
     /// Where a node's name is drawn: the middle of the ribbons it sends.
     ///
