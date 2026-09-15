@@ -8614,13 +8614,23 @@ function addNodeTrendsSection(nav     , sections     ) {
   // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
   let colours = new Map                ();
 
-  const tagRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  // Kinds and tags flow in one row: two rows of chips before the chart was half the page on a real install.
+  const tagRow = el('div', { style: { display: 'contents' } });
   const search = el('input', { class: 'trend-search' })                    ;
   search.type = 'search';
   search.placeholder = 'Filter nodes';
   search.title = 'Show only the nodes whose name, id or tags contain this text.';
   const searchRow = el('div', { class: 'ld-toolbar' }, search);
   const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  // The node list is dozens of chips on a real install, so it folds into one line saying what is charted.
+  const nodesBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const nodesPanel = el('div', {}, searchRow, picker);
+  const NODES_OPEN_KEY = 'rpdu-node-trends-nodes-open';
+  let nodesOpen = (() => { try { return localStorage.getItem(NODES_OPEN_KEY) === '1'; } catch { return false; } })();
+  const setNodesOpen = (on         ) => {
+    nodesOpen = on;
+    try { localStorage.setItem(NODES_OPEN_KEY, on ? '1' : '0'); } catch { /* private mode: this session only */ }
+  };
   const table = el('div');
   const overlaySel = el('select', { title: 'Draw one more series as a line over the chart, on the same axis.' })                     ;
 
@@ -8663,7 +8673,8 @@ function addNodeTrendsSection(nav     , sections     ) {
     : kindMeta(k)[0] === k ? kindMeta(k)[1] : k;
 
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
-  const kindRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const kindRow = el('div', { style: { display: 'contents' } });
+  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
     const kinds = [...new Set(all().map(kindOf))]
@@ -8710,7 +8721,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     const tags = new Set        ();
     all().forEach((s     ) => (s.tags || []).forEach((t        ) => tags.add(t)));
     if (!tags.size) return;
-    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Tags:' }));
+    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 10px' }, text: 'Tags:' }));
     [...tags].sort().forEach(tag => {
       const members = all().filter((s     ) => (s.tags || []).includes(tag));
       const allOn = members.every((s     ) => !off.has(s.node));
@@ -8728,7 +8739,6 @@ function addNodeTrendsSection(nav     , sections     ) {
 
   const drawPicker = () => {
     picker.innerHTML = '';
-    picker.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Nodes:' }));
     const visible = all().filter(matches);
     all().forEach((s     , i        ) => {
       if (!matches(s)) return;
@@ -8759,7 +8769,14 @@ function addNodeTrendsSection(nav     , sections     ) {
       resetSelection(false);
       page.draw();
     };
-    picker.append(allBtn, none, reset);
+    nodesBar.innerHTML = '';
+    const charted = all().filter((s     ) => !off.has(s.node)).length;
+    const toggle = btn(nodesOpen ? 'Hide node list ▴' : 'Choose nodes ▾');
+    toggle.title = nodesOpen ? 'Fold the node list away.' : 'Pick individual nodes, or filter them by name.';
+    toggle.onclick = () => { setNodesOpen(!nodesOpen); drawPicker(); };
+    nodesBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: `Nodes: ${charted} of ${all().length} charted` }),
+      toggle, allBtn, none, reset);
+    nodesPanel.hidden = !nodesOpen;
   };
   search.oninput = () => { filter = search.value.trim().toLowerCase(); drawPicker(); };
 
@@ -8942,7 +8959,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       }
       return lines;
     },
-    above: () => [kindRow, tagRow, searchRow, picker],
+    above: () => [filterRow, nodesBar, nodesPanel],
     below: () => [table],
     loaded: () => {
       if (pending) {
