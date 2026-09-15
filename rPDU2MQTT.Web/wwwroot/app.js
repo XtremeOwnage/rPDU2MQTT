@@ -7804,7 +7804,9 @@ function snapped(t        , size        ) {
   return d.getTime();
 }
 
-function timelineStrip(onPick                             ) {
+/// A longer range the page can load when zooming out past the whole of this one.
+
+function timelineStrip(onPick                             , widen        ) {
   const box = el('div', { class: 'trend-timeline' });
   const head = el('div', { class: 'trend-timeline-head' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
@@ -7883,7 +7885,7 @@ function timelineStrip(onPick                             ) {
     note.textContent = span
       ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
       : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
-    if (zoomOut) zoomOut.disabled = !span;
+    if (zoomOut) zoomOut.disabled = !span && !widen?.can();
     if (earlier) earlier.disabled = !span || span.from <= t0();
     if (later) later.disabled = !span || span.to >= t1();
     if (whole) whole.hidden = !span;
@@ -7942,6 +7944,12 @@ function timelineStrip(onPick                             ) {
         if (!span) return;
         const dir = (ev.deltaX || ev.deltaY || 0) > 0 ? 1 : -1;
         span = shifted(span, dir * (span.to - span.from) * 0.15);
+      } else if (!span && (ev.deltaY || 0) > 0) {
+        // Out past the whole range loads a longer one, once the burst stops.
+        if (!widen?.can()) return;
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => widen.go(), 300);
+        return;
       } else {
         span = zoomed(span ?? { from: t0(), to: t1() }, tOf(pxOf(ev)), (ev.deltaY || 0) < 0 ? 0.7 : 1 / 0.7);
       }
@@ -8057,8 +8065,11 @@ function timelineStrip(onPick                             ) {
       settle();
     };
     zoomOut = btn('−');
-    zoomOut.title = 'Zoom out: twice the length, about the middle. Past the whole range, shows all of it.';
-    zoomOut.onclick = () => { if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); } };
+    zoomOut.title = 'Zoom out: twice the length, about the middle. At the whole range, loads the next longer range.';
+    zoomOut.onclick = () => {
+      if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); }
+      else widen?.go();
+    };
     tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
       const b = btn(text);
@@ -8205,7 +8216,10 @@ function trendsPage(nav     , sections     , spec            ) {
   let whole      = null;
   let picked              = null;
   const strip = spec.timeline
-    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } })
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
+      can: () => !!wider(),
+      go: () => { const r = wider(); if (r) { rangeSel.value = r.value; rangeSel.onchange ({}       ); } },
+    })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
@@ -8217,6 +8231,8 @@ function trendsPage(nav     , sections     , spec            ) {
   const rangeOf = ()        => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
   const multiDay = () => rangeSel.value.startsWith('days=');
+  // The next longer range up to now, which zooming out past the whole timeline loads.
+  const wider = ()                    => RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
 
   const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' })                     ;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));

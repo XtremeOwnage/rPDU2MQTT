@@ -78,8 +78,30 @@ for (const link of pages) {
   button('This week').onclick();
   await wait(100);
   if (button('Last 6 hours').classList.contains('primary')) fail(`${name}: This week left Last 6 hours marked`);
+
+  // Zooming out past the whole timeline loads the next longer range, and the dropdown reads it back. Node Trends has the timeline.
+  if (name !== 'Node Trends') continue;
+  button('Last hour').onclick();
+  await wait(100);
+  const minus = () => query(sec, 'button', true).find(b => b.textContent === '−');
+  if (!minus() || minus().disabled) fail(`${name}: − is disabled at the whole range, so the timeframe cannot zoom out`);
+  asked.length = 0;
+  minus().onclick();
+  await wait(100);
+  if (rangeSel.value !== 'minutes=180' || !/minutes=180(&|$)/.test(asked.at(-1) || ''))
+    fail(`${name}: − at the whole last hour did not load the last 3 hours: ${rangeSel.value}, ${asked.at(-1)}`);
+  // The wheel does the same.
+  const strip = query(sec, 'svg', true).find(s => s.attrs?.class === 'trend-timeline-svg');
+  strip._on.wheel[0]({ deltaY: 120, clientX: 50, preventDefault() { } });
+  await wait(400);
+  if (rangeSel.value !== 'minutes=360') fail(`${name}: wheeling out at the whole range did not load the next longer range: ${rangeSel.value}`);
+  // Past the longest range there is nothing to load.
+  rangeSel.value = 'days=90';
+  rangeSel.onchange({});
+  await wait(100);
+  if (!minus().disabled) fail(`${name}: − is offered at the longest range, where there is nothing longer to load`);
 }
 
 console.log('trends recent: both Trends pages offer hour windows from the last hour up in the dropdown, and Last hour, 6 hours and 24 hours '
-  + 'as one click that asks for that window, reads back in the dropdown and marks the button; a calendar period clears the mark');
+  + 'as one click that asks for that window, reads back in the dropdown and marks the button; a calendar period clears the mark; on Node Trends, zooming out past the whole timeline by − or the wheel loads the next longer range');
 process.exit(0);

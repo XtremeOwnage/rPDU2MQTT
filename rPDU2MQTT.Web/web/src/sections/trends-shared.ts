@@ -118,7 +118,10 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   let whole: any = null;
   let picked: Span | null = null;
   const strip = spec.timeline
-    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } })
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
+      can: () => !!wider(),
+      go: () => { const r = wider(); if (r) { rangeSel.value = r.value; rangeSel.onchange!({} as any); } },
+    })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
@@ -130,6 +133,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const rangeOf = (): Range => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
   const multiDay = () => rangeSel.value.startsWith('days=');
+  // The next longer range up to now, which zooming out past the whole timeline loads.
+  const wider = (): Range | undefined => RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
 
   const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' }) as HTMLSelectElement;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));
