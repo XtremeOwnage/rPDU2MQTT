@@ -162,6 +162,48 @@ export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; 
   };
 }
 
+/// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
+/// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
+export let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
+
+export function setHideNoData(on: boolean) {
+  hideNoData = on;
+  try { localStorage.setItem('rpdu-flow-hide-no-data', on ? '1' : '0'); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes with no data when nothing downstream of them has data either, and say how many went.
+///
+/// The test is downstream, as it is for empty branches: a panel nothing meters, above circuits that are
+/// metered, stays — removing it would cut the measured circuits off from everything that feeds them.
+export function applyHideNoDataPref(nodes: any[], links: any[]): { nodes: any[]; links: any[]; hidden: number } {
+  if (!hideNoData) return { nodes, links, hidden: 0 };
+
+  const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+  const out = new Map<string, string[]>();
+  links.forEach((l: any) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
+
+  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
+  const reachesData = new Map<string, boolean>();
+  const walking = new Set<string>();
+  const feedsData = (id: string): boolean => {
+    if (reachesData.has(id)) return reachesData.get(id)!;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => byId.get(t)?.value != null || feedsData(t));
+    walking.delete(id);
+    reachesData.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id: string) => byId.has(id) && (byId.get(id).value != null || feedsData(id));
+  const kept = nodes.filter((n: any) => keep(n.id));
+  return {
+    nodes: kept,
+    links: links.filter((l: any) => keep(l.source) && keep(l.target)),
+    hidden: nodes.length - kept.length,
+  };
+}
+
 /// The "Unmeasured load" view switch, shown wherever the group chips are.
 export function unmeasuredToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
@@ -247,6 +289,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
     row.appendChild(hideEmptyToggle(onToggle));
+    row.appendChild(hideNoDataToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
     row.appendChild(ribbonStyleSelect(onToggle));
@@ -272,6 +315,22 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
 }
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
+
+/// The "Hide no data" view switch. Per-viewer, like the others here.
+export function hideNoDataToggle(onToggle: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' },
+    title: 'Hide nodes nothing measures, and the branches under them that have no data either. A node with no '
+      + 'data that feeds a measured one stays, so nothing measured is cut off. How many were hidden is shown '
+      + 'beside the node count. A view setting only; no total changes.',
+  });
+  const cb: any = el('input', { type: 'checkbox' });
+  cb.checked = hideNoData;
+  cb.onchange = () => { setHideNoData(cb.checked); onToggle(); };
+  lbl.append(cb, document.createTextNode('Hide no data'));
+  return lbl;
+}
 
 /// The "Hide empty" view switch. Per-viewer, like the others here.
 export function hideEmptyToggle(onToggle: () => void): HTMLElement {
