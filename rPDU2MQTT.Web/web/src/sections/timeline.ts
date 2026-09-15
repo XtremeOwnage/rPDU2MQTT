@@ -43,7 +43,7 @@ function snapped(t: number, size: number) {
   return d.getTime();
 }
 
-/// What the page does when zooming out would cover the whole strip: widen the picked stretch, or load a longer range.
+/// A longer range the page can load when zooming out past the whole of this one.
 export type Widen = { can: () => boolean; go: () => void };
 
 export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen) {
@@ -307,10 +307,8 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     zoomOut = btn('−');
     zoomOut.title = 'Zoom out: twice the length, about the middle. At the whole range, loads the next longer range.';
     zoomOut.onclick = () => {
-      const out = span ? zoomed(span, (span.from + span.to) / 2, 2) : null;
-      if (out) { span = out; settle(); }
-      else if (widen) widen.go();
-      else { span = null; settle(); }
+      if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); }
+      else widen?.go();
     };
     tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
@@ -376,6 +374,5 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     draw,
     span: () => span,
     clear: () => { span = null; paint(); },
-    set: (s: Span) => { span = s; paint(); },
   };
 }

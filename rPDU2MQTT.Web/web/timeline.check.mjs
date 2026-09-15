@@ -163,30 +163,13 @@ const dz = spanOf(picks().at(-1));
 near(dz.to - dz.from, (panned.to - panned.from) / 3, 'double-clicking the window zooms in to a third');
 if (!(dz.from <= inside && inside <= dz.to)) fail('double-clicking zoomed away from where it was clicked');
 
-// A stretch short of a third of the range zooms the timeline itself: to three times the stretch about it, fetched at
-// its own step, with the window drawn across the middle third so its edges can still be dragged.
-const viewOf = (w) => {
-  const len = 3 * (w.to - w.from);
-  const from = Math.min(Math.max(t0, 2 * w.from - w.to), t0 + range - len);
-  return { from, to: from + len };
-};
-const view = viewOf(dz);
-const around = asked.filter(u => u.includes('from=')).at(-2);
-const aroundSpan = spanOf(around);
-near(aroundSpan.from, view.from, 'the zoomed timeline starts a stretch before the window');
-near(aroundSpan.to, view.to, 'the zoomed timeline ends a stretch after the window');
-const inView = (t) => ((t - view.from) / (view.to - view.from)) * 1200;
-if (Math.abs(Number(frame().attrs.x) - inView(dz.from)) > 1 || Math.abs(Number(frame().attrs.width) - (inView(dz.to) - inView(dz.from))) > 1)
-  fail(`the window is not drawn on the zoomed timeline: x ${frame().attrs.x}, width ${frame().attrs.width}`);
-
-// Double-clicking outside the window zooms into that part of the timeline instead: any section is two clicks away.
-const far = inView(inside) < 600 ? 1100 : 100;
-const farAt = view.from + (far / 1200) * (view.to - view.from);
+// Double-clicking outside the window zooms into that part of the whole range instead: any section is two clicks away.
+const far = pxAt(inside) < 600 ? 1100 : 100;
 boxed()._on.dblclick[0]({ clientX: far });
 await tick();
 const jumped = spanOf(picks().at(-1));
-near(jumped.to - jumped.from, (view.to - view.from) / 3, 'double-clicking outside the window zooms into the timeline shown');
-if (!(jumped.from <= farAt && farAt <= jumped.to)) fail('double-clicking outside the window did not go to where it was clicked');
+near(jumped.to - jumped.from, range / 3, 'double-clicking outside the window zooms into the whole range');
+if (!(jumped.from <= at(far) && at(far) <= jumped.to)) fail('double-clicking outside the window did not go to where it was clicked');
 
 // Show the whole range clears it, without fetching a stretch.
 const count = picks().length;
@@ -268,15 +251,14 @@ await tick();
 const hour = spanOf(picks().at(-1));
 if (hour.to - hour.from !== 3_600_000) fail(`1 h picked ${(hour.to - hour.from) / 60_000} min`);
 if (new Date(hour.from).getMinutes() !== 0) fail(`1 h did not start on the hour: ${new Date(hour.from)}`);
-if (!/\(1 h\)/.test(query(strip(), '.desc').textContent)) fail(`the window's length is not shown: ${query(strip(), '.desc').textContent}`);
-// − widens the stretch step by step until it covers the loaded range, which is then shown whole — the range itself stays.
-const rangeBefore = rangeSel.value;
-for (let i = 0; i < 12 && frame().attrs.visibility === 'visible'; i++) { toolButton('−').onclick(); await tick(); }
+toolButton('6 h').onclick();
+await tick();
+if (!/\(6 h\)/.test(query(strip(), '.desc').textContent)) fail(`the window's length is not shown: ${query(strip(), '.desc').textContent}`);
+for (let i = 0; i < 6 && frame().attrs.visibility === 'visible'; i++) { toolButton('−').onclick(); await tick(); }
 if (frame().attrs.visibility !== 'hidden' || !headings().includes('Daily energy by node')) fail('zooming out past the whole range did not show all of it');
-if (rangeSel.value !== rangeBefore) fail(`zooming a picked stretch out loaded a different range: ${rangeBefore} → ${rangeSel.value}`);
 
 console.log('timeline: Node Trends draws the whole range above the dashboard; dragging across it picks a stretch '
   + 'the dashboard then shows, fetched at its own step; the window moves, resizes by either edge, zooms about the '
-  + 'pointer (faster), zooms in on a double-click, pans and pinches; a short stretch zooms the timeline to three times it; + and − halve and double it, zooming out past the range shows all of it; its edges carry grips and a 12 px grab zone the cursor announces; the axis names '
+  + 'pointer (faster), zooms in on a double-click, pans and pinches; + and − halve and double it, zooming out past the range shows all of it; its edges carry grips and a 12 px grab zone the cursor announces; the axis names '
   + 'dates and times, each a period to click; lengths snap to hours and midnights; ◀ ▶ step by the window; a click picks nothing; Show the whole range and a range change return to the whole range');
 process.exit(0);

@@ -7804,7 +7804,7 @@ function snapped(t        , size        ) {
   return d.getTime();
 }
 
-/// What the page does when zooming out would cover the whole strip: widen the picked stretch, or load a longer range.
+/// A longer range the page can load when zooming out past the whole of this one.
 
 function timelineStrip(onPick                             , widen        ) {
   const box = el('div', { class: 'trend-timeline' });
@@ -8067,10 +8067,8 @@ function timelineStrip(onPick                             , widen        ) {
     zoomOut = btn('−');
     zoomOut.title = 'Zoom out: twice the length, about the middle. At the whole range, loads the next longer range.';
     zoomOut.onclick = () => {
-      const out = span ? zoomed(span, (span.from + span.to) / 2, 2) : null;
-      if (out) { span = out; settle(); }
-      else if (widen) widen.go();
-      else { span = null; settle(); }
+      if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); }
+      else widen?.go();
     };
     tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
@@ -8136,7 +8134,6 @@ function timelineStrip(onPick                             , widen        ) {
     draw,
     span: () => span,
     clear: () => { span = null; paint(); },
-    set: (s      ) => { span = s; paint(); },
   };
 }
 
@@ -8218,40 +8215,13 @@ function trendsPage(nav     , sections     , spec            ) {
   // The whole range as loaded, and the stretch of it picked on the timeline. `body` is whichever is shown.
   let whole      = null;
   let picked              = null;
-  // The timeline's own range while a stretch is picked, and its lines; null is the whole loaded range.
-  let view              = null;
-  let viewBody      = null;
   const strip = spec.timeline
-    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else showWhole(); }, {
-      can: () => !!picked || !!wider(),
-      go: () => {
-        if (picked) {
-          // Twice the picked stretch about its middle; once that covers the loaded range, the whole range.
-          const out = within({ from: 1.5 * picked.from - 0.5 * picked.to, to: 1.5 * picked.to - 0.5 * picked.from });
-          if (!out) { unpick(); showWhole(); return; }
-          picked = out;
-          strip .set(out);
-          loadPicked();
-          return;
-        }
-        const r = wider();
-        if (r) { rangeSel.value = r.value; rangeSel.onchange ({}       ); }
-      },
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
+      can: () => !!wider(),
+      go: () => { const r = wider(); if (r) { rangeSel.value = r.value; rangeSel.onchange ({}       ); } },
     })
     : null;
-  const unpick = () => { picked = null; view = null; viewBody = null; strip?.clear(); };
-  const showWhole = () => { view = null; viewBody = null; body = whole; draw(); };
-  const wholeBounds = ()              => (whole?.ok ? placed(whole)?.bounds : null) ?? null;
-  /// `s` moved inside the loaded range, keeping its length; null when it is as long as the range.
-  const within = (s      )              => {
-    const all = wholeBounds();
-    const w = s.to - s.from;
-    if (!all || w >= all.to - all.from) return null;
-    const from = Math.min(Math.max(all.from, s.from), all.to - w);
-    return { from, to: from + w };
-  };
-  /// The timeline zooms to three times a picked stretch, so the stretch can be refined against the time around it.
-  const contextOf = (s      )              => within({ from: 2 * s.from - s.to, to: 2 * s.to - s.from });
+  const unpick = () => { picked = null; strip?.clear(); };
 
   const rangeSel = el('select', { title: 'How far back to chart.' })                     ;
   RANGES.forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
@@ -8460,10 +8430,9 @@ function trendsPage(nav     , sections     , spec            ) {
 
   const drawStrip = () => {
     if (!strip) return;
-    const src = view && viewBody ? viewBody : whole?.ok ? whole : null;
-    const where = src ? placed(src) ?? (view ? { points: [], bounds: view } : null) : null;
+    const where = whole?.ok ? placed(whole) : null;
     strip.el.hidden = !where;
-    if (where) strip.draw({ lines: spec.timeline (page, src), points: where.points, bounds: view ?? where.bounds, width: fitTo() });
+    if (where) strip.draw({ lines: spec.timeline (page, whole), points: where.points, bounds: where.bounds, width: fitTo() });
   };
 
   const draw = () => { hideCard(); charts.innerHTML = ''; describe(); spec.render(page); drawStrip(); };
@@ -8477,27 +8446,17 @@ function trendsPage(nav     , sections     , spec            ) {
     const fit = stepToFit(seconds, maxPoints());
     const choice = intervalSel.value;
     const step = choice === 'auto' || choice === 'day' ? fit : Math.max(Number(choice), fit);
-    const ask = (s      , st        ) => api(withInstance('/api/flow/series?'
-      + `from=${encodeURIComponent(new Date(s.from).toISOString())}`
-      + `&to=${encodeURIComponent(new Date(s.to).toISOString())}`
-      + `&step=${st}&metric=${encodeURIComponent(metricSel.value)}`, instSel));
-    const ctx = contextOf(span);
-    let r     , c      = null;
-    try {
-      // The timeline's range is asked for first, so the stretch itself is the last request made.
-      const around = ctx ? ask(ctx, stepToFit((ctx.to - ctx.from) / 1000, maxPoints())) : null;
-      [c, r] = await Promise.all([around, ask(span, step)]);
-    }
+    const query = `from=${encodeURIComponent(new Date(span.from).toISOString())}`
+      + `&to=${encodeURIComponent(new Date(span.to).toISOString())}`
+      + `&step=${step}&metric=${encodeURIComponent(metricSel.value)}`;
+    let r     ;
+    try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     // A newer pick is already on its way; this answer is for a window nobody is looking at.
     if (picked !== span) return;
     const b = r.body;
     const epoch = epochOf(metricSel.value);
-    const counter = epoch === 'lifetime' || epoch === 'period';
-    if (b?.ok && counter) toDeltas(b);
-    viewBody = c?.body?.ok ? c.body : null;
-    if (viewBody && counter) toDeltas(viewBody);
-    view = viewBody ? ctx : null;
+    if (b?.ok && (epoch === 'lifetime' || epoch === 'period')) toDeltas(b);
     body = b?.ok ? b : whole;
     draw();
     if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
