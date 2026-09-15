@@ -3802,7 +3802,7 @@ function addFlowSection(nav     , sections     ) {
         let prev = l.source;
         for (let c = a + 1; c < b; c++) {
           const id = `${l.source}→${l.target}@${c}`;
-          const way = { id, label: '', kind: 'passthrough', passthrough: true, value: l.known === false ? null : l.value };
+          const way = { id, to: l.target, label: '', kind: 'passthrough', passthrough: true, value: l.known === false ? null : l.value };
           ways.push(way); colMemo[id] = c; byId[id] = way;
           laid.push({ ...l, source: prev, target: id, orig: l });
           prev = id;
@@ -3914,8 +3914,36 @@ function addFlowSection(nav     , sections     ) {
     // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
     // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
     // moved.
+    /// By kind: every column in the order of one walk down the hierarchy. A branch is laid out in full before the
+    /// next begins, so what a node feeds stays together in every column it reaches, and no two ribbons between
+    /// neighbouring columns cross — the averaging sweeps below only make that likely. Children that feed further
+    /// come first, then the loads, biggest first; a panel's unmeasured remainder last. A node with several
+    /// feeders is walked from the one supplying most of it, and a waypoint sits with the branch it leads to.
+    const hierarchyOrder = () => {
+      const ord                         = {};
+      let next = 0;
+      const primaryFeeder = (id        ) => ((cardIn[id] || [])         )
+        .reduce((best     , l     ) => (!best || (l.value || 0) > (best.value || 0) ? l : best), null)?.source;
+      const feedsOn = (id        ) => ((cardOut[id] || [])         ).length > 0;
+      const visit = (id        ) => {
+        if (ord[id] != null) return;
+        ord[id] = next++;
+        ((cardOut[id] || [])         ).map((l     ) => l.target)
+          .filter((t        ) => primaryFeeder(t) === id)
+          .sort((a        , b        ) => (Number(feedsOn(b)) - Number(feedsOn(a))) || (remainder(a) - remainder(b)) || (nodeValue(b) - nodeValue(a)))
+          .forEach(visit);
+      };
+      folded.nodes.filter((n     ) => !((cardIn[n.id] || [])         ).length).map((n     ) => n.id)
+        .sort((a        , b        ) => nodeValue(b) - nodeValue(a)).forEach(visit);
+      // Anything reached only through a loop.
+      folded.nodes.forEach((n     ) => visit(n.id));
+      const ordOf = (id        ) => byId[id]?.passthrough ? (ord[byId[id].to] ?? next) - 0.5 : (ord[id] ?? next);
+      cols.forEach((cn       ) => cn && cn.sort((a     , b     ) => ordOf(a.id) - ordOf(b.id)));
+    };
+
     const orderOf = () => cols.map(cn => (cn || []).map((n     ) => n.id).join(',')).join('|');
-    for (let sweep = 0; sweep < 4; sweep++) {
+    if (flowLayout === 'tiers') hierarchyOrder();
+    else for (let sweep = 0; sweep < 4; sweep++) {
       const before = orderOf();
       // Forward: roots stack by size, downstream columns follow their feeders.
       cols.forEach((cn, c) => {

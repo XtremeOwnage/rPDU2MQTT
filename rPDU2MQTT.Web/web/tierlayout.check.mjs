@@ -22,6 +22,9 @@ const graph = {
     N('hall_light', 'node', 12),
     // A second branch whose panel has nothing nested under it.
     N('garage_panel', 'panel', 200), N('g_breaker', 'breaker', 150), N('tools', 'load', 150),
+    // A small circuit with one load, beside a large load on the same panel: averaging positions put the small
+    // circuit's load among the panel's own loads, with its ribbon crossing them.
+    N('b_bedroom', 'breaker', 20), N('fan', 'load', 20), N('office', 'load', 400),
   ],
   links: [
     { source: 'grid', target: 'inverter', value: 2000 },
@@ -37,6 +40,9 @@ const graph = {
     { source: 'inverter', target: 'garage_panel', value: 200 },
     { source: 'garage_panel', target: 'g_breaker', value: 150 },
     { source: 'g_breaker', target: 'tools', value: 150 },
+    { source: 'main_panel', target: 'b_bedroom', value: 20 },
+    { source: 'b_bedroom', target: 'fan', value: 20 },
+    { source: 'main_panel', target: 'office', value: 400 },
   ],
 };
 const real = new Set(graph.nodes.map(n => n.id));
@@ -77,7 +83,7 @@ const x = (id) => { const b = tiers.bars.get(id); if (!b) fail(`no bar for ${id}
 
 // Loads and outlets end at the far right, whatever depth they hang at.
 const right = Math.max(...[...tiers.bars.values()].map(b => b.x));
-for (const id of ['fridge', 'hvac', 'n30', 'dell', 'hall_light', 'tools'])
+for (const id of ['fridge', 'hvac', 'n30', 'dell', 'hall_light', 'tools', 'fan', 'office'])
   if (x(id) !== right) fail(`${id} is not in the last column (x=${x(id)}, last is ${right})`);
 
 // Panels nest, and what a panel feeds beyond the next tier sits past it: the breaker is right of the sub-panel.
@@ -87,6 +93,22 @@ if (!(x('b_living') < x('pdu1'))) fail('the PDU is not right of the breaker feed
 // …but only past panels on its own branch: a panel with nothing nested under it keeps its breakers beside it.
 if (x('g_breaker') !== x('sub_panel'))
   fail(`a breaker under a panel with nothing nested was pushed past another branch's sub-panel (x=${x('g_breaker')}; the column beside its panel is x=${x('sub_panel')})`);
+
+// Every column follows the hierarchy: what one node feeds stays together, and a panel's own loads come after
+// its sub-branches, so its ribbons do not have to cross them.
+const lastCol = [...tiers.bars.entries()].filter(([, b]) => b.x === right).sort((a, b) => a[1].y - b[1].y).map(([id]) => id);
+const together = (ids, what) => {
+  const at = ids.map(id => lastCol.indexOf(id)).sort((a, b) => a - b);
+  if (at.some(i => i < 0)) fail(`${what}: not all of ${ids.join(', ')} are in the last column`);
+  if (at.at(-1) - at[0] !== ids.length - 1) fail(`${what} are split up in the last column: ${lastCol.join(', ')}`);
+};
+together(['n30', 'dell'], "the breaker's loads");
+together(['hvac', 'hall_light'], "the sub-panel's loads");
+together(['fridge', 'office', 'n30', 'dell', 'hvac', 'hall_light', 'fan'], "the main panel's loads");
+const ownFirst = Math.min(...['fridge', 'office'].map(id => lastCol.indexOf(id)));
+const branchesLast = Math.max(...['n30', 'dell', 'hvac', 'hall_light', 'fan'].map(id => lastCol.indexOf(id)));
+if (ownFirst < branchesLast)
+  fail(`the main panel's own loads sit among its circuits' loads rather than after them: ${lastCol.join(', ')}`);
 
 // A link that skips columns is still ONE band: drawn hop by hop it left a stripe at every column it crossed.
 const fridge = tiers.ribbons.filter(r => r.src === 'main_panel' && r.dst === 'fridge');
