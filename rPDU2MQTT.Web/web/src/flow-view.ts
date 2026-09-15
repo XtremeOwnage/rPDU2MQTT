@@ -223,6 +223,44 @@ export function ribbonStyleSelect(onChange: () => void): HTMLElement {
   return lbl;
 }
 
+export type FlowLayout = 'hops' | 'tiers';
+
+const LAYOUT_KEY = 'rpdu-flow-layout';
+const FLOW_LAYOUTS: [FlowLayout, string, string][] = [
+  ['hops', 'By connection', 'The default: a node sits one column to the right of what feeds it.'],
+  ['tiers', 'By kind (preview)', 'Columns by kind: sources, inverters, each tier of panels, breakers, PDUs, then loads at the far right. A link that skips a column runs through it in a lane of its own.'],
+];
+
+export let flowLayout: FlowLayout = (() => {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    return FLOW_LAYOUTS.some(([id]) => id === v) ? v as FlowLayout : 'hops';
+  } catch { return 'hops'; }
+})();
+
+/// The column-layout picker: by connection, the default, or by kind, which is a preview.
+export function flowLayoutSelect(onChange: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'How nodes are placed in columns. A view setting only — it changes nothing about the values.',
+  });
+  const sel: any = el('select', { style: { width: 'auto' } });
+  FLOW_LAYOUTS.forEach(([id, label, why]) => {
+    const opt = el('option', { value: id, text: label });
+    opt.title = why;
+    sel.appendChild(opt);
+  });
+  sel.value = flowLayout;
+  sel.onchange = () => {
+    flowLayout = sel.value;
+    try { localStorage.setItem(LAYOUT_KEY, sel.value); } catch { /* private mode: this session only */ }
+    onChange();
+  };
+  lbl.append(document.createTextNode('Layout'), sel);
+  return lbl;
+}
+
 /// The "Animate flow" view switch. Purely local: a per-viewer preference.
 export function animateToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
@@ -250,6 +288,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
     row.appendChild(ribbonStyleSelect(onToggle));
+    row.appendChild(flowLayoutSelect(onToggle));
   }
   if (!groups.length) return drawn ? row : null;
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
