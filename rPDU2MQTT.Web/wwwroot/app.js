@@ -8134,13 +8134,19 @@ function timelineStrip(onPick                             ) {
 const RANGES          = [
   { value: 'today=1', text: 'today so far', wants: 'power', seconds: 86_400 },
   { value: 'today=1&back=1', text: 'yesterday', wants: 'power', seconds: 86_400 },
+  { value: 'minutes=60', text: 'last hour', wants: 'power', seconds: 3_600 },
+  { value: 'minutes=180', text: 'last 3 hours', wants: 'power', seconds: 10_800 },
   { value: 'minutes=360', text: 'last 6 hours', wants: 'power', seconds: 21_600 },
+  { value: 'minutes=720', text: 'last 12 hours', wants: 'power', seconds: 43_200 },
   { value: 'minutes=1440', text: 'last 24 hours', wants: 'power', seconds: 86_400 },
   { value: 'days=7', text: 'last 7 days', wants: 'energy', seconds: 7 * 86_400 },
   { value: 'days=14', text: 'last 14 days', wants: 'energy', seconds: 14 * 86_400 },
   { value: 'days=30', text: 'last 30 days', wants: 'energy', seconds: 30 * 86_400 },
   { value: 'days=90', text: 'last 90 days', wants: 'energy', seconds: 90 * 86_400 },
 ];
+
+/// The recent windows offered as one click beside the calendar periods.
+const RECENT                     = [['minutes=60', 'Last hour'], ['minutes=360', 'Last 6 hours'], ['minutes=1440', 'Last 24 hours']];
 
 /// Auto fits the samples to the chart; per day is one total for each day.
 const INTERVALS                     = [
@@ -8286,9 +8292,19 @@ function trendsPage(nav     , sections     , spec            ) {
     const energy = energyFor(range);
     if (energy) { metricSel.value = energy.metric; metricChosen = true; }
     periods.mark(key);
+    markRecent();
     load();
   });
-  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  // A recent window is a range the dropdown already lists, so picking one reads back there too.
+  const recentButtons = RECENT.map(([value, label]) => {
+    const b = btn(label);
+    b.title = `Chart the ${label.toLowerCase()} up to now.`;
+    b.onclick = () => { rangeSel.value = value; rangeSel.onchange ({}       ); };
+    return b;
+  });
+  periods.row.append(...recentButtons);
+  const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
+  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
   const toDeltas = (b     ) => {
