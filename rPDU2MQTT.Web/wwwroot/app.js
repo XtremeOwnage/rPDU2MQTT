@@ -2066,6 +2066,107 @@ function lanePath(style             , b      , f        )         {
   return polyline([[b.x1, sY], [xc, sY], [xc, tY], [b.x2, tY]], r);
 }
 
+/// A ribbon that passes through columns on its way, as one band.
+///
+/// `hops[i]` runs from one column to the next, and consecutive hops meet at a waypoint: a lane the layout
+/// kept for this ribbon in a column it crosses. Drawing each hop as its own band left the width of every
+/// waypoint empty — a dark stripe down every column a ribbon passed through — and bent the band flat at
+/// each one, so a long ribbon descended in steps. This is one closed band through every lane.
+function chainOutline(style             , hops        )         {
+  if (hops.length === 1) return ribbonOutline(style, hops[0]);
+  if (style === 'curved') {
+    const { xs, ys } = chainPoints(hops, 0);
+    const h = hops[0].h;
+    const m = throughSlopes(xs, ys);
+    const top = curveThrough(xs, ys, m);
+    const bottom = curveThrough([...xs].reverse(), ys.map(y => y + h).reverse(), [...m].reverse());
+    const last = xs.length - 1;
+    return `${top} L${r2(xs[last])},${r2(ys[last] + h)} ${bottom.replace(/^M/, 'L')} Z`;
+  }
+  return orthoChain(hops, style === 'ortho-round');
+}
+
+/// The stream's path along a chained band, at fraction `f` across it; the same route as `chainOutline`.
+function chainLanePath(style             , hops        , f        )         {
+  if (hops.length === 1) return lanePath(style, hops[0], f);
+  if (style === 'curved') {
+    const { xs, ys } = chainPoints(hops, f);
+    return curveThrough(xs, ys, throughSlopes(xs, ys));
+  }
+  const r = style === 'ortho-round' ? Math.max(...hops.map(cornerRadius)) : 0;
+  const pts             = [];
+  hops.forEach((b, i) => {
+    const sY = b.sTop + b.h * f, tY = b.tTop + b.h * f;
+    if (i === 0) pts.push([b.x1, sY]);
+    if (Math.abs(tY - sY) > 1) { const xc = elbowX(b); pts.push([xc, sY], [xc, tY]); }
+    pts.push([b.x2, tY]);
+  });
+  return polyline(pts, r);
+}
+
+/// Where a chained band's edge passes: the source bar, the middle of each waypoint, and the target bar.
+function chainPoints(hops        , f        ) {
+  const xs = [hops[0].x1], ys = [hops[0].sTop + hops[0].h * f];
+  for (let i = 0; i < hops.length - 1; i++) {
+    xs.push((hops[i].x2 + hops[i + 1].x1) / 2);
+    ys.push((hops[i].tTop + hops[i + 1].sTop) / 2 + hops[i].h * f);
+  }
+  const last = hops[hops.length - 1];
+  xs.push(last.x2); ys.push(last.tTop + last.h * f);
+  return { xs, ys };
+}
+
+/// The slope the band takes through each point: level at both bars, so it meets them square, and through a
+/// waypoint the average of the runs either side of it — unless it turns back there, where it stays level so
+/// the curve cannot overshoot its lane.
+function throughSlopes(xs          , ys          ) {
+  const m = xs.map(() => 0);
+  for (let i = 1; i < xs.length - 1; i++) {
+    const a = (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1]), b = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+    m[i] = a * b <= 0 ? 0 : (a + b) / 2;
+  }
+  return m;
+}
+
+/// A curve through each point with the slope given there: one cubic per run, so it bends smoothly through
+/// every waypoint rather than kinking at it.
+function curveThrough(xs          , ys          , m          ) {
+  let d = `M${r2(xs[0])},${r2(ys[0])}`;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const dx = xs[i + 1] - xs[i];
+    d += ` C${r2(xs[i] + dx / 3)},${r2(ys[i] + (m[i] * dx) / 3)} ${r2(xs[i + 1] - dx / 3)},${r2(ys[i + 1] - (m[i + 1] * dx) / 3)} ${r2(xs[i + 1])},${r2(ys[i + 1])}`;
+  }
+  return d;
+}
+
+/// The grid routings through waypoints: each corridor keeps its own elbow, and the band runs straight on
+/// across every waypoint between them.
+function orthoChain(hops        , round         )         {
+  const r = round ? Math.max(...hops.map(cornerRadius)) : 0;
+  const upper             = [];
+  hops.forEach((b, i) => {
+    if (i === 0) upper.push([b.x1, b.sTop]);
+    if (Math.abs(b.tTop - b.sTop) > 1) {
+      const xc = elbowX(b), half = runWidth(b) / 2, down = b.tTop > b.sTop ? 1 : -1;
+      upper.push([xc + down * half, b.sTop], [xc + down * half, b.tTop]);
+    }
+    upper.push([b.x2, b.tTop]);
+  });
+  const last = hops[hops.length - 1];
+  // The lower edge runs back, so each corridor's two points come in reverse order too.
+  const back             = [[last.x2, last.tTop + last.h]];
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const b = hops[i];
+    if (Math.abs(b.tTop - b.sTop) > 1) {
+      const xc = elbowX(b), half = runWidth(b) / 2, down = b.tTop > b.sTop ? 1 : -1;
+      back.push([xc - down * half, b.tTop + b.h], [xc - down * half, b.sTop + b.h]);
+    }
+    back.push([b.x1, b.sTop + b.h]);
+  }
+  const up = polyline(upper, r), dn = polyline(back, r);
+  return `${up} L${r2(last.x2)},${r2(last.tTop + last.h)} ${dn.replace(/^M/, 'L')} Z`;
+}
+
 /// The original: one smooth band from source to target.
 function curvedBand({ x1, sTop, x2, tTop, h }      )         {
   const xc = (x1 + x2) / 2;
@@ -3710,6 +3811,9 @@ function addFlowSection(nav     , sections     ) {
     // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
     // column of thirty circuits was mostly empty space.
     const gap = 6;
+    // Two waypoints side by side are lanes of ribbons passing through together, so they sit close and read as
+    // one wide band; anything with a bar keeps the gap.
+    const gapBetween = (a        , b        ) => isWay(a) && isWay(b) ? 1 : gap;
     // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
     // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
@@ -3755,15 +3859,16 @@ function addFlowSection(nav     , sections     ) {
     // Stack one column top-to-bottom in its current order; returns the y it ended at.
     const placeColumn = (cn       , c        ) => {
       let y = padTop;
-      cn.forEach((n     ) => {
+      cn.forEach((n     , i        ) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         // Bar height is proportional to what actually passes THROUGH the node, not to its own reading.
         const h = known(n.id) ? Math.max(2, throughput(n.id) * pxPerUnit) : 3;
         // A waypoint is only its ribbon's lane: no label, so no label row.
         const rowH = isWay(n.id) ? h : Math.max(h, labelRow);
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
-        y += rowH + gap;
+        y += rowH;
       });
-      return y;
+      return y + gap;
     };
 
     // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
@@ -3883,23 +3988,25 @@ function addFlowSection(nav     , sections     ) {
     /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
     const separate = (cn       ) => {
       let y = padTop;
-      cn.forEach((n     ) => {
+      cn.forEach((n     , i        ) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         if (pos[n.id].y < y) pos[n.id].y = y;
-        y = pos[n.id].y + rowOf(n.id) + gap;
+        y = pos[n.id].y + rowOf(n.id);
       });
       // Ran off the bottom: walk back up, which can only compress the slack this pass introduced.
-      const foot = y - gap;
+      const foot = y;
       if (foot > padTop + usableH) {
-        let limit = foot - (foot - (padTop + usableH));
+        let limit = padTop + usableH;
         for (let i = cn.length - 1; i >= 0; i--) {
           const id = cn[i].id;
           if (pos[id].y + rowOf(id) > limit) pos[id].y = limit - rowOf(id);
-          limit = pos[id].y - gap;
+          limit = pos[id].y - (i > 0 ? gapBetween(cn[i - 1].id, id) : gap);
         }
         let top = padTop;   // and never above the top margin
-        cn.forEach((n     ) => {
+        cn.forEach((n     , i        ) => {
+          if (i > 0) top += gapBetween(cn[i - 1].id, n.id);
           if (pos[n.id].y < top) pos[n.id].y = top;
-          top = pos[n.id].y + rowOf(n.id) + gap;
+          top = pos[n.id].y + rowOf(n.id);
         });
       }
     };
@@ -3996,21 +4103,32 @@ function addFlowSection(nav     , sections     ) {
       pos[n.id].inOff = stackStart(n.id);
     });
     let flowClipSeq = 0;
+    // Where every hop meets its bars, in stacking order. A pass-through is several hops, and they are drawn
+    // together below as one band: drawn one by one they left a stripe at every column crossed.
+    const hopsOf = new Map                                              ();
     links.sort((a     , b     ) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
       (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
     ).forEach((l     ) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
+      const unknownHop = l.known === false;
+      const h = (unknownHop || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
+      const band = { x1: s.x + nodeW, sTop: s.y + s.outOff, x2: t.x, tTop: t.y + t.inOff, h, ...(laneOf.get(l) ?? {}) };
+      const link = l.orig || l;
+      (hopsOf.get(link) ?? hopsOf.set(link, []).get(link) ).push({ band, h, col: colMemo[l.source] ?? 0 });
+      s.outOff += h; t.inOff += h;
+    });
+
+    hopsOf.forEach((hops, l     ) => {
+      hops.sort((a, b) => a.col - b.col);
+      const bands = hops.map(x => x.band);
+      const h = hops[0].h;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
-      const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x;
-      const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const color = tintOf((l.orig || l).source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
-      const ribbonPath = ribbonOutline(ribbonStyle, band);
+      const color = tintOf(l.source);
+      const ribbonPath = chainOutline(ribbonStyle, bands);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
@@ -4018,7 +4136,7 @@ function addFlowSection(nav     , sections     ) {
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         class: 'flow-ribbon',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
-        'data-src': (l.orig || l).source, 'data-dst': (l.orig || l).target,
+        'data-src': l.source, 'data-dst': l.target,
       }));
 
       // A stream drawn along the ribbon's centre line.
@@ -4039,14 +4157,14 @@ function addFlowSection(nav     , sections     ) {
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
           const stream = svgEl('path', {
-            d: lanePath(ribbonStyle, band, f),
+            d: chainLanePath(ribbonStyle, bands, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',
             'stroke-dasharray': '9 31',
             'clip-path': `url(#${clipId})`,
             class: 'flow-stream',
-            'data-src': (l.orig || l).source, 'data-dst': (l.orig || l).target,
+            'data-src': l.source, 'data-dst': l.target,
           });
           stream.style.animationDuration = `${duration.toFixed(2)}s`;
           // Stagger the lanes so they read as a current rather than as one blinking comb.
@@ -4054,8 +4172,6 @@ function addFlowSection(nav     , sections     ) {
           svg.appendChild(stream);
         }
       }
-
-      s.outOff += h; t.inOff += h;
     });
 
     // A group reads like a node: click the group node to toggle it.

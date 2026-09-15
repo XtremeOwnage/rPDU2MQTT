@@ -356,6 +356,9 @@ export function addFlowSection(nav: any, sections: any) {
     // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
     // column of thirty circuits was mostly empty space.
     const gap = 6;
+    // Two waypoints side by side are lanes of ribbons passing through together, so they sit close and read as
+    // one wide band; anything with a bar keeps the gap.
+    const gapBetween = (a: string, b: string) => isWay(a) && isWay(b) ? 1 : gap;
     // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
     // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
@@ -401,15 +404,16 @@ export function addFlowSection(nav: any, sections: any) {
     // Stack one column top-to-bottom in its current order; returns the y it ended at.
     const placeColumn = (cn: any[], c: number) => {
       let y = padTop;
-      cn.forEach((n: any) => {
+      cn.forEach((n: any, i: number) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         // Bar height is proportional to what actually passes THROUGH the node, not to its own reading.
         const h = known(n.id) ? Math.max(2, throughput(n.id) * pxPerUnit) : 3;
         // A waypoint is only its ribbon's lane: no label, so no label row.
         const rowH = isWay(n.id) ? h : Math.max(h, labelRow);
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
-        y += rowH + gap;
+        y += rowH;
       });
-      return y;
+      return y + gap;
     };
 
     // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
@@ -529,23 +533,25 @@ export function addFlowSection(nav: any, sections: any) {
     /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
     const separate = (cn: any[]) => {
       let y = padTop;
-      cn.forEach((n: any) => {
+      cn.forEach((n: any, i: number) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         if (pos[n.id].y < y) pos[n.id].y = y;
-        y = pos[n.id].y + rowOf(n.id) + gap;
+        y = pos[n.id].y + rowOf(n.id);
       });
       // Ran off the bottom: walk back up, which can only compress the slack this pass introduced.
-      const foot = y - gap;
+      const foot = y;
       if (foot > padTop + usableH) {
-        let limit = foot - (foot - (padTop + usableH));
+        let limit = padTop + usableH;
         for (let i = cn.length - 1; i >= 0; i--) {
           const id = cn[i].id;
           if (pos[id].y + rowOf(id) > limit) pos[id].y = limit - rowOf(id);
-          limit = pos[id].y - gap;
+          limit = pos[id].y - (i > 0 ? gapBetween(cn[i - 1].id, id) : gap);
         }
         let top = padTop;   // and never above the top margin
-        cn.forEach((n: any) => {
+        cn.forEach((n: any, i: number) => {
+          if (i > 0) top += gapBetween(cn[i - 1].id, n.id);
           if (pos[n.id].y < top) pos[n.id].y = top;
-          top = pos[n.id].y + rowOf(n.id) + gap;
+          top = pos[n.id].y + rowOf(n.id);
         });
       }
     };
@@ -642,21 +648,32 @@ export function addFlowSection(nav: any, sections: any) {
       pos[n.id].inOff = stackStart(n.id);
     });
     let flowClipSeq = 0;
+    // Where every hop meets its bars, in stacking order. A pass-through is several hops, and they are drawn
+    // together below as one band: drawn one by one they left a stripe at every column crossed.
+    const hopsOf = new Map<any, { band: any; h: number; col: number }[]>();
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
       (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
     ).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
+      const unknownHop = l.known === false;
+      const h = (unknownHop || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
+      const band = { x1: s.x + nodeW, sTop: s.y + s.outOff, x2: t.x, tTop: t.y + t.inOff, h, ...(laneOf.get(l) ?? {}) };
+      const link = l.orig || l;
+      (hopsOf.get(link) ?? hopsOf.set(link, []).get(link)!).push({ band, h, col: colMemo[l.source] ?? 0 });
+      s.outOff += h; t.inOff += h;
+    });
+
+    hopsOf.forEach((hops, l: any) => {
+      hops.sort((a, b) => a.col - b.col);
+      const bands = hops.map(x => x.band);
+      const h = hops[0].h;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
-      const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x;
-      const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
-      const color = tintOf((l.orig || l).source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
-      const ribbonPath = ribbonOutline(ribbonStyle, band);
+      const color = tintOf(l.source);
+      const ribbonPath = chainOutline(ribbonStyle, bands);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
@@ -664,7 +681,7 @@ export function addFlowSection(nav: any, sections: any) {
         'fill-opacity': unknownLink ? '0.35' : idleLink ? '0.55' : '0.3',
         class: 'flow-ribbon',
         // Endpoints in the markup so focusing a supply path is a CSS class flip, not a repaint.
-        'data-src': (l.orig || l).source, 'data-dst': (l.orig || l).target,
+        'data-src': l.source, 'data-dst': l.target,
       }));
 
       // A stream drawn along the ribbon's centre line.
@@ -685,14 +702,14 @@ export function addFlowSection(nav: any, sections: any) {
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
           const stream = svgEl('path', {
-            d: lanePath(ribbonStyle, band, f),
+            d: chainLanePath(ribbonStyle, bands, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',
             'stroke-dasharray': '9 31',
             'clip-path': `url(#${clipId})`,
             class: 'flow-stream',
-            'data-src': (l.orig || l).source, 'data-dst': (l.orig || l).target,
+            'data-src': l.source, 'data-dst': l.target,
           });
           stream.style.animationDuration = `${duration.toFixed(2)}s`;
           // Stagger the lanes so they read as a current rather than as one blinking comb.
@@ -700,8 +717,6 @@ export function addFlowSection(nav: any, sections: any) {
           svg.appendChild(stream);
         }
       }
-
-      s.outOff += h; t.inOff += h;
     });
 
     // A group reads like a node: click the group node to toggle it.
