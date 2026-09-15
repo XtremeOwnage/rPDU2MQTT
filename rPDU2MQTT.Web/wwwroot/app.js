@@ -3745,13 +3745,30 @@ function addFlowSection(nav     , sections     ) {
           });
         }
       };
-      const tiers = [...new Set(nodes.map((n     ) => tierOf(n.id)).filter((t     ) => t != null))].sort((a     , b     ) => a - b);
+      // Everything a node feeds, all the way down.
+      const under = new Map                     ();
+      const beneath = (id        ) => {
+        if (under.has(id)) return under.get(id) ;
+        const seen = new Set        (), stack = (outgoing[id] || []).map((l     ) => l.target);
+        while (stack.length) { const x = stack.pop() ; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach((l     ) => stack.push(l.target)); }
+        under.set(id, seen);
+        return seen;
+      };
+      // A node sits right of the earlier-kind nodes nested under its own feeder — a sub-panel beside it, not a
+      // panel on another branch. Measured against the whole diagram, a sub-panel under Sub Panel pushed Main
+      // Panel's circuits a column further out than anything on their branch needed.
       for (let pass = 0; pass < 4; pass++) {
-        tiers.forEach((t     ) => {
-          const before = nodes.filter((n     ) => { const k = tierOf(n.id); return k != null && k < t; });
-          if (!before.length) return;
-          const floor = Math.max(...before.map((n     ) => colMemo[n.id])) + 1;
-          nodes.forEach((n     ) => { if (tierOf(n.id) === t && colMemo[n.id] < floor) colMemo[n.id] = floor; });
+        nodes.forEach((n     ) => {
+          const t = tierOf(n.id);
+          if (t == null) return;
+          const mine = beneath(n.id);
+          let floor = -1;
+          (incoming[n.id] || []).forEach((l     ) => beneath(l.source).forEach((u        ) => {
+            if (u === n.id || mine.has(u)) return;
+            const k = tierOf(u);
+            if (k != null && k < t) floor = Math.max(floor, colMemo[u] + 1);
+          }));
+          if (floor > colMemo[n.id]) colMemo[n.id] = floor;
         });
         relax();
       }
