@@ -1,8 +1,8 @@
 // Two rules the diagram now has to obey, on the shape that broke them: a main panel with seven circuits
 // and a sub-panel with two, hanging off one inverter.
 //
-// 1. No two bars in a column sit closer than the gap. A node carries a name and a figure on one line, and
-//    two bars closer than that put one row's text against the next row's bar.
+// 1. Nothing in a column collides: bars keep the layout's gap, and labels sit at least a text line apart.
+//    A small node is as tall as its label, not as tall as its label plus a second label's worth of gap.
 // 2. Ribbons between the same pair of columns do not cross. They crossed because the layout could only
 //    move a whole column at once, so a sub-panel's bar could sit above some of the MAIN panel's circuits
 //    and every ribbon it sent had to cut across them to reach its own children.
@@ -15,7 +15,9 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('nocross check FAILED: ' + m); process.exit(1); };
 
-const MIN_GAP = 13.9;   // the layout's own gap, less a rounding hair
+const MIN_GAP = 5.9;       // the layout's gap between bars, less a rounding hair
+const TEXT_LINE = 13.9;    // an 11px label and its 3px halo
+const PACKED = 20.1;       // a label row and one gap: how far apart small nodes of one parent sit
 
 // Values from the live system this was reported on.
 const N = (id, kind, value) => ({ id, label: id, kind, value, derivation: 'measured' });
@@ -74,6 +76,8 @@ async function render(style) {
   return {
     bars: query(sec, 'rect', true).filter(r => r.attrs && r.attrs['data-node'])
       .map(r => ({ id: r.attrs['data-node'], x: +r.attrs.x, y: +r.attrs.y, h: +r.attrs.height })),
+    labels: query(sec, 'text', true).filter(t => t.attrs && t.attrs['data-node'])
+      .map(t => ({ id: t.attrs['data-node'], x: +t.attrs.x, y: +t.attrs.y })),
     ribbons: query(sec, 'path', true).filter(p => p.attrs && p.attrs['fill-opacity'] !== undefined && p.attrs.d)
       .map(p => ({ src: p.attrs['data-src'], dst: p.attrs['data-dst'], d: p.attrs.d })),
   };
@@ -97,11 +101,11 @@ function ends(d) {
 }
 
 for (const style of ['curved', 'ortho', 'ortho-round']) {
-  const { bars, ribbons } = await render(style);
+  const { bars, labels, ribbons } = await render(style);
   if (ribbons.length !== graph.links.length)
     fail(`${style}: expected ${graph.links.length} ribbons, got ${ribbons.length}`);
 
-  // --- Rule 1: nothing in a column is closer than the gap ---------------------------------------------
+  // --- Rule 1: nothing in a column collides ----------------------------------------------------------
   const byCol = new Map();
   bars.forEach(b => { if (!byCol.has(b.x)) byCol.set(b.x, []); byCol.get(b.x).push(b); });
   for (const [x, col] of byCol) {
@@ -109,10 +113,32 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
     for (let i = 1; i < col.length; i++) {
       const space = col[i].y - (col[i - 1].y + col[i - 1].h);
       if (space < MIN_GAP)
-        fail(`${style}: "${col[i - 1].id}" and "${col[i].id}" in the column at x=${x} are ${space.toFixed(1)}px `
-           + `apart — closer than the ${MIN_GAP}px a row of text needs`);
+        fail(`${style}: the bars of "${col[i - 1].id}" and "${col[i].id}" in the column at x=${x} are ${space.toFixed(1)}px `
+           + `apart — closer than the layout's ${MIN_GAP}px gap`);
     }
   }
+  const textCols = new Map();
+  labels.forEach(l => { if (!textCols.has(l.x)) textCols.set(l.x, []); textCols.get(l.x).push(l); });
+  for (const [x, col] of textCols) {
+    col.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < col.length; i++) {
+      const apart = col[i].y - col[i - 1].y;
+      if (apart < TEXT_LINE)
+        fail(`${style}: the labels of "${col[i - 1].id}" and "${col[i].id}" at x=${x} are ${apart.toFixed(1)}px apart — `
+           + `closer than the ${TEXT_LINE}px a line of text needs, so they overlap`);
+    }
+  }
+
+  // --- Rule 1b: small nodes are packed, not spread ----------------------------------------------------
+  // The main panel's small circuits have bars thinner than a line of text. Each is one text line tall, and
+  // they sit one gap apart; any more is empty space multiplied by every circuit in the column.
+  const small = ['fridge', 'light', 'utility', 'server_ac', 'bedroom'];
+  const smallYs = labels.filter(l => small.includes(l.id)).map(l => l.y).sort((a, b) => a - b);
+  if (smallYs.length !== small.length) fail(`${style}: expected labels for ${small.join(', ')}`);
+  for (let i = 1; i < smallYs.length; i++)
+    if (smallYs[i] - smallYs[i - 1] > PACKED)
+      fail(`${style}: small circuits of one panel sit ${(smallYs[i] - smallYs[i - 1]).toFixed(1)}px apart — `
+         + `more than the ${PACKED}px a label row and one gap take, so the column is mostly empty space`);
 
   // --- Rule 2: ribbons between the same two columns do not cross ---------------------------------------
   // Two ribbons spanning the same gap cross exactly when their order at one end is the reverse of their
