@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -231,7 +231,9 @@ export function addFlowSection(nav: any, sections: any) {
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
-    const folded = applyHideEmptyPref(shown.nodes, shown.links);
+    const emptied = applyHideEmptyPref(shown.nodes, shown.links);
+    // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
+    const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
     wrap.appendChild(controls);
     const toggles = groupToggles(redrawBoth);
@@ -782,7 +784,8 @@ export function addFlowSection(nav: any, sections: any) {
     // Surface the unknowns rather than leaving them to be spotted.
     const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
-      + (unknownCount ? ` · ${unknownCount} with no data` : '');
+      + (unknownCount ? ` · ${unknownCount} with no data` : '')
+      + (folded.hidden ? ` · ${folded.hidden} with no data hidden` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
       : '';
