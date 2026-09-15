@@ -169,4 +169,18 @@ public class MeteredCircuitTests
         Assert.Equal(4460, spare.Value!.Value, 2);
         Assert.Equal("Unaccounted output", spare.Label);
     }
+
+    /// <summary>
+    /// A breaker passes power on as a panel does, even to a single circuit: a 1,040 W breaker feeding one circuit
+    /// metered at 90 W draws that circuit at 90 W, not at the breaker's whole reading. A node that does not
+    /// distribute keeps conservation down a single path, which is what drew it at 1,040 W.
+    /// </summary>
+    [Fact]
+    public void ABreakerDistributesLikeAPanel()
+    {
+        var cfg = Panel(("b06", "breaker"), ("garage", "load"));
+        var g = Build(cfg, new() { ["b06|realpower"] = 1040, ["garage|realpower"] = 90 });
+
+        Assert.Equal(90, Assert.Single(g.Links, l => l.Target == "garage").Value, 2);
+    }
 }

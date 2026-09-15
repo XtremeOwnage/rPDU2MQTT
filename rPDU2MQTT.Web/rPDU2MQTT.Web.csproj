@@ -112,6 +112,7 @@
 		<!-- The Flow page's controls pack onto shared lines rather than stacking down the page. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowcontrols.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hierarchy.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/feeders.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A refresh rebuilds the diagram without collapsing the page and losing the reader's place. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowscroll.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be

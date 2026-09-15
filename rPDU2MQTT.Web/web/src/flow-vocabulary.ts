@@ -26,12 +26,15 @@ export const sourceMetricKey = (src: any) => { const m = src.Metric || 'realpowe
 export const NODE_KINDS: [string, string, string[]][] = [
   ['node', 'Virtual node', SOURCE_METRICS],
   ['panel', 'Electrical panel', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
+  ['breaker', 'Breaker / circuit', ['realpower', 'apparentpower', 'current', 'voltage', 'energy', 'powerfactor']],
   ['inverter', 'Inverter', SOURCE_METRICS],
   ['battery', 'Battery', ['realpower', 'energy', 'current', 'voltage', 'soc']],
   ['solar', 'Solar / PV', ['realpower', 'energy', 'current', 'voltage']],
   ['grid', 'Grid', SOURCE_METRICS],
   ['load', 'Load', ['realpower', 'apparentpower', 'energy', 'current', 'voltage', 'powerfactor']],
 ];
+/// A load is where power is used, so it feeds nothing; a circuit that feeds other nodes is a breaker.
+export const feedsNothing = (kind?: string) => kind === 'load';
 export const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.

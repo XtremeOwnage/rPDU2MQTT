@@ -883,12 +883,13 @@ spec:
                           - ''
                           - node
                           - panel
+                          - breaker
                           - inverter
                           - battery
                           - solar
                           - grid
                           - load
-                          description: "What this node represents: 'node' (generic), 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'. Drives styling and the fields the editor offers."
+                          description: "What this node represents: 'node' (generic), 'panel', 'breaker' (a circuit that feeds other nodes), 'inverter', 'battery', 'solar', 'grid', or 'load' (where power is used, so it feeds nothing). Drives styling and the fields the editor offers."
                         Value:
                           type: number
                           description: Optional fixed value for a leaf node. Used only when no live source has reported for it.
@@ -1171,12 +1172,13 @@ spec:
                           - ''
                           - node
                           - panel
+                          - breaker
                           - inverter
                           - battery
                           - solar
                           - grid
                           - load
-                          description: "What the group represents, for diagram styling: 'node', 'panel', 'inverter', 'battery', 'solar', 'grid', or 'load'."
+                          description: "What the group represents, for diagram styling: 'node', 'panel', 'breaker', 'inverter', 'battery', 'solar', 'grid', or 'load'."
                         Members:
                           type: array
                           items:

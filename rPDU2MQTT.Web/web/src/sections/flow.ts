@@ -4,7 +4,7 @@ import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
-import { isAdditiveMetric, metricLabel } from '../flow-vocabulary.js';
+import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
@@ -1103,6 +1103,10 @@ export function addFlowSection(nav: any, sections: any) {
     /// an extra feeder is the ● drag. Replacing is destructive, so existing wiring is named and confirmed.
     const setParent = (child: string, parent: string) => {
       if (child === parent) return;
+      if (feedsNothing((cand.get(parent) || {}).kind)) {
+        toast(`${nm(parent)} is a load, and a load does not feed anything. If it is a circuit that feeds ${nm(child)}, set its kind to Breaker.`, false);
+        return;
+      }
       if (reaches(child, parent)) { toast(`${nm(parent)} is already downstream of ${nm(child)} — that would be a loop.`, false); return; }
       if (links.some((l: any) => l.From === parent && l.To === child)) { toast(`${nm(parent)} already feeds ${nm(child)}.`, false); return; }
 
@@ -1181,6 +1185,7 @@ export function addFlowSection(nav: any, sections: any) {
       const src = linkFrom, tgt = targetUnder(e.clientX, e.clientY);
       if (tempLine) tempLine.remove(); linkFrom = null; highlight(null);
       if (!tgt || src === tgt) return;
+      if (feedsNothing((cand.get(src) || {}).kind)) { toast(`${nm(src)} is a load, and a load does not feed anything. If it is a circuit, set its kind to Breaker.`, false); return; }
       if (reaches(tgt, src)) { toast('That would create a feeder loop.', false); return; }
       if (links.some((l: any) => l.From === src && l.To === tgt)) { toast('That feed already exists.', false); return; }
       links.push({ From: src, To: tgt });

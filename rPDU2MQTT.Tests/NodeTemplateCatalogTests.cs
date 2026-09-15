@@ -10,7 +10,7 @@ namespace rPDU2MQTT.Tests;
 /// </summary>
 public class NodeTemplateCatalogTests
 {
-    private static readonly HashSet<string> Kinds = new() { "node", "panel", "inverter", "battery", "solar", "grid", "load" };
+    private static readonly HashSet<string> Kinds = new() { "node", "panel", "breaker", "inverter", "battery", "solar", "grid", "load" };
     private static readonly HashSet<string> Metrics = new() { "realpower", "apparentpower", "energy", "current", "voltage", "frequency", "powerfactor" };
     private static readonly HashSet<string> RegisterTypes = new() { "holding", "input" };
     private static readonly HashSet<string> DataTypes = new() { "uint16", "int16", "uint32", "int32", "float32" };

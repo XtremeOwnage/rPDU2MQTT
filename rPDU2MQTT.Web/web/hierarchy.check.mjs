@@ -17,6 +17,8 @@ const config = {
       { Id: 'sub_panel', Label: 'Sub Panel', Kind: 'panel' },
       { Id: 'main_panel', Label: 'Main Panel', Kind: 'panel' },
       { Id: 'fridge', Label: 'fridge', Kind: 'load' },
+      // A load wired to nothing, so a refusal to wire from it cannot be mistaken for a loop refusal.
+      { Id: 'kettle', Label: 'Kettle', Kind: 'load' },
     ],
     Links: [{ From: 'grid', To: 'main_panel' }],
   },
@@ -26,6 +28,7 @@ const nodes = [
   { id: 'sub_panel', label: 'Sub Panel', kind: 'panel' },
   { id: 'main_panel', label: 'Main Panel', kind: 'panel' },
   { id: 'fridge', label: 'fridge', kind: 'load' },
+  { id: 'kettle', label: 'Kettle', kind: 'load' },
 ];
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
@@ -105,6 +108,23 @@ asked = [];
 dropOn('fridge', 'grid', { move: false });
 if (linksOf().join(', ') !== before) fail(`a click rewired the hierarchy: ${linksOf().join(', ')}`);
 
+// A load uses power; it does not pass it on. Nothing is wired as fed by one, by dropping or by its ●.
+const beforeLoad = linksOf().join(', ');
+said.length = 0;
+dropOn('sub_panel', 'kettle');
+if (linksOf().join(', ') !== beforeLoad) fail(`a node was wired to be fed by a load: ${linksOf().join(', ')}`);
+if (!said.some(t => /load/.test(t) && /Breaker/.test(t))) fail(`refusing a load as a feeder did not say to use Breaker: ${said.join(' | ')}`);
+said.length = 0;
+{
+  const svg = query(page(), 'svg', true)[0];
+  svg._on.mousedown[0]({ target: { getAttribute: (k) => k === 'data-port' ? 'kettle' : null }, clientX: 10, clientY: 10, preventDefault() { } });
+  sandbox.document.elementFromPoint = () => ({ closest: () => groupFor('sub_panel') });
+  sandbox.window.dispatch('mousemove', { clientX: 200, clientY: 120 });
+  sandbox.window.dispatch('mouseup', { clientX: 200, clientY: 120 });
+}
+if (linksOf().join(', ') !== beforeLoad) fail(`a feed was dragged out of a load: ${linksOf().join(', ')}`);
+if (!said.some(t => /Breaker/.test(t))) fail(`dragging a feed out of a load did not say to use Breaker: ${said.join(' | ')}`);
+
 console.log('hierarchy: dropping a node on another sets what feeds it, replacing an existing feeder only '
-  + 'after naming it, refusing a loop, and never on a click that did not move');
+  + 'after naming it, refusing a loop, never on a click that did not move, and never from a load');
 process.exit(0);
