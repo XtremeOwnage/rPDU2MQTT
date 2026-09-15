@@ -107,6 +107,7 @@
 		<!-- Two rules the layout owes the eye: nothing in a column closer than a row of text, and no two
 		     ribbons crossing the same gap. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nocross.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tierlayout.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The diagram lays out to its pane rather than to a fixed 960px. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowwidth.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- The Flow page's controls pack onto shared lines rather than stacking down the page. -->

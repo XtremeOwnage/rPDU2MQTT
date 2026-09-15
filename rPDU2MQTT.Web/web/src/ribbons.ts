@@ -46,6 +46,107 @@ export function lanePath(style: RibbonStyle, b: Band, f: number): string {
   return polyline([[b.x1, sY], [xc, sY], [xc, tY], [b.x2, tY]], r);
 }
 
+/// A ribbon that passes through columns on its way, as one band.
+///
+/// `hops[i]` runs from one column to the next, and consecutive hops meet at a waypoint: a lane the layout
+/// kept for this ribbon in a column it crosses. Drawing each hop as its own band left the width of every
+/// waypoint empty — a dark stripe down every column a ribbon passed through — and bent the band flat at
+/// each one, so a long ribbon descended in steps. This is one closed band through every lane.
+export function chainOutline(style: RibbonStyle, hops: Band[]): string {
+  if (hops.length === 1) return ribbonOutline(style, hops[0]);
+  if (style === 'curved') {
+    const { xs, ys } = chainPoints(hops, 0);
+    const h = hops[0].h;
+    const m = throughSlopes(xs, ys);
+    const top = curveThrough(xs, ys, m);
+    const bottom = curveThrough([...xs].reverse(), ys.map(y => y + h).reverse(), [...m].reverse());
+    const last = xs.length - 1;
+    return `${top} L${r2(xs[last])},${r2(ys[last] + h)} ${bottom.replace(/^M/, 'L')} Z`;
+  }
+  return orthoChain(hops, style === 'ortho-round');
+}
+
+/// The stream's path along a chained band, at fraction `f` across it; the same route as `chainOutline`.
+export function chainLanePath(style: RibbonStyle, hops: Band[], f: number): string {
+  if (hops.length === 1) return lanePath(style, hops[0], f);
+  if (style === 'curved') {
+    const { xs, ys } = chainPoints(hops, f);
+    return curveThrough(xs, ys, throughSlopes(xs, ys));
+  }
+  const r = style === 'ortho-round' ? Math.max(...hops.map(cornerRadius)) : 0;
+  const pts: number[][] = [];
+  hops.forEach((b, i) => {
+    const sY = b.sTop + b.h * f, tY = b.tTop + b.h * f;
+    if (i === 0) pts.push([b.x1, sY]);
+    if (Math.abs(tY - sY) > 1) { const xc = elbowX(b); pts.push([xc, sY], [xc, tY]); }
+    pts.push([b.x2, tY]);
+  });
+  return polyline(pts, r);
+}
+
+/// Where a chained band's edge passes: the source bar, the middle of each waypoint, and the target bar.
+function chainPoints(hops: Band[], f: number) {
+  const xs = [hops[0].x1], ys = [hops[0].sTop + hops[0].h * f];
+  for (let i = 0; i < hops.length - 1; i++) {
+    xs.push((hops[i].x2 + hops[i + 1].x1) / 2);
+    ys.push((hops[i].tTop + hops[i + 1].sTop) / 2 + hops[i].h * f);
+  }
+  const last = hops[hops.length - 1];
+  xs.push(last.x2); ys.push(last.tTop + last.h * f);
+  return { xs, ys };
+}
+
+/// The slope the band takes through each point: level at both bars, so it meets them square, and through a
+/// waypoint the average of the runs either side of it — unless it turns back there, where it stays level so
+/// the curve cannot overshoot its lane.
+function throughSlopes(xs: number[], ys: number[]) {
+  const m = xs.map(() => 0);
+  for (let i = 1; i < xs.length - 1; i++) {
+    const a = (ys[i] - ys[i - 1]) / (xs[i] - xs[i - 1]), b = (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]);
+    m[i] = a * b <= 0 ? 0 : (a + b) / 2;
+  }
+  return m;
+}
+
+/// A curve through each point with the slope given there: one cubic per run, so it bends smoothly through
+/// every waypoint rather than kinking at it.
+function curveThrough(xs: number[], ys: number[], m: number[]) {
+  let d = `M${r2(xs[0])},${r2(ys[0])}`;
+  for (let i = 0; i < xs.length - 1; i++) {
+    const dx = xs[i + 1] - xs[i];
+    d += ` C${r2(xs[i] + dx / 3)},${r2(ys[i] + (m[i] * dx) / 3)} ${r2(xs[i + 1] - dx / 3)},${r2(ys[i + 1] - (m[i + 1] * dx) / 3)} ${r2(xs[i + 1])},${r2(ys[i + 1])}`;
+  }
+  return d;
+}
+
+/// The grid routings through waypoints: each corridor keeps its own elbow, and the band runs straight on
+/// across every waypoint between them.
+function orthoChain(hops: Band[], round: boolean): string {
+  const r = round ? Math.max(...hops.map(cornerRadius)) : 0;
+  const upper: number[][] = [];
+  hops.forEach((b, i) => {
+    if (i === 0) upper.push([b.x1, b.sTop]);
+    if (Math.abs(b.tTop - b.sTop) > 1) {
+      const xc = elbowX(b), half = runWidth(b) / 2, down = b.tTop > b.sTop ? 1 : -1;
+      upper.push([xc + down * half, b.sTop], [xc + down * half, b.tTop]);
+    }
+    upper.push([b.x2, b.tTop]);
+  });
+  const last = hops[hops.length - 1];
+  // The lower edge runs back, so each corridor's two points come in reverse order too.
+  const back: number[][] = [[last.x2, last.tTop + last.h]];
+  for (let i = hops.length - 1; i >= 0; i--) {
+    const b = hops[i];
+    if (Math.abs(b.tTop - b.sTop) > 1) {
+      const xc = elbowX(b), half = runWidth(b) / 2, down = b.tTop > b.sTop ? 1 : -1;
+      back.push([xc - down * half, b.tTop + b.h], [xc - down * half, b.sTop + b.h]);
+    }
+    back.push([b.x1, b.sTop + b.h]);
+  }
+  const up = polyline(upper, r), dn = polyline(back, r);
+  return `${up} L${r2(last.x2)},${r2(last.tTop + last.h)} ${dn.replace(/^M/, 'L')} Z`;
+}
+
 /// The original: one smooth band from source to target.
 function curvedBand({ x1, sTop, x2, tTop, h }: Band): string {
   const xc = (x1 + x2) / 2;

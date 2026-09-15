@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle, flowLayout } from '../flow-view.js';
 import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 
@@ -236,16 +236,19 @@ export function addFlowSection(nav: any, sections: any) {
     wrap.appendChild(controls);
     const toggles = groupToggles(redrawBoth);
     if (toggles) controls.appendChild(toggles);
-    const links = folded.links;
-    const nodes = folded.nodes;
+    let links = folded.links;
+    let nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
     const units = graph.units || '';
     // Which metric is actually on screen.
     const lifetimeEnergy = String(graph.metric || metricSel.value || '').toLowerCase() === 'energy';
-    const incoming: any = {}, outgoing: any = {};
+    let incoming: any = {}, outgoing: any = {};
     nodes.forEach((n: any) => { incoming[n.id] = []; outgoing[n.id] = []; });
     links.forEach((l: any) => { (outgoing[l.source] = outgoing[l.source] || []).push(l); (incoming[l.target] = incoming[l.target] || []).push(l); });
+    // The graph as it is, for what explains it — hover cards and the supply path. The preview layout adds
+    // waypoints to the graph it lays out, and a card must never name one.
+    const cardIn = incoming, cardOut = outgoing;
     // The server decides a node's value and, crucially, whether one is known at all.
     const byId: any = {};
     nodes.forEach((n: any) => { byId[n.id] = n; });
@@ -266,14 +269,105 @@ export function addFlowSection(nav: any, sections: any) {
     };
     nodes.forEach((n: any) => col(n.id));
 
-    // Then pull every node as far RIGHT as its nearest child allows, so it lands next to what it powers.
-    nodes.slice().sort((a: any, b: any) => colMemo[b.id] - colMemo[a.id]).forEach((n: any) => {
-      const outs = outgoing[n.id] || [];
-      if (outs.length) colMemo[n.id] = Math.max(0, Math.min(...outs.map((l: any) => colMemo[l.target])) - 1);
-    });
+    /// Preview layout: columns by kind. Each kind sits right of every kind before it, so one tier of panels
+    /// shares a column and whatever a panel feeds beyond the next tier runs through it; endpoints sit at the
+    /// far right. A node whose feeder is a later kind than its own — a battery charged by the inverter — is
+    /// placed by its links alone, or the two kinds would push each other right without end.
+    const TIER: Record<string, number> = { grid: 0, solar: 0, inverter: 1, panel: 2, breaker: 3, pdu: 4, outlet: 5, load: 5, unmeasured: 5 };
+    const tierOf = (id: string) => {
+      const t = TIER[byId[id]?.kind as string];
+      if (t == null) return undefined;
+      return (incoming[id] || []).some((l: any) => (TIER[byId[l.source]?.kind as string] ?? -1) > t) ? undefined : t;
+    };
+    const tierColumns = () => {
+      const relax = () => {
+        for (let guard = nodes.length + 5, moved = true; moved && guard > 0; guard--) {
+          moved = false;
+          links.forEach((l: any) => {
+            if (colMemo[l.source] == null || colMemo[l.target] == null) return;
+            if (colMemo[l.target] < colMemo[l.source] + 1) { colMemo[l.target] = colMemo[l.source] + 1; moved = true; }
+          });
+        }
+      };
+      // Everything a node feeds, all the way down.
+      const under = new Map<string, Set<string>>();
+      const beneath = (id: string) => {
+        if (under.has(id)) return under.get(id)!;
+        const seen = new Set<string>(), stack = (outgoing[id] || []).map((l: any) => l.target);
+        while (stack.length) { const x = stack.pop()!; if (seen.has(x)) continue; seen.add(x); (outgoing[x] || []).forEach((l: any) => stack.push(l.target)); }
+        under.set(id, seen);
+        return seen;
+      };
+      // A node sits right of the earlier-kind nodes nested under its own feeder — a sub-panel beside it, not a
+      // panel on another branch. Measured against the whole diagram, a sub-panel under Sub Panel pushed Main
+      // Panel's circuits a column further out than anything on their branch needed.
+      for (let pass = 0; pass < 4; pass++) {
+        nodes.forEach((n: any) => {
+          const t = tierOf(n.id);
+          if (t == null) return;
+          const mine = beneath(n.id);
+          let floor = -1;
+          (incoming[n.id] || []).forEach((l: any) => beneath(l.source).forEach((u: string) => {
+            if (u === n.id || mine.has(u)) return;
+            const k = tierOf(u);
+            if (k != null && k < t) floor = Math.max(floor, colMemo[u] + 1);
+          }));
+          if (floor > colMemo[n.id]) colMemo[n.id] = floor;
+        });
+        relax();
+      }
+      // Endpoints at the far right: a node that feeds nothing, unless it is a source, an inverter or a panel.
+      const last = Math.max(0, ...nodes.map((n: any) => colMemo[n.id]));
+      nodes.forEach((n: any) => {
+        const t = TIER[byId[n.id]?.kind as string];
+        if (!(outgoing[n.id] || []).length && !(t != null && t <= TIER.panel)) colMemo[n.id] = last;
+      });
+    };
+
+    if (flowLayout === 'tiers') tierColumns();
+    else {
+      // Then pull every node as far RIGHT as its nearest child allows, so it lands next to what it powers.
+      nodes.slice().sort((a: any, b: any) => colMemo[b.id] - colMemo[a.id]).forEach((n: any) => {
+        const outs = outgoing[n.id] || [];
+        if (outs.length) colMemo[n.id] = Math.max(0, Math.min(...outs.map((l: any) => colMemo[l.target])) - 1);
+      });
+    }
     // Never leave an empty left margin if every node pulled off column 0.
     const minCol = Math.min(...nodes.map((n: any) => colMemo[n.id]));
     if (minCol > 0) nodes.forEach((n: any) => { colMemo[n.id] -= minCol; });
+
+    // Each pass-through: its first and last hop, and the waypoints between.
+    const chains: { first: any; last: any; ways: string[] }[] = [];
+    // Preview layout: a link that skips columns gets a waypoint in each column it crosses, so its ribbon has a
+    // lane there rather than cutting across whatever sits in between.
+    if (flowLayout === 'tiers') {
+      const ways: any[] = [], laid: any[] = [];
+      links.forEach((l: any) => {
+        const a = colMemo[l.source], b = colMemo[l.target];
+        if (a == null || b == null || b - a <= 1) { laid.push(l); return; }
+        let prev = l.source;
+        const segs: any[] = [], ids: string[] = [];
+        for (let c = a + 1; c < b; c++) {
+          const id = `${l.source}→${l.target}@${c}`;
+          const way = { id, to: l.target, label: '', kind: 'passthrough', passthrough: true, value: l.known === false ? null : l.value };
+          ways.push(way); colMemo[id] = c; byId[id] = way;
+          const seg = { ...l, source: prev, target: id, orig: l };
+          laid.push(seg); segs.push(seg); ids.push(id);
+          prev = id;
+        }
+        const lastSeg = { ...l, source: prev, target: l.target, orig: l };
+        laid.push(lastSeg); segs.push(lastSeg);
+        chains.push({ first: segs[0], last: lastSeg, ways: ids });
+      });
+      if (ways.length) {
+        nodes = [...nodes, ...ways];
+        links = laid;
+        incoming = {}; outgoing = {};
+        nodes.forEach((n: any) => { incoming[n.id] = []; outgoing[n.id] = []; });
+        links.forEach((l: any) => { outgoing[l.source].push(l); incoming[l.target].push(l); });
+      }
+    }
+    const isWay = (id: string) => !!byId[id]?.passthrough;
 
     const maxCol = Math.max(0, ...nodes.map((n: any) => colMemo[n.id]));
 
@@ -285,6 +379,9 @@ export function addFlowSection(nav: any, sections: any) {
     // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
     // column of thirty circuits was mostly empty space.
     const gap = 6;
+    // Two waypoints side by side are lanes of ribbons passing through together, so they sit close and read as
+    // one wide band; anything with a bar keeps the gap.
+    const gapBetween = (a: string, b: string) => isWay(a) && isWay(b) ? 1 : gap;
     // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
     // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
@@ -330,14 +427,16 @@ export function addFlowSection(nav: any, sections: any) {
     // Stack one column top-to-bottom in its current order; returns the y it ended at.
     const placeColumn = (cn: any[], c: number) => {
       let y = padTop;
-      cn.forEach((n: any) => {
+      cn.forEach((n: any, i: number) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         // Bar height is proportional to what actually passes THROUGH the node, not to its own reading.
         const h = known(n.id) ? Math.max(2, throughput(n.id) * pxPerUnit) : 3;
-        const rowH = Math.max(h, labelRow);
+        // A waypoint is only its ribbon's lane: no label, so no label row.
+        const rowH = isWay(n.id) ? h : Math.max(h, labelRow);
         pos[n.id] = { x: colX(c), y: y + (rowH - h) / 2, h, outOff: 0, inOff: 0 };
-        y += rowH + gap;
+        y += rowH;
       });
-      return y;
+      return y + gap;
     };
 
     // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
@@ -366,8 +465,37 @@ export function addFlowSection(nav: any, sections: any) {
     // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
     // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
     // moved.
+    /// By kind: every column in the order of one walk down the hierarchy. A branch is laid out in full before the
+    /// next begins, so what a node feeds stays together in every column it reaches, and no two ribbons between
+    /// neighbouring columns cross — the averaging sweeps below only make that likely. A node's own loads come
+    /// first, biggest first: they are its longest ribbons, and at the top of its group they run nearly straight
+    /// instead of diving under everything else. Then what feeds further; a panel's remainder last. A node with several
+    /// feeders is walked from the one supplying most of it, and a waypoint sits with the branch it leads to.
+    const hierarchyOrder = () => {
+      const ord: Record<string, number> = {};
+      let next = 0;
+      const primaryFeeder = (id: string) => ((cardIn[id] || []) as any[])
+        .reduce((best: any, l: any) => (!best || (l.value || 0) > (best.value || 0) ? l : best), null)?.source;
+      const feedsOn = (id: string) => ((cardOut[id] || []) as any[]).length > 0;
+      const visit = (id: string) => {
+        if (ord[id] != null) return;
+        ord[id] = next++;
+        ((cardOut[id] || []) as any[]).map((l: any) => l.target)
+          .filter((t: string) => primaryFeeder(t) === id)
+          .sort((a: string, b: string) => (Number(feedsOn(a)) - Number(feedsOn(b))) || (remainder(a) - remainder(b)) || (nodeValue(b) - nodeValue(a)))
+          .forEach(visit);
+      };
+      folded.nodes.filter((n: any) => !((cardIn[n.id] || []) as any[]).length).map((n: any) => n.id)
+        .sort((a: string, b: string) => nodeValue(b) - nodeValue(a)).forEach(visit);
+      // Anything reached only through a loop.
+      folded.nodes.forEach((n: any) => visit(n.id));
+      const ordOf = (id: string) => byId[id]?.passthrough ? (ord[byId[id].to] ?? next) - 0.5 : (ord[id] ?? next);
+      cols.forEach((cn: any[]) => cn && cn.sort((a: any, b: any) => ordOf(a.id) - ordOf(b.id)));
+    };
+
     const orderOf = () => cols.map(cn => (cn || []).map((n: any) => n.id).join(',')).join('|');
-    for (let sweep = 0; sweep < 4; sweep++) {
+    if (flowLayout === 'tiers') hierarchyOrder();
+    else for (let sweep = 0; sweep < 4; sweep++) {
       const before = orderOf();
       // Forward: roots stack by size, downstream columns follow their feeders.
       cols.forEach((cn, c) => {
@@ -448,7 +576,7 @@ export function addFlowSection(nav: any, sections: any) {
     };
 
     /// The row a node occupies: its bar, or a full line of text where the bar is shorter than one.
-    const rowOf = (id: string) => Math.max(pos[id].h, labelRow);
+    const rowOf = (id: string) => isWay(id) ? pos[id].h : Math.max(pos[id].h, labelRow);
 
     /// Push a column apart until no two rows are closer than `gap`, keeping the settled order.
     ///
@@ -457,23 +585,25 @@ export function addFlowSection(nav: any, sections: any) {
     /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
     const separate = (cn: any[]) => {
       let y = padTop;
-      cn.forEach((n: any) => {
+      cn.forEach((n: any, i: number) => {
+        if (i > 0) y += gapBetween(cn[i - 1].id, n.id);
         if (pos[n.id].y < y) pos[n.id].y = y;
-        y = pos[n.id].y + rowOf(n.id) + gap;
+        y = pos[n.id].y + rowOf(n.id);
       });
       // Ran off the bottom: walk back up, which can only compress the slack this pass introduced.
-      const foot = y - gap;
+      const foot = y;
       if (foot > padTop + usableH) {
-        let limit = foot - (foot - (padTop + usableH));
+        let limit = padTop + usableH;
         for (let i = cn.length - 1; i >= 0; i--) {
           const id = cn[i].id;
           if (pos[id].y + rowOf(id) > limit) pos[id].y = limit - rowOf(id);
-          limit = pos[id].y - gap;
+          limit = pos[id].y - (i > 0 ? gapBetween(cn[i - 1].id, id) : gap);
         }
         let top = padTop;   // and never above the top margin
-        cn.forEach((n: any) => {
+        cn.forEach((n: any, i: number) => {
+          if (i > 0) top += gapBetween(cn[i - 1].id, n.id);
           if (pos[n.id].y < top) pos[n.id].y = top;
-          top = pos[n.id].y + rowOf(n.id) + gap;
+          top = pos[n.id].y + rowOf(n.id);
         });
       }
     };
@@ -523,6 +653,26 @@ export function addFlowSection(nav: any, sections: any) {
       for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
     }
     cols.forEach((cn: any[]) => { if (cn && cn.length) separate(cn); });
+
+    // By kind: each waypoint lies on the straight line from where its ribbon leaves its source to where it arrives.
+    // Placed only against its neighbours, a lane took a ribbon's whole descent in one column and held flat through
+    // the rest — against a tall last column, a dive at the end. Columns are separated again after each move, which
+    // keeps their order, and a few rounds let the ends and the lanes settle against each other.
+    if (flowLayout === 'tiers' && chains.length) {
+      for (let pass = 0; pass < 3; pass++) {
+        const at = attachments();
+        chains.forEach(ch => {
+          const a = at.get(ch.first), b = at.get(ch.last);
+          if (!a || !b) return;
+          const x0 = pos[ch.first.source].x + nodeW, x1 = pos[ch.last.target].x;
+          ch.ways.forEach(w => {
+            const f = (pos[w].x + nodeW / 2 - x0) / ((x1 - x0) || 1);
+            pos[w].y = a.from + (b.to - a.from) * f - rowOf(w) / 2;
+          });
+        });
+        cols.forEach((cn: any[]) => { if (cn && cn.length) separate(cn); });
+      }
+    }
     bottom = Math.max(bottom, ...cols.filter(Boolean).flatMap((cn: any[]) => cn.map((n: any) => pos[n.id].y + rowOf(n.id))));
 
     // Fit the viewBox to the tallest column (stacking gaps push it past usableH), so nothing clips.
@@ -570,21 +720,32 @@ export function addFlowSection(nav: any, sections: any) {
       pos[n.id].inOff = stackStart(n.id);
     });
     let flowClipSeq = 0;
+    // Where every hop meets its bars, in stacking order. A pass-through is several hops, and they are drawn
+    // together below as one band: drawn one by one they left a stripe at every column crossed.
+    const hopsOf = new Map<any, { band: any; h: number; col: number }[]>();
     links.sort((a: any, b: any) =>
       (pos[a.target]?.y ?? 0) - (pos[b.target]?.y ?? 0) ||
       (pos[a.source]?.y ?? 0) - (pos[b.source]?.y ?? 0)
     ).forEach((l: any) => {
       const s = pos[l.source], t = pos[l.target];
       if (!s || !t) return;
+      const unknownHop = l.known === false;
+      const h = (unknownHop || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
+      const band = { x1: s.x + nodeW, sTop: s.y + s.outOff, x2: t.x, tTop: t.y + t.inOff, h, ...(laneOf.get(l) ?? {}) };
+      const link = l.orig || l;
+      (hopsOf.get(link) ?? hopsOf.set(link, []).get(link)!).push({ band, h, col: colMemo[l.source] ?? 0 });
+      s.outOff += h; t.inOff += h;
+    });
+
+    hopsOf.forEach((hops, l: any) => {
+      hops.sort((a, b) => a.col - b.col);
+      const bands = hops.map(x => x.band);
+      const h = hops[0].h;
       // An unknown link draws as a hairline: the wiring is real, the quantity isn't known.
       const unknownLink = l.known === false;
       const idleLink = !unknownLink && l.value * pxPerUnit < 1.5;
-      const h = (unknownLink || idleLink) ? 1.5 : l.value * pxPerUnit;
-      const x1 = s.x + nodeW, x2 = t.x;
-      const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = tintOf(l.source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
-      const ribbonPath = ribbonOutline(ribbonStyle, band);
+      const ribbonPath = chainOutline(ribbonStyle, bands);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
         fill: unknownLink ? 'var(--muted)' : color,
@@ -613,7 +774,7 @@ export function addFlowSection(nav: any, sections: any) {
         for (let i = 0; i < lanes; i++) {
           const f = (i + 0.5) / lanes;                       // this lane's position across the band
           const stream = svgEl('path', {
-            d: lanePath(ribbonStyle, band, f),
+            d: chainLanePath(ribbonStyle, bands, f),
             fill: 'none', stroke: color, 'stroke-opacity': lanes > 1 ? '0.42' : '0.5',
             'stroke-width': laneW,
             'stroke-linecap': 'round',
@@ -628,8 +789,6 @@ export function addFlowSection(nav: any, sections: any) {
           svg.appendChild(stream);
         }
       }
-
-      s.outOff += h; t.inOff += h;
     });
 
     // A group reads like a node: click the group node to toggle it.
@@ -640,7 +799,7 @@ export function addFlowSection(nav: any, sections: any) {
     // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted: { id: string, label: string, share: number }[] = [];
     nodes.forEach((n: any) => {
-      const p = pos[n.id]; if (!p) return;
+      const p = pos[n.id]; if (!p || n.passthrough) return;
       const unknownNode = !known(n.id);
       const rect = svgEl('rect', {
         x: p.x, y: p.y, width: nodeW, height: p.h, rx: 2,
@@ -734,8 +893,8 @@ export function addFlowSection(nav: any, sections: any) {
             el('span', { class: 'nh-name', text: byId[other(l)]?.label || other(l) }),
             el('span', { class: 'nh-num', text: l.known === false ? '—' : formatMeasure(l.value, units) }))));
         };
-        side('Fed by', incoming[n.id] || [], (l: any) => l.source);
-        side('Feeds', outgoing[n.id] || [], (l: any) => l.target);
+        side('Fed by', cardIn[n.id] || [], (l: any) => l.source);
+        side('Feeds', cardOut[n.id] || [], (l: any) => l.target);
 
         // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
         const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === n.id);
@@ -760,7 +919,7 @@ export function addFlowSection(nav: any, sections: any) {
       if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
         [rect, lab].forEach((elm: any) => {
           elm.style.cursor = 'pointer';
-          elm.addEventListener('click', (e: any) => { e.stopPropagation?.(); focusPath(svg, incoming, n.id); });
+          elm.addEventListener('click', (e: any) => { e.stopPropagation?.(); focusPath(svg, cardIn, n.id); });
         });
       }
 
@@ -780,20 +939,20 @@ export function addFlowSection(nav: any, sections: any) {
     });
 
     // Surface the unknowns rather than leaving them to be spotted.
-    const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
-    count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
+    const unknownCount = folded.nodes.filter((n: any) => !known(n.id)).length;
+    count.textContent = `${folded.nodes.length} node(s) · ${folded.links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
       : '';
     // Tag chips, above the banners: they change what is emphasised, not what is being reported.
-    const taggedById = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+    const taggedById = new Map<string, any>(folded.nodes.map((n: any) => [n.id, n]));
     const applyTag = (tag: string | null) => {
       if (tag) focusTag(svg, taggedById, tag); else clearFocus(svg);
-      const fresh = tagToggles(nodes, svg, applyTag);
+      const fresh = tagToggles(folded.nodes, svg, applyTag);
       if (fresh && tagRow.parentNode) { tagRow.replaceWith(fresh); tagRow = fresh; }
     };
-    let tagRow = tagToggles(nodes, svg, applyTag) as any;
+    let tagRow = tagToggles(folded.nodes, svg, applyTag) as any;
     if (tagRow) {
       controls.appendChild(tagRow);
       // Re-apply across the live repaint, so the selection survives a push.
@@ -801,7 +960,7 @@ export function addFlowSection(nav: any, sections: any) {
     }
 
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
-    if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
+    if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, cardIn, id)));
 
     // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once
     // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
