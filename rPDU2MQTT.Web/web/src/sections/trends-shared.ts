@@ -119,8 +119,9 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   let picked: Span | null = null;
   const strip = spec.timeline
     ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
-      can: () => !!wider(),
-      go: () => { const r = wider(); if (r) { rangeSel.value = r.value; rangeSel.onchange!({} as any); } },
+      can: () => !!spanOfRange(rangeSel.value) || !!wider(),
+      go: () => { const r = wider(); if (r) useRange(r); },
+      zoomTo: (s) => useRange(customRange(s)),
     })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
@@ -133,8 +134,39 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const rangeOf = (): Range => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
   const multiDay = () => rangeSel.value.startsWith('days=');
-  // The next longer range up to now, which zooming out past the whole timeline loads.
-  const wider = (): Range | undefined => RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
+  /// The two instants of a zoomed-to range, or null for any other range.
+  const spanOfRange = (value: string): Span | null => {
+    const m = /^from=([^&]+)&to=([^&]+)$/.exec(value);
+    if (!m) return null;
+    const from = Date.parse(decodeURIComponent(m[1])), to = Date.parse(decodeURIComponent(m[2]));
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
+  };
+  /// A range of two instants, listed in the dropdown so it reads back there.
+  const customRange = (s: Span): Range => {
+    const value = `from=${encodeURIComponent(new Date(s.from).toISOString())}&to=${encodeURIComponent(new Date(s.to).toISOString())}`;
+    const at = (t: number) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const range: Range = { value, text: `${at(s.from)} → ${at(s.to)}`, wants: rate() ? 'power' : 'energy', seconds: Math.round((s.to - s.from) / 1000) };
+    if (!added.has(value)) { added.set(value, range); rangeSel.appendChild(el('option', { value, text: range.text })); }
+    return range;
+  };
+  // Only the zoomed-to range being shown stays listed.
+  const useRange = (r: Range) => {
+    rangeSel.value = r.value;
+    Array.from(rangeSel.children).forEach((o: any) => {
+      if (o.value !== r.value && spanOfRange(o.value)) { added.delete(o.value); o.remove(); }
+    });
+    rangeSel.onchange!({} as any);
+  };
+  // The next longer range, which zooming out past the whole timeline loads: a zoomed-to range doubles about its middle.
+  const wider = (): Range | undefined => {
+    const custom = spanOfRange(rangeSel.value);
+    if (!custom) return RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
+    const w = 2 * (custom.to - custom.from);
+    const longest = RANGES[RANGES.length - 1];
+    if (w >= longest.seconds * 1000) return longest;
+    const to = Math.min(Date.now(), (custom.from + custom.to) / 2 + w / 2);
+    return customRange({ from: to - w, to });
+  };
 
   const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' }) as HTMLSelectElement;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));

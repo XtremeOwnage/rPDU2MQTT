@@ -12,8 +12,8 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 const power = {
   ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 60,
-  at: Array.from({ length: 4 }, (_, i) => new Date(Date.UTC(2026, 8, 15, 12, i)).toISOString()),
-  series: [{ node: 'n30_1', label: 'n30_1', kind: 'breaker', values: [100, 110, 120, 130] }],
+  at: Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(2026, 7, 1, 6 + i)).toISOString()),
+  series: [{ node: 'n30_1', label: 'n30_1', kind: 'breaker', values: [100, 110, 120, 130, 140, 150, 160] }],
 };
 const daily = {
   ok: true, metric: 'energy', units: 'kWh', source: 'prometheus',
@@ -95,6 +95,33 @@ for (const link of pages) {
   strip._on.wheel[0]({ deltaY: 120, clientX: 50, preventDefault() { } });
   await wait(400);
   if (rangeSel.value !== 'minutes=360') fail(`${name}: wheeling out at the whole range did not load the next longer range: ${rangeSel.value}`);
+
+  // Zoom to selection makes a picked window the time range itself.
+  const spanIn = (u) => { const m = /from=([^&]+)&to=([^&]+)/.exec(u || ''); return m ? { from: Date.parse(m[1]), to: Date.parse(m[2]) } : null; };
+  const tool = (text) => query(query(sec, '.trend-timeline'), 'button', true).find(b => b.textContent === text);
+  if (tool('Zoom to selection') && !tool('Zoom to selection').hidden) fail(`${name}: Zoom to selection is offered with nothing selected`);
+  tool('1 h').onclick();
+  await wait(100);
+  if (!tool('Zoom to selection') || tool('Zoom to selection').hidden) fail(`${name}: no Zoom to selection once a window is picked`);
+  const win = spanIn(asked.at(-1));
+  asked.length = 0;
+  tool('Zoom to selection').onclick();
+  await wait(100);
+  const ranged = spanIn(rangeSel.value.replace(/%3A/g, ':'));
+  if (!ranged || ranged.from !== win.from || ranged.to !== win.to) fail(`${name}: Zoom to selection did not make the window the range: ${rangeSel.value}`);
+  const asks = spanIn(asked.at(-1));
+  if (!asks || asks.from !== win.from || asks.to !== win.to) fail(`${name}: Zoom to selection did not load the window as the range: ${asked.at(-1)}`);
+  const label = (rangeSel.children || []).find(o => o.value === rangeSel.value)?.textContent || '';
+  if (!/→/.test(label)) fail(`${name}: the dropdown does not name the zoomed-to range: "${label}"`);
+  if (tool('Zoom to selection') && !tool('Zoom to selection').hidden) fail(`${name}: a window is still picked after zooming to it`);
+
+  // − zooms that range out to twice its length about its middle, replacing it in the dropdown.
+  minus().onclick();
+  await wait(100);
+  const out = spanIn(asked.at(-1));
+  if (!out || out.to - out.from !== 2 * (win.to - win.from) || (out.from + out.to) / 2 !== (win.from + win.to) / 2)
+    fail(`${name}: − did not zoom the range out about its middle: ${asked.at(-1)}`);
+  if ((rangeSel.children || []).filter(o => spanIn(o.value)).length !== 1) fail(`${name}: zoomed-to ranges pile up in the dropdown`);
   // Past the longest range there is nothing to load.
   rangeSel.value = 'days=90';
   rangeSel.onchange({});
@@ -103,5 +130,5 @@ for (const link of pages) {
 }
 
 console.log('trends recent: both Trends pages offer hour windows from the last hour up in the dropdown, and Last hour, 6 hours and 24 hours '
-  + 'as one click that asks for that window, reads back in the dropdown and marks the button; a calendar period clears the mark; on Node Trends, zooming out past the whole timeline by − or the wheel loads the next longer range');
+  + 'as one click that asks for that window, reads back in the dropdown and marks the button; a calendar period clears the mark; on Node Trends, zooming out past the whole timeline by − or the wheel loads the next longer range, Zoom to selection makes a window the range, and − doubles that range about its middle');
 process.exit(0);

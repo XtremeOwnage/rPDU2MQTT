@@ -44,7 +44,7 @@ function snapped(t: number, size: number) {
 }
 
 /// A longer range the page can load when zooming out past the whole of this one.
-export type Widen = { can: () => boolean; go: () => void };
+export type Widen = { can: () => boolean; go: () => void; zoomTo?: (s: Span) => void };
 
 export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen) {
   const box = el('div', { class: 'trend-timeline' });
@@ -59,7 +59,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
   let span: Span | null = null;
   let svg: any = null;
   let shadeL: any, shadeR: any, frame: any, edgeL: any, edgeR: any, gripL: any, gripR: any;
-  let earlier: any = null, later: any = null, zoomOut: any = null, whole: any = null;
+  let earlier: any = null, later: any = null, zoomOut: any = null, whole: any = null, toRange: any = null;
 
   const width = () => data?.width || 1200;
   const t0 = () => data!.bounds.from;
@@ -129,6 +129,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     if (earlier) earlier.disabled = !span || span.from <= t0();
     if (later) later.disabled = !span || span.to >= t1();
     if (whole) whole.hidden = !span;
+    if (toRange) toRange.hidden = !span;
     if (!svg) return;
     const on = !!span;
     const xl = on ? xOf(span!.from) : 0;
@@ -317,6 +318,12 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
       b.onclick = () => { const s = sized(size); if (s) { span = s; settle(); } };
       tools.appendChild(b);
     });
+    if (widen?.zoomTo) {
+      toRange = btn('Zoom to selection');
+      toRange.title = 'Make the picked window the time range, so the timeline and the dashboard both cover just that stretch.';
+      toRange.onclick = () => { if (span) widen.zoomTo!(span); };
+      tools.appendChild(toRange);
+    }
     whole = btn('Show the whole range');
     whole.onclick = () => { span = null; settle(); };
     tools.appendChild(whole);
