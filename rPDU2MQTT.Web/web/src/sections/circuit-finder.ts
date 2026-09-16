@@ -38,13 +38,13 @@ export function addCircuitFinderSection(nav: any, sections: any) {
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just circuits')));
 
-  const tap = el('button', { class: 'cf-tap' }) as HTMLButtonElement;
-  const coolBar = el('span');
-  const cooling = el('div', { class: 'cf-cooldown' }, coolBar);
-  cooling.hidden = true;
+  // The button is its own progress bar: the fill sweeps across it while the channels are read again.
+  const coolBar = el('span', { class: 'cf-fill' });
+  coolBar.hidden = true;
+  const tapLabel = el('span', { class: 'cf-label' });
+  const tap = el('button', { class: 'cf-tap' }, coolBar, tapLabel) as HTMLButtonElement;
   const reset_ = btn('Start over');
   sec.appendChild(el('div', { class: 'cf-actions' }, tap, reset_));
-  sec.appendChild(cooling);
   const rate = el('div', { class: 'desc cf-rate' });
   sec.appendChild(rate);
   const verdict = el('div', { class: 'cf-verdict' });
@@ -107,21 +107,21 @@ export function addCircuitFinderSection(nav: any, sections: any) {
     const cool = coolSeconds();
     tap.disabled = true;
     tap.dataset.cooldown = String(cool);
-    tap.textContent = `Reading channels… wait ${cool} s`;
-    cooling.hidden = false;
+    tapLabel.textContent = `Reading channels… wait ${cool} s`;
+    coolBar.hidden = false;
     coolBar.style.animationDuration = `${cool}s`;
     // The load has already been switched, so the tap opens the state it is now in and reads it.
     stages.push({ on: stages.length ? !stages[stages.length - 1].on : false, sum: {}, n: {} });
     await sample();
     render();
-    setTimeout(() => { busy = false; tap.disabled = false; cooling.hidden = true; render(); }, cool * 1000);
+    setTimeout(() => { busy = false; tap.disabled = false; coolBar.hidden = true; render(); }, cool * 1000);
   };
 
   const render = () => {
     const poll = pollSeconds();
     // Each tap names the state the load is already in, so the button asks for the next one.
     const next = !stages.length || stages[stages.length - 1].on ? 'OFF' : 'ON';
-    tap.textContent = busy ? `Reading channels… wait ${coolSeconds()} s` : `Switch the load ${next}, then tap`;
+    tapLabel.textContent = busy ? `Reading channels… wait ${coolSeconds()} s` : `Switch the load ${next}, then tap`;
     tap.title = 'Switch the load first, then tap: the tap reads every channel in the state the load is now in.';
     reset_.hidden = !stages.length;
     rate.textContent = `Channels are read every ${poll} s, so a switch shorter than about ${poll * 2} s cannot be seen. `

@@ -1038,15 +1038,19 @@
 .cf-tap {
   width: 100%; min-height: 56px; font-size: 16px; font-weight: 600;
   background: var(--accent); color: var(--accent-fg); border-color: transparent;
+  position: relative; overflow: hidden;
 }
+/* The button is the progress bar: the fill sweeps across it, under its own label. */
+.cf-fill {
+  position: absolute; inset: 0; transform-origin: left; background: rgba(0, 0, 0, .28);
+  animation: cf-fill linear 1 forwards;
+}
+.cf-label { position: relative; }
+@keyframes cf-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .cf-fill { animation: none; } }
 .cf-tap:disabled { opacity: .6; }
 .cf-rate { margin: 0 0 var(--sp-3); }
-/* A tap is only worth making once the channels have been read again, so the button stays down until then and
-   the bar shows how long that is. */
-.cf-cooldown { height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; max-width: 480px; margin: -4px 0 var(--sp-3); }
-.cf-cooldown > span { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; animation: cf-fill linear 1 forwards; }
-@keyframes cf-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) { .cf-cooldown > span { animation: none; } }
+
 .cf-verdict {
   padding: var(--sp-3); margin: 0 0 var(--sp-3); max-width: 640px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2); line-height: 1.45;

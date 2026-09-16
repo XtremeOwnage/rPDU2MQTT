@@ -120,15 +120,22 @@ if (rows().indexOf(named('Kitchen Circuit')) !== 0) fail(`the match is not at th
 // nothing, since the PDU has not looked at the circuit yet.
 const inFlight = tap().onclick();
 if (!tap().disabled) fail('the button can be tapped again before the channels have been read');
-if (query(sec, '.cf-cooldown').hidden) fail('nothing shows how long the button stays down');
+// The button itself is the bar: the fill lives inside it, so there is no second widget to look at.
+const fillIn = () => query(tap(), '.cf-fill', true)[0];
+if (query(sec, '.cf-cooldown', true).length) fail('the cooldown is a separate bar rather than the button filling');
+if (!fillIn() || fillIn().hidden) fail('the button does not fill while the channels are read');
 if (!/Reading channels/.test(tap().textContent || '')) fail(`the button does not say it is waiting: "${tap().textContent}"`);
 const cool = Number(tap().dataset.cooldown);
 if (!(cool >= 3 && cool <= 5)) fail(`the cooldown is ${cool} s; it should be 3-5 s while the PDU is read`);
 await inFlight;
 await wait(30);
-if (tap().disabled || !query(sec, '.cf-cooldown').hidden) fail('the button never came back after the cooldown');
-const fill = /\.cf-cooldown\s*>\s*span\s*\{([^}]*)\}/.exec(css);
-if (!fill || !/animation\s*:/.test(fill[1])) fail('the cooldown bar does not animate, so it reads as a stuck bar');
+if (tap().disabled || !fillIn().hidden) fail('the button never came back after the cooldown');
+const fill = /\.cf-fill\s*\{([^}]*)\}/.exec(css);
+if (!fill || !/animation\s*:/.test(fill[1])) fail('the button fill does not animate, so it reads as a stuck bar');
+if (!/position\s*:\s*absolute/.test(fill[1])) fail('the fill is not laid over the button');
+const tapCss = /\.cf-tap\s*\{([^}]*)\}/.exec(css)[1];
+if (!/overflow\s*:\s*hidden/.test(tapCss) || !/position\s*:\s*relative/.test(tapCss))
+  fail('the button does not clip its own fill, so the sweep would escape the button');
 
 // Finding a circuit is how you come to name it, so a row opens that node's editor.
 const row = query(sec, '.cf-row', true)[0];
@@ -172,5 +179,5 @@ if (!/240 V/.test(verdict()) || !/Garage Circuit/.test(verdict()) || !/Garage Ci
 console.log('circuit finder: offers circuits rather than the panel and grid that carry them, with every channel one tick away; says the sampling rate and the shortest switch it can see; a channel that steps with '
   + 'every toggle is named and ranked first, one that moves once drops out, a step of the wrong size is refused '
   + 'against a known draw, both legs of a 240 V breaker are reported, and the page is one column of rows with a '
-  + 'finger-sized button; the button holds itself down for 3-5 s with an animated bar while the channels are read again, and a result row opens that node in the editor');
+  + 'finger-sized button; the button holds itself down for 3-5 s and fills itself as the progress bar while the channels are read again, and a result row opens that node in the editor');
 process.exit(0);
