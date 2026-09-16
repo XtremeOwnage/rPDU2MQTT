@@ -9176,6 +9176,10 @@ function addNodeTrendsSection(nav     , sections     ) {
 // tap again — every channel is read between taps, and the one that steps with the load is the circuit.
 // Built for a phone held in one hand at the panel: one big button, one list, no tables.
 
+/// What a load can actually sit on. A panel, the grid and an inverter all step with the load as well, being
+/// upstream of it, so offering them as answers only buries the circuit.
+const CIRCUIT_KINDS = ['breaker', 'outlet', 'load'];
+
 /// A state of the load that has been sampled at least once: the running total per channel.
 
 function addCircuitFinderSection(nav     , sections     ) {
@@ -9197,9 +9201,19 @@ function addCircuitFinderSection(nav     , sections     ) {
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('label', { class: 'ld-inst' }, 'Load draws about ', draw, ' W'), instSel.wrap));
 
+  const everything = el('input', { type: 'checkbox' })                    ;
+  everything.title = 'Also offer panels, the grid and other upstream nodes, which step with the load because they carry it.';
+  everything.onchange = () => render();
+  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just circuits')));
+
   const tap = el('button', { class: 'cf-tap' })                     ;
+  const coolBar = el('span');
+  const cooling = el('div', { class: 'cf-cooldown' }, coolBar);
+  cooling.hidden = true;
   const reset_ = btn('Start over');
   sec.appendChild(el('div', { class: 'cf-actions' }, tap, reset_));
+  sec.appendChild(cooling);
   const rate = el('div', { class: 'desc cf-rate' });
   sec.appendChild(rate);
   const verdict = el('div', { class: 'cf-verdict' });
@@ -9216,9 +9230,13 @@ function addCircuitFinderSection(nav     , sections     ) {
 
   let stages          = [];
   let labels                         = {};
+  let kinds                         = {};
   let busy = false;
 
-  const reset = () => { stages = []; labels = {}; render(); };
+  // A reading has to settle before the next tap means anything: the PDU is only read every few seconds.
+  const coolSeconds = () => Math.min(5, Math.max(3, pollSeconds()));
+
+  const reset = () => { stages = []; labels = {}; kinds = {}; render(); };
   reset_.onclick = () => reset();
 
   /// Every channel's reading now, added to the state the load is in.
@@ -9233,6 +9251,7 @@ function addCircuitFinderSection(nav     , sections     ) {
       // A return lane or an unmetered remainder is not a channel anyone can find a load on.
       if (!n.id || String(n.id).includes('#') || typeof n.value !== 'number') return;
       labels[n.id] = n.label || n.id;
+      kinds[n.id] = n.kind || 'node';
       stage.sum[n.id] = (stage.sum[n.id] || 0) + n.value;
       stage.n[n.id] = (stage.n[n.id] || 0) + 1;
     });
@@ -9242,29 +9261,36 @@ function addCircuitFinderSection(nav     , sections     ) {
   // one instant — that is what lets a small load show through the noise.
   setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
 
+  const offered = (id        ) => everything.checked || CIRCUIT_KINDS.includes(kinds[id] || 'node');
   const levels = ()          => stages
     .filter(s => Object.keys(s.n).length)
-    .map(s => ({ on: s.on, mean: Object.fromEntries(Object.keys(s.sum).map(k => [k, s.sum[k] / s.n[k]])) }));
+    .map(s => ({ on: s.on, mean: Object.fromEntries(Object.keys(s.sum).filter(offered).map(k => [k, s.sum[k] / s.n[k]])) }));
 
   const wattsWanted = () => { const v = Number(draw.value); return Number.isFinite(v) && v > 0 ? v : null; };
 
   tap.onclick = async () => {
     if (busy) return;
     busy = true;
+    // The button stays down while the channels are read again, so a second tap cannot land inside the same
+    // reading — the bar says how long that is.
+    const cool = coolSeconds();
     tap.disabled = true;
+    tap.dataset.cooldown = String(cool);
+    tap.textContent = `Reading channels… wait ${cool} s`;
+    cooling.hidden = false;
+    coolBar.style.animationDuration = `${cool}s`;
     // The load has already been switched, so the tap opens the state it is now in and reads it.
     stages.push({ on: stages.length ? !stages[stages.length - 1].on : false, sum: {}, n: {} });
     await sample();
-    busy = false;
-    tap.disabled = false;
     render();
+    setTimeout(() => { busy = false; tap.disabled = false; cooling.hidden = true; render(); }, cool * 1000);
   };
 
   const render = () => {
     const poll = pollSeconds();
     // Each tap names the state the load is already in, so the button asks for the next one.
     const next = !stages.length || stages[stages.length - 1].on ? 'OFF' : 'ON';
-    tap.textContent = `Switch the load ${next}, then tap`;
+    tap.textContent = busy ? `Reading channels… wait ${coolSeconds()} s` : `Switch the load ${next}, then tap`;
     tap.title = 'Switch the load first, then tap: the tap reads every channel in the state the load is now in.';
     reset_.hidden = !stages.length;
     rate.textContent = `Channels are read every ${poll} s, so a switch shorter than about ${poll * 2} s cannot be seen. `
@@ -9277,9 +9303,16 @@ function addCircuitFinderSection(nav     , sections     ) {
     list.innerHTML = '';
     found.candidates.slice(0, 8).forEach(c => {
       const share = found.toggles ? Math.round((c.matched / found.toggles) * 100) : 0;
-      const row = el('div', { class: 'cf-row' + (found.done && found.found.some(f => f.node === c.node) ? ' is-found' : '') },
+      // The point of finding a circuit is usually to name it, so each row opens that node's editor.
+      const row = el('button', { class: 'cf-row' + (found.done && found.found.some(f => f.node === c.node) ? ' is-found' : '') },
         el('span', { class: 'cf-name', text: c.label }),
-        el('span', { class: 'cf-meta', text: `${c.matched} of ${found.toggles} toggles · ${Math.round(c.step).toLocaleString('en-US')} W · ${share}%` }));
+        el('span', { class: 'cf-meta', text: `${c.matched} of ${found.toggles} toggles · ${Math.round(c.step).toLocaleString('en-US')} W · ${share}%` }),
+        el('span', { class: 'cf-edit', text: 'Edit ›' }));
+      row.title = `Open ${c.label} in the node editor, to name it or set what feeds it.`;
+      row.onclick = () => {
+        editNodeOnNextOpen(c.node);
+        (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+      };
       list.appendChild(row);
     });
     if (stages.length && !found.candidates.length && found.toggles)

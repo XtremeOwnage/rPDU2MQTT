@@ -1041,6 +1041,12 @@
 }
 .cf-tap:disabled { opacity: .6; }
 .cf-rate { margin: 0 0 var(--sp-3); }
+/* A tap is only worth making once the channels have been read again, so the button stays down until then and
+   the bar shows how long that is. */
+.cf-cooldown { height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; max-width: 480px; margin: -4px 0 var(--sp-3); }
+.cf-cooldown > span { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; animation: cf-fill linear 1 forwards; }
+@keyframes cf-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .cf-cooldown > span { animation: none; } }
 .cf-verdict {
   padding: var(--sp-3); margin: 0 0 var(--sp-3); max-width: 640px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2); line-height: 1.45;
@@ -1048,12 +1054,16 @@
 .cf-verdict.is-found { border-color: var(--good); background: var(--panel3); font-weight: 600; }
 .cf-list { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
 .cf-row {
-  display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); align-items: baseline;
+  display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); align-items: baseline; width: 100%; min-height: 44px;
   padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--panel2);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
+.cf-row:hover { border-color: var(--accent-dim); }
+.cf-edit { color: var(--accent); font-size: 12.5px; white-space: nowrap; }
 .cf-row.is-found { border-color: var(--good); }
 .cf-name { font-weight: 600; }
 .cf-meta { color: var(--muted); font-size: 12.5px; margin-left: auto; }
 @media (max-width: 560px) {
-  .cf-meta { margin-left: 0; flex: 1 1 100%; }
+  .cf-meta { margin-left: 0; flex: 1 1 100%; order: 3; }
+  .cf-edit { margin-left: auto; }
 }
