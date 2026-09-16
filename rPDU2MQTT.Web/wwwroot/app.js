@@ -7804,7 +7804,9 @@ function snapped(t        , size        ) {
   return d.getTime();
 }
 
-function timelineStrip(onPick                             ) {
+/// A longer range the page can load when zooming out past the whole of this one.
+
+function timelineStrip(onPick                             , widen        ) {
   const box = el('div', { class: 'trend-timeline' });
   const head = el('div', { class: 'trend-timeline-head' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
@@ -7817,7 +7819,7 @@ function timelineStrip(onPick                             ) {
   let span              = null;
   let svg      = null;
   let shadeL     , shadeR     , frame     , edgeL     , edgeR     , gripL     , gripR     ;
-  let earlier      = null, later      = null, zoomOut      = null, whole      = null;
+  let earlier      = null, later      = null, zoomOut      = null, whole      = null, toRange      = null;
 
   const width = () => data?.width || 1200;
   const t0 = () => data .bounds.from;
@@ -7883,10 +7885,11 @@ function timelineStrip(onPick                             ) {
     note.textContent = span
       ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
       : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
-    if (zoomOut) zoomOut.disabled = !span;
+    if (zoomOut) zoomOut.disabled = !span && !widen?.can();
     if (earlier) earlier.disabled = !span || span.from <= t0();
     if (later) later.disabled = !span || span.to >= t1();
     if (whole) whole.hidden = !span;
+    if (toRange) toRange.hidden = !span;
     if (!svg) return;
     const on = !!span;
     const xl = on ? xOf(span .from) : 0;
@@ -7942,6 +7945,12 @@ function timelineStrip(onPick                             ) {
         if (!span) return;
         const dir = (ev.deltaX || ev.deltaY || 0) > 0 ? 1 : -1;
         span = shifted(span, dir * (span.to - span.from) * 0.15);
+      } else if (!span && (ev.deltaY || 0) > 0) {
+        // Out past the whole range loads a longer one, once the burst stops.
+        if (!widen?.can()) return;
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => widen.go(), 300);
+        return;
       } else {
         span = zoomed(span ?? { from: t0(), to: t1() }, tOf(pxOf(ev)), (ev.deltaY || 0) < 0 ? 0.7 : 1 / 0.7);
       }
@@ -8057,8 +8066,11 @@ function timelineStrip(onPick                             ) {
       settle();
     };
     zoomOut = btn('−');
-    zoomOut.title = 'Zoom out: twice the length, about the middle. Past the whole range, shows all of it.';
-    zoomOut.onclick = () => { if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); } };
+    zoomOut.title = 'Zoom out: twice the length, about the middle. At the whole range, loads the next longer range.';
+    zoomOut.onclick = () => {
+      if (span) { span = zoomed(span, (span.from + span.to) / 2, 2); settle(); }
+      else widen?.go();
+    };
     tools.append(zoomIn, zoomOut, earlier, later);
     SIZES.filter(([size]) => size < t1() - t0()).forEach(([size, text]) => {
       const b = btn(text);
@@ -8066,6 +8078,12 @@ function timelineStrip(onPick                             ) {
       b.onclick = () => { const s = sized(size); if (s) { span = s; settle(); } };
       tools.appendChild(b);
     });
+    if (widen?.zoomTo) {
+      toRange = btn('Zoom to selection');
+      toRange.title = 'Make the picked window the time range, so the timeline and the dashboard both cover just that stretch.';
+      toRange.onclick = () => { if (span) widen.zoomTo (span); };
+      tools.appendChild(toRange);
+    }
     whole = btn('Show the whole range');
     whole.onclick = () => { span = null; settle(); };
     tools.appendChild(whole);
@@ -8134,13 +8152,19 @@ function timelineStrip(onPick                             ) {
 const RANGES          = [
   { value: 'today=1', text: 'today so far', wants: 'power', seconds: 86_400 },
   { value: 'today=1&back=1', text: 'yesterday', wants: 'power', seconds: 86_400 },
+  { value: 'minutes=60', text: 'last hour', wants: 'power', seconds: 3_600 },
+  { value: 'minutes=180', text: 'last 3 hours', wants: 'power', seconds: 10_800 },
   { value: 'minutes=360', text: 'last 6 hours', wants: 'power', seconds: 21_600 },
+  { value: 'minutes=720', text: 'last 12 hours', wants: 'power', seconds: 43_200 },
   { value: 'minutes=1440', text: 'last 24 hours', wants: 'power', seconds: 86_400 },
   { value: 'days=7', text: 'last 7 days', wants: 'energy', seconds: 7 * 86_400 },
   { value: 'days=14', text: 'last 14 days', wants: 'energy', seconds: 14 * 86_400 },
   { value: 'days=30', text: 'last 30 days', wants: 'energy', seconds: 30 * 86_400 },
   { value: 'days=90', text: 'last 90 days', wants: 'energy', seconds: 90 * 86_400 },
 ];
+
+/// The recent windows offered as one click beside the calendar periods.
+const RECENT                     = [['minutes=60', 'Last hour'], ['minutes=360', 'Last 6 hours'], ['minutes=1440', 'Last 24 hours']];
 
 /// Auto fits the samples to the chart; per day is one total for each day.
 const INTERVALS                     = [
@@ -8199,7 +8223,11 @@ function trendsPage(nav     , sections     , spec            ) {
   let whole      = null;
   let picked              = null;
   const strip = spec.timeline
-    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } })
+    ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
+      can: () => !!spanOfRange(rangeSel.value) || !!wider(),
+      go: () => { const r = wider(); if (r) useRange(r); },
+      zoomTo: (s) => useRange(customRange(s)),
+    })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
@@ -8211,6 +8239,39 @@ function trendsPage(nav     , sections     , spec            ) {
   const rangeOf = ()        => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
   const multiDay = () => rangeSel.value.startsWith('days=');
+  /// The two instants of a zoomed-to range, or null for any other range.
+  const spanOfRange = (value        )              => {
+    const m = /^from=([^&]+)&to=([^&]+)$/.exec(value);
+    if (!m) return null;
+    const from = Date.parse(decodeURIComponent(m[1])), to = Date.parse(decodeURIComponent(m[2]));
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
+  };
+  /// A range of two instants, listed in the dropdown so it reads back there.
+  const customRange = (s      )        => {
+    const value = `from=${encodeURIComponent(new Date(s.from).toISOString())}&to=${encodeURIComponent(new Date(s.to).toISOString())}`;
+    const at = (t        ) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const range        = { value, text: `${at(s.from)} → ${at(s.to)}`, wants: rate() ? 'power' : 'energy', seconds: Math.round((s.to - s.from) / 1000) };
+    if (!added.has(value)) { added.set(value, range); rangeSel.appendChild(el('option', { value, text: range.text })); }
+    return range;
+  };
+  // Only the zoomed-to range being shown stays listed.
+  const useRange = (r       ) => {
+    rangeSel.value = r.value;
+    Array.from(rangeSel.children).forEach((o     ) => {
+      if (o.value !== r.value && spanOfRange(o.value)) { added.delete(o.value); o.remove(); }
+    });
+    rangeSel.onchange ({}       );
+  };
+  // The next longer range, which zooming out past the whole timeline loads: a zoomed-to range doubles about its middle.
+  const wider = ()                    => {
+    const custom = spanOfRange(rangeSel.value);
+    if (!custom) return RANGES.find(r => /^(minutes|days)=/.test(r.value) && r.seconds > rangeOf().seconds);
+    const w = 2 * (custom.to - custom.from);
+    const longest = RANGES[RANGES.length - 1];
+    if (w >= longest.seconds * 1000) return longest;
+    const to = Math.min(Date.now(), (custom.from + custom.to) / 2 + w / 2);
+    return customRange({ from: to - w, to });
+  };
 
   const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' })                     ;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));
@@ -8286,9 +8347,19 @@ function trendsPage(nav     , sections     , spec            ) {
     const energy = energyFor(range);
     if (energy) { metricSel.value = energy.metric; metricChosen = true; }
     periods.mark(key);
+    markRecent();
     load();
   });
-  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  // A recent window is a range the dropdown already lists, so picking one reads back there too.
+  const recentButtons = RECENT.map(([value, label]) => {
+    const b = btn(label);
+    b.title = `Chart the ${label.toLowerCase()} up to now.`;
+    b.onclick = () => { rangeSel.value = value; rangeSel.onchange ({}       ); };
+    return b;
+  });
+  periods.row.append(...recentButtons);
+  const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
+  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
   const toDeltas = (b     ) => {
@@ -8614,13 +8685,23 @@ function addNodeTrendsSection(nav     , sections     ) {
   // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
   let colours = new Map                ();
 
-  const tagRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  // Kinds and tags flow in one row: two rows of chips before the chart was half the page on a real install.
+  const tagRow = el('div', { style: { display: 'contents' } });
   const search = el('input', { class: 'trend-search' })                    ;
   search.type = 'search';
   search.placeholder = 'Filter nodes';
   search.title = 'Show only the nodes whose name, id or tags contain this text.';
   const searchRow = el('div', { class: 'ld-toolbar' }, search);
   const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  // The node list is dozens of chips on a real install, so it folds into one line saying what is charted.
+  const nodesBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const nodesPanel = el('div', {}, searchRow, picker);
+  const NODES_OPEN_KEY = 'rpdu-node-trends-nodes-open';
+  let nodesOpen = (() => { try { return localStorage.getItem(NODES_OPEN_KEY) === '1'; } catch { return false; } })();
+  const setNodesOpen = (on         ) => {
+    nodesOpen = on;
+    try { localStorage.setItem(NODES_OPEN_KEY, on ? '1' : '0'); } catch { /* private mode: this session only */ }
+  };
   const table = el('div');
   const overlaySel = el('select', { title: 'Draw one more series as a line over the chart, on the same axis.' })                     ;
 
@@ -8629,12 +8710,62 @@ function addNodeTrendsSection(nav     , sections     ) {
   const matches = (s     ) => !filter
     || [s.label, s.node, ...(s.tags || [])].some(t => String(t || '').toLowerCase().includes(filter));
 
-  // The selection the page opens with: the leaves the Energy board treats as the whole picture.
-  const resetSelection = () => {
+  const kindOf = (s     )         => s.kind || 'node';
+  const KINDS_KEY = 'rpdu-node-trends-kinds';
+  /// The kinds the page opens on when none were chosen: one that splits the total without counting it twice,
+  /// circuits where there are any. Grid beside everything it feeds counts the same energy at every tier.
+  const DEFAULT_KINDS = ['breaker', 'load', 'outlet', 'panel', 'pdu'];
+
+  // The selection the page opens with: the kinds last chosen here, or the default.
+  const resetSelection = (useSaved = true) => {
     off.clear();
-    const kinds = new Set(all().map((s     ) => s.kind));
+    const kinds = new Set(all().map(kindOf));
+    let saved           = [];
+    if (useSaved) {
+      try { saved = JSON.parse(localStorage.getItem(KINDS_KEY) || '[]').filter((k        ) => kinds.has(k)); }
+      catch { saved = []; }
+    }
+    const one = DEFAULT_KINDS.find(k => kinds.has(k));
+    // An install with none of those is sources and loads only, charted as before.
     const preferred = ['solar', 'battery', 'grid', 'load'].filter(k => kinds.has(k));
-    if (preferred.length >= 2) all().forEach((s     ) => { if (!preferred.includes(s.kind)) off.add(s.node); });
+    const pick = saved.length ? saved : one ? [one] : preferred.length >= 2 ? preferred : [];
+    if (pick.length) all().forEach((s     ) => { if (!pick.includes(kindOf(s))) off.add(s.node); });
+  };
+
+  /// The kinds wholly on the chart, remembered so the page opens as it was left.
+  const saveKinds = () => {
+    const kinds = [...new Set(all().map(kindOf))];
+    const on = kinds.filter(k => all().filter((s     ) => kindOf(s) === k).every((s     ) => !off.has(s.node)));
+    try { localStorage.setItem(KINDS_KEY, JSON.stringify(on)); } catch { /* private mode: this session only */ }
+  };
+
+  const KIND_ORDER = ['grid', 'solar', 'battery', 'inverter', 'panel', 'breaker', 'pdu', 'outlet', 'load', 'node', 'unmeasured'];
+  const kindName = (k        ) => k === 'pdu' ? 'PDU' : k === 'outlet' ? 'Outlet' : k === 'unmeasured' ? 'Unmeasured'
+    : kindMeta(k)[0] === k ? kindMeta(k)[1] : k;
+
+  /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
+  const kindRow = el('div', { style: { display: 'contents' } });
+  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
+  const drawKinds = () => {
+    kindRow.innerHTML = '';
+    const kinds = [...new Set(all().map(kindOf))]
+      .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+    if (kinds.length < 2) return;
+    kindRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Kinds:' }));
+    kinds.forEach(kind => {
+      const members = all().filter((s     ) => kindOf(s) === kind);
+      const allOn = members.every((s     ) => !off.has(s.node));
+      const chip = btn(`${allOn ? '● ' : '○ '}${kindName(kind)} (${members.length})`);
+      if (allOn) chip.classList.add('chip-on');
+      chip.title = `${allOn ? 'Take' : 'Add'} the ${members.length} ${kindName(kind).toLowerCase()} node(s) ${allOn ? 'off' : 'to'} the chart. `
+        + 'Kinds combine; one kind at a time charts the total once.';
+      chip.onclick = () => {
+        members.forEach((s     ) => allOn ? off.add(s.node) : off.delete(s.node));
+        saveKinds();
+        page.draw();
+      };
+      kindRow.appendChild(chip);
+    });
   };
 
   // A node's weight in the window, for choosing which get their own colour.
@@ -8661,7 +8792,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     const tags = new Set        ();
     all().forEach((s     ) => (s.tags || []).forEach((t        ) => tags.add(t)));
     if (!tags.size) return;
-    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Tags:' }));
+    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 10px' }, text: 'Tags:' }));
     [...tags].sort().forEach(tag => {
       const members = all().filter((s     ) => (s.tags || []).includes(tag));
       const allOn = members.every((s     ) => !off.has(s.node));
@@ -8679,7 +8810,6 @@ function addNodeTrendsSection(nav     , sections     ) {
 
   const drawPicker = () => {
     picker.innerHTML = '';
-    picker.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Nodes:' }));
     const visible = all().filter(matches);
     all().forEach((s     , i        ) => {
       if (!matches(s)) return;
@@ -8704,9 +8834,20 @@ function addNodeTrendsSection(nav     , sections     ) {
     none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
     none.onclick = () => { visible.forEach((s     ) => off.add(s.node)); page.draw(); };
     const reset = btn('Reset', 'primary');
-    reset.title = 'Back to the default selection: solar, battery, grid and the loads.';
-    reset.onclick = () => { resetSelection(); page.draw(); };
-    picker.append(allBtn, none, reset);
+    reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
+    reset.onclick = () => {
+      try { localStorage.removeItem(KINDS_KEY); } catch { /* private mode */ }
+      resetSelection(false);
+      page.draw();
+    };
+    nodesBar.innerHTML = '';
+    const charted = all().filter((s     ) => !off.has(s.node)).length;
+    const toggle = btn(nodesOpen ? 'Hide node list ▴' : 'Choose nodes ▾');
+    toggle.title = nodesOpen ? 'Fold the node list away.' : 'Pick individual nodes, or filter them by name.';
+    toggle.onclick = () => { setNodesOpen(!nodesOpen); drawPicker(); };
+    nodesBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: `Nodes: ${charted} of ${all().length} charted` }),
+      toggle, allBtn, none, reset);
+    nodesPanel.hidden = !nodesOpen;
   };
   search.oninput = () => { filter = search.value.trim().toLowerCase(); drawPicker(); };
 
@@ -8889,7 +9030,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       }
       return lines;
     },
-    above: () => [tagRow, searchRow, picker],
+    above: () => [filterRow, nodesBar, nodesPanel],
     below: () => [table],
     loaded: () => {
       if (pending) {
@@ -8913,7 +9054,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     render: (p) => {
       const body = p.body();
       const fold = assignColours(body?.ok ? shown() : []);
-      drawTags(); drawPicker(); table.innerHTML = '';
+      drawKinds(); drawTags(); drawPicker(); table.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();
