@@ -65,6 +65,13 @@ public class EnergyFlowConfig
     public List<EnergyFlowGroup> Groups { get; set; } = new();
 
     /// <summary>
+    /// Electrical panels and the breakers in their slots (#452) — the panel directory that otherwise lives on
+    /// paper. Which channel a breaker is measured by is mapped separately (#454).
+    /// </summary>
+    [Description("Electrical panels and the breakers in their slots: breaker number, rating, wire label and what each one feeds, including the circuits nobody has identified yet.")]
+    public List<PanelConfig> Panels { get; set; } = new();
+
+    /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
     /// load (each entry behaves like a link parent → child) so older configs keep working.
     /// </summary>
