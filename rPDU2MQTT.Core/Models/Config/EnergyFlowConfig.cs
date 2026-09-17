@@ -72,6 +72,13 @@ public class EnergyFlowConfig
     public List<PanelConfig> Panels { get; set; } = new();
 
     /// <summary>
+    /// The CT clamps on the panels' wires and the monitor channel each is plugged into (#454), so a breaker's
+    /// power comes from the channel measuring it.
+    /// </summary>
+    [Description("CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards.")]
+    public List<CtClampConfig> Clamps { get; set; } = new();
+
+    /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
     /// load (each entry behaves like a link parent → child) so older configs keep working.
     /// </summary>
