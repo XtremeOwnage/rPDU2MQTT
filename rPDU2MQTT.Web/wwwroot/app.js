@@ -2891,6 +2891,30 @@ function verdictOf(toggles        , candidates             , found             ,
     + `${more} more toggle${more > 1 ? 's' : ''} should separate them.`;
 }
 
+// ── panel-layout.ts ─────────────────────────────────────────────
+// Where a breaker sits in the panel as it is drawn (#453): odd slots down the left column, even down the
+// right, a double-pole spanning the next slot in its own column, and a tandem sharing one slot.
+
+/// One drawn position: the slot, how many rows it covers, and the breaker (or two tandem halves) in it.
+
+const isLeft = (slot        ) => slot % 2 === 1;
+const rowOf = (slot        ) => Math.floor((slot + 1) / 2);
+
+/// The cells of one column, top to bottom. A slot a double-pole reaches into is not drawn again.
+function column                   (slots        , breakers     , left         )                {
+  const cells                = [];
+  const covered = new Set        ();
+  for (let slot = left ? 1 : 2; slot <= slots; slot += 2) {
+    if (covered.has(slot)) continue;
+    const halves = breakers.filter(b => b.slot === slot).sort((a, b) => (a.half || 1) - (b.half || 1));
+    // A double-pole in the last slot of a column has nothing to reach into, so it is drawn as one.
+    const spans = halves.some(b => (b.poles || 1) === 2) && slot + 2 <= slots;
+    if (spans) covered.add(slot + 2);
+    cells.push({ slot, span: spans ? 2 : 1, halves });
+  }
+  return cells;
+}
+
 // ── sections/paths.ts ───────────────────────────────────────────
 // Integration Paths section + the shared paths-table builders (also used by the overrides preview).
 
@@ -9324,6 +9348,205 @@ function addCircuitFinderSection(nav     , sections     ) {
   return { link, sec };
 }
 
+// ── sections/panel-schedule.ts ──────────────────────────────────
+// The panel schedule (#453): a panel drawn as it is — two columns of slots — with each breaker's number,
+// wire, rating, what it feeds and the live power of the channel measuring it (#454). Editable in place.
+
+/// A breaker as the API reports it, with its chain and power resolved.
+
+/// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
+const GAPS                         = {
+  noclamp: 'No CT clamp on this breaker’s wire yet.',
+  nochannel: 'Its clamp is not plugged into a monitor channel yet.',
+  noreading: 'Its channel has no current reading.',
+};
+
+function addPanelScheduleSection(nav     , sections     ) {
+  const link = navLink(nav, 'Panel Schedule', '🗂');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Panel Schedule' }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Each panel as its own directory: the slots laid out as they are in the panel, odd down the left and even '
+    + 'down the right, with what each breaker feeds and the power of the channel measuring it. A breaker with '
+    + 'no channel mapped to it reads no data rather than zero. Tap a slot to edit it.'));
+
+  const panelSel = el('select', { title: 'Which panel to show.' })                     ;
+  const refresh = btn('Refresh');
+  const addPanel = btn('Add panel');
+  const status = el('span', { class: 'ld-count' });
+  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), refresh, addPanel, status));
+  const grid = el('div', { class: 'ps-grid' });
+  sec.appendChild(grid);
+
+  let panels          = [];
+
+  const panelsIn = ()        => ensure(ensure(state.data, 'EnergyFlow', {}), 'Panels', []);
+  const shown = () => panels.find(p => p.id === panelSel.value) || panels[0];
+
+  const load = async () => {
+    status.textContent = 'loading…';
+    let r     ;
+    try { r = await api('/api/panels'); }
+    catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+    if (!r.body?.ok) { status.textContent = r.body?.message || 'Could not read the panels.'; panels = []; render(); return; }
+    panels = r.body.panels || [];
+    const keep = panelSel.value;
+    panelSel.innerHTML = '';
+    panels.forEach(p => panelSel.appendChild(el('option', { value: p.id, text: p.name || p.id })));
+    if (panels.some(p => p.id === keep)) panelSel.value = keep;
+    status.textContent = '';
+    render();
+  };
+  refresh.onclick = () => load();
+  panelSel.onchange = () => render();
+
+  addPanel.onclick = () => {
+    const id = (prompt('An id for the panel, e.g. main_panel') || '').trim();
+    if (!id) return;
+    panelsIn().push({ Id: id, Name: id, Slots: 42, Breakers: [] });
+    refreshDirty();
+    toast(`Added panel ${id}. Press Save to keep it.`, true);
+    load();
+  };
+
+  /// The breaker in the config this drawn one came from, so an edit lands on the real entry.
+  const configBreaker = (panel       , b         ) => {
+    const p = panelsIn().find((x     ) => x.Id === panel.id);
+    if (!p) return null;
+    const list = ensure(p, 'Breakers', []);
+    return list.find((x     ) => x.Slot === b.slot && (x.Number || '') === b.number) || null;
+  };
+
+  const edit = (panel       , b                , slot        ) => {
+    const entry = b ? configBreaker(panel, b) : null;
+    const field = (label        , input     , hint         ) =>
+      el('div', { class: 'ps-field' }, el('label', { class: 'ps-label', text: label }), input,
+        hint ? el('div', { class: 'desc', style: { margin: '2px 0 0' }, text: hint }) : '');
+    const text = (value        , placeholder = '') => {
+      const i = el('input', { type: 'text', placeholder })                    ;
+      i.value = value;
+      return i;
+    };
+    const num = (value               ) => {
+      const i = el('input', { type: 'number', min: '1' })                    ;
+      i.value = value == null ? '' : String(value);
+      return i;
+    };
+    const number = text(b?.number || String(slot), 'as written, e.g. B06 or 26.1');
+    const description = text(b?.description || '', 'what it feeds');
+    const wire = text(b?.wire || '', 'e.g. W11');
+    const amps = num(b?.amps ?? null);
+    const poles = el('select', {})                     ;
+    [['1', 'single pole'], ['2', 'double pole (spans the next slot down)']].forEach(([v, t]) => poles.appendChild(el('option', { value: v, text: t })));
+    poles.value = String(b?.poles || 1);
+    const half = el('select', {})                     ;
+    [['', 'the whole slot'], ['1', 'tandem, upper half'], ['2', 'tandem, lower half']].forEach(([v, t]) => half.appendChild(el('option', { value: v, text: t })));
+    half.value = b?.half ? String(b.half) : '';
+    const stateSel = el('select', {})                     ;
+    [['identified', 'Identified'], ['unknown', 'Not identified yet'], ['unused', 'Unused slot']]
+      .forEach(([v, t]) => stateSel.appendChild(el('option', { value: v, text: t })));
+    stateSel.value = b?.state || 'unknown';
+
+    const save = btn('Apply', 'primary');
+    save.onclick = () => {
+      const target = entry || { Slot: slot };
+      target.Slot = slot;
+      target.Number = number.value.trim() || String(slot);
+      target.Description = description.value.trim();
+      target.Wire = wire.value.trim();
+      target.Amps = amps.value ? Number(amps.value) : null;
+      target.Poles = Number(poles.value) || 1;
+      target.Half = half.value ? Number(half.value) : null;
+      target.State = stateSel.value;
+      if (!entry) {
+        const p = panelsIn().find((x     ) => x.Id === panel.id);
+        if (p) ensure(p, 'Breakers', []).push(target);
+      }
+      refreshDirty();
+      closeSheet();
+      toast('Breaker updated. Press Save to keep it.', true);
+      load();
+    };
+    const remove = btn('Remove', 'danger');
+    remove.hidden = !entry;
+    remove.onclick = () => {
+      const p = panelsIn().find((x     ) => x.Id === panel.id);
+      const list = p ? ensure(p, 'Breakers', []) : [];
+      const at = list.indexOf(entry);
+      if (at >= 0) list.splice(at, 1);
+      refreshDirty();
+      closeSheet();
+      toast('Breaker removed. Press Save to keep it.', true);
+      load();
+    };
+
+    const chain = b?.legs?.length
+      ? el('div', { class: 'desc' }, 'Measured by: ' + b.legs.map(l =>
+        `leg ${l.leg} — ${l.wire || 'no wire'} → ${l.clamp || 'no clamp'} → ${l.channel || 'no channel'}${l.reversed ? ' (reversed)' : ''}`).join('; '))
+      : el('div', { class: 'desc', text: 'Nothing is measuring this breaker yet. CT clamps are mapped under Energy Flow → Clamps.' });
+
+    openSheet({
+      title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
+      body: el('div', {}, field('Breaker number', number), field('What it feeds', description),
+        field('Wire label', wire), field('Rating (A)', amps), field('Poles', poles),
+        field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
+        field('State', stateSel), chain),
+      footer: [save, remove],
+    });
+  };
+
+  const powerText = (b         ) => b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`;
+
+  const render = () => {
+    grid.innerHTML = '';
+    const panel = shown();
+    if (!panel) {
+      grid.appendChild(el('div', { class: 'desc', text: 'No panels yet. Add one to start a directory, then fill in its slots.' }));
+      return;
+    }
+    grid.style.gridTemplateRows = `repeat(${panel.rows}, auto)`;
+    [true, false].forEach(left => {
+      column(panel.slots, panel.breakers, left).forEach(cell => {
+        const first = cell.halves[0];
+        const box = el('button', {
+          class: 'ps-cell' + (cell.halves.length ? '' : ' is-empty')
+            + (first && first.state === 'unknown' ? ' is-unknown' : '')
+            + (first && first.state === 'unused' ? ' is-unused' : ''),
+          style: { gridColumn: left ? '1' : '2', gridRow: `${rowOf(cell.slot)} / span ${cell.span}` },
+        });
+        box.appendChild(el('span', { class: 'ps-slot', text: String(cell.slot) + (cell.span === 2 ? `+${cell.slot + 2}` : '') }));
+        if (!cell.halves.length) {
+          box.appendChild(el('span', { class: 'ps-desc', text: 'empty' }));
+          box.title = `Slot ${cell.slot} — nothing recorded. Tap to add a breaker.`;
+          box.onclick = () => edit(panel, null, cell.slot);
+        } else {
+          cell.halves.forEach(b => {
+            const half = el('span', { class: 'ps-half' },
+              el('span', { class: 'ps-num', text: b.number }),
+              el('span', { class: 'ps-desc', text: b.state === 'unused' ? 'Unused' : b.description || 'Not identified' }),
+              // The directory's own mark for a circuit nobody has confirmed, description or not.
+              ...(b.state === 'unknown' ? [el('span', { class: 'ps-mark', text: '????', title: 'Nobody has identified this circuit yet.' })] : []),
+              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : ''].filter(Boolean).join(' · ') }),
+              el('span', { class: 'ps-power' + (b.power == null ? ' is-nodata' : ''), text: powerText(b) }));
+            half.title = b.power == null ? (GAPS[b.gap] || 'No reading for this breaker.') : '';
+            box.appendChild(half);
+          });
+          box.onclick = () => edit(panel, cell.halves[0], cell.slot);
+        }
+        grid.appendChild(box);
+      });
+    });
+  };
+
+  link.onclick = () => { activate(link, sec); load(); };
+  // A schedule is read while someone is at the panel, so it keeps up with the channels behind it.
+  setInterval(() => { if (sec.classList.contains('active')) load(); }, 10000);
+  return { link, sec };
+}
+
 // ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
@@ -10278,7 +10501,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.

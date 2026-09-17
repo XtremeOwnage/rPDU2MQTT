@@ -1071,3 +1071,34 @@
   .cf-meta { margin-left: 0; flex: 1 1 100%; order: 3; }
   .cf-edit { margin-left: auto; }
 }
+
+/* --- Panel schedule ------------------------------------------------------------------------------- */
+/* The panel as it is: two columns of slots, odd on the left and even on the right, a double-pole spanning
+   the next slot in its own column. On a phone the two columns become one, in slot order. */
+.ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-width: 900px; margin-top: var(--sp-3); }
+.ps-cell {
+  display: flex; flex-direction: column; gap: 2px; min-height: 52px; position: relative;
+  padding: var(--sp-2) 34px var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.ps-cell:hover { border-color: var(--accent-dim); }
+.ps-cell.is-empty { background: transparent; border-style: dashed; color: var(--faint); }
+.ps-cell.is-unknown { border-color: var(--warn); }
+.ps-cell.is-unused { opacity: .65; }
+.ps-slot { position: absolute; top: 4px; right: 6px; font-size: 11px; color: var(--faint); font-family: var(--mono); }
+.ps-half { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 4px; padding-top: 4px; }
+.ps-num { font-weight: 600; font-family: var(--mono); font-size: 12px; }
+.ps-desc { flex: 1 1 auto; }
+.ps-meta { color: var(--muted); font-size: 12px; }
+.ps-mark { color: var(--warn); font-family: var(--mono); font-size: 12px; letter-spacing: -1px; }
+.ps-power { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.ps-power.is-nodata { color: var(--faint); font-style: italic; }
+.ps-field { margin: 0 0 var(--sp-3); }
+.ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
+@media (max-width: 560px) {
+  .ps-grid { grid-template-columns: 1fr; }
+  /* The placement is inline on each cell, so the phone layout has to outrank it. */
+  .ps-cell { grid-column: 1 !important; grid-row: auto !important; }
+}
