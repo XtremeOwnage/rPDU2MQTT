@@ -1146,3 +1146,13 @@
   .ps-bus { display: none; }
   .ps-cell.is-left .ps-half { flex-direction: row; }
 }
+
+/* A panel's feeders, as chips beside the picker that adds one. */
+.ps-feeders { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ps-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--panel2); font-size: 12px;
+}
+.ps-chip-x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
+.ps-chip-x:hover { color: var(--bad); }
+.ps-incoming { margin: 0 0 var(--sp-2); }

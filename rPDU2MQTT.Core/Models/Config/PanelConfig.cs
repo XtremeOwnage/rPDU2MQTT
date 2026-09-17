@@ -40,6 +40,10 @@ public class PanelConfig
     [Description("How many breaker positions the panel has, counting both columns. A 42-space panel has 42. Odd numbers fill the left column; even numbers the right, as they are stamped in the panel.")]
     public int Slots { get; set; } = 42;
 
+    /// <summary>The energy-flow node that is this panel: what feeds it, and what its circuits hang beneath.</summary>
+    [Description("The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.")]
+    public string Node { get; set; } = "";
+
     [Description("The breakers in this panel's slots.")]
     public List<BreakerConfig> Breakers { get; set; } = new();
 

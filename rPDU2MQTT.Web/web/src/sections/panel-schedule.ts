@@ -12,7 +12,7 @@ type Breaker = {
   slot: number; number: string; poles: number; half: number | null; amps: number | null;
   wire: string; description: string; state: string; power: number | null; gap: string; legs: Leg[];
 };
-type Panel = { id: string; name: string; slots: number; rows: number; breakers: Breaker[] };
+type Panel = { id: string; name: string; slots: number; rows: number; node: string; incoming: number | null; breakers: Breaker[] };
 
 /// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
 const GAPS: Record<string, string> = {
@@ -46,10 +46,20 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
   const slotsIn = el('input', { type: 'number', min: '2', max: '200', step: '2', class: 'ps-slots' }) as HTMLInputElement;
   slotsIn.title = 'How many breaker positions the panel has, counting both columns. A 42-space panel has 42.';
+  // The node that is this panel: its reading is the power coming in, and its breakers' circuits hang beneath it.
+  const nodeSel = el('select', { class: 'ps-panel-node' }) as HTMLSelectElement;
+  nodeSel.title = 'The energy-flow node that is this panel. Its reading is the power coming in, and a circuit mapped to one of its breakers is placed beneath it.';
+  const feeders = el('span', { class: 'ps-feeders' });
+  const feedAdd = el('select', { class: 'ps-feed-add' }) as HTMLSelectElement;
+  feedAdd.title = 'Add a node that feeds this panel.';
   const settings = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('label', { class: 'ld-inst' }, 'Name ', nameIn),
-    el('label', { class: 'ld-inst' }, 'Slots ', slotsIn));
+    el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
+    el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
+    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
   sec.appendChild(settings);
+  const incoming = el('div', { class: 'desc ps-incoming' });
+  sec.appendChild(incoming);
 
   const grid = el('div', { class: 'ps-grid' });
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
@@ -61,7 +71,17 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
   const panelsIn = (): any[] => ensure(flowIn(), 'Panels', []);
   const clampsIn = (): any[] => ensure(flowIn(), 'Clamps', []);
+  const linksIn = (): any[] => ensure(flowIn(), 'Links', []);
   const shown = () => panels.find(p => p.id === panelSel.value) || panels[0];
+  const labelOf = (id: string) => nodes.find(n => n.id === id)?.label || id;
+  /// What feeds a node today, according to the flow links.
+  const parentsOf = (node: string) => linksIn().filter((l: any) => l.To === node).map((l: any) => String(l.From));
+  /// A breaker's circuit hangs beneath the panel: whatever fed it before is replaced, never left beside it.
+  const reparent = (node: string, parent: string) => {
+    const links = linksIn();
+    for (let i = links.length - 1; i >= 0; i--) if (links[i].To === node) links.splice(i, 1);
+    links.push({ From: parent, To: node });
+  };
   /// The config entry behind the drawn panel: edits land there, and it is what the drawing follows.
   const configPanel = (id: string) => panelsIn().find((p: any) => p.Id === id);
 
@@ -108,6 +128,21 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const p = configPanel(panelSel.value);
     if (!p) return;
     p.Name = nameIn.value.trim() || p.Id;
+    refreshDirty();
+    render();
+  };
+  nodeSel.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p) return;
+    p.Node = nodeSel.value;
+    refreshDirty();
+    load();
+  };
+  feedAdd.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p?.Node || !feedAdd.value) return;
+    if (!parentsOf(p.Node).includes(feedAdd.value)) linksIn().push({ From: feedAdd.value, To: p.Node });
+    feedAdd.value = '';
     refreshDirty();
     render();
   };
@@ -212,6 +247,22 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
     const save = btn('Apply', 'primary');
     save.onclick = () => {
+      const panelNode = configPanel(panel.id)?.Node || '';
+      const picked = pickers.map(s => s.value).filter(Boolean);
+      // A circuit belongs beneath the panel feeding it. One that hangs somewhere else today is not moved
+      // quietly: what it is fed by now, and what that becomes, is said before anything is written.
+      const moving = panelNode
+        ? picked.map(ch => ({ ch, from: parentsOf(ch).filter(f => f !== panelNode) })).filter(x => x.from.length)
+        : [];
+      if (moving.length) {
+        const where = nameIn.value.trim() || panel.name || panel.id;
+        const lines = moving.map(m => `• ${labelOf(m.ch)} is fed by ${m.from.map(labelOf).join(', ')}`);
+        const ok = confirm(`${lines.join('\n')}\n\nMapping ${moving.length > 1 ? 'them' : 'it'} to breaker `
+          + `${number.value.trim() || slot} places ${moving.length > 1 ? 'them' : 'it'} beneath ${where} instead, `
+          + `and the old feeder link${moving.reduce((n, m) => n + m.from.length, 0) > 1 ? 's are' : ' is'} removed.`
+          + `\n\nOK to move, Cancel to leave it as it is.`);
+        if (!ok) return;
+      }
       const target = entry || { Slot: slot };
       const newNumber = number.value.trim() || String(slot);
       target.Slot = slot;
@@ -233,6 +284,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
       // One CT for the whole circuit leaves no second leg to record.
       if (whole || target.Poles === 1) mapLeg(panel.id, newNumber, 2, '', '');
+      // The panel is now what feeds these circuits, in the flow graph as well as on paper.
+      if (panelNode) picked.forEach(ch => reparent(ch, panelNode));
       refreshDirty();
       closeSheet();
       toast('Breaker updated. Press Save to keep it.', true);
@@ -292,6 +345,39 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const rows = Math.ceil(slots / 2);
     nameIn.value = cfg?.Name ?? drawn.name;
     slotsIn.value = String(slots);
+
+    // Which node is this panel, and what feeds it.
+    const panelNode = cfg?.Node ?? drawn.node ?? '';
+    nodeSel.innerHTML = '';
+    nodeSel.appendChild(el('option', { value: '', text: '— not mapped —' }));
+    nodes.forEach(n => nodeSel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    nodeSel.value = panelNode;
+    feeders.innerHTML = '';
+    const fedBy = panelNode ? parentsOf(panelNode) : [];
+    fedBy.forEach(from => {
+      const chip = el('span', { class: 'ps-chip' }, el('span', { text: labelOf(from) }));
+      const drop = el('button', { class: 'ps-chip-x', text: '×', title: `${labelOf(from)} no longer feeds this panel` });
+      drop.onclick = () => {
+        const links = linksIn();
+        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === panelNode && links[i].From === from) links.splice(i, 1);
+        refreshDirty();
+        render();
+      };
+      chip.appendChild(drop);
+      feeders.appendChild(chip);
+    });
+    if (!fedBy.length) feeders.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: panelNode ? 'nothing yet' : 'pick the panel’s node first' }));
+    feedAdd.innerHTML = '';
+    feedAdd.appendChild(el('option', { value: '', text: '+ add a feeder' }));
+    nodes.filter(n => n.id !== panelNode && !fedBy.includes(n.id))
+      .forEach(n => feedAdd.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    feedAdd.disabled = !panelNode;
+
+    incoming.textContent = !panelNode
+      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one above.'
+      : drawn.incoming == null
+        ? `Incoming: no data — ${labelOf(panelNode)} has no current reading.`
+        : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W through ${labelOf(panelNode)}.`;
     grid.style.gridTemplateRows = `repeat(${rows}, auto)`;
 
     [true, false].forEach(left => {

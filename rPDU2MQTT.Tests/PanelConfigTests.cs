@@ -80,6 +80,7 @@ public class PanelConfigTests
                 - Id: main_panel
                   Name: Main Panel
                   Slots: 42
+                  Node: main_panel_feed
                   Breakers:
                     - Slot: 1
                       Number: "1,3"
@@ -108,6 +109,9 @@ public class PanelConfigTests
         var panel = Assert.Single(config.EnergyFlow.Panels);
         Assert.Equal("main_panel", panel.Id);
         Assert.Equal("Main Panel", panel.Name);
+        // The node that is the panel: what its incoming power is read from, and what its circuits hang beneath.
+        Assert.Equal("main_panel_feed", panel.Node);
+        Assert.Equal("", new PanelConfig().Node);
         Assert.Equal(42, panel.Slots);
         Assert.Equal(4, panel.Breakers.Count);
 
@@ -173,6 +177,7 @@ public class PanelConfigTests
         var panels = Assert.Single(flow.Properties!, c => c.Key == "Panels");
         Assert.False(string.IsNullOrWhiteSpace(panels.Description));
 
+        Assert.Single(Fields(panels), c => c.Key == "Node");
         var breakers = Assert.Single(Fields(panels), c => c.Key == "Breakers");
         var state = Assert.Single(Fields(breakers), c => c.Key == "State");
         // The three states are offered as a choice, so a directory cannot be given a fourth by typing one.

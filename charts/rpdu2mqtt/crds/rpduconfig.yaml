@@ -1202,6 +1202,9 @@ spec:
                           description: How many breaker positions the panel has, counting both columns. A 42-space panel has 42. Odd numbers fill the left column; even numbers the right, as they are stamped in the panel.
                           minimum: 2
                           maximum: 200
+                        Node:
+                          type: string
+                          description: The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.
                         Breakers:
                           type: array
                           items:

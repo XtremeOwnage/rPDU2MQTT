@@ -1050,6 +1050,10 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 name = panel.Name,
                 slots = panel.Slots,
                 rows = panel.Rows,
+                node = panel.Node,
+                // What the panel is drawing, read from the node that is the panel. Null is a gap, not a zero.
+                incoming = !string.IsNullOrWhiteSpace(panel.Node) && live is not null
+                    && live.TryGetValue(panel.Node, metric, out var incoming) ? incoming : (double?)null,
                 breakers = map.Chains.Where(c => ReferenceEquals(c.Panel, panel)).Select(chain =>
                 {
                     var power = Core.Flow.PanelMap.Power(chain, live, metric, out var gap);

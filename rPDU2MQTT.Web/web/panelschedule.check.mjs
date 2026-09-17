@@ -18,7 +18,9 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const config = {
   History: { Enabled: false },
   EnergyFlow: {
-    Nodes: [], Links: [],
+    Nodes: [],
+    // The circuit on n30_1_1 hangs off the grid today, so mapping it to a breaker has something to replace.
+    Links: [{ From: 'grid', To: 'n30_1_1' }],
     Panels: [{
       Id: 'main_panel', Name: 'Main Panel', Slots: 12,
       Breakers: [
@@ -36,13 +38,14 @@ const config = {
 };
 
 // What each monitor channel reads.
-const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100 };
+const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, main_panel: 2600 };
 const nodes = [
   { id: 'n30_1_1', label: 'N30 1-1', kind: 'breaker', value: 1100 },
   { id: 'n30_1_2', label: 'N30 1-2', kind: 'breaker', value: 1150 },
   { id: 'n30_1_5', label: 'N30 1-5', kind: 'breaker', value: 240 },
   { id: 'n30_1_8', label: 'N30 1-8', kind: 'breaker', value: 100 },
   { id: 'main_panel', label: 'Main Panel', kind: 'panel', value: 2600 },
+  { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 },
   { id: 'main_panel#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 60 },
 ];
 
@@ -52,6 +55,8 @@ const resolve = (flow) => ({
   ok: true, metric: 'realpower',
   panels: flow.Panels.map(p => ({
     id: p.Id, name: p.Name, slots: p.Slots, rows: Math.ceil(p.Slots / 2),
+    node: p.Node || '',
+    incoming: p.Node && reading[p.Node] != null ? reading[p.Node] : null,
     breakers: (p.Breakers || []).map(b => {
       const legs = [];
       for (let leg = 1; leg <= (b.Poles || 1); leg++) {
@@ -250,6 +255,76 @@ await wait(30);
 await apply();
 if (!/no data/.test(textOf(cellAt(1)))) fail('half a double-pole was reported as the whole breaker');
 
+// The panel is itself a node in the flow: its reading is the power coming into the panel.
+const links = () => config.EnergyFlow.Links;
+const panelNodeSel = () => query(sec, '.ps-panel-node');
+const incomingText = () => query(sec, '.ps-incoming').textContent || '';
+if (!panelNodeSel()) fail('the panel cannot be told which node it is');
+if (!/No node is mapped/.test(incomingText())) fail(`a panel with no node claims an incoming figure: "${incomingText()}"`);
+panelNodeSel().value = 'main_panel';
+panelNodeSel().onchange({});
+await wait(100);
+if (config.EnergyFlow.Panels[0].Node !== 'main_panel') fail('the panel\u2019s node did not reach the config');
+if (!/2,600 W/.test(incomingText())) fail(`the power coming into the panel is not drawn: "${incomingText()}"`);
+
+// A panel whose node has no reading says so, rather than drawing a zero.
+panelNodeSel().value = 'grid';
+panelNodeSel().onchange({});
+await wait(100);
+if (!/no data/.test(incomingText())) fail(`a panel node with no reading does not say so: "${incomingText()}"`);
+if (/\b0 W/.test(incomingText())) fail(`a panel with no reading draws zero: "${incomingText()}"`);
+panelNodeSel().value = 'main_panel';
+panelNodeSel().onchange({});
+await wait(100);
+
+// What feeds the panel is picked here as well, and taken away here.
+const feedAdd = () => query(sec, '.ps-feed-add');
+feedAdd().value = 'grid';
+feedAdd().onchange({});
+await wait(60);
+if (!links().some(l => l.From === 'grid' && l.To === 'main_panel')) fail('picking a feeder did not connect it to the panel');
+const chip = () => query(sec, '.ps-chip');
+if (!/Grid/.test(chip()?.textContent || '')) fail('the panel does not show what feeds it');
+query(chip(), '.ps-chip-x').onclick();
+await wait(60);
+if (links().some(l => l.From === 'grid' && l.To === 'main_panel')) fail('dropping the feeder left the connection behind');
+feedAdd().value = 'grid';
+feedAdd().onchange({});
+await wait(60);
+
+// A circuit mapped to a breaker is placed beneath the panel — and one that hangs elsewhere today is not
+// moved without saying what it is fed by now and what that becomes.
+let asked = [];
+sandbox.confirm = (m) => { asked.push(m); return false; };
+halves(9)[0].onclick();
+await wait(100);
+nodeSel().value = 'n30_1_1';
+await apply();
+if (!asked.length) fail('a circuit fed by something else was moved without a word');
+if (!/Grid/.test(asked[0])) fail(`the warning does not say what feeds it today: ${asked[0]}`);
+if (!/Main Panel/.test(asked[0])) fail(`the warning does not say where it is going: ${asked[0]}`);
+if (!/Cancel/.test(asked[0])) fail(`the warning does not offer to leave it alone: ${asked[0]}`);
+// Cancel leaves the directory exactly as it was.
+if (links().some(l => l.To === 'n30_1_1' && l.From === 'main_panel')) fail('Cancel moved the circuit anyway');
+if (!links().some(l => l.To === 'n30_1_1' && l.From === 'grid')) fail('Cancel dropped the feeder it was warning about');
+if (clampFor('B09')) fail('Cancel still recorded what measures the breaker');
+
+// OK moves it, and what fed it before is replaced rather than left beside the new link.
+sandbox.confirm = (m) => { asked.push(m); return true; };
+await apply();
+if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_1')) fail('the circuit was not placed beneath the panel');
+if (links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('the old feeder was left beside the new one');
+if (clampFor('B09')?.Channel !== 'n30_1_1') fail('the clamp was not recorded with the move');
+
+// A circuit that hangs nowhere is mapped without asking about replacing anything.
+asked = [];
+halves(8)[0].onclick();
+await wait(100);
+nodeSel().value = 'n30_1_2';
+await apply();
+if (asked.length) fail(`mapping a circuit with no feeder still asked about replacing one: ${asked[0]}`);
+if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_2')) fail('a circuit with no feeder was not placed beneath the panel');
+
 // A breaker is edited in place, and the edit lands on the config entry rather than the drawn copy.
 halves(6)[0].onclick();
 await wait(100);
@@ -283,7 +358,7 @@ if (!/\.ps-grid\s*\{[^}]*grid-template-columns:\s*1fr/.test(rules)) fail('the pa
 if (!/\.ps-cell\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the cells keep their two-column placement on a phone — inline placement outranks the media query');
 
-console.log('panel schedule: drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
