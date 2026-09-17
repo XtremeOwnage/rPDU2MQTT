@@ -122,11 +122,22 @@ if (placed(1).gridRow !== '1 / span 2') fail(`the double-pole does not span its 
 if (cells().some(c => (query(c, '.ps-slot') || {}).textContent === '3'))
   fail('slot 3 is drawn again beneath the double-pole that already holds it');
 if (!/1\+3/.test(textOf(cellAt(1)))) fail(`the double-pole does not say which slots it holds: ${textOf(cellAt(1))}`);
+// A number that only repeats the slots already stamped in the corner is not drawn twice.
+if (/1,3/.test(textOf(cellAt(1)))) fail(`the breaker number repeats the slots it is already stamped with: ${textOf(cellAt(1))}`);
+if (query(cellAt(1), '.ps-num', true).length) fail('a breaker numbered after its own slots still draws its number');
+// …but a number that says something the slots do not is kept.
+if (!/B06/.test(textOf(cellAt(6)))) fail(`a breaker's own number is not shown: ${textOf(cellAt(6))}`);
 
 // It reads as a panel: an enclosure with a bus bar down the middle and a handle on every breaker.
 if (!query(sec, '.ps-panel')) fail('the schedule is not drawn inside a panel enclosure');
 if (!query(sec, '.ps-bus')) fail('the panel has no bus bar down the middle');
 if (!query(cellAt(6), '.ps-handle')) fail('a breaker has no handle');
+// The handle is how a breaker looks, not a control: nothing here can switch one, so it carries no wording
+// and is hidden from anything reading the page aloud.
+const handle = query(cellAt(6), '.ps-handle');
+if ((handle.textContent || '').trim()) fail(`the handle is labelled "${handle.textContent}", so it reads as a button that does something`);
+if (handle.attrs['aria-hidden'] !== 'true') fail('the decorative handle is not hidden from assistive tech');
+if (handle.tag === 'button') fail('the handle is a button, but nothing can switch a breaker from here');
 if (!query(cellAt(9), '.ps-handle').classList.contains('is-unknown'))
   fail('an unidentified breaker’s handle does not show it');
 if (!cellAt(1).classList.contains('is-left') || !cellAt(2).classList.contains('is-right'))

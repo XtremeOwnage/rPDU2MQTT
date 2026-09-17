@@ -271,6 +271,13 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
   const powerText = (b: Breaker) => b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`;
 
+  /// Whether a breaker's number says anything the slot stamp has not already said: "1,3" in slots 1+3 has not,
+  /// but "B06" and a tandem's "26.1" have.
+  const saysMore = (number: string, slotLabel: string) => {
+    const digits = (s: string) => (s.match(/\d+/g) || []).join(',');
+    return !!number && digits(number) !== digits(slotLabel);
+  };
+
   const render = () => {
     grid.innerHTML = '';
     const drawn = shown();
@@ -294,18 +301,23 @@ export function addPanelScheduleSection(nav: any, sections: any) {
           class: 'ps-cell ' + (left ? 'is-left' : 'is-right') + (cell.halves.length ? '' : ' is-empty'),
           style: { gridColumn: left ? '1' : '2', gridRow: `${rowOf(cell.slot)} / span ${cell.span}` },
         });
-        box.appendChild(el('span', { class: 'ps-slot', text: String(cell.slot) + (cell.span === 2 ? `+${cell.slot + 2}` : '') }));
+        const slotLabel = String(cell.slot) + (cell.span === 2 ? `+${cell.slot + 2}` : '');
+        box.appendChild(el('span', { class: 'ps-slot', text: slotLabel }));
         if (!cell.halves.length) {
-          const add = el('button', { class: 'ps-half is-empty' },
-            el('span', { class: 'ps-handle is-empty' }), el('span', { class: 'ps-desc', text: 'empty' }));
+          const blank = el('span', { class: 'ps-handle is-empty' });
+          blank.setAttribute('aria-hidden', 'true');
+          const add = el('button', { class: 'ps-half is-empty' }, blank, el('span', { class: 'ps-desc', text: 'empty' }));
           add.title = `Slot ${cell.slot} — nothing recorded. Tap to add a breaker.`;
           add.onclick = () => edit(drawn, null, cell.slot);
           box.appendChild(add);
         } else {
           cell.halves.forEach(b => {
+            // The handle is the breaker as it looks in the panel, not a control: nothing here can switch one.
+            const handle = el('span', { class: 'ps-handle is-' + b.state });
+            handle.setAttribute('aria-hidden', 'true');
             const half = el('button', { class: 'ps-half is-' + b.state },
-              el('span', { class: 'ps-handle is-' + b.state, text: b.state === 'unused' ? '' : 'ON' }),
-              el('span', { class: 'ps-num', text: b.number }),
+              handle,
+              ...(saysMore(b.number, slotLabel) ? [el('span', { class: 'ps-num', text: b.number })] : []),
               el('span', { class: 'ps-desc', text: b.state === 'unused' ? 'Unused' : b.description || 'Not identified' }),
               // The directory's own mark for a circuit nobody has confirmed, description or not.
               ...(b.state === 'unknown' ? [el('span', { class: 'ps-mark', text: '????', title: 'Nobody has identified this circuit yet.' })] : []),
