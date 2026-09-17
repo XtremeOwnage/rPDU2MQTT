@@ -2816,6 +2816,81 @@ function pruneEmpty(o     )      {
   return o;
 }
 
+// ── circuit-finder.ts ───────────────────────────────────────────
+// Which circuit is this load on? Switch the load itself on and off, and watch which channel steps with it.
+// The maths only: what each toggle did to every channel, and which of them is still in the running (#471).
+
+/// One settled state of the load, and what each channel read on average while it lasted.
+
+/// A channel still in the running: how many toggles it followed, and by how much.
+
+                                               
+
+/// The smallest step worth calling a change, in watts. Below this a channel's own noise answers for it.
+const NOISE_FLOOR = 5;
+
+const median = (xs          ) => {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+};
+
+/// A load's own draw is the step to expect; without it, anything above the noise floor counts.
+const bounds = (watts                ) => watts && watts > 0
+  ? { least: Math.max(NOISE_FLOOR, 0.4 * watts), most: 2.5 * watts }
+  : { least: NOISE_FLOOR, most: Infinity };
+
+/// Two channels stepping by roughly the same amount are the two legs of one 240 V breaker.
+const paired = (a           , b           ) => Math.abs(a.step - b.step) <= 0.3 * Math.max(a.step, b.step);
+
+function analyse(levels         , opts                                                             = {})          {
+  const labels = opts.labels || {};
+  const { least, most } = bounds(opts.watts);
+  const toggles = Math.max(0, levels.length - 1);
+  const steps                           = {};
+  const misses                         = {};
+
+  for (let i = 1; i < levels.length; i++) {
+    // On should raise a channel and off should lower it; a change the other way is not this load.
+    const want = levels[i].on ? 1 : -1;
+    const nodes = new Set([...Object.keys(levels[i - 1].mean), ...Object.keys(levels[i].mean)]);
+    nodes.forEach(node => {
+      const before = levels[i - 1].mean[node], after = levels[i].mean[node];
+      if (before == null || after == null) return;
+      const step = want * (after - before);
+      if (step >= least && step <= most) (steps[node] ||= []).push(step);
+      else misses[node] = (misses[node] || 0) + 1;
+    });
+  }
+
+  const candidates              = Object.entries(steps)
+    .map(([node, seen]) => ({ node, label: labels[node] || node, matched: seen.length, step: median(seen), missed: misses[node] || 0 }))
+    .sort((a, b) => b.matched - a.matched || b.step - a.step);
+
+  const found = candidates.filter(c => c.matched === toggles && toggles > 0);
+  // One channel that followed every toggle is the answer; two that also step together are one 240 V breaker.
+  const legs = found.length === 2 && paired(found[0], found[1]);
+  const done = toggles >= 2 && (found.length === 1 || legs);
+
+  return { toggles, candidates, found, done, verdict: verdictOf(toggles, candidates, found, done, legs, opts.watts) };
+}
+
+const watts = (w        ) => `${Math.round(w).toLocaleString('en-US')} W`;
+
+function verdictOf(toggles        , candidates             , found             , done         , legs         , load                )         {
+  if (!toggles) return 'Switch the load, then tap again — the first toggle has nothing to compare against yet.';
+  if (done && legs) return `Both legs of a 240 V breaker: ${found[0].label} and ${found[1].label}, stepping ${watts(found[0].step)} each.`;
+  if (done) return `${found[0].label} — it followed all ${toggles} toggles, stepping ${watts(found[0].step)}.`;
+  if (!candidates.length) {
+    return load
+      ? `Nothing stepped by about ${watts(load)}. Check the load really switched, or clear the expected draw and keep toggling.`
+      : 'No channel stepped with that toggle. A small load can hide in one toggle\'s noise — keep toggling.';
+  }
+  if (!found.length) return `Nothing has followed every toggle yet. ${candidates[0].label} is closest, at ${candidates[0].matched} of ${toggles}. Keep toggling.`;
+  const more = toggles < 2 ? 1 : found.length > 2 ? 2 : 1;
+  return `${found.length} channels still match all ${toggles} toggles: ${found.slice(0, 3).map(c => c.label).join(', ')}. `
+    + `${more} more toggle${more > 1 ? 's' : ''} should separate them.`;
+}
+
 // ── sections/paths.ts ───────────────────────────────────────────
 // Integration Paths section + the shared paths-table builders (also used by the overrides preview).
 
@@ -9096,6 +9171,159 @@ function addNodeTrendsSection(nav     , sections     ) {
   return { link: created.link, sec: created.sec };
 }
 
+// ── sections/circuit-finder.ts ──────────────────────────────────
+// Circuit Finder (#471): find a load's circuit by switching the load, not the breaker. Tap, switch the load,
+// tap again — every channel is read between taps, and the one that steps with the load is the circuit.
+// Built for a phone held in one hand at the panel: one big button, one list, no tables.
+
+/// What a load can actually sit on. A panel, the grid and an inverter all step with the load as well, being
+/// upstream of it, so offering them as answers only buries the circuit.
+const CIRCUIT_KINDS = ['breaker', 'outlet', 'load'];
+
+/// A state of the load that has been sampled at least once: the running total per channel.
+
+function addCircuitFinderSection(nav     , sections     ) {
+  const link = navLink(nav, 'Circuit Finder', '🔌');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Circuit Finder' }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Find which circuit a load is on by switching the load itself. Tap the button, switch the load, then tap '
+    + 'again. Every channel is read between taps, and the channel that rises when the load goes on and falls '
+    + 'when it goes off is the one it is on. Each toggle narrows it down.'));
+
+  const instSel = instanceSelector(() => reset());
+  const draw = el('input', { type: 'number', min: '0', step: '10', placeholder: 'e.g. 1500' })                    ;
+  draw.style.maxWidth = '9em';
+  draw.title = 'Roughly what the load draws, if you know it. Leave blank for an unknown load.';
+  draw.onchange = () => render();
+  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, 'Load draws about ', draw, ' W'), instSel.wrap));
+
+  const everything = el('input', { type: 'checkbox' })                    ;
+  everything.title = 'Also offer panels, the grid and other upstream nodes, which step with the load because they carry it.';
+  everything.onchange = () => render();
+  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just circuits')));
+
+  // The button is its own progress bar: the fill sweeps across it while the channels are read again.
+  const coolBar = el('span', { class: 'cf-fill' });
+  coolBar.hidden = true;
+  const tapLabel = el('span', { class: 'cf-label' });
+  const tap = el('button', { class: 'cf-tap' }, coolBar, tapLabel)                     ;
+  const reset_ = btn('Start over');
+  sec.appendChild(el('div', { class: 'cf-actions' }, tap, reset_));
+  const rate = el('div', { class: 'desc cf-rate' });
+  sec.appendChild(rate);
+  const verdict = el('div', { class: 'cf-verdict' });
+  sec.appendChild(verdict);
+  const list = el('div', { class: 'cf-list' });
+  sec.appendChild(list);
+
+  // The PDU decides how often a channel can be read at all, so it decides the shortest switch that can be seen.
+  const pollSeconds = () => {
+    const pdus      = (state.data || {}).Pdus || {};
+    const each = Object.values(pdus).map((p     ) => Number(p?.PollInterval)).filter(n => Number.isFinite(n) && n > 0);
+    return each.length ? Math.min(...each) : 5;
+  };
+
+  let stages          = [];
+  let labels                         = {};
+  let kinds                         = {};
+  let busy = false;
+
+  // A reading has to settle before the next tap means anything: the PDU is only read every few seconds.
+  const coolSeconds = () => Math.min(5, Math.max(3, pollSeconds()));
+
+  const reset = () => { stages = []; labels = {}; kinds = {}; render(); };
+  reset_.onclick = () => reset();
+
+  /// Every channel's reading now, added to the state the load is in.
+  const sample = async () => {
+    const stage = stages[stages.length - 1];
+    if (!stage) return;
+    let r     ;
+    try { r = await api(withInstance('/api/flow', instSel)); }
+    catch { return; }
+    const nodes = r?.body?.ok ? r.body.nodes || [] : [];
+    nodes.forEach((n     ) => {
+      // A return lane or an unmetered remainder is not a channel anyone can find a load on.
+      if (!n.id || String(n.id).includes('#') || typeof n.value !== 'number') return;
+      labels[n.id] = n.label || n.id;
+      kinds[n.id] = n.kind || 'node';
+      stage.sum[n.id] = (stage.sum[n.id] || 0) + n.value;
+      stage.n[n.id] = (stage.n[n.id] || 0) + 1;
+    });
+  };
+
+  // While a session is open the channels are read in the background too, so a state is an average rather than
+  // one instant — that is what lets a small load show through the noise.
+  setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
+
+  const offered = (id        ) => everything.checked || CIRCUIT_KINDS.includes(kinds[id] || 'node');
+  const levels = ()          => stages
+    .filter(s => Object.keys(s.n).length)
+    .map(s => ({ on: s.on, mean: Object.fromEntries(Object.keys(s.sum).filter(offered).map(k => [k, s.sum[k] / s.n[k]])) }));
+
+  const wattsWanted = () => { const v = Number(draw.value); return Number.isFinite(v) && v > 0 ? v : null; };
+
+  tap.onclick = async () => {
+    if (busy) return;
+    busy = true;
+    // The button stays down while the channels are read again, so a second tap cannot land inside the same
+    // reading — the bar says how long that is.
+    const cool = coolSeconds();
+    tap.disabled = true;
+    tap.dataset.cooldown = String(cool);
+    tapLabel.textContent = `Reading channels… wait ${cool} s`;
+    coolBar.hidden = false;
+    coolBar.style.animationDuration = `${cool}s`;
+    // The load has already been switched, so the tap opens the state it is now in and reads it.
+    stages.push({ on: stages.length ? !stages[stages.length - 1].on : false, sum: {}, n: {} });
+    await sample();
+    render();
+    setTimeout(() => { busy = false; tap.disabled = false; coolBar.hidden = true; render(); }, cool * 1000);
+  };
+
+  const render = () => {
+    const poll = pollSeconds();
+    // Each tap names the state the load is already in, so the button asks for the next one.
+    const next = !stages.length || stages[stages.length - 1].on ? 'OFF' : 'ON';
+    tapLabel.textContent = busy ? `Reading channels… wait ${coolSeconds()} s` : `Switch the load ${next}, then tap`;
+    tap.title = 'Switch the load first, then tap: the tap reads every channel in the state the load is now in.';
+    reset_.hidden = !stages.length;
+    rate.textContent = `Channels are read every ${poll} s, so a switch shorter than about ${poll * 2} s cannot be seen. `
+      + 'Leave the load in each state for a few seconds before tapping.';
+
+    const found = analyse(levels(), { watts: wattsWanted(), labels });
+    verdict.className = 'cf-verdict' + (found.done ? ' is-found' : '');
+    verdict.textContent = stages.length ? found.verdict : 'Switch the load off, then tap to take the first reading.';
+
+    list.innerHTML = '';
+    found.candidates.slice(0, 8).forEach(c => {
+      const share = found.toggles ? Math.round((c.matched / found.toggles) * 100) : 0;
+      // The point of finding a circuit is usually to name it, so each row opens that node's editor.
+      const row = el('button', { class: 'cf-row' + (found.done && found.found.some(f => f.node === c.node) ? ' is-found' : '') },
+        el('span', { class: 'cf-name', text: c.label }),
+        el('span', { class: 'cf-meta', text: `${c.matched} of ${found.toggles} toggles · ${Math.round(c.step).toLocaleString('en-US')} W · ${share}%` }),
+        el('span', { class: 'cf-edit', text: 'Edit ›' }));
+      row.title = `Open ${c.label} in the node editor, to name it or set what feeds it.`;
+      row.onclick = () => {
+        editNodeOnNextOpen(c.node);
+        (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+      };
+      list.appendChild(row);
+    });
+    if (stages.length && !found.candidates.length && found.toggles)
+      list.appendChild(el('div', { class: 'desc', text: 'No channel has stepped with the load yet.' }));
+  };
+
+  link.onclick = () => { activate(link, sec); render(); };
+  render();
+  return { link, sec };
+}
+
 // ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
@@ -10050,7 +10278,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.

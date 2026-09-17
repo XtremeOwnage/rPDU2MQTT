@@ -1030,3 +1030,44 @@
 .radio-group .radio input { margin: 0; cursor: pointer; }
 .hint { opacity: .55; cursor: help; font-size: .85em; user-select: none; }
 .hint:hover { opacity: 1; }
+
+/* --- Circuit Finder ------------------------------------------------------------------------------- */
+/* Used one-handed at the panel: the tap target is the page's main control, so it is finger-sized and full
+   width, and the results are rows that wrap rather than a table a phone cannot hold. */
+.cf-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin: var(--sp-3) 0; max-width: 480px; }
+.cf-tap {
+  width: 100%; min-height: 56px; font-size: 16px; font-weight: 600;
+  background: var(--accent); color: var(--accent-fg); border-color: transparent;
+  position: relative; overflow: hidden;
+}
+/* The button is the progress bar: the fill sweeps across it, under its own label. */
+.cf-fill {
+  position: absolute; inset: 0; transform-origin: left; background: rgba(0, 0, 0, .28);
+  animation: cf-fill linear 1 forwards;
+}
+.cf-label { position: relative; }
+@keyframes cf-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .cf-fill { animation: none; } }
+.cf-tap:disabled { opacity: .6; }
+.cf-rate { margin: 0 0 var(--sp-3); }
+
+.cf-verdict {
+  padding: var(--sp-3); margin: 0 0 var(--sp-3); max-width: 640px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2); line-height: 1.45;
+}
+.cf-verdict.is-found { border-color: var(--good); background: var(--panel3); font-weight: 600; }
+.cf-list { display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.cf-row {
+  display: flex; flex-wrap: wrap; gap: 2px var(--sp-3); align-items: baseline; width: 100%; min-height: 44px;
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--panel2);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.cf-row:hover { border-color: var(--accent-dim); }
+.cf-edit { color: var(--accent); font-size: 12.5px; white-space: nowrap; }
+.cf-row.is-found { border-color: var(--good); }
+.cf-name { font-weight: 600; }
+.cf-meta { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+@media (max-width: 560px) {
+  .cf-meta { margin-left: 0; flex: 1 1 100%; order: 3; }
+  .cf-edit { margin-left: auto; }
+}
