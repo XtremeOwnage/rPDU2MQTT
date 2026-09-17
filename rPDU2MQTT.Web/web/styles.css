@@ -1073,32 +1073,70 @@
 }
 
 /* --- Panel schedule ------------------------------------------------------------------------------- */
-/* The panel as it is: two columns of slots, odd on the left and even on the right, a double-pole spanning
-   the next slot in its own column. On a phone the two columns become one, in slot order. */
-.ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-width: 900px; margin-top: var(--sp-3); }
+/* Drawn as the panel is: an enclosure with a bus bar down the middle, breakers either side of it with their
+   handles facing in. Odd slots down the left column, even down the right; a double-pole spans two rows. */
+.ps-panel {
+  position: relative; max-width: 900px; margin-top: var(--sp-3); padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--panel3), var(--panel2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.ps-bus {
+  position: absolute; top: var(--sp-3); bottom: var(--sp-3); left: 50%; width: 14px; transform: translateX(-50%);
+  border-radius: 3px; background: linear-gradient(90deg, rgba(0, 0, 0, .35), rgba(255, 255, 255, .10), rgba(0, 0, 0, .35));
+  border: 1px solid var(--line-soft);
+}
+.ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; position: relative; }
 .ps-cell {
-  display: flex; flex-direction: column; gap: 2px; min-height: 52px; position: relative;
-  padding: var(--sp-2) 34px var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2);
+  display: flex; flex-direction: column; gap: 2px; min-height: 46px; position: relative;
+  padding: var(--sp-2) var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--panel2), var(--panel));
+}
+.ps-cell.is-empty { background: none; border-style: dashed; }
+/* The slot number is stamped on the enclosure, on the outer edge away from the bus. */
+.ps-slot { position: absolute; top: 3px; font-size: 10px; color: var(--faint); font-family: var(--mono); }
+.ps-cell.is-left .ps-slot { left: 5px; }
+.ps-cell.is-right .ps-slot { right: 5px; }
+/* One breaker. The handle faces the bus bar: right-hand edge on the left column, and the other way about. */
+.ps-half {
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; width: 100%; min-height: 34px;
+  padding: 2px 4px; border: 0; border-radius: var(--r-sm); background: transparent;
   font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-.ps-cell:hover { border-color: var(--accent-dim); }
-.ps-cell.is-empty { background: transparent; border-style: dashed; color: var(--faint); }
-.ps-cell.is-unknown { border-color: var(--warn); }
-.ps-cell.is-unused { opacity: .65; }
-.ps-slot { position: absolute; top: 4px; right: 6px; font-size: 11px; color: var(--faint); font-family: var(--mono); }
-.ps-half { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
-.ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 4px; padding-top: 4px; }
+.ps-cell.is-left .ps-half { flex-direction: row-reverse; }
+.ps-half:hover { background: var(--panel3); }
+.ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 2px; }
+.ps-half.is-unused { opacity: .6; }
+/* The breaker's own handle, coloured by what the directory knows about it. */
+.ps-handle {
+  flex: none; width: 24px; height: 30px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; letter-spacing: .5px; color: rgba(255, 255, 255, .8); font-family: var(--mono);
+  background: linear-gradient(180deg, #4a515e, #262b33); border: 1px solid rgba(0, 0, 0, .55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15);
+}
+.ps-handle.is-identified { background: linear-gradient(180deg, var(--accent), var(--accent-dim)); border-color: var(--accent-dim); }
+.ps-handle.is-unknown { background: linear-gradient(180deg, var(--warn), rgba(0, 0, 0, .35)); border-color: var(--warn); }
+.ps-handle.is-unused { opacity: .45; }
+.ps-handle.is-empty { background: none; border-style: dashed; border-color: var(--line); }
 .ps-num { font-weight: 600; font-family: var(--mono); font-size: 12px; }
 .ps-desc { flex: 1 1 auto; }
 .ps-meta { color: var(--muted); font-size: 12px; }
 .ps-mark { color: var(--warn); font-family: var(--mono); font-size: 12px; letter-spacing: -1px; }
-.ps-power { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.ps-power { font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .ps-power.is-nodata { color: var(--faint); font-style: italic; }
+.ps-tandem {
+  align-self: flex-start; margin: 2px 0 0; padding: 2px 8px; font-size: 11px;
+  background: transparent; border: 1px dashed var(--line); border-radius: var(--r-sm); color: var(--muted); cursor: pointer;
+}
+.ps-tandem:hover { border-color: var(--accent-dim); color: var(--accent); }
+.ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
 @media (max-width: 560px) {
-  .ps-grid { grid-template-columns: 1fr; }
+  .ps-grid { grid-template-columns: 1fr; gap: 6px; }
   /* The placement is inline on each cell, so the phone layout has to outrank it. */
   .ps-cell { grid-column: 1 !important; grid-row: auto !important; }
+  .ps-bus { display: none; }
+  .ps-cell.is-left .ps-half { flex-direction: row; }
 }
