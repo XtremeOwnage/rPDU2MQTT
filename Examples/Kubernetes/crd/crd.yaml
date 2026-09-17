@@ -1185,6 +1185,68 @@ spec:
                             type: string
                           description: The ids of the member nodes this group aggregates.
                     description: Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.
+                  Panels:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id for this panel, used to refer to it from elsewhere. For example 'main_panel'.
+                        Name:
+                          type: string
+                          description: Human-readable name shown on the panel schedule. For example 'Main Panel'.
+                        Slots:
+                          type: integer
+                          description: How many breaker positions the panel has, counting both columns. A 42-space panel has 42. Odd numbers fill the left column; even numbers the right, as they are stamped in the panel.
+                          minimum: 2
+                          maximum: 200
+                        Breakers:
+                          type: array
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              Slot:
+                                type: integer
+                                description: 'Which slot the breaker is in, numbered as the panel is: odd down the left column, even down the right.'
+                                minimum: 1
+                                maximum: 200
+                              Number:
+                                type: string
+                                description: The breaker number as written in the directory. Usually the slot number; a tandem half is written like '26.1'.
+                              Poles:
+                                type: integer
+                                description: 1 for a single-pole breaker, 2 for a double-pole. A double-pole also occupies the next slot in the same column (slot + 2).
+                                minimum: 1
+                                maximum: 2
+                              Half:
+                                type: integer
+                                description: 'For a tandem breaker, which half of the slot this is: 1 for the upper, 2 for the lower. Leave blank when the breaker has the whole slot.'
+                                minimum: 1
+                                maximum: 2
+                              Amps:
+                                type: integer
+                                description: The breaker's rating in amps, as stamped on its handle.
+                                minimum: 1
+                                maximum: 1000
+                              Wire:
+                                type: string
+                                description: The label on the wire leaving this breaker, for example 'W11'. What the wire carries is mapped separately.
+                              Description:
+                                type: string
+                                description: What this breaker feeds, in the words the directory uses. For example 'Lights, Garage, Kitchen'.
+                              State:
+                                type: string
+                                enum:
+                                - ''
+                                - identified
+                                - unknown
+                                - unused
+                                description: Whether this breaker is identified, not yet identified (the '????' rows of a paper directory), or an unused slot. A new breaker starts unknown, so a blank row claims nothing.
+                          description: The breakers in this panel's slots.
+                    description: 'Electrical panels and the breakers in their slots: breaker number, rating, wire label and what each one feeds, including the circuits nobody has identified yet.'
                   Parents:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
