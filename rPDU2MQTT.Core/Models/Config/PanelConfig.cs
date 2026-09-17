@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -41,7 +43,9 @@ public class PanelConfig
     [Description("The breakers in this panel's slots.")]
     public List<BreakerConfig> Breakers { get; set; } = new();
 
-    /// <summary>Rows of slots down the panel: two slots to a row, left and right.</summary>
+    /// <summary>Rows of slots down the panel: two slots to a row, left and right. Derived, never stored.</summary>
+    [JsonIgnore]
+    [YamlIgnore]
     public int Rows => (Slots + 1) / 2;
 
     /// <summary>A slot number the panel actually has.</summary>

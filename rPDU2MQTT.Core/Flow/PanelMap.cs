@@ -86,8 +86,14 @@ public sealed class PanelMap
     /// <summary>As <see cref="Power(BreakerChain, IFlowValueSource?, string)"/>, and why it is unknown when it is.</summary>
     public static double? Power(BreakerChain chain, IFlowValueSource? live, string metric, out PowerGap gap)
     {
+        // One clamp can be measuring the whole circuit — a single CT on a 240 V breaker — in which case the
+        // other leg is not expected and its absence is not a gap.
+        var legs = chain.Legs.Any(l => l.Clamp?.Whole == true)
+            ? chain.Legs.Where(l => l.Clamp?.Whole == true).ToList()
+            : chain.Legs;
+
         double total = 0;
-        foreach (var leg in chain.Legs)
+        foreach (var leg in legs)
         {
             if (leg.Clamp is null) { gap = PowerGap.NoClamp; return null; }
             if (leg.Channel is null) { gap = PowerGap.NoChannel; return null; }

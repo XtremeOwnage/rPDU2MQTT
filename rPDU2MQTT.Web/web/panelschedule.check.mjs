@@ -56,10 +56,12 @@ const resolve = (flow) => ({
       const legs = [];
       for (let leg = 1; leg <= (b.Poles || 1); leg++) {
         const c = (flow.Clamps || []).find(x => x.Panel === p.Id && x.Breaker === b.Number && (x.Leg || 1) === leg);
-        legs.push({ leg, wire: c?.Wire || b.Wire || '', clamp: c?.Label ?? null, channel: c?.Channel ?? null, reversed: !!c?.Reversed });
+        legs.push({ leg, wire: c?.Wire || b.Wire || '', clamp: c?.Label ?? null, channel: c?.Channel ?? null, reversed: !!c?.Reversed, whole: !!c?.Whole });
       }
+      // One CT measuring the whole circuit is the breaker's power; the other leg is then not expected.
+      const counted = legs.some(l => l.whole) ? legs.filter(l => l.whole) : legs;
       let sum = 0, gap = 'none';
-      for (const l of legs) {
+      for (const l of counted) {
         if (!l.clamp) { gap = 'noclamp'; break; }
         if (!l.channel) { gap = 'nochannel'; break; }
         if (reading[l.channel] == null) { gap = 'noreading'; break; }
@@ -210,6 +212,32 @@ nodeSel().value = '';
 await apply();
 if (clampFor('6.2')) fail('clearing the node left the record behind');
 if (!/no data/.test(textOf(cellAt(6)))) fail('clearing the node did not take the power away with it');
+
+// A 240 V circuit is often measured by one CT. That clamp is the whole breaker, not half of it.
+halves(1)[0].onclick();
+await wait(100);
+if (query(sheet(), '.ps-node', true).length !== 2) fail('a double-pole does not ask for a node per leg');
+const wholeBox = query(sheet(), '.ps-whole');
+if (!wholeBox || wholeBox.checked) fail('a double-pole does not offer that one CT measures the whole circuit');
+wholeBox.checked = true;
+wholeBox.onchange({});
+await wait(30);
+if (query(sheet(), '.ps-node', true).length !== 1) fail('with one CT on the circuit the editor still asks for two');
+query(sheet(), '.ps-node', true)[0].value = 'n30_1_5';
+await apply();
+const wholeClamp = clampFor('1,3');
+if (!wholeClamp?.Whole) fail('the clamp was not recorded as measuring the whole circuit');
+if (clampFor('1,3', 2)) fail('a second leg was recorded for a circuit measured by one CT');
+if (!/240 W/.test(textOf(cellAt(1)))) fail(`one CT on the circuit did not give the breaker its power: ${textOf(cellAt(1))}`);
+
+// Untick it and the breaker wants both legs again, so one clamp is no longer the whole answer.
+halves(1)[0].onclick();
+await wait(100);
+query(sheet(), '.ps-whole').checked = false;
+query(sheet(), '.ps-whole').onchange({});
+await wait(30);
+await apply();
+if (!/no data/.test(textOf(cellAt(1)))) fail('half a double-pole was reported as the whole breaker');
 
 // A breaker is edited in place, and the edit lands on the config entry rather than the drawn copy.
 halves(6)[0].onclick();

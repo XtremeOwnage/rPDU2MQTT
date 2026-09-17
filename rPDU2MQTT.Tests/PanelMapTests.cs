@@ -135,6 +135,33 @@ public class PanelMapTests
     }
 
     [Fact]
+    public void OneClampMeasuringTheWholeCircuit_IsTheBreakersPower()
+    {
+        // A 240 V circuit with a single CT on it: the monitor already accounts for both legs, so the other
+        // leg having no clamp is not a gap.
+        var wiring = Wiring();
+        wiring.Clamps.RemoveAll(c => c.Breaker == "1,3");
+        wiring.Clamps.Add(new CtClampConfig { Label = "C9", Panel = "main_panel", Breaker = "1,3", Leg = 1, Wire = "W01", Channel = "n30_3_1", Whole = true });
+        var live = new Fixed(new() { ["n30_3_1|realpower"] = 2250 });
+
+        var chain = PanelMap.For(wiring).Breaker("main_panel", "1,3")!;
+        Assert.Equal(2250, PanelMap.Power(chain, live, "realpower", out var gap));
+        Assert.Equal(PowerGap.None, gap);
+        // Both legs are still drawn — the second simply has nothing on it.
+        Assert.Equal(2, chain.Legs.Count);
+
+        // Without that flag the same wiring is half a breaker, and half is not reported as the whole.
+        wiring.Clamps[wiring.Clamps.Count - 1].Whole = false;
+        Assert.Null(PanelMap.Power(PanelMap.For(wiring).Breaker("main_panel", "1,3")!, live, "realpower", out var half));
+        Assert.Equal(PowerGap.NoClamp, half);
+
+        // A whole-circuit clamp with nothing to say is still a gap, not a zero.
+        wiring.Clamps[wiring.Clamps.Count - 1].Whole = true;
+        Assert.Null(PanelMap.Power(PanelMap.For(wiring).Breaker("main_panel", "1,3")!, new Fixed(new()), "realpower", out var silent));
+        Assert.Equal(PowerGap.NoReading, silent);
+    }
+
+    [Fact]
     public void AReversedClampIsFlipped_RatherThanBelievedAsANegativeLoad()
     {
         var wiring = Wiring();

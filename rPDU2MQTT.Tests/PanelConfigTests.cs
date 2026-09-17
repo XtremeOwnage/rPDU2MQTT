@@ -146,6 +146,23 @@ public class PanelConfigTests
         Assert.Equal(BreakerState.Identified, office.State);
     }
 
+    [Fact]
+    public void HowManyRowsThePanelHas_IsDerived_AndNeverWrittenIntoTheDocument()
+    {
+        // It was: a panel added in the GUI saved "Rows: 21" into the config document and the CR with it.
+        var config = new rPDU2MQTT.Classes.Config();
+        config.EnergyFlow.Panels.Add(new PanelConfig { Id = "main_panel", Name = "Main Panel", Slots = 42 });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(config, ConfigSchema.ConfigJsonOptions);
+        var yaml = ConfigSchema.ToYaml(config);
+
+        Assert.DoesNotContain("\"Rows\"", json);
+        Assert.DoesNotContain("Rows:", yaml);
+        // …and the document still carries the slot count it is derived from.
+        Assert.Contains("\"Slots\"", json);
+        Assert.Equal(21, config.EnergyFlow.Panels[0].Rows);
+    }
+
     /// <summary>The fields of one item of a list, wherever the schema hangs them.</summary>
     private static List<SchemaNode> Fields(SchemaNode node) => node.ValueSchema?.Properties ?? node.Properties ?? new();
 

@@ -34,6 +34,11 @@ public class CtClampConfig
     [Description("The monitor channel this clamp is plugged into, given as the node id the bridge already reads — for example 'n30_1_5'.")]
     public string Channel { get; set; } = "";
 
+    /// <summary>One clamp measuring a whole 240 V circuit rather than one of its legs.</summary>
+    [DefaultValue(false)]
+    [Description("Tick when this single clamp measures the whole breaker rather than one leg — one CT on a 240 V circuit, where the monitor already accounts for both legs. Without it, a double-pole breaker needs a clamp on each leg before its power is known.")]
+    public bool Whole { get; set; }
+
     /// <summary>A clamp put on backwards reads negative; the reading is flipped rather than believed.</summary>
     [DefaultValue(false)]
     [Description("Tick when the clamp is on the wire backwards, so it reads negative. Its reading is flipped rather than taken as a negative load.")]

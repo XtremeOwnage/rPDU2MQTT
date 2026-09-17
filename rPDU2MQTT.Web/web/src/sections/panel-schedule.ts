@@ -16,7 +16,7 @@ type Panel = { id: string; name: string; slots: number; rows: number; breakers: 
 
 /// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
 const GAPS: Record<string, string> = {
-  noclamp: 'Nothing is measuring this breaker yet — pick the node its circuit is on.',
+  noclamp: 'Nothing is measuring this breaker yet — pick the node its circuit is on. A double-pole needs both legs, unless one CT measures the whole circuit.',
   nochannel: 'Its clamp is not plugged into a monitor channel yet.',
   noreading: 'Its channel has no current reading.',
 };
@@ -134,15 +134,15 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     clampsIn().find((c: any) => c.Panel === panelId && c.Breaker === number && (c.Leg || 1) === leg) || null;
 
   /// Point a leg at a node, or at nothing. The chain is kept — the pick writes the clamp behind it.
-  const mapLeg = (panelId: string, number: string, leg: number, channel: string, wire: string) => {
+  const mapLeg = (panelId: string, number: string, leg: number, channel: string, wire: string, whole = false) => {
     const existing = clampFor(panelId, number, leg);
     if (!channel) {
       const at = clampsIn().indexOf(existing);
       if (at >= 0) clampsIn().splice(at, 1);
       return;
     }
-    if (existing) { existing.Channel = channel; if (wire) existing.Wire = wire; return; }
-    clampsIn().push({ Label: `${number} L${leg}`, Panel: panelId, Breaker: number, Leg: leg, Wire: wire, Channel: channel });
+    if (existing) { existing.Channel = channel; existing.Whole = whole; if (wire) existing.Wire = wire; return; }
+    clampsIn().push({ Label: `${number} L${leg}`, Panel: panelId, Breaker: number, Leg: leg, Wire: wire, Channel: channel, Whole: whole });
   };
 
   /// Which breaker a node is already measuring, so the picker can say so rather than let it be claimed twice.
@@ -179,13 +179,20 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       .forEach(([v, t]) => stateSel.appendChild(el('option', { value: v, text: t })));
     stateSel.value = b?.state || 'unknown';
 
-    // One picker per leg: which node the bridge already reads is this circuit.
+    // One picker per leg: which node the bridge already reads is this circuit. A 240 V circuit is often
+    // measured by a single CT, which is the whole breaker rather than half of it.
+    const wholeBox = el('input', { type: 'checkbox', class: 'ps-whole' }) as HTMLInputElement;
+    wholeBox.checked = !!clampFor(panel.id, wasNumber, 1)?.Whole;
     const pickers: HTMLSelectElement[] = [];
     const pickerRows = el('div', {});
     const drawPickers = () => {
       pickerRows.innerHTML = '';
       pickers.length = 0;
-      const legs = Number(poles.value) === 2 ? [1, 2] : [1];
+      const doublePole = Number(poles.value) === 2;
+      if (doublePole)
+        pickerRows.appendChild(el('div', { class: 'ps-field' },
+          el('label', { class: 'ld-inst' }, wholeBox, ' One CT measures the whole circuit, not one leg')));
+      const legs = doublePole && !wholeBox.checked ? [1, 2] : [1];
       legs.forEach(leg => {
         const sel = el('select', { class: 'ps-node' }) as HTMLSelectElement;
         sel.appendChild(el('option', { value: '', text: '— nothing measuring it —' }));
@@ -200,6 +207,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       });
     };
     poles.onchange = () => drawPickers();
+    wholeBox.onchange = () => drawPickers();
     drawPickers();
 
     const save = btn('Apply', 'primary');
@@ -221,7 +229,10 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       // A renamed breaker keeps the clamps that were recorded against its old number.
       if (wasNumber && wasNumber !== newNumber)
         clampsIn().filter((c: any) => c.Panel === panel.id && c.Breaker === wasNumber).forEach((c: any) => { c.Breaker = newNumber; });
-      pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire));
+      const whole = target.Poles === 2 && wholeBox.checked;
+      pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
+      // One CT for the whole circuit leaves no second leg to record.
+      if (whole || target.Poles === 1) mapLeg(panel.id, newNumber, 2, '', '');
       refreshDirty();
       closeSheet();
       toast('Breaker updated. Press Save to keep it.', true);
