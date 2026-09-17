@@ -9712,24 +9712,36 @@ function addPanelScheduleSection(nav     , sections     ) {
     feedAdd.appendChild(el('option', { value: '', text: '+ add a feeder' }));
     nodes.filter(n => n.id !== panelNode && !fedBy.includes(n.id))
       .forEach(n => feedAdd.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    // A panel is fed from one place. Once that is said, the way to change it is to drop it and pick again.
+    feedAdd.hidden = !panelNode || fedBy.length > 0;
     feedAdd.disabled = !panelNode;
 
+    // The mains figure: power, and the voltage beside it when whatever measures the panel reports one.
+    const volts = drawn.volts == null ? '' : ` at ${drawn.volts.toFixed(1)} V`;
     incoming.textContent = !panelNode
       ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one above.'
       : drawn.incoming == null
-        ? `Incoming: no data — ${labelOf(panelNode)} has no current reading.`
-        : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W through ${labelOf(panelNode)}.`;
+        ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
+        : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
     grid.style.gridTemplateRows = `repeat(${rows}, auto)`;
 
     [true, false].forEach(left => {
       column(slots, drawn.breakers, left).forEach(cell => {
+        const place = `${rowOf(cell.slot)} / span ${cell.span}`;
         const box = el('div', {
           // The column decides which way the breaker faces: handles point at the bus bar down the middle.
           class: 'ps-cell ' + (left ? 'is-left' : 'is-right') + (cell.halves.length ? '' : ' is-empty'),
-          style: { gridColumn: left ? '1' : '2', gridRow: `${rowOf(cell.slot)} / span ${cell.span}` },
+          style: { gridColumn: left ? '2' : '3', gridRow: place },
         });
+        box.dataset.slot = String(cell.slot);
         const slotLabel = String(cell.slot) + (cell.span === 2 ? `+${cell.slot + 2}` : '');
-        box.appendChild(el('span', { class: 'ps-slot', text: slotLabel }));
+        // Stamped down the outside edge of the frame, as a panel is: one number per slot, counted down.
+        const stamped = el('div', {
+          class: 'ps-nums',
+          style: { gridColumn: left ? '1' : '4', gridRow: place },
+        }, ...(cell.span === 2 ? [cell.slot, cell.slot + 2] : [cell.slot]).map(n => el('span', { text: String(n) })));
+        stamped.setAttribute('aria-hidden', 'true');
+        grid.appendChild(stamped);
         if (!cell.halves.length) {
           const blank = el('span', { class: 'ps-handle is-empty' });
           blank.setAttribute('aria-hidden', 'true');

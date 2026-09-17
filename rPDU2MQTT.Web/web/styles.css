@@ -1086,7 +1086,13 @@
   border-radius: 3px; background: linear-gradient(90deg, rgba(0, 0, 0, .35), rgba(255, 255, 255, .10), rgba(0, 0, 0, .35));
   border: 1px solid var(--line-soft);
 }
-.ps-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; position: relative; }
+.ps-grid { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 6px 10px; position: relative; align-items: stretch; }
+/* The slot numbers, stamped down the outside edge of the frame as they are on a panel: one per slot, counted
+   down the column, outside the breaker but inside the enclosure. */
+.ps-nums {
+  display: flex; flex-direction: column; justify-content: space-around; align-items: center;
+  font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.1; min-width: 1.6em;
+}
 .ps-cell {
   display: flex; flex-direction: column; gap: 2px; min-height: 46px; position: relative;
   padding: var(--sp-2) var(--sp-2);
@@ -1094,10 +1100,6 @@
   background: linear-gradient(180deg, var(--panel2), var(--panel));
 }
 .ps-cell.is-empty { background: none; border-style: dashed; }
-/* The slot number is stamped on the enclosure, on the outer edge away from the bus. */
-.ps-slot { position: absolute; top: 3px; font-size: 10px; color: var(--faint); font-family: var(--mono); }
-.ps-cell.is-left .ps-slot { left: 5px; }
-.ps-cell.is-right .ps-slot { right: 5px; }
 /* One breaker. The handle faces the bus bar: right-hand edge on the left column, and the other way about. */
 .ps-half {
   display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; width: 100%; min-height: 34px;
@@ -1140,9 +1142,10 @@
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
 @media (max-width: 560px) {
-  .ps-grid { grid-template-columns: 1fr; gap: 6px; }
+  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; }
   /* The placement is inline on each cell, so the phone layout has to outrank it. */
-  .ps-cell { grid-column: 1 !important; grid-row: auto !important; }
+  .ps-cell { grid-column: 2 !important; grid-row: auto !important; }
+  .ps-nums { grid-column: 1 !important; grid-row: auto !important; flex-direction: row; gap: 3px; }
   .ps-bus { display: none; }
   .ps-cell.is-left .ps-half { flex-direction: row; }
 }

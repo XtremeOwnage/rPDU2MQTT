@@ -39,6 +39,8 @@ const config = {
 
 // What each monitor channel reads.
 const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, main_panel: 2600 };
+// What the mains are sitting at, where anything measures it.
+const voltage = { main_panel: 241.3 };
 const nodes = [
   { id: 'n30_1_1', label: 'N30 1-1', kind: 'breaker', value: 1100 },
   { id: 'n30_1_2', label: 'N30 1-2', kind: 'breaker', value: 1150 },
@@ -57,6 +59,7 @@ const resolve = (flow) => ({
     id: p.Id, name: p.Name, slots: p.Slots, rows: Math.ceil(p.Slots / 2),
     node: p.Node || '',
     incoming: p.Node && reading[p.Node] != null ? reading[p.Node] : null,
+    volts: p.Node && voltage[p.Node] != null ? voltage[p.Node] : null,
     breakers: (p.Breakers || []).map(b => {
       const legs = [];
       for (let leg = 1; leg <= (b.Poles || 1); leg++) {
@@ -107,7 +110,10 @@ const sec = query(getEl('sections'), '.section', true).find(s => s.classList.con
 if (!sec) fail('clicking Panel Schedule activated no section');
 
 const cells = () => query(sec, '.ps-cell', true);
-const cellAt = (slot) => cells().find(c => (query(c, '.ps-slot') || {}).textContent?.startsWith(String(slot)));
+const cellAt = (slot) => cells().find(c => c.dataset?.slot === String(slot));
+const gutters = () => query(sec, '.ps-nums', true);
+const gutterAt = (row, col = '1') => gutters().find(g => (g.style.gridRow || '').startsWith(`${row} /`) && g.style.gridColumn === col);
+const numbersIn = (g) => query(g, 'span', true).map(s => s.textContent);
 const textOf = (c) => (c?.textContent || '').replace(/\s+/g, ' ');
 const halves = (slot) => query(cellAt(slot), '.ps-half', true);
 const breakerIn = (number) => config.EnergyFlow.Panels[0].Breakers.find(b => b.Number === number);
@@ -118,16 +124,29 @@ const apply = async () => { query(sheet(), 'button', true).find(b => b.textConte
 // The panel is drawn as it is: odd down the left column, even down the right.
 if (!cells().length) fail('the panel drew no slots');
 const placed = (slot) => (cellAt(slot)?.style || {});
-if (placed(1).gridColumn !== '1' || placed(2).gridColumn !== '2')
+// Columns 1 and 4 are the number stamps down the frame's edges; the breakers sit in 2 and 3 between them.
+if (placed(1).gridColumn !== '2' || placed(2).gridColumn !== '3')
   fail(`odd and even slots are not in their own columns: ${placed(1).gridColumn} / ${placed(2).gridColumn}`);
 if (placed(5).gridRow !== '3 / span 1') fail(`slot 5 is not in the third row down its column: ${placed(5).gridRow}`);
 
 // A double-pole is drawn across the two slots it holds, and the slot it reaches into is not drawn again.
 if (placed(1).gridRow !== '1 / span 2') fail(`the double-pole does not span its two slots: ${placed(1).gridRow}`);
-if (cells().some(c => (query(c, '.ps-slot') || {}).textContent === '3'))
+if (cells().some(c => c.dataset?.slot === '3'))
   fail('slot 3 is drawn again beneath the double-pole that already holds it');
-if (!/1\+3/.test(textOf(cellAt(1)))) fail(`the double-pole does not say which slots it holds: ${textOf(cellAt(1))}`);
-// A number that only repeats the slots already stamped in the corner is not drawn twice.
+
+// The slot numbers are stamped down the outside edges of the frame, one per slot, counted down the column —
+// not inside the breaker.
+if (query(sec, '.ps-slot', true).length) fail('the slot number is still drawn inside the breaker');
+const stamps = (row, col) => JSON.stringify(numbersIn(gutterAt(row, col) || {}));
+if (!gutterAt(1, '1')) fail('the left column has no number stamped outside it');
+if (!gutterAt(1, '4')) fail('the right column has no number stamped outside it');
+// A double-pole is stamped with both of the slots it holds, one under the other.
+if (stamps(1, '1') !== JSON.stringify(['1', '3'])) fail(`the double-pole is not stamped with both its slots: ${stamps(1, '1')}`);
+// Odd numbers count down the left edge, even down the right, a row at a time.
+if (stamps(3, '1') !== JSON.stringify(['5'])) fail(`the left edge does not count down in odd slots: ${stamps(3, '1')}`);
+if (stamps(1, '4') !== JSON.stringify(['2'])) fail(`the right edge does not start at slot 2: ${stamps(1, '4')}`);
+if (stamps(3, '4') !== JSON.stringify(['6'])) fail(`the right edge does not count down in even slots: ${stamps(3, '4')}`);
+// A number that only repeats the slots stamped beside it is not drawn on the breaker as well.
 if (/1,3/.test(textOf(cellAt(1)))) fail(`the breaker number repeats the slots it is already stamped with: ${textOf(cellAt(1))}`);
 if (query(cellAt(1), '.ps-num', true).length) fail('a breaker numbered after its own slots still draws its number');
 // …but a number that says something the slots do not is kept.
@@ -267,12 +286,17 @@ await wait(100);
 if (config.EnergyFlow.Panels[0].Node !== 'main_panel') fail('the panel\u2019s node did not reach the config');
 if (!/2,600 W/.test(incomingText())) fail(`the power coming into the panel is not drawn: "${incomingText()}"`);
 
+// The mains voltage is shown beside the power, where whatever measures the panel reports one.
+if (!/241\.3 V/.test(incomingText())) fail(`the mains voltage is not shown: "${incomingText()}"`);
+
 // A panel whose node has no reading says so, rather than drawing a zero.
 panelNodeSel().value = 'grid';
 panelNodeSel().onchange({});
 await wait(100);
 if (!/no data/.test(incomingText())) fail(`a panel node with no reading does not say so: "${incomingText()}"`);
 if (/\b0 W/.test(incomingText())) fail(`a panel with no reading draws zero: "${incomingText()}"`);
+// …and a node that reports no voltage is not given one.
+if (/ V\b/.test(incomingText())) fail(`a voltage was shown for a node that reports none: "${incomingText()}"`);
 panelNodeSel().value = 'main_panel';
 panelNodeSel().onchange({});
 await wait(100);
@@ -285,9 +309,12 @@ await wait(60);
 if (!links().some(l => l.From === 'grid' && l.To === 'main_panel')) fail('picking a feeder did not connect it to the panel');
 const chip = () => query(sec, '.ps-chip');
 if (!/Grid/.test(chip()?.textContent || '')) fail('the panel does not show what feeds it');
+// A panel is fed from one place, so nothing offers to add a second.
+if (!feedAdd().hidden) fail('a panel that already has a feeder still offers to add another');
 query(chip(), '.ps-chip-x').onclick();
 await wait(60);
 if (links().some(l => l.From === 'grid' && l.To === 'main_panel')) fail('dropping the feeder left the connection behind');
+if (feedAdd().hidden) fail('dropping the feeder left no way to pick another');
 feedAdd().value = 'grid';
 feedAdd().onchange({});
 await wait(60);
@@ -336,7 +363,7 @@ if (breakerIn('B06').Description !== 'Garage lights only') fail('the edit did no
 if (sheet()) fail('the editor stayed open after applying');
 
 // A slot nobody has recorded can be filled in.
-const filledSlot = query(empty(), '.ps-slot').textContent;
+const filledSlot = empty().dataset.slot;
 query(empty(), '.ps-half').onclick();
 await wait(100);
 query(sheet(), 'input', true)[0].value = 'B02';
@@ -354,9 +381,12 @@ if (saved.EnergyFlow.Panels[0].Slots !== 12 || config.EnergyFlow.Panels[0].Slots
 
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
-if (!/\.ps-grid\s*\{[^}]*grid-template-columns:\s*1fr/.test(rules)) fail('the panel keeps two columns on a phone');
-if (!/\.ps-cell\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
+// One column of breakers on a phone, with the numbers still stamped beside them.
+if (!/\.ps-grid\s*\{[^}]*grid-template-columns:\s*auto\s+1fr\s*[;}]/.test(rules)) fail('the panel keeps two columns of breakers on a phone');
+if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
   fail('the cells keep their two-column placement on a phone — inline placement outranks the media query');
+if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
+  fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
 console.log('panel schedule: the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '

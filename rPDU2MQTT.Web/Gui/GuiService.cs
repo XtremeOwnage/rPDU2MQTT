@@ -1054,6 +1054,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 // What the panel is drawing, read from the node that is the panel. Null is a gap, not a zero.
                 incoming = !string.IsNullOrWhiteSpace(panel.Node) && live is not null
                     && live.TryGetValue(panel.Node, metric, out var incoming) ? incoming : (double?)null,
+                // The mains voltage, when whatever measures the panel reports one.
+                volts = !string.IsNullOrWhiteSpace(panel.Node) && live is not null
+                    && live.TryGetValue(panel.Node, "voltage", out var volts) ? volts : (double?)null,
                 breakers = map.Chains.Where(c => ReferenceEquals(c.Panel, panel)).Select(chain =>
                 {
                     var power = Core.Flow.PanelMap.Power(chain, live, metric, out var gap);
