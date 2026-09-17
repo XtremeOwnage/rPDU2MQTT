@@ -4,6 +4,7 @@ using rPDU2MQTT.Extensions;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Interfaces;
 using rPDU2MQTT.Models.HomeAssistant;
+using rPDU2MQTT.Services;
 using rPDU2MQTT.Models.HomeAssistant.baseClasses;
 using rPDU2MQTT.Models.HomeAssistant.DiscoveryTypes;
 using rPDU2MQTT.Models.PDU;
@@ -135,7 +136,7 @@ public abstract class baseDiscoveryService : baseMQTTService
             Min = min,
             Max = max,
             Step = step,
-            UnitOfMeasurement = unit,
+            UnitOfMeasurement = HomeAssistantUnits.ForDiscovery(unit),
 
             AvailabilityTopic = Availability,
         };
@@ -258,7 +259,7 @@ public abstract class baseDiscoveryService : baseMQTTService
 
             //Specific to this sensor.
             StateTopic = measurement.GetTopicPath(),
-            UnitOfMeasurement = measurement.Units,
+            UnitOfMeasurement = HomeAssistantUnits.ForDiscovery(measurement.Units),
             ValueTemplate = valueTemplate,
 
             ExpireAfter = StateExpiry,
