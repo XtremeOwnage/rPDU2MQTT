@@ -47,15 +47,15 @@ const nodes = [
 ];
 
 /// The bridge's own resolution, as /api/panels reports it: the chain per leg, and a power only when every
-/// link of it is there.
-const panelsBody = () => ({
+/// link of it is there. GET answers from the saved directory; POST from whatever the page is holding.
+const resolve = (flow) => ({
   ok: true, metric: 'realpower',
-  panels: config.EnergyFlow.Panels.map(p => ({
+  panels: flow.Panels.map(p => ({
     id: p.Id, name: p.Name, slots: p.Slots, rows: Math.ceil(p.Slots / 2),
     breakers: (p.Breakers || []).map(b => {
       const legs = [];
       for (let leg = 1; leg <= (b.Poles || 1); leg++) {
-        const c = (config.EnergyFlow.Clamps || []).find(x => x.Panel === p.Id && x.Breaker === b.Number && (x.Leg || 1) === leg);
+        const c = (flow.Clamps || []).find(x => x.Panel === p.Id && x.Breaker === b.Number && (x.Leg || 1) === leg);
         legs.push({ leg, wire: c?.Wire || b.Wire || '', clamp: c?.Label ?? null, channel: c?.Channel ?? null, reversed: !!c?.Reversed });
       }
       let sum = 0, gap = 'none';
@@ -75,8 +75,13 @@ const panelsBody = () => ({
   })),
 });
 
+// What the bridge has on disk. Nothing in this check ever saves, so it never changes: an edit that shows up
+// on the page can only have come from the page sending what it is holding.
+const saved = structuredClone(config);
+
 const { sandbox, getEl } = makeDom({
-  bodies: (url) => url.includes('/api/panels') ? panelsBody()
+  bodies: (url, opts) => url.includes('/api/panels/resolve') ? resolve(JSON.parse(opts.body).EnergyFlow)
+    : url.includes('/api/panels') ? resolve(saved.EnergyFlow)
     : url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
         : url.includes('/api/config') ? config
@@ -217,12 +222,21 @@ if (breakerIn('B06').Description !== 'Garage lights only') fail('the edit did no
 if (sheet()) fail('the editor stayed open after applying');
 
 // A slot nobody has recorded can be filled in.
+const filledSlot = query(empty(), '.ps-slot').textContent;
 query(empty(), '.ps-half').onclick();
 await wait(100);
 query(sheet(), 'input', true)[0].value = 'B02';
 query(sheet(), 'input', true).find(i => i.attrs.placeholder === 'what it feeds').value = 'Fridge';
 await apply();
 if (!breakerIn('B02') || breakerIn('B02').Description !== 'Fridge') fail('filling in an empty slot did not add a breaker');
+
+// None of the above was ever saved: the page draws the directory it is holding, so an edit shows without a
+// save and a page refresh.
+if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B02'))
+  fail('the check saved the directory, so drawing it proves nothing');
+if (!/Fridge/.test(textOf(cellAt(filledSlot)))) fail('an unsaved breaker is not drawn — it takes a save and a refresh to appear');
+if (saved.EnergyFlow.Panels[0].Slots !== 12 || config.EnergyFlow.Panels[0].Slots !== 12)
+  fail('the slot count was not the one being edited');
 
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');

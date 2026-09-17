@@ -1041,54 +1041,68 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         });
 
         // The panel directory, resolved: each breaker's chain to the channel measuring it, and its power (#453/#454).
+        object PanelsPayload(Models.Config.EnergyFlowConfig flow, string metric)
+        {
+            var map = Core.Flow.PanelMap.For(flow);
+            var panels = flow.Panels.Select(panel => new
+            {
+                id = panel.Id,
+                name = panel.Name,
+                slots = panel.Slots,
+                rows = panel.Rows,
+                breakers = map.Chains.Where(c => ReferenceEquals(c.Panel, panel)).Select(chain =>
+                {
+                    var power = Core.Flow.PanelMap.Power(chain, live, metric, out var gap);
+                    return new
+                    {
+                        slot = chain.Breaker.Slot,
+                        occupies = chain.Breaker.Occupies().ToArray(),
+                        number = chain.Breaker.Number,
+                        poles = chain.Breaker.Poles,
+                        half = chain.Breaker.Half,
+                        amps = chain.Breaker.Amps,
+                        wire = chain.Breaker.Wire,
+                        description = chain.Breaker.Description,
+                        state = Models.Config.BreakerState.Of(chain.Breaker.State),
+                        // Null power is a gap, never a zero: `gap` says which link of the chain is missing.
+                        power,
+                        gap = gap.ToString().ToLowerInvariant(),
+                        legs = chain.Legs.Select(l => new
+                        {
+                            leg = l.Leg,
+                            wire = l.Wire,
+                            clamp = l.Clamp?.Label,
+                            amps = l.Clamp?.Amps,
+                            reversed = l.Clamp?.Reversed ?? false,
+                            channel = l.Channel,
+                        }).ToArray(),
+                    };
+                }).ToArray(),
+            }).ToArray();
+            return new { ok = true, metric, panels };
+        }
+
+        string PanelMetric(HttpContext ctx) => string.IsNullOrWhiteSpace(ctx.Request.Query["metric"])
+            ? Core.Flow.FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
+
         app.MapGet("/api/panels", (HttpContext ctx) =>
+        {
+            try { return Results.Json(PanelsPayload(config.EnergyFlow, PanelMetric(ctx)), ConfigSchema.Json); }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
+        // The same, for a directory that has not been saved yet: the schedule page draws what is on screen,
+        // so a breaker added or re-mapped there shows its chain and power before Save.
+        app.MapPost("/api/panels/resolve", async (HttpContext ctx) =>
         {
             try
             {
-                var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? Core.Flow.FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
-                var map = Core.Flow.PanelMap.For(config.EnergyFlow);
-                var panels = config.EnergyFlow.Panels.Select(panel => new
-                {
-                    id = panel.Id,
-                    name = panel.Name,
-                    slots = panel.Slots,
-                    rows = panel.Rows,
-                    breakers = map.Chains.Where(c => ReferenceEquals(c.Panel, panel)).Select(chain =>
-                    {
-                        var power = Core.Flow.PanelMap.Power(chain, live, metric, out var gap);
-                        return new
-                        {
-                            slot = chain.Breaker.Slot,
-                            occupies = chain.Breaker.Occupies().ToArray(),
-                            number = chain.Breaker.Number,
-                            poles = chain.Breaker.Poles,
-                            half = chain.Breaker.Half,
-                            amps = chain.Breaker.Amps,
-                            wire = chain.Breaker.Wire,
-                            description = chain.Breaker.Description,
-                            state = Models.Config.BreakerState.Of(chain.Breaker.State),
-                            // Null power is a gap, never a zero: `gap` says which link of the chain is missing.
-                            power,
-                            gap = gap.ToString().ToLowerInvariant(),
-                            legs = chain.Legs.Select(l => new
-                            {
-                                leg = l.Leg,
-                                wire = l.Wire,
-                                clamp = l.Clamp?.Label,
-                                amps = l.Clamp?.Amps,
-                                reversed = l.Clamp?.Reversed ?? false,
-                                channel = l.Channel,
-                            }).ToArray(),
-                        };
-                    }).ToArray(),
-                }).ToArray();
-
-                return Results.Json(new { ok = true, metric, panels }, ConfigSchema.Json);
+                using var reader = new StreamReader(ctx.Request.Body);
+                var json = await reader.ReadToEndAsync(ctx.RequestAborted);
+                var posted = string.IsNullOrWhiteSpace(json) ? config : ConfigSchema.FromJson(json);
+                return Results.Json(PanelsPayload(posted.EnergyFlow ?? config.EnergyFlow, PanelMetric(ctx)), ConfigSchema.Json);
             }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
-            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
         // Restart a tier — or everything.

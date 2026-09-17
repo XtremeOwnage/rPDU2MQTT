@@ -68,7 +68,13 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const load = async () => {
     status.textContent = 'loading…';
     let r: any;
-    try { r = await api('/api/panels'); }
+    // Resolved from the directory on screen rather than the saved one, so an edit is drawn before Save.
+    const holding = { EnergyFlow: { Panels: panelsIn(), Clamps: clampsIn() } };
+    try {
+      r = panelsIn().length
+        ? await api('/api/panels/resolve', { method: 'POST', body: JSON.stringify(holding) })
+        : await api('/api/panels');
+    }
     catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     if (!r.body?.ok) { status.textContent = r.body?.message || 'Could not read the panels.'; panels = []; render(); return; }
     panels = r.body.panels || [];
