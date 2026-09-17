@@ -1071,3 +1071,91 @@
   .cf-meta { margin-left: 0; flex: 1 1 100%; order: 3; }
   .cf-edit { margin-left: auto; }
 }
+
+/* --- Panel schedule ------------------------------------------------------------------------------- */
+/* Drawn as the panel is: an enclosure with a bus bar down the middle, breakers either side of it with their
+   handles facing in. Odd slots down the left column, even down the right; a double-pole spans two rows. */
+.ps-panel {
+  position: relative; max-width: 900px; margin-top: var(--sp-3); padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--panel3), var(--panel2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.ps-bus {
+  position: absolute; top: var(--sp-3); bottom: var(--sp-3); left: 50%; width: 14px; transform: translateX(-50%);
+  border-radius: 3px; background: linear-gradient(90deg, rgba(0, 0, 0, .35), rgba(255, 255, 255, .10), rgba(0, 0, 0, .35));
+  border: 1px solid var(--line-soft);
+}
+.ps-grid { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 6px 10px; position: relative; align-items: stretch; }
+/* The slot numbers, stamped down the outside edge of the frame as they are on a panel: one per slot, counted
+   down the column, outside the breaker but inside the enclosure. */
+.ps-nums {
+  display: flex; flex-direction: column; justify-content: space-around; align-items: center;
+  font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.1; min-width: 1.6em;
+}
+.ps-cell {
+  display: flex; flex-direction: column; gap: 2px; min-height: 46px; position: relative;
+  padding: var(--sp-2) var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--panel2), var(--panel));
+}
+.ps-cell.is-empty { background: none; border-style: dashed; }
+/* One breaker. The handle faces the bus bar: right-hand edge on the left column, and the other way about. */
+.ps-half {
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; width: 100%; min-height: 34px;
+  padding: 2px 4px; border: 0; border-radius: var(--r-sm); background: transparent;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.ps-cell.is-left .ps-half { flex-direction: row-reverse; }
+.ps-half:hover { background: var(--panel3); }
+.ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 2px; }
+.ps-half.is-unused { opacity: .6; }
+/* The breaker's own handle, coloured by what the directory knows about it. */
+.ps-handle {
+  flex: none; width: 18px; height: 30px; border-radius: 2px; position: relative;
+  background: linear-gradient(180deg, #3d4450, #22262e); border: 1px solid rgba(0, 0, 0, .55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+/* The throw: a raised bar across the handle, sitting up when the breaker is a known circuit. */
+.ps-handle::after {
+  content: ''; position: absolute; left: 2px; right: 2px; top: 4px; height: 9px; border-radius: 1px;
+  background: linear-gradient(180deg, #767f8d, #4b525d); box-shadow: 0 1px 0 rgba(0, 0, 0, .4);
+}
+.ps-handle.is-identified::after { background: linear-gradient(180deg, var(--accent), var(--accent-dim)); }
+.ps-handle.is-unknown::after { background: linear-gradient(180deg, var(--warn), rgba(0, 0, 0, .25)); }
+/* An unused slot's breaker is thrown: the bar sits at the bottom. */
+.ps-handle.is-unused::after { top: auto; bottom: 4px; background: linear-gradient(180deg, #4b525d, #363c46); }
+.ps-handle.is-unused { opacity: .45; }
+.ps-handle.is-empty { background: none; border-style: dashed; border-color: var(--line); }
+.ps-num { font-weight: 600; font-family: var(--mono); font-size: 12px; }
+.ps-desc { flex: 1 1 auto; }
+.ps-meta { color: var(--muted); font-size: 12px; }
+.ps-mark { color: var(--warn); font-family: var(--mono); font-size: 12px; letter-spacing: -1px; }
+.ps-power { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.ps-power.is-nodata { color: var(--faint); font-style: italic; }
+.ps-tandem {
+  align-self: flex-start; margin: 2px 0 0; padding: 2px 8px; font-size: 11px;
+  background: transparent; border: 1px dashed var(--line); border-radius: var(--r-sm); color: var(--muted); cursor: pointer;
+}
+.ps-tandem:hover { border-color: var(--accent-dim); color: var(--accent); }
+.ps-slots { max-width: 6em; }
+.ps-field { margin: 0 0 var(--sp-3); }
+.ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
+@media (max-width: 560px) {
+  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; }
+  /* The placement is inline on each cell, so the phone layout has to outrank it. */
+  .ps-cell { grid-column: 2 !important; grid-row: auto !important; }
+  .ps-nums { grid-column: 1 !important; grid-row: auto !important; flex-direction: row; gap: 3px; }
+  .ps-bus { display: none; }
+  .ps-cell.is-left .ps-half { flex-direction: row; }
+}
+
+/* A panel's feeders, as chips beside the picker that adds one. */
+.ps-feeders { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.ps-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--panel2); font-size: 12px;
+}
+.ps-chip-x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
+.ps-chip-x:hover { color: var(--bad); }
+.ps-incoming { margin: 0 0 var(--sp-2); }
