@@ -153,6 +153,11 @@ if (placed(5).gridRow !== '3 / span 1') fail(`slot 5 is not in the third row dow
 
 // A double-pole is drawn across the two slots it holds, and the slot it reaches into is not drawn again.
 if (placed(1).gridRow !== '1 / span 2') fail(`the double-pole does not span its two slots: ${placed(1).gridRow}`);
+// …and those two rows are each a slot tall, so it stands twice as tall as a single-pole. Left to size
+// themselves, the rows a double spans hold nothing else and split its height between them instead.
+const rowTemplate = query(sec, '.ps-grid').style.gridTemplateRows || '';
+if (!/minmax\(var\(--ps-row\)/.test(rowTemplate)) fail(`the panel's rows are not a slot tall: "${rowTemplate}"`);
+if (!/--ps-row:\s*\d+px/.test(css)) fail('the stylesheet does not say how tall a slot is');
 if (cells().some(c => c.dataset?.slot === '3'))
   fail('slot 3 is drawn again beneath the double-pole that already holds it');
 

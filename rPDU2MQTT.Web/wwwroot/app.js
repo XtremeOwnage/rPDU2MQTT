@@ -9867,7 +9867,9 @@ function addPanelScheduleSection(nav     , sections     ) {
       : drawn.incoming == null
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
-    grid.style.gridTemplateRows = `repeat(${rows}, auto)`;
+    // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
+    // the two rows it spans had nothing else in them and split its height between them instead.
+    grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;
 
     [true, false].forEach(left => {
       column(slots, drawn.breakers, left).forEach(cell => {

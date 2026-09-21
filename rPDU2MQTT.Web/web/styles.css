@@ -1087,7 +1087,12 @@
   border-radius: 3px; background: linear-gradient(90deg, rgba(0, 0, 0, .35), rgba(255, 255, 255, .10), rgba(0, 0, 0, .35));
   border: 1px solid var(--line-soft);
 }
-.ps-grid { display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 6px 10px; position: relative; align-items: stretch; }
+.ps-grid {
+  display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 6px 10px; position: relative; align-items: stretch;
+  /* One slot, one row. A breaker spanning two rows is then visibly twice the height of one that does not. */
+  --ps-row: 54px;
+  grid-auto-rows: minmax(var(--ps-row), auto);
+}
 /* The slot numbers, stamped down the outside edge of the frame as they are on a panel: one per slot, counted
    down the column, outside the breaker but inside the enclosure. */
 .ps-nums {
@@ -1154,7 +1159,8 @@
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
 @media (max-width: 560px) {
-  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; }
+  /* One column in slot order: a row per breaker, so the panel's own row heights no longer apply. */
+  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; grid-template-rows: none !important; grid-auto-rows: auto; }
   /* The placement is inline on each cell, so the phone layout has to outrank it. */
   .ps-cell { grid-column: 2 !important; grid-row: auto !important; }
   .ps-nums { grid-column: 1 !important; grid-row: auto !important; flex-direction: row; gap: 3px; }
