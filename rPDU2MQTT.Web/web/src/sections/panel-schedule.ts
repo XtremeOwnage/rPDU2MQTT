@@ -336,14 +336,6 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     });
   };
 
-  /// Put a second breaker in a slot that already has one: both become halves of a tandem.
-  const addTandem = (panel: Panel, first: Breaker, slot: number) => {
-    const entry = configBreaker(panel.id, first);
-    if (entry && !entry.Half) entry.Half = 1;
-    refreshDirty();
-    edit(panel, null, slot, 2);
-  };
-
   /// Windows worth asking a breaker about, and how finely each is sampled.
   const WINDOWS: [string, string][] = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
 
@@ -531,12 +523,18 @@ export function addPanelScheduleSection(nav: any, sections: any) {
             reading.onclick = () => history(drawn, b);
             box.appendChild(el('div', { class: 'ps-half is-' + b.state }, open, reading));
           });
-          // A slot holding one full-height breaker can take a second as a tandem.
-          if (cell.halves.length === 1 && cell.span === 1) {
-            const tandem = el('button', { class: 'ps-tandem', text: '+ tandem' });
-            tandem.title = 'Add a second breaker sharing this slot, as a tandem.';
-            tandem.onclick = () => addTandem(drawn, cell.halves[0], cell.slot);
-            box.appendChild(tandem);
+          // A breaker declared as one half of a tandem leaves the other half of its slot to fill in. Saying
+          // a slot is shared is the editor's business; what is in the other half is the panel's.
+          const lone = cell.halves.length === 1 ? cell.halves[0] : null;
+          if (lone?.half) {
+            const missing = lone.half === 1 ? 2 : 1;
+            const vacant = el('span', { class: 'ps-handle is-empty' });
+            vacant.setAttribute('aria-hidden', 'true');
+            const other = el('button', { class: 'ps-open is-empty' }, vacant,
+              el('span', { class: 'ps-desc', text: missing === 1 ? 'empty upper half' : 'empty lower half' }));
+            other.title = `Slot ${cell.slot} shares two breakers; this half is empty. Tap to fill it in.`;
+            other.onclick = () => edit(drawn, null, cell.slot, missing);
+            box.appendChild(other);
           }
         }
         grid.appendChild(box);

@@ -221,19 +221,28 @@ await wait(60);
 if (config.EnergyFlow.Panels[0].Slots !== 12) fail(`an odd slot count was not rounded to whole rows: ${config.EnergyFlow.Panels[0].Slots}`);
 if (!cellAt(9)) fail('growing the panel did not draw the slots it gained');
 
-// Two separate breakers can share one slot: the tandem button adds the second half.
-const tandemBtn = query(cellAt(6), '.ps-tandem');
-if (!tandemBtn) fail('a slot with one breaker offers no way to add a second sharing it');
-tandemBtn.onclick();
+// Two separate breakers can share one slot. Saying so is the editor's business — there is no button on the
+// panel for it, since a slot that is not shared should not be inviting one.
+if (query(sec, '.ps-tandem', true).length) fail('the panel still offers a tandem button of its own');
+halves(6)[0].onclick();
 await wait(100);
-if (!sheet()) fail('adding a tandem half did not open an editor for it');
 const halfSel = query(sheet(), 'select', true).find(s => (s.children || []).some(o => o.textContent === 'tandem, lower half'));
-if (halfSel.value !== '2') fail(`the second breaker in the slot is not preset to the lower half: ${halfSel.value}`);
+if (!halfSel) fail('the breaker editor cannot say a slot is shared');
+halfSel.value = '1';
+await apply();
+if (breakerIn('B06').Half !== 1) fail('setting the breaker as a tandem half did not reach the config');
+// Its slot now shows the other half as somewhere to fill in.
+const otherHalf = query(cellAt(6), '.ps-open', true).find(b => /empty lower half/.test(b.textContent || ''));
+if (!otherHalf) fail(`a tandem half leaves nowhere to put the other one: ${textOf(cellAt(6))}`);
+otherHalf.onclick();
+await wait(100);
+if (!sheet()) fail('the empty half of a tandem opened no editor');
+const preset = query(sheet(), 'select', true).find(s => (s.children || []).some(o => o.textContent === 'tandem, lower half'));
+if (preset.value !== '2') fail(`the empty half is not preset to the half it is: ${preset.value}`);
 const numberIn = query(sheet(), 'input', true)[0];
 numberIn.value = '6.2';
 query(sheet(), 'input', true).find(i => i.attrs.placeholder === 'what it feeds').value = 'Freezer';
 await apply();
-if (breakerIn('B06').Half !== 1) fail('the breaker already in the slot was not made the upper half');
 const second = breakerIn('6.2');
 if (!second || second.Slot !== 6 || second.Half !== 2) fail('the second breaker did not land in the same slot as a tandem half');
 if (halves(6).length !== 2) fail(`the slot is not drawn as two breakers: ${textOf(cellAt(6))}`);

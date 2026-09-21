@@ -1142,11 +1142,6 @@
 .ps-chart { margin: var(--sp-2) 0; overflow-x: auto; }
 .ps-chart .spark { width: 100%; height: auto; }
 .ps-power.is-nodata { color: var(--faint); font-style: italic; }
-.ps-tandem {
-  align-self: flex-start; margin: 2px 0 0; padding: 2px 8px; font-size: 11px;
-  background: transparent; border: 1px dashed var(--line); border-radius: var(--r-sm); color: var(--muted); cursor: pointer;
-}
-.ps-tandem:hover { border-color: var(--accent-dim); color: var(--accent); }
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
