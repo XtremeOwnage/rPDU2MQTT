@@ -5852,12 +5852,24 @@ function wouldLoop(links       , from        , to        ) {
 }
 
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab).
-function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           ) {
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '') {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
+  // What the filter leaves. The node being edited stays whatever is typed, so narrowing the table never
+  // closes the editor out from under whoever is using it.
+  const q = query.trim().toLowerCase();
+  const all = customNodes;
+  if (q) {
+    const hit = (n     ) => [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+      .some((v     ) => String(v || '').toLowerCase().includes(q));
+    customNodes = all.filter((n     ) => hit(n) || n.Id === editing.id);
+    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` }));
+  }
+
   if (!customNodes.length) {
+    if (q) { box.appendChild(el('div', { class: 'desc', text: `Nothing matches “${query.trim()}”.` })); return box; }
     closeNodeModal();
     box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
     return box;
@@ -5988,8 +6000,11 @@ function addNodesSection(nav     , sections     ) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const instSel = instanceSelector(() => load());
+  // A hierarchy of any size is a long table: type to narrow it by id, name, kind or tag.
+  const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' })                    ;
+  hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(count); sec.appendChild(bar);
   const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph      = null;
   const editing                        = { id: null };
@@ -6031,14 +6046,15 @@ function addNodesSection(nav     , sections     ) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderGroupManager(flow, cand, render));
-    ed.appendChild(renderAutoTagRules(flow, cand, render));
-    // The tag manager has a page of its own now — two editors for one list is two places to disagree.
-    ed.appendChild(el('div', { class: 'desc', style: { margin: '18px 0 0' } },
-      el('span', { text: 'Tags are defined and managed on the ' }),
-      el('a', { text: 'Tags page', onclick: () => (document.querySelector('nav a[data-label="Tags"]')       )?.click() }),
-      el('span', { text: ' — what each is for, what carries it, and which destinations decide on it.' })));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }));
+    // Groups and the PDU/outlet tag rules have pages of their own: this one is for the nodes.
+    const goTo = (label        ) => (document.querySelector(`nav a[data-label="${label}"]`)       )?.click();
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
+      el('span', { text: 'Groups are managed on the ' }),
+      el('a', { text: 'Groups page', onclick: () => goTo('Groups') }),
+      el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),
+      el('a', { text: 'Tags page', onclick: () => goTo('Tags') }),
+      el('span', { text: '.' })));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }, hunt.value));
   };
 
   const load = async () => {
@@ -6050,6 +6066,48 @@ function addNodesSection(nav     , sections     ) {
   link.onclick = () => { activate(link, sec); load(); };
   // The editor panel is mounted on <body>.
   nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
+}
+
+// ── sections/groups.ts ──────────────────────────────────────────
+// Groups of nodes shown as one on the flow diagrams (#342). Its own page: it is a different job from listing
+// the nodes themselves, and sharing the Nodes page meant scrolling past it to reach them.
+
+function addGroupsSection(nav     , sections     ) {
+  const link = navLink(nav, 'Groups', '⧉');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Node groups' }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Nodes shown as a single collapsible node on the flow diagrams — three MPPTs as one “Incoming PV”, say. '
+    + 'Members keep their own links and their own exports; the group carries their summed total.'));
+
+  const instSel = instanceSelector(() => load());
+  const save = btn('Save', 'primary');
+  const count = el('span', { class: 'ld-count' });
+  sec.appendChild(el('div', { class: 'ld-toolbar' }, instSel.wrap, save, count));
+  const ed = el('div');
+  sec.appendChild(ed);
+
+  let lastGraph      = null;
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    const groups = ensure(flow, 'Groups', []);
+    count.textContent = `${groups.length} group(s)`;
+    ed.innerHTML = '';
+    ed.appendChild(renderGroupManager(flow, flowCandidates(lastGraph, ensure(flow, 'Nodes', [])), render));
+  };
+
+  const load = async () => {
+    // The flow graph names the nodes a group can hold, derived ones included.
+    let r     ;
+    try { r = await api(withInstance('/api/flow', instSel)); } catch { r = null; }
+    lastGraph = r?.body?.ok ? r.body : null;
+    render();
+  };
+  save.onclick = () => saveConfig(load);
+  link.onclick = () => { activate(link, sec); load(); };
+  return { link, sec };
 }
 
 // ── sections/explorer.ts ────────────────────────────────────────
@@ -6466,6 +6524,8 @@ function addTagsSection(nav     , sections     ) {
   const link = navLink(nav, 'Tags', '#');
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
+  // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.
+  let lastGraph      = null;
 
   const render = () => {
     sec.innerHTML = '';
@@ -6592,9 +6652,20 @@ function addTagsSection(nav     , sections     ) {
     sec.appendChild(el('div', { class: 'desc', style: { marginTop: '6px' },
       text: 'Save (main button) to apply. A tag that no destination decides on is doing nothing yet — set '
           + 'it on a destination’s Include or Exclude list to give it an effect.' }));
+
+    // …and the rules that put tags on the nodes with no row of their own.
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    sec.appendChild(renderAutoTagRules(flow, flowCandidates(lastGraph, ensure(flow, 'Nodes', [])), render));
   };
 
-  link.onclick = () => { render(); activate(link, sec); };
+  const load = async () => {
+    let r     ;
+    try { r = await api('/api/flow'); } catch { r = null; }
+    lastGraph = r?.body?.ok ? r.body : null;
+    render();
+  };
+
+  link.onclick = () => { render(); activate(link, sec); load(); };
   render();
 }
 
@@ -10929,7 +11000,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.

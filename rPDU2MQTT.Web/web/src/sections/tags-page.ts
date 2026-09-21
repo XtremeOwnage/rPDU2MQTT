@@ -4,15 +4,18 @@
 // filter names it. So the page has to answer both halves at once: what wears this tag, and what does
 // wearing it do. Buried at the bottom of the Nodes page it answered neither, and a tag could not exist
 // until something already carried it, so a filter could never be set up ahead of the nodes it selects.
-import { btn, el, activate, navLink, ensure } from '../helpers.js';
+import { api, btn, el, activate, navLink, ensure } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { knownTags, tagUsage, tagDescription, declaredTags, declareTag, renameTag, removeTag } from '../tags.js';
+import { flowCandidates, renderAutoTagRules } from './nodes.js';
 
 export function addTagsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Tags', '#');
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
+  // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.
+  let lastGraph: any = null;
 
   const render = () => {
     sec.innerHTML = '';
@@ -139,8 +142,19 @@ export function addTagsSection(nav: any, sections: any) {
     sec.appendChild(el('div', { class: 'desc', style: { marginTop: '6px' },
       text: 'Save (main button) to apply. A tag that no destination decides on is doing nothing yet — set '
           + 'it on a destination’s Include or Exclude list to give it an effect.' }));
+
+    // …and the rules that put tags on the nodes with no row of their own.
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    sec.appendChild(renderAutoTagRules(flow, flowCandidates(lastGraph, ensure(flow, 'Nodes', [])), render));
   };
 
-  link.onclick = () => { render(); activate(link, sec); };
+  const load = async () => {
+    let r: any;
+    try { r = await api('/api/flow'); } catch { r = null; }
+    lastGraph = r?.body?.ok ? r.body : null;
+    render();
+  };
+
+  link.onclick = () => { render(); activate(link, sec); load(); };
   render();
 }

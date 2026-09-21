@@ -104,18 +104,14 @@ const open = async (label) => {
   config.EnergyFlow.MqttExportTags = { Include: [], Exclude: ['local-only'] };
 }
 
-// --- 3. A node's tag field offers the tags that already exist ------------------------------------------
+// --- 3. A tag field offers the tags that already exist, rather than asking for them to be retyped -------
+// The rules that tag PDUs and outlets carry such a field, and live with the tags they apply (Tags page).
 {
-  const { sec } = await open('Nodes');
-  const edit = query(sec, 'button', true).find(b => b.textContent === 'Edit');
-  if (!edit) fail('no node to edit');
-  edit.click();
-  await new Promise(r => setTimeout(r, 250));
-
-  const picks = query(sec.ownerDocument ? sec.ownerDocument.body : sec, 'select', true)
+  const { sec } = await open('Tags');
+  const picks = query(sec, 'select', true)
     .filter(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'local-only'));
   if (!picks.length)
-    fail('the node editor offers no control listing the tags that already exist — only a box to retype one');
+    fail('no control lists the tags that already exist — only a box to retype one');
 
   const opts = (picks[0].children || []).map(o => o.value || (o.attrs && o.attrs.value));
   for (const t of ['local-only', 'panel'])
