@@ -409,6 +409,16 @@ if (!/peak 180 W/.test(sheet().textContent || '')) fail('the chart does not summ
 if (!/5 of 6 readings/.test(sheet().textContent || ''))
   fail(`a missing reading was counted rather than left as a gap: "${(sheet().textContent || '').slice(0, 140)}"`);
 
+// A light grid behind the line: the scale down the side, the time along the bottom.
+const plotted = query(sheet(), 'svg', true)[0];
+const gridLines = query(plotted, 'line', true).filter(l => l.attrs.class === 'spark-grid');
+const axis = query(plotted, 'text', true).filter(t => t.attrs.class === 'spark-axis').map(t => t.textContent);
+if (gridLines.length < 4) fail(`the chart has no grid behind it: ${gridLines.length} lines`);
+if (!axis.some(t => /W$/.test(t || ''))) fail(`the grid does not say what the scale is in: ${axis.join(' | ')}`);
+if (!axis.some(t => /:/.test(t || ''))) fail(`the grid has no times along the bottom: ${axis.join(' | ')}`);
+// Stretching a strip is fine for a bare line, but it would stretch the labels with it.
+if (plotted.attrs.preserveAspectRatio === 'none') fail('the gridded chart is stretched, so its labels are too');
+
 // The line is named rather than left to be guessed.
 const key = query(sheet(), '.ps-legend');
 if (!key) fail('the chart has no legend');

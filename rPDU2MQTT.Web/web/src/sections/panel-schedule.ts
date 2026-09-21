@@ -365,7 +365,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
         `${labelOf(ch)} (${ch})`)));
       plot.appendChild(sparkline({
-        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160,
+        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160, grid: true,
         at: (i: number) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
       }));
       note.textContent = known.length

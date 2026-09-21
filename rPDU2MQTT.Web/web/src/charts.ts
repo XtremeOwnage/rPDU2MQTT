@@ -280,10 +280,15 @@ let sparkSeq = 0;
 export function sparkline(opts: {
   values: (number | null)[]; color: string; units: string; width?: number; height?: number;
   at?: (i: number) => string;      // what to call point i when someone hovers it
+  /// Draw a light grid behind the line, with the scale down the side and the time along the bottom. Off by
+  /// default: a strip a few centimetres wide has no room for it, and the shape is the whole message there.
+  grid?: boolean;
 }): any {
   const { values, color, units } = opts;
   const w = opts.width ?? 132, h = opts.height ?? 40;
   const pad = 3;                                   // room for the 2px stroke and the hover dot's ring
+  // With a grid, the scale needs room down the left and the times need room along the bottom.
+  const padL = opts.grid ? 44 : pad, padB = opts.grid ? 16 : pad;
 
   const known = values.filter((v): v is number => v != null && Number.isFinite(v));
   if (known.length < 2) {
@@ -295,14 +300,36 @@ export function sparkline(opts: {
 
   const lo = Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
-  const x = (i: number) => pad + (values.length === 1 ? 0 : (i * (w - pad * 2)) / (values.length - 1));
-  const y = (v: number) => h - pad - ((v - lo) / span) * (h - pad * 2);
+  const x = (i: number) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
+  const y = (v: number) => h - padB - ((v - lo) / span) * (h - padB - pad);
 
   const svg = svgTag('svg', {
-    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark',
-    preserveAspectRatio: 'none', role: 'img',
+    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark' + (opts.grid ? ' spark-gridded' : ''),
+    // A stretched strip is fine for a bare line, but it would stretch the grid's labels with it.
+    preserveAspectRatio: opts.grid ? 'xMidYMid meet' : 'none', role: 'img',
     'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
   });
+
+  // A light grid, drawn first so it sits behind the line: the scale down the side, the time along the bottom.
+  if (opts.grid) {
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const v = lo + (span / ticks) * i, yy = y(v);
+      svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: w - pad, y2: yy, class: 'spark-grid' }));
+      const label = svgTag('text', { x: padL - 6, y: yy + 3, 'text-anchor': 'end', class: 'spark-axis' });
+      // Units on the top line only: repeating them down the side says nothing five times.
+      label.textContent = formatNum(Number(v.toFixed(hi < 10 ? 2 : 0))) + (i === ticks && units ? ' ' + units : '');
+      svg.appendChild(label);
+    }
+    const steps = 4;
+    for (let i = 1; i < steps && opts.at; i++) {
+      const idx = Math.round(((values.length - 1) * i) / steps), xx = x(idx);
+      svg.appendChild(svgTag('line', { x1: xx, y1: pad, x2: xx, y2: h - padB, class: 'spark-grid' }));
+      const when = svgTag('text', { x: xx, y: h - 4, 'text-anchor': 'middle', class: 'spark-axis' });
+      when.textContent = opts.at(idx);
+      svg.appendChild(when);
+    }
+  }
 
   // The area fades from the line down to nothing. A flat wash reads as a solid block of colour and buries
   // the shape it is meant to sit under; a fade keeps the line the thing you look at.

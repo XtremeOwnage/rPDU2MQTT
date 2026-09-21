@@ -1168,3 +1168,7 @@
 .ps-chip-x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 13px; line-height: 1; }
 .ps-chip-x:hover { color: var(--bad); }
 .ps-incoming { margin: 0 0 var(--sp-2); }
+
+/* A light grid behind a sparkline that has room for one: the scale down the side, the time along the bottom. */
+.spark-grid { stroke: var(--line-soft); stroke-width: 1; pointer-events: none; }
+.spark-axis { fill: var(--faint); font-size: 9px; font-family: var(--mono); pointer-events: none; }
