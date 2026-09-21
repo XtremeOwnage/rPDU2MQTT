@@ -1745,7 +1745,12 @@ function sparkline(opts
   svg.appendChild(hit);
   hit.addEventListener('mousemove', (ev     ) => {
     const box = svg.getBoundingClientRect?.() ?? { left: 0, width: w };
-    const frac = box.width ? (ev.clientX - box.left) / box.width : 0;
+    // The pointer, in the chart's own coordinates, then measured across the plot rather than the whole box:
+    // with a grid the plot starts past the scale down the side, and ignoring that slid every position right,
+    // by the width of that gutter at the left and by nothing at all at the right.
+    const scale = box.width ? box.width / w : 1;
+    const px = (ev.clientX - box.left) / scale;
+    const frac = (px - padL) / Math.max(1, w - padL - pad);
     const i = Math.max(0, Math.min(values.length - 1, Math.round(frac * (values.length - 1))));
     const v = values[i];
     const c = hoverCard();

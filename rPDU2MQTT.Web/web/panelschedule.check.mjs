@@ -91,12 +91,21 @@ const saved = structuredClone(config);
 
 // What the history backend holds, and every window the page asks it for.
 const series = [];
-const when = (i) => new Date(Date.UTC(2026, 8, 20, 12 + i)).toISOString();
+const when = (i) => new Date(Date.UTC(2026, 8, 20, 4 + i)).toISOString();
+// Dense enough that where the pointer lands matters: 21 samples, one of them missing, rising to 180 W.
+const SAMPLES = 21, GAP_AT = 7;
 const seriesBody = () => ({
   ok: true, metric: 'realpower', units: 'W',
-  at: Array.from({ length: 6 }, (_, i) => when(i)),
-  series: [{ node: 'n30_1_5', label: 'N30 1-5', kind: 'breaker', values: [100, 120, 140, null, 160, 180] }],
+  at: Array.from({ length: SAMPLES }, (_, i) => when(i)),
+  series: [{
+    node: 'n30_1_5', label: 'N30 1-5', kind: 'breaker',
+    values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 100 + i * 4)),
+  }],
 });
+// The chart's own coordinates: a gutter down the left for the scale, then the plot.
+const CHART_W = 560, PAD_L = 44, PAD_R = 3;
+const stepX = (CHART_W - PAD_L - PAD_R) / (SAMPLES - 1);
+const atX = (i) => PAD_L + i * stepX;
 
 const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => url.includes('/api/flow/series') ? (series.push(url), seriesBody())
@@ -406,7 +415,7 @@ if (!/from n30_1_5/.test(sheet().textContent || '')) fail('the chart does not sa
 if (!/peak 180 W/.test(sheet().textContent || '')) fail('the chart does not summarise what it drew');
 // A moment the backend has no reading for is a gap in the chart, not a zero in it: the fixture holds 6
 // samples, one of them missing.
-if (!/5 of 6 readings/.test(sheet().textContent || ''))
+if (!/20 of 21 readings/.test(sheet().textContent || ''))
   fail(`a missing reading was counted rather than left as a gap: "${(sheet().textContent || '').slice(0, 140)}"`);
 
 // A light grid behind the line: the scale down the side, the time along the bottom.
@@ -431,8 +440,9 @@ if (!/B06/.test(key.textContent || '') || !/n30_1_5/.test(key.textContent || '')
 const hit = query(sheet(), 'rect', true).find(r => r.attrs.class === 'spark-hit');
 if (!hit) fail('the chart has no hover target');
 const plot = query(sheet(), 'svg', true)[0];
-plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 160 });
-hit._on.mousemove[0]({ clientX: 600, clientY: 80 });
+// Drawn at its own size, so a client x is a chart x.
+plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: CHART_W, height: 160 });
+hit._on.mousemove[0]({ clientX: atX(SAMPLES - 1), clientY: 80 });
 const hover = query(sandbox.document.body, '.node-card', true)[0];
 if (!hover) fail('hovering the chart showed no card');
 if (!hover.classList.contains('show')) fail('the hover card was built but never shown');
@@ -443,15 +453,35 @@ const svgPart = (cls) => query(plot, '*', true).find(e => e.attrs && e.attrs.cla
 const cross = () => svgPart('spark-cross'), cursor = () => svgPart('spark-cursor');
 if (!cross() || cross().attrs.visibility !== 'visible') fail('nothing marks where the pointer is on the chart');
 if (!cursor() || cursor().attrs.visibility !== 'visible') fail('no dot sits on the reading being named');
-const atLast = Number(cross().attrs.x1);
-hit._on.mousemove[0]({ clientX: 300, clientY: 80 });
-if (Number(cross().attrs.x1) >= atLast) fail('the crosshair does not follow the pointer');
+// The line lands under the pointer, wherever it is. The plot starts past the scale down the side, and
+// measuring across the whole box instead slid every reading right — by that gutter at the left, by nothing
+// at the right, which is a gap that grows the further left you go.
+for (const i of [0, 1, 5, 10, 15, SAMPLES - 1]) {
+  const pointer = atX(i);
+  hit._on.mousemove[0]({ clientX: pointer, clientY: 80 });
+  const drawn = Number(cross().attrs.x1);
+  if (Math.abs(drawn - pointer) > stepX / 2 + 1)
+    fail(`at sample ${i} the pointer is at ${pointer.toFixed(1)} but the line is at ${drawn.toFixed(1)}`);
+  const want = i === GAP_AT ? 'no reading' : `${100 + i * 4} W`;
+  if (!hover.textContent.includes(want)) fail(`hovering sample ${i} reads "${hover.textContent}", not ${want}`);
+}
 const cardRule = /\.node-card\s*\{([^}]*)\}/.exec(css), overlayRule = /\.overlay\s*\{([^}]*)\}/.exec(css);
 const zOf = (r) => Number((/z-index:\s*(\d+)/.exec(r ? r[1] : '') || [])[1]);
 if (!(zOf(cardRule) > zOf(overlayRule)))
   fail(`the hover card (z-index ${zOf(cardRule)}) sits under the sheet it is drawn in (${zOf(overlayRule)})`);
+// …and it still lands under the pointer when the chart is stretched to fill the sheet, which is how it is
+// actually drawn: a client x is then twice a chart x.
+plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: CHART_W * 2, height: 320 });
+for (const i of [0, 4, 12, SAMPLES - 1]) {
+  hit._on.mousemove[0]({ clientX: atX(i) * 2, clientY: 80 });
+  const drawn = Number(cross().attrs.x1);
+  if (Math.abs(drawn - atX(i)) > stepX / 2 + 1)
+    fail(`stretched, sample ${i} should draw at ${atX(i).toFixed(1)} but drew at ${drawn.toFixed(1)}`);
+}
+plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: CHART_W, height: 160 });
+
 // A reading the backend does not have says so rather than showing a number.
-hit._on.mousemove[0]({ clientX: 360, clientY: 80 });
+hit._on.mousemove[0]({ clientX: atX(GAP_AT), clientY: 80 });
 if (!/no reading/.test(hover.textContent || '')) fail(`a gap in the chart hovers as a value: "${hover.textContent}"`);
 // Over a gap the line still says where you are, but there is no reading to put a dot on.
 if (cross().attrs.visibility !== 'visible') fail('the crosshair vanished over a gap');
