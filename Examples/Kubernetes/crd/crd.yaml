@@ -901,6 +901,12 @@ spec:
                           items:
                             type: string
                           description: Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.
+                        Location:
+                          type: string
+                          description: The id of the room, area, floor or site this node is in. Its own consumption counts toward that place.
+                        Circuit:
+                          type: string
+                          description: "The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered."
                         EmonCmsTag:
                           type: string
                           description: "EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}."
@@ -1205,6 +1211,9 @@ spec:
                         Node:
                           type: string
                           description: The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.
+                        Location:
+                          type: string
+                          description: The id of the room, area or floor the panel is mounted in.
                         Breakers:
                           type: array
                           items:
@@ -1250,6 +1259,14 @@ spec:
                                 - copper
                                 - aluminium
                                 description: What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.
+                              Rooms:
+                                type: array
+                                items:
+                                  type: string
+                                description: The ids of the rooms and areas this breaker's circuit serves. A circuit serving several rooms lists each; its power then counts toward the smallest place holding all of them.
+                              Node:
+                                type: string
+                                description: The energy-flow node that is this circuit. Blank uses the channel measuring it, when a single channel does.
                               State:
                                 type: string
                                 enum:
@@ -1298,6 +1315,155 @@ spec:
                           type: boolean
                           description: Tick when the clamp is on the wire backwards, so it reads negative. Its reading is flipped rather than taken as a negative load.
                     description: "CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards."
+                  Sites:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id for this site, used to refer to it from elsewhere. For example 'home'. Ids are shared by sites, floors, rooms and areas, so each must be unique across all of them.
+                        Name:
+                          type: string
+                          description: Human-readable name, for example 'Home'.
+                        Floors:
+                          type: array
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              Id:
+                                type: string
+                                description: Stable unique id for this floor, for example 'ground'.
+                              Name:
+                                type: string
+                                description: Human-readable name, for example 'Ground floor'.
+                              Level:
+                                type: integer
+                                description: 'Where this floor sits in the building: 0 for the ground floor, 1 for the one above, -1 for a basement. Floors are listed in this order.'
+                              Image:
+                                type: string
+                                description: The id of the uploaded floor plan image drawn behind this floor. Images are kept in plan storage, never in the configuration. Blank shows a grid.
+                              Width:
+                                type: number
+                                description: Width of the plan in drawing units. Room outlines are given in these units, with 0,0 at the top left. Set from the image's proportions when one is uploaded.
+                                minimum: 100
+                                maximum: 100000
+                              Height:
+                                type: number
+                                description: Height of the plan in drawing units.
+                                minimum: 100
+                                maximum: 100000
+                              Rooms:
+                                type: array
+                                items:
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                                  properties:
+                                    Id:
+                                      type: string
+                                      description: Stable unique id for this room, for example 'kitchen'.
+                                    Name:
+                                      type: string
+                                      description: Human-readable name, for example 'Kitchen'. Also the name of its Home Assistant area.
+                                    Shape:
+                                      type: array
+                                      items:
+                                        type: object
+                                        x-kubernetes-preserve-unknown-fields: true
+                                        properties:
+                                          X:
+                                            type: number
+                                          Y:
+                                            type: number
+                                      description: The room's outline on the plan, as points in drawing units. Empty until the room is drawn.
+                                    HaArea:
+                                      type: string
+                                      description: The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.
+                                description: The rooms on this floor.
+                              Areas:
+                                type: array
+                                items:
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                                  properties:
+                                    Id:
+                                      type: string
+                                      description: Stable unique id for this area, for example 'server_corner'.
+                                    Name:
+                                      type: string
+                                      description: Human-readable name, for example 'Server corner'.
+                                    Rooms:
+                                      type: array
+                                      items:
+                                        type: string
+                                      description: The ids of the rooms this area takes in. Everything in those rooms counts toward the area as well.
+                                    Shape:
+                                      type: array
+                                      items:
+                                        type: object
+                                        x-kubernetes-preserve-unknown-fields: true
+                                        properties:
+                                          X:
+                                            type: number
+                                          Y:
+                                            type: number
+                                      description: "The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own."
+                                description: Areas on this floor. An area can span several rooms, such as 'upstairs' or 'server corner', and may overlap them.
+                          description: The floors of this site.
+                    description: 'Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.'
+                  Placements:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id for this item.
+                        Kind:
+                          type: string
+                          enum:
+                          - ''
+                          - outlet
+                          - switch
+                          - fixture
+                          - appliance
+                          - device
+                          description: 'What this is: an outlet, switch, fixture, appliance or device.'
+                        Label:
+                          type: string
+                          description: What it is called, for example 'Fridge' or 'Desk outlet'.
+                        Room:
+                          type: string
+                          description: The id of the room it is in.
+                        X:
+                          type: number
+                          description: Where it is on the floor plan, across, in drawing units.
+                        Y:
+                          type: number
+                          description: Where it is on the floor plan, down, in drawing units.
+                        Circuit:
+                          type: string
+                          description: "The circuit feeding it, as the panel id and breaker number: 'main_panel/B06'. Blank when nobody knows which breaker it is on."
+                        Node:
+                          type: string
+                          description: The energy-flow node metering it, when it is individually metered — a smart plug, an ESPHome sensor, a PDU outlet.
+                    description: Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.
+                  AutoLocations:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Match:
+                          type: string
+                          description: Node id to match, with '*' matching any run of characters. For example 'outlet:rack_pdu_1:*' for every outlet on that PDU.
+                        Location:
+                          type: string
+                          description: The id of the room, area, floor or site the matching nodes are in.
+                    description: Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.
                   Parents:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
@@ -1329,6 +1495,45 @@ spec:
                     type: string
                     description: "Template for each tier's MQTT topic. Placeholders: {parent} (MQTT parent topic), {id}, {label}, {kind}, {metric}, {units}. e.g. '{parent}/energyflow/{id}'."
                 description: Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.
+              PlanStorage:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+                properties:
+                  Directory:
+                    type: string
+                    description: "Directory floor plan images are written to. Put it on a persistent volume: a PVC on Kubernetes, a volume under Docker Compose, any directory for a plain binary. Blank uses 'plans' beside the program, which a container loses on restart. Ignored when an object store bucket is set."
+                  MaxMegabytes:
+                    type: integer
+                    description: Largest image accepted, in megabytes. A phone photo is shrunk in the browser before it is sent, so this is rarely reached.
+                    minimum: 1
+                    maximum: 100
+                  ObjectStore:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Endpoint:
+                        type: string
+                        description: The store's endpoint, for example 'https://s3.us-east-1.amazonaws.com' or 'http://minio:9000'.
+                      Bucket:
+                        type: string
+                        description: The bucket images are kept in. Setting it switches plan storage from the directory to this store.
+                      Region:
+                        type: string
+                        description: The region requests are signed for. Most self-hosted stores accept 'us-east-1'.
+                      AccessKeyId:
+                        type: string
+                        description: Access key id.
+                      SecretAccessKey:
+                        type: string
+                        description: Secret access key.
+                      Prefix:
+                        type: string
+                        description: Prefix for every object this bridge writes, so it can share a bucket.
+                      PathStyle:
+                        type: boolean
+                        description: Address the bucket as a path ('endpoint/bucket/key') rather than a subdomain. Self-hosted stores almost always need this on.
+                    description: An S3-compatible object store (AWS S3, MinIO, Ceph, Garage, R2) to keep images in instead of a directory.
+                description: 'Where floor plan images are kept: a directory on a persistent volume, or an S3-compatible bucket. Never the configuration itself.'
               Modbus:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true

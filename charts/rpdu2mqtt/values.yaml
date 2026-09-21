@@ -108,6 +108,8 @@ credentials:
   hassToken: ""
   # Password for the shared cache, when it needs one (RPDU2MQTT_CACHE_PASSWORD).
   cachePassword: ""
+  # Secret access key for an S3-compatible floor plan image store (RPDU2MQTT_PLANS_SECRET_KEY).
+  plansSecretKey: ""
 
 serviceAccount:
   create: true
@@ -374,6 +376,20 @@ valkey:
 #
 # Note: a plugin's settings live under the `Plugins` map in the config, NOT as CRD fields. The CRD is a
 # compile-time contract and cannot describe a type that exists only on your machine.
+# Floor plan images (#462). They are never written into the configuration — a CR is stored in etcd with a
+# ~1.5 MB limit and rewritten on every save — so they need somewhere of their own. With persistence on, a
+# volume is mounted at mountPath and the bridge stores images there. Leave it off to use an S3-compatible
+# bucket instead (PlanStorage.ObjectStore in the config, secret key in credentials.plansSecretKey).
+floorPlans:
+  mountPath: /data/plans
+  persistence:
+    enabled: false
+    # Use a claim you manage yourself instead of the one this chart creates.
+    existingClaim: ""
+    size: 1Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
 plugins:
   enabled: false
   volume:

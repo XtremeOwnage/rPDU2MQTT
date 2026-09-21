@@ -81,6 +81,9 @@ public class Config
     [YamlMember(Alias = "EnergyFlow", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Virtual upstream nodes (breakers, transfer switches, a “Total”) and their feeder wiring for the energy-flow hierarchy. Edited visually on the Flow tab.")]
     public EnergyFlowConfig EnergyFlow { get; set; } = new EnergyFlowConfig();
 
+    [YamlMember(Alias = "PlanStorage", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Where floor plan images are kept: a directory on a persistent volume, or an S3-compatible bucket. Never the configuration itself.")]
+    public PlanStorageConfig PlanStorage { get; set; } = new PlanStorageConfig();
+
     [YamlMember(Alias = "Modbus", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Modbus TCP connections that energy-flow nodes can be bound to (inverters, meters, PLCs).")]
     [NavGroup("Integrations")]
     public ModbusConfig Modbus { get; set; } = new ModbusConfig();
@@ -136,5 +139,6 @@ public class Config
         Plugins = other.Plugins;
         Modbus = other.Modbus;
         Operator = other.Operator;
+        PlanStorage = other.PlanStorage;
     }
 }

@@ -1,0 +1,20 @@
+{{- if and .Values.floorPlans.persistence.enabled (not .Values.floorPlans.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-plans
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+  annotations:
+    # Floor plan images outlive an uninstall; delete the claim by hand when they are no longer wanted.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.floorPlans.persistence.accessMode }}
+  {{- with .Values.floorPlans.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.floorPlans.persistence.size }}
+{{- end }}

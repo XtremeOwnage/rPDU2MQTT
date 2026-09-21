@@ -196,6 +196,9 @@ internal class YamlConfigLoader
 
         var cachePass = ResolveSecret("RPDU2MQTT_CACHE_PASSWORD");
         if (cachePass is not null) { config.Cache.Password = cachePass; Log.Information("Using cache password from environment."); }
+
+        var plansKey = ResolveSecret("RPDU2MQTT_PLANS_SECRET_KEY");
+        if (plansKey is not null) { config.PlanStorage.ObjectStore.SecretAccessKey = plansKey; Log.Information("Using plan storage secret key from environment."); }
     }
 
     /// <summary>

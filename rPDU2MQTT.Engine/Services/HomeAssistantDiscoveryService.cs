@@ -21,6 +21,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     // Built each discovery run: "deviceKey/outletIndex" -> (outlet, owning device), for mirroring
     // group member switches with an identifying name.
     private Dictionary<string, (Outlet Outlet, Device Device)> memberOutletLookup = new();
+    /// <summary>The room name of each PDU and outlet by its discovery identifier, for the current pass.</summary>
+    private Dictionary<string, string> deviceAreas = new();
 
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
     {
@@ -83,6 +85,15 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                 memberOutletLookup = data.Devices
                     .SelectMany(d => d.Outlets.Select(o => (key: $"{d.Key}/{o.Key}", value: (Outlet: o, Device: d))))
                     .ToDictionary(x => x.key, x => x.value);
+
+                // The room each PDU and outlet is in, by its discovery identifier (#467).
+                var rooms = Core.Flow.LocationExport.RoomNames(Core.Flow.LocationIndex.For(cfg.EnergyFlow), Core.Flow.FlowTopology.For(data, cfg.EnergyFlow));
+                deviceAreas = data.Devices
+                    .SelectMany(d => d.Outlets.Select(o => (o.Entity_Identifier, Node: Core.Flow.FlowNodeId.ForOutlet(d.Entity_Name, o.Key)))
+                        .Prepend((d.Entity_Identifier, Node: Core.Flow.FlowNodeId.ForPdu(d.Entity_Name))))
+                    .Where(x => !string.IsNullOrEmpty(x.Entity_Identifier) && rooms.ContainsKey(x.Node))
+                    .GroupBy(x => x.Entity_Identifier!)
+                    .ToDictionary(g => g.Key, g => rooms[g.First().Node]);
 
                 // Discover PDUs, Outlets, etc...
                 foreach (rPDU nestedPDU in data.PDUs)
@@ -189,6 +200,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // inherits the MAC/IP connections from the PDU-level device.
             var newParent = parent.CreateChild(device, inheritConnections: true);
             ApplyMakeModelOverride(newParent, device);
+            newParent.SuggestedArea = deviceAreas.GetValueOrDefault(device.Entity_Identifier ?? "");
 
             // Device-level alarm.
             components.Add(BuildAlarm(device, newParent));
@@ -225,6 +237,8 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
             // Create a device to represent the outlet. Prefix with the PDU name so outlets
             // stay distinguishable across multiple PDUs (e.g. "Rack-PDU-1 Dell: r730XD").
             var newParent = parent.CreateChild(outlet, prefixWithParentName: true);
+
+            newParent.SuggestedArea = deviceAreas.GetValueOrDefault(outlet.Entity_Identifier ?? "");
 
             // Surface the physical outlet number (1-based, matching the PDU UI) in the device info.
             newParent.SerialNumber = $"Outlet {outlet.Key + 1}";

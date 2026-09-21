@@ -110,6 +110,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
         var tagFilter = flow.MqttExportTags;
         var published = 0;
 
+        // Where each tier is, so its device lands in its room's Home Assistant area (#467).
+        var locations = LocationIndex.For(flow);
+        var topology = FlowTopology.For(pass.Snapshot, flow);
+        var rooms = LocationExport.RoomNames(locations, topology);
+
         // Synthetic nodes are for the diagram only — see FlowNode.Synthetic.
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
@@ -200,7 +205,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             {
                 var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
                     includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
-                    includeEnergyDaily: energyDaily is not null);
+                    includeEnergyDaily: energyDaily is not null, area: rooms.GetValueOrDefault(node.Id));
                 await publisher.PublishAsync(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
             }
         }
@@ -243,6 +248,46 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             var gconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(g.Id)}/config";
             var gdoc = FlowExport.DiscoveryDocument(groupNode, null, gtopic, energyGraph.Units, graph.Units, availability);
             await publisher.PublishAsync(gconfig, gdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
+        }
+
+        // Each place's total, as a tier of its own (#467). Unknown is not published, exactly as for a node.
+        if (locations.All.Count > 0)
+        {
+            var power = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(graph));
+            var energyTotals = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(energyGraph));
+            var todayTotals = periodsReady ? LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(todayGraph)) : null;
+            foreach (var place in locations.All)
+            {
+                if (power[place.Id].Value is not { } watts) continue;
+                var nodeId = LocationExport.NodeId(place.Id);
+                var placeNode = new FlowNode(nodeId, place.Label, place.Kind, watts);
+                var ptopic = FlowExport.Topic(placeNode, graph, cfg.MQTT.ParentTopic, flow);
+                double? penergy = cumulative.Publish($"{nodeId}|energy", energyTotals[place.Id].Value);
+                double? pdaily = todayTotals?[place.Id].Value;
+
+                var ppayload = JsonSerializer.Serialize(new
+                {
+                    id = nodeId,
+                    location = place.Id,
+                    value = watts,
+                    power = watts,
+                    energy = penergy,
+                    energy_d = pdaily,
+                    units = graph.Units,
+                    energyUnits = energyGraph.Units,
+                    label = place.Label,
+                    kind = place.Kind,
+                    timestamp = Core.MessageTimestamps.Format(pass.AtUtc),
+                });
+                await publisher.PublishAsync(ptopic, ppayload, retain: true, ct, pass.AtUtc);
+                published++;
+
+                if (!publishDiscovery) continue;
+                var pconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(nodeId)}/config";
+                var pdoc = FlowExport.DiscoveryDocument(placeNode, null, ptopic, energyGraph.Units, graph.Units, availability,
+                    includeEnergyDaily: pdaily is not null, area: place.Kind == LocationKind.Room ? place.Label : null);
+                await publisher.PublishAsync(pconfig, pdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
+            }
         }
 
         // A counter held back is said once, when it starts, and once when it recovers. Silence is what let a
