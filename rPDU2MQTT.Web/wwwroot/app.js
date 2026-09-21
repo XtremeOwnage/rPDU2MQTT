@@ -1732,6 +1732,13 @@ function sparkline(opts
     cx: x(lastAt), cy: y(last), r: 2.4, fill: color, stroke: 'var(--panel2)', 'stroke-width': '1.5',
   }));
 
+  // Where the pointer is, drawn on the chart: a line down through it and a dot on the reading it names, so
+  // the card's figure is tied to a place rather than left to be found.
+  const cross = svgTag('line', { class: 'spark-cross', x1: 0, x2: 0, y1: pad, y2: h - padB, visibility: 'hidden' });
+  const cursor = svgTag('circle', { class: 'spark-cursor', cx: 0, cy: 0, r: 3, fill: color, visibility: 'hidden' });
+  svg.appendChild(cross);
+  svg.appendChild(cursor);
+
   // The hover layer. The plot is 40px tall, so the target is the whole strip and the nearest point wins —
   // asking someone to hit a 2px line with a mouse is asking them not to bother.
   const hit = svgTag('rect', { x: 0, y: 0, width: w, height: h, fill: 'transparent', class: 'spark-hit' });
@@ -1748,8 +1755,24 @@ function sparkline(opts
     c.classList.add('show');
     c.style.left = `${ev.clientX + 12}px`;
     c.style.top = `${ev.clientY + 12}px`;
+
+    const at = x(i);
+    cross.setAttribute('x1', String(at));
+    cross.setAttribute('x2', String(at));
+    cross.setAttribute('visibility', 'visible');
+    // A moment with no reading has nowhere to put the dot; the line still says where you are.
+    if (v == null) cursor.setAttribute('visibility', 'hidden');
+    else {
+      cursor.setAttribute('cx', String(at));
+      cursor.setAttribute('cy', String(y(v)));
+      cursor.setAttribute('visibility', 'visible');
+    }
   });
-  hit.addEventListener('mouseleave', () => hideCard());
+  hit.addEventListener('mouseleave', () => {
+    hideCard();
+    cross.setAttribute('visibility', 'hidden');
+    cursor.setAttribute('visibility', 'hidden');
+  });
 
   return svg;
 }

@@ -1172,3 +1172,6 @@
 /* A light grid behind a sparkline that has room for one: the scale down the side, the time along the bottom. */
 .spark-grid { stroke: var(--line-soft); stroke-width: 1; pointer-events: none; }
 .spark-axis { fill: var(--faint); font-size: 9px; font-family: var(--mono); pointer-events: none; }
+/* The pointer's place on a sparkline: a line down through it, and a dot on the reading it names. */
+.spark-cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.spark-cursor { stroke: var(--panel); stroke-width: 2; pointer-events: none; }

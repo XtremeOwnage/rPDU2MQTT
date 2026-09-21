@@ -437,6 +437,15 @@ const hover = query(sandbox.document.body, '.node-card', true)[0];
 if (!hover) fail('hovering the chart showed no card');
 if (!hover.classList.contains('show')) fail('the hover card was built but never shown');
 if (!/180 W/.test(hover.textContent || '')) fail(`the hover card does not say the reading: "${hover.textContent}"`);
+// …and the chart says where that reading is: a line down through the pointer, and a dot on the point.
+const svgPart = (cls) => query(plot, '*', true).find(e => e.attrs && e.attrs.class === cls)
+  || query(plot, 'line', true).concat(query(plot, 'circle', true)).find(e => e.attrs.class === cls);
+const cross = () => svgPart('spark-cross'), cursor = () => svgPart('spark-cursor');
+if (!cross() || cross().attrs.visibility !== 'visible') fail('nothing marks where the pointer is on the chart');
+if (!cursor() || cursor().attrs.visibility !== 'visible') fail('no dot sits on the reading being named');
+const atLast = Number(cross().attrs.x1);
+hit._on.mousemove[0]({ clientX: 300, clientY: 80 });
+if (Number(cross().attrs.x1) >= atLast) fail('the crosshair does not follow the pointer');
 const cardRule = /\.node-card\s*\{([^}]*)\}/.exec(css), overlayRule = /\.overlay\s*\{([^}]*)\}/.exec(css);
 const zOf = (r) => Number((/z-index:\s*(\d+)/.exec(r ? r[1] : '') || [])[1]);
 if (!(zOf(cardRule) > zOf(overlayRule)))
@@ -444,6 +453,14 @@ if (!(zOf(cardRule) > zOf(overlayRule)))
 // A reading the backend does not have says so rather than showing a number.
 hit._on.mousemove[0]({ clientX: 360, clientY: 80 });
 if (!/no reading/.test(hover.textContent || '')) fail(`a gap in the chart hovers as a value: "${hover.textContent}"`);
+// Over a gap the line still says where you are, but there is no reading to put a dot on.
+if (cross().attrs.visibility !== 'visible') fail('the crosshair vanished over a gap');
+if (cursor().attrs.visibility !== 'hidden') fail('a dot was drawn on a reading that does not exist');
+// Leaving the chart takes all of it away.
+hit._on.mouseleave[0]({});
+if (cross().attrs.visibility !== 'hidden' || cursor().attrs.visibility !== 'hidden')
+  fail('the crosshair stayed behind after the pointer left');
+if (hover.classList.contains('show')) fail('the hover card stayed up after the pointer left');
 
 // The node measuring it is one tap away, beside the breaker's own editor.
 const toNode = query(sheet(), 'button', true).find(b => b.textContent === 'Edit node');
