@@ -1175,3 +1175,5 @@
 /* The pointer's place on a sparkline: a line down through it, and a dot on the reading it names. */
 .spark-cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
 .spark-cursor { stroke: var(--panel); stroke-width: 2; pointer-events: none; }
+/* Typing to narrow a list of channels, beside the count of what is left. */
+.ps-hunt { max-width: 22em; }

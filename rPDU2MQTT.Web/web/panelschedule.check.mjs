@@ -249,6 +249,30 @@ const offered = (nodeSel().children || []).map(o => o.value);
 if (!offered.includes('n30_1_8')) fail(`the circuit nodes are not offered: ${offered.join(', ')}`);
 if (offered.includes('main_panel')) fail('the panel carrying the breaker is offered as the thing measuring it');
 if (offered.includes('main_panel#unmeasured')) fail('an unmetered remainder is offered as a circuit');
+// A house has more channels than anyone wants to scroll, so the list is typed down.
+const hunt = () => query(sheet(), '.ps-hunt');
+const shownCount = () => (query(sheet(), 'span', true).map(s => s.textContent).find(t => /channels$/.test(t || '')) || '');
+const optionsOf = () => (nodeSel().children || []).map(o => o.value).filter(Boolean);
+if (!hunt()) fail('the channel picker cannot be searched');
+if (!/4 of 4 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
+hunt().value = '1_8';
+hunt().oninput({});
+await wait(30);
+if (JSON.stringify(optionsOf()) !== JSON.stringify(['n30_1_8'])) fail(`typing did not narrow the list: ${optionsOf().join(', ')}`);
+if (!/1 of 4 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
+// A filter that matches nothing must not quietly unpick what is already chosen.
+nodeSel().value = 'n30_1_8';
+hunt().value = 'zzz';
+hunt().oninput({});
+await wait(30);
+if (nodeSel().value !== 'n30_1_8') fail('narrowing the list unpicked the channel that was already chosen');
+if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out from under the person looking at it');
+// Clearing it brings the rest back.
+hunt().value = '';
+hunt().oninput({});
+await wait(30);
+if (optionsOf().length !== 4) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
+
 nodeSel().value = 'n30_1_8';
 await apply();
 const mapped = clampFor('6.2');

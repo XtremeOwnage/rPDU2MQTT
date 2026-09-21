@@ -221,6 +221,16 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     wholeBox.checked = !!clampFor(panel.id, wasNumber, 1)?.Whole;
     const pickers: HTMLSelectElement[] = [];
     const pickerRows = el('div', {});
+    // A house has more channels than anyone wants to scroll: type to narrow them.
+    const hunt = el('input', { type: 'search', class: 'ps-hunt', placeholder: 'filter channels by name or id…' }) as HTMLInputElement;
+    const huntCount = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+    const candidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind));
+    /// The channels worth showing: those matching what was typed, and whatever is already picked, which must
+    /// never be filtered out from under the person looking at it.
+    const matching = (chosen: string) => {
+      const q = hunt.value.trim().toLowerCase();
+      return candidates().filter(n => !q || n.id.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || n.id === chosen);
+    };
     const drawPickers = () => {
       pickerRows.innerHTML = '';
       pickers.length = 0;
@@ -228,19 +238,30 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       if (doublePole)
         pickerRows.appendChild(el('div', { class: 'ps-field' },
           el('label', { class: 'ld-inst' }, wholeBox, ' One CT measures the whole circuit, not one leg')));
+      pickerRows.appendChild(el('div', { class: 'ps-field' }, el('label', { class: 'ld-inst' }, hunt, huntCount)));
       const legs = doublePole && !wholeBox.checked ? [1, 2] : [1];
       legs.forEach(leg => {
+        const chosen = clampFor(panel.id, wasNumber, leg)?.Channel || '';
         const sel = el('select', { class: 'ps-node' }) as HTMLSelectElement;
-        sel.appendChild(el('option', { value: '', text: '— nothing measuring it —' }));
-        nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind)).forEach(n => {
-          const taken = takenBy(n.id, panel.id, wasNumber || number.value, leg);
-          sel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})${taken ? ` — already on ${taken}` : ''}` }));
-        });
-        sel.value = clampFor(panel.id, wasNumber, leg)?.Channel || '';
+        const fill = (keep: string) => {
+          sel.innerHTML = '';
+          sel.appendChild(el('option', { value: '', text: '— nothing measuring it —' }));
+          const shown = matching(keep);
+          shown.forEach(n => {
+            const taken = takenBy(n.id, panel.id, wasNumber || number.value, leg);
+            sel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})${taken ? ` — already on ${taken}` : ''}` }));
+          });
+          sel.value = keep;
+          huntCount.textContent = `${shown.length} of ${candidates().length} channels`;
+        };
+        fill(chosen);
+        (sel as any)._fill = fill;
         pickers.push(sel);
         pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', sel,
           legs.length > 1 ? 'Both legs need a node before this breaker reports its power.' : ''));
       });
+      // Filtering keeps whatever is picked, so narrowing the list never quietly unpicks it.
+      hunt.oninput = () => pickers.forEach(p => (p as any)._fill(p.value));
     };
     poles.onchange = () => drawPickers();
     wholeBox.onchange = () => drawPickers();
