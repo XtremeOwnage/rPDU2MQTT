@@ -9663,6 +9663,68 @@ function addPanelScheduleSection(nav     , sections     ) {
     edit(panel, null, slot, 2);
   };
 
+  /// Windows worth asking a breaker about, and how finely each is sampled.
+  const WINDOWS                     = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
+
+  /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
+  const history = (panel       , b         ) => {
+    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
+    const plot = el('div', { class: 'ps-chart' });
+    const note = el('div', { class: 'desc' });
+    let window = WINDOWS[1][0];
+
+    const load = async () => {
+      if (!channels.length) {
+        plot.innerHTML = '';
+        note.textContent = GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.';
+        return;
+      }
+      plot.innerHTML = '';
+      note.textContent = 'Reading…';
+      let r     ;
+      try { r = await api(`/api/flow/series?${window}&metric=realpower`); }
+      catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+      const body = r?.body;
+      if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+      const series = (body.series || []).filter((s     ) => channels.includes(s.node));
+      if (!series.length) { note.textContent = `The history backend holds nothing for ${channels.join(', ')} in this window.`; return; }
+      // A leg with no reading at some moment leaves the breaker unknown then, exactly as its power is.
+      const at           = body.at || [];
+      const values = at.map((_, i) => {
+        let total = 0;
+        for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
+        return total                 ;
+      });
+      const known = values.filter((v)              => v != null);
+      plot.appendChild(sparkline({
+        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160,
+        at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+      }));
+      note.textContent = known.length
+        ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} W · `
+          + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} W · from ${channels.join(' + ')}`
+        : `No readings stored for ${channels.join(', ')} in this window.`;
+    };
+
+    const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+    const buttons = WINDOWS.map(([q, label]) => {
+      const b2 = btn(label);
+      b2.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b2.classList.add('primary'); load(); };
+      picker.appendChild(b2);
+      return b2;
+    });
+    buttons[1].classList.add('primary');
+
+    const toEditor = btn('Edit breaker');
+    toEditor.onclick = () => edit(panel, b, b.slot);
+    openSheet({
+      title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
+      body: el('div', {}, picker, plot, note),
+      footer: [toEditor],
+    });
+    load();
+  };
+
   const powerText = (b         ) => b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`;
 
   /// Whether a breaker's number says anything the slot stamp has not already said: "1,3" in slots 1+3 has not,
@@ -9745,7 +9807,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         if (!cell.halves.length) {
           const blank = el('span', { class: 'ps-handle is-empty' });
           blank.setAttribute('aria-hidden', 'true');
-          const add = el('button', { class: 'ps-half is-empty' }, blank, el('span', { class: 'ps-desc', text: 'empty' }));
+          const add = el('button', { class: 'ps-open is-empty' }, blank, el('span', { class: 'ps-desc', text: 'empty' }));
           add.title = `Slot ${cell.slot} — nothing recorded. Tap to add a breaker.`;
           add.onclick = () => edit(drawn, null, cell.slot);
           box.appendChild(add);
@@ -9754,17 +9816,22 @@ function addPanelScheduleSection(nav     , sections     ) {
             // The handle is the breaker as it looks in the panel, not a control: nothing here can switch one.
             const handle = el('span', { class: 'ps-handle is-' + b.state });
             handle.setAttribute('aria-hidden', 'true');
-            const half = el('button', { class: 'ps-half is-' + b.state },
+            const open = el('button', { class: 'ps-open' },
               handle,
               ...(saysMore(b.number, slotLabel) ? [el('span', { class: 'ps-num', text: b.number })] : []),
               el('span', { class: 'ps-desc', text: b.state === 'unused' ? 'Unused' : b.description || 'Not identified' }),
               // The directory's own mark for a circuit nobody has confirmed, description or not.
               ...(b.state === 'unknown' ? [el('span', { class: 'ps-mark', text: '????', title: 'Nobody has identified this circuit yet.' })] : []),
-              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : ''].filter(Boolean).join(' · ') }),
-              el('span', { class: 'ps-power' + (b.power == null ? ' is-nodata' : ''), text: powerText(b) }));
-            half.title = b.power == null ? (GAPS[b.gap] || 'No reading for this breaker.') : `Measured by ${b.legs.map(l => l.channel).filter(Boolean).join(' + ')}`;
-            half.onclick = () => edit(drawn, b, cell.slot);
-            box.appendChild(half);
+              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : ''].filter(Boolean).join(' · ') }));
+            open.title = 'Edit this breaker — what it feeds, its wire, rating, and the node measuring it.';
+            open.onclick = () => edit(drawn, b, cell.slot);
+            // The reading is its own target: what a circuit is drawing now is also the way into what it has been drawing.
+            const reading = el('button', { class: 'ps-power' + (b.power == null ? ' is-nodata' : ''), text: powerText(b) });
+            reading.title = b.power == null
+              ? (GAPS[b.gap] || 'No reading for this breaker.')
+              : `Measured by ${b.legs.map(l => l.channel).filter(Boolean).join(' + ')}. Tap for what it has been drawing.`;
+            reading.onclick = () => history(drawn, b);
+            box.appendChild(el('div', { class: 'ps-half is-' + b.state }, open, reading));
           });
           // A slot holding one full-height breaker can take a second as a tandem.
           if (cell.halves.length === 1 && cell.span === 1) {

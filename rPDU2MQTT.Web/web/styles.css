@@ -1100,14 +1100,17 @@
   background: linear-gradient(180deg, var(--panel2), var(--panel));
 }
 .ps-cell.is-empty { background: none; border-style: dashed; }
-/* One breaker. The handle faces the bus bar: right-hand edge on the left column, and the other way about. */
-.ps-half {
-  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; width: 100%; min-height: 34px;
+/* One breaker: what it is, and what it is drawing. Both are their own target — the first opens the breaker,
+   the second what it has been drawing. The handle faces the bus bar, so the left column reads in reverse. */
+.ps-half { display: flex; gap: 2px 8px; align-items: center; width: 100%; min-height: 34px; }
+.ps-open {
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; flex: 1 1 auto; min-width: 0; min-height: 34px;
   padding: 2px 4px; border: 0; border-radius: var(--r-sm); background: transparent;
   font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-.ps-cell.is-left .ps-half { flex-direction: row-reverse; }
-.ps-half:hover { background: var(--panel3); }
+.ps-cell.is-left .ps-half, .ps-cell.is-left .ps-open { flex-direction: row-reverse; }
+.ps-open:hover, .ps-power:hover { background: var(--panel3); }
+.ps-power:hover { color: var(--accent); }
 .ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 2px; }
 .ps-half.is-unused { opacity: .6; }
 /* The breaker's own handle, coloured by what the directory knows about it. */
@@ -1131,7 +1134,12 @@
 .ps-desc { flex: 1 1 auto; }
 .ps-meta { color: var(--muted); font-size: 12px; }
 .ps-mark { color: var(--warn); font-family: var(--mono); font-size: 12px; letter-spacing: -1px; }
-.ps-power { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.ps-power {
+  flex: none; padding: 2px 6px; border: 0; border-radius: var(--r-sm); background: transparent;
+  font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; color: inherit; cursor: pointer;
+}
+.ps-chart { margin: var(--sp-2) 0; overflow-x: auto; }
+.ps-chart .spark { width: 100%; height: auto; }
 .ps-power.is-nodata { color: var(--faint); font-style: italic; }
 .ps-tandem {
   align-self: flex-start; margin: 2px 0 0; padding: 2px 8px; font-size: 11px;

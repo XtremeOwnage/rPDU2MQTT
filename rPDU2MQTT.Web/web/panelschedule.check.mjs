@@ -89,8 +89,18 @@ const resolve = (flow) => ({
 // on the page can only have come from the page sending what it is holding.
 const saved = structuredClone(config);
 
+// What the history backend holds, and every window the page asks it for.
+const series = [];
+const when = (i) => new Date(Date.UTC(2026, 8, 20, 12 + i)).toISOString();
+const seriesBody = () => ({
+  ok: true, metric: 'realpower', units: 'W',
+  at: Array.from({ length: 6 }, (_, i) => when(i)),
+  series: [{ node: 'n30_1_5', label: 'N30 1-5', kind: 'breaker', values: [100, 120, 140, null, 160, 180] }],
+});
+
 const { sandbox, getEl } = makeDom({
-  bodies: (url, opts) => url.includes('/api/panels/resolve') ? resolve(JSON.parse(opts.body).EnergyFlow)
+  bodies: (url, opts) => url.includes('/api/flow/series') ? (series.push(url), seriesBody())
+    : url.includes('/api/panels/resolve') ? resolve(JSON.parse(opts.body).EnergyFlow)
     : url.includes('/api/panels') ? resolve(saved.EnergyFlow)
     : url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
@@ -115,10 +125,13 @@ const gutters = () => query(sec, '.ps-nums', true);
 const gutterAt = (row, col = '1') => gutters().find(g => (g.style.gridRow || '').startsWith(`${row} /`) && g.style.gridColumn === col);
 const numbersIn = (g) => query(g, 'span', true).map(s => s.textContent);
 const textOf = (c) => (c?.textContent || '').replace(/\s+/g, ' ');
-const halves = (slot) => query(cellAt(slot), '.ps-half', true);
+const halves = (slot) => query(cellAt(slot), '.ps-open', true);
+const readings = (slot) => query(cellAt(slot), '.ps-power', true);
 const breakerIn = (number) => config.EnergyFlow.Panels[0].Breakers.find(b => b.Number === number);
 const clampFor = (number, leg = 1) => (config.EnergyFlow.Clamps || []).find(c => c.Breaker === number && (c.Leg || 1) === leg);
 const sheet = () => query(getEl('overlay'), '.sheet');
+// Clicking the backdrop is how a sheet is dismissed.
+const shut = () => getEl('overlay').onclick({ target: getEl('overlay') });
 const apply = async () => { query(sheet(), 'button', true).find(b => b.textContent === 'Apply').onclick(); await wait(100); };
 
 // The panel is drawn as it is: odd down the left column, even down the right.
@@ -175,8 +188,9 @@ if (!/2,250 W/.test(textOf(cellAt(1)))) fail(`the double-pole does not show both
 const unmapped = () => cellAt(9);
 if (!/no data/.test(textOf(unmapped()))) fail(`an unmapped breaker does not read "no data": ${textOf(unmapped())}`);
 if (/\b0 W/.test(textOf(unmapped()))) fail(`an unmapped breaker reads as zero: ${textOf(unmapped())}`);
-if (!/measuring this breaker/i.test(halves(9)[0].title || ''))
-  fail(`nothing says why the power is missing: "${halves(9)[0].title}"`);
+// The gap lives on the reading itself, which is what someone taps to ask why.
+if (!/measuring this breaker/i.test(readings(9)[0].title || ''))
+  fail(`nothing says why the power is missing: "${readings(9)[0].title}"`);
 
 // The gaps in the directory are visible at a glance.
 if (!/\?\?\?\?/.test(textOf(unmapped()))) fail(`an unknown breaker is not marked as unidentified: ${textOf(unmapped())}`);
@@ -364,7 +378,7 @@ if (sheet()) fail('the editor stayed open after applying');
 
 // A slot nobody has recorded can be filled in.
 const filledSlot = empty().dataset.slot;
-query(empty(), '.ps-half').onclick();
+query(empty(), '.ps-open').onclick();
 await wait(100);
 query(sheet(), 'input', true)[0].value = 'B02';
 query(sheet(), 'input', true).find(i => i.attrs.placeholder === 'what it feeds').value = 'Fridge';
@@ -379,6 +393,37 @@ if (!/Fridge/.test(textOf(cellAt(filledSlot)))) fail('an unsaved breaker is not 
 if (saved.EnergyFlow.Panels[0].Slots !== 12 || config.EnergyFlow.Panels[0].Slots !== 12)
   fail('the slot count was not the one being edited');
 
+// What a circuit is drawing is also the way into what it has been drawing: the reading is its own target.
+const drawingNow = readings(6)[0];
+if (!drawingNow || drawingNow.tag !== 'button') fail('the reading is not something you can tap');
+drawingNow.onclick();
+await wait(120);
+if (!sheet()) fail('tapping the reading opened nothing');
+if (!/B06/.test(sheet().textContent || '')) fail('the chart does not say which breaker it is for');
+const charted = query(sheet(), 'svg', true);
+if (!charted.length) fail(`no chart was drawn: "${(sheet().textContent || '').slice(0, 120)}"`);
+if (!/from n30_1_5/.test(sheet().textContent || '')) fail('the chart does not say which channel it came from');
+if (!/peak 180 W/.test(sheet().textContent || '')) fail('the chart does not summarise what it drew');
+// A moment the backend has no reading for is a gap in the chart, not a zero in it: the fixture holds 6
+// samples, one of them missing.
+if (!/5 of 6 readings/.test(sheet().textContent || ''))
+  fail(`a missing reading was counted rather than left as a gap: "${(sheet().textContent || '').slice(0, 140)}"`);
+// The window is picked here, and asked for at the step that window deserves.
+const asks = () => series.slice();
+if (!asks().some(u => /minutes=1440&step=900/.test(u))) fail(`the day window was not asked for: ${asks().join(' | ')}`);
+query(sheet(), 'button', true).find(b => b.textContent === 'Last 7 days').onclick();
+await wait(120);
+if (!asks().some(u => /days=7&step=3600/.test(u))) fail(`picking a longer window asked for nothing: ${asks().join(' | ')}`);
+// A breaker nothing measures says what is missing instead of drawing an empty chart. The tandem half had its
+// node cleared earlier, so nothing is on it.
+shut();
+readings(6)[1].onclick();
+await wait(120);
+if (query(sheet(), 'svg', true).length) fail('a breaker with no channel still drew a chart');
+if (!/measuring this breaker/i.test(sheet().textContent || ''))
+  fail(`an unmeasured breaker does not say what is missing: "${(sheet().textContent || '').slice(0, 120)}"`);
+shut();
+
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
 // One column of breakers on a phone, with the numbers still stamped beside them.
@@ -388,7 +433,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
