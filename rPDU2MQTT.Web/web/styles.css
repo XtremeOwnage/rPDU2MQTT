@@ -1114,23 +1114,31 @@
 .ps-power:hover { color: var(--accent); }
 .ps-half + .ps-half { border-top: 1px dashed var(--line-soft); margin-top: 2px; }
 .ps-half.is-unused { opacity: .6; }
-/* The breaker's own handle, coloured by what the directory knows about it. */
-.ps-handle {
-  flex: none; width: 18px; height: 30px; border-radius: 2px; position: relative;
-  background: linear-gradient(180deg, #3d4450, #22262e); border: 1px solid rgba(0, 0, 0, .55);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
+/* The breaker itself: a dark body with a lighter handle, the rating stamped on it, exactly as it reads in the
+   panel. A double-pole is two of them with a tie between the handles. */
+.ps-breaker { flex: none; display: flex; flex-direction: column; justify-content: space-around; gap: 3px; position: relative; align-self: stretch; padding: 2px 0; }
+.ps-pole {
+  width: 22px; min-height: 26px; flex: 1 1 auto; border-radius: 2px; display: flex; justify-content: center; align-items: flex-start;
+  background: linear-gradient(180deg, #2b3039, #14171c); border: 1px solid rgba(0, 0, 0, .75);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
 }
-/* The throw: a raised bar across the handle, sitting up when the breaker is a known circuit. */
-.ps-handle::after {
-  content: ''; position: absolute; left: 2px; right: 2px; top: 4px; height: 9px; border-radius: 1px;
-  background: linear-gradient(180deg, #767f8d, #4b525d); box-shadow: 0 1px 0 rgba(0, 0, 0, .4);
+/* The handle, thrown up when the circuit is known. The number on it is the rating, as stamped. */
+.ps-throw {
+  width: 14px; height: 13px; margin-top: 4px; border-radius: 1px; font-family: var(--mono); font-size: 7px;
+  line-height: 13px; text-align: center; color: rgba(0, 0, 0, .75);
+  background: linear-gradient(180deg, #99a2b0, #5c6470); box-shadow: 0 1px 0 rgba(0, 0, 0, .45);
 }
-.ps-handle.is-identified::after { background: linear-gradient(180deg, var(--accent), var(--accent-dim)); }
-.ps-handle.is-unknown::after { background: linear-gradient(180deg, var(--warn), rgba(0, 0, 0, .25)); }
-/* An unused slot's breaker is thrown: the bar sits at the bottom. */
-.ps-handle.is-unused::after { top: auto; bottom: 4px; background: linear-gradient(180deg, #4b525d, #363c46); }
-.ps-handle.is-unused { opacity: .45; }
-.ps-handle.is-empty { background: none; border-style: dashed; border-color: var(--line); }
+.ps-pole.is-identified .ps-throw { background: linear-gradient(180deg, var(--accent), var(--accent-dim)); color: var(--accent-fg); }
+.ps-pole.is-unknown .ps-throw { background: linear-gradient(180deg, var(--warn), #7a5a12); }
+/* An unused breaker is thrown off: the handle sits at the bottom of its body. */
+.ps-pole.is-unused { opacity: .6; align-items: flex-end; }
+.ps-pole.is-unused .ps-throw { margin: 0 0 4px; background: linear-gradient(180deg, #5c6470, #3a404a); }
+.ps-pole.is-empty { background: none; border-style: dashed; border-color: var(--line); box-shadow: none; }
+/* The tie joining a double-pole's two handles. */
+.ps-tie {
+  position: absolute; left: 50%; transform: translateX(-50%); top: 22%; bottom: 22%; width: 7px;
+  border-radius: 2px; background: linear-gradient(180deg, #b9c0cb, #78808d); box-shadow: 0 0 0 1px rgba(0, 0, 0, .5);
+}
 .ps-num { font-weight: 600; font-family: var(--mono); font-size: 12px; }
 .ps-desc { flex: 1 1 auto; }
 .ps-meta { color: var(--muted); font-size: 12px; }

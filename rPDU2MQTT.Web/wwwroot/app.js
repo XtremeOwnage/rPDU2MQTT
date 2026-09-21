@@ -9887,7 +9887,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         stamped.setAttribute('aria-hidden', 'true');
         grid.appendChild(stamped);
         if (!cell.halves.length) {
-          const blank = el('span', { class: 'ps-handle is-empty' });
+          const blank = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));
           blank.setAttribute('aria-hidden', 'true');
           const add = el('button', { class: 'ps-open is-empty' }, blank, el('span', { class: 'ps-desc', text: 'empty' }));
           add.title = `Slot ${cell.slot} — nothing recorded. Tap to add a breaker.`;
@@ -9895,8 +9895,14 @@ function addPanelScheduleSection(nav     , sections     ) {
           box.appendChild(add);
         } else {
           cell.halves.forEach(b => {
-            // The handle is the breaker as it looks in the panel, not a control: nothing here can switch one.
-            const handle = el('span', { class: 'ps-handle is-' + b.state });
+            // The breaker as it looks in the panel, not a control: nothing here can switch one. A double-pole
+            // is two handles with a tie between them, as it is on the wall.
+            const poles = b.poles === 2 && cell.span === 2 ? 2 : 1;
+            const handle = el('span', { class: 'ps-breaker is-' + b.state });
+            for (let i = 0; i < poles; i++)
+              handle.appendChild(el('span', { class: 'ps-pole is-' + b.state },
+                el('span', { class: 'ps-throw', text: b.amps ? String(b.amps) : '' })));
+            if (poles === 2) handle.appendChild(el('span', { class: 'ps-tie' }));
             handle.setAttribute('aria-hidden', 'true');
             const open = el('button', { class: 'ps-open' },
               handle,
@@ -9920,7 +9926,7 @@ function addPanelScheduleSection(nav     , sections     ) {
           const lone = cell.halves.length === 1 ? cell.halves[0] : null;
           if (lone?.half) {
             const missing = lone.half === 1 ? 2 : 1;
-            const vacant = el('span', { class: 'ps-handle is-empty' });
+            const vacant = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));
             vacant.setAttribute('aria-hidden', 'true');
             const other = el('button', { class: 'ps-open is-empty' }, vacant,
               el('span', { class: 'ps-desc', text: missing === 1 ? 'empty upper half' : 'empty lower half' }));

@@ -177,18 +177,27 @@ if (!/B06/.test(textOf(cellAt(6)))) fail(`a breaker's own number is not shown: $
 // It reads as a panel: an enclosure with a bus bar down the middle and a handle on every breaker.
 if (!query(sec, '.ps-panel')) fail('the schedule is not drawn inside a panel enclosure');
 if (!query(sec, '.ps-bus')) fail('the panel has no bus bar down the middle');
-if (!query(cellAt(6), '.ps-handle')) fail('a breaker has no handle');
+if (!query(cellAt(6), '.ps-breaker')) fail('a breaker is not drawn as one');
+// A double-pole is two handles tied together, as it is on the wall; a single-pole is one and no tie.
+const polesIn = (slot) => query(cellAt(slot), '.ps-pole', true).length;
+if (polesIn(1) !== 2) fail(`the double-pole is drawn with ${polesIn(1)} handles`);
+if (!query(cellAt(1), '.ps-tie')) fail('the double-pole\u2019s handles are not tied together');
+if (polesIn(6) !== 1) fail(`a single-pole breaker is drawn with ${polesIn(6)} handles`);
+if (query(cellAt(6), '.ps-tie')) fail('a single-pole breaker was given a tie');
+// The rating is stamped on the handle, as it is on the real thing.
+const stamped = query(cellAt(1), '.ps-throw', true).map(t => t.textContent);
+if (JSON.stringify(stamped) !== JSON.stringify(['60', '60'])) fail(`the rating is not stamped on both handles: ${stamped.join(',')}`);
+if (query(cellAt(9), '.ps-throw')?.textContent) fail('a breaker with no rating stamped something on its handle');
 // The handle is how a breaker looks, not a control: nothing here can switch one, so it carries no wording
 // and is hidden from anything reading the page aloud.
-const handle = query(cellAt(6), '.ps-handle');
-if ((handle.textContent || '').trim()) fail(`the handle is labelled "${handle.textContent}", so it reads as a button that does something`);
-if (handle.attrs['aria-hidden'] !== 'true') fail('the decorative handle is not hidden from assistive tech');
-if (handle.tag === 'button') fail('the handle is a button, but nothing can switch a breaker from here');
-if (!query(cellAt(9), '.ps-handle').classList.contains('is-unknown'))
+const handle = query(cellAt(6), '.ps-breaker');
+if (handle.attrs['aria-hidden'] !== 'true') fail('the drawn breaker is not hidden from assistive tech');
+if (handle.tag === 'button') fail('the breaker is a button, but nothing can switch one from here');
+if (!query(cellAt(9), '.ps-pole').classList.contains('is-unknown'))
   fail('an unidentified breaker’s handle does not show it');
 if (!cellAt(1).classList.contains('is-left') || !cellAt(2).classList.contains('is-right'))
   fail('the cells do not know which side of the bus they are on, so the handles cannot face it');
-for (const rule of ['.ps-bus', '.ps-handle'])
+for (const rule of ['.ps-bus', '.ps-pole', '.ps-tie'])
   if (!new RegExp(rule.replace('.', '\\.') + '\\s*\\{').test(css)) fail(`the stylesheet has no ${rule} rule`);
 
 // Power comes from the node measuring the breaker; a breaker nothing measures reads no data, never zero.
