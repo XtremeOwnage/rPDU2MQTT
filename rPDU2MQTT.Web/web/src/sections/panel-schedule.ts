@@ -330,6 +330,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const history = (panel: Panel, b: Breaker) => {
     const channels = b.legs.map(l => l.channel).filter(Boolean) as string[];
     const plot = el('div', { class: 'ps-chart' });
+    const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
     const note = el('div', { class: 'desc' });
     let window = WINDOWS[1][0];
 
@@ -356,6 +357,13 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         return total as number | null;
       });
       const known = values.filter((v): v is number => v != null);
+      // What the line is: the breaker, and the channels it is summed from.
+      legend.innerHTML = '';
+      legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+        el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }),
+        `${b.number}${b.description ? ' — ' + b.description : ''}`));
+      channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+        `${labelOf(ch)} (${ch})`)));
       plot.appendChild(sparkline({
         values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160,
         at: (i: number) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
@@ -377,10 +385,19 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
+    // The node measuring it is a thing of its own — its bindings and its label live on the Nodes page.
+    const toNode = btn('Edit node');
+    toNode.hidden = !channels.length;
+    toNode.title = channels.length ? `Open ${labelOf(channels[0])} (${channels[0]}) in the node editor.` : '';
+    toNode.onclick = () => {
+      closeSheet();
+      editNodeOnNextOpen(channels[0]);
+      (Array.from(document.querySelectorAll('nav a')) as any[]).find(a => a.dataset.label === 'Nodes')?.click();
+    };
     openSheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      body: el('div', {}, picker, plot, note),
-      footer: [toEditor],
+      body: el('div', {}, picker, plot, legend, note),
+      footer: [toNode, toEditor],
     });
     load();
   };

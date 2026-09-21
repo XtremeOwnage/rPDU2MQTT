@@ -408,6 +408,44 @@ if (!/peak 180 W/.test(sheet().textContent || '')) fail('the chart does not summ
 // samples, one of them missing.
 if (!/5 of 6 readings/.test(sheet().textContent || ''))
   fail(`a missing reading was counted rather than left as a gap: "${(sheet().textContent || '').slice(0, 140)}"`);
+
+// The line is named rather than left to be guessed.
+const key = query(sheet(), '.ps-legend');
+if (!key) fail('the chart has no legend');
+if (!query(key, '.trend-swatch')) fail('the legend has no colour to tie to the line');
+if (!/B06/.test(key.textContent || '') || !/n30_1_5/.test(key.textContent || ''))
+  fail(`the legend does not name the breaker and the channel: "${key.textContent}"`);
+
+// Hovering the chart says what it was reading at that moment — and the card has to sit above the sheet it is
+// drawn in, which is what a z-index of 45 under an overlay of 50 did not do.
+const hit = query(sheet(), 'rect', true).find(r => r.attrs.class === 'spark-hit');
+if (!hit) fail('the chart has no hover target');
+const plot = query(sheet(), 'svg', true)[0];
+plot.getBoundingClientRect = () => ({ left: 0, top: 0, width: 600, height: 160 });
+hit._on.mousemove[0]({ clientX: 600, clientY: 80 });
+const hover = query(sandbox.document.body, '.node-card', true)[0];
+if (!hover) fail('hovering the chart showed no card');
+if (!hover.classList.contains('show')) fail('the hover card was built but never shown');
+if (!/180 W/.test(hover.textContent || '')) fail(`the hover card does not say the reading: "${hover.textContent}"`);
+const cardRule = /\.node-card\s*\{([^}]*)\}/.exec(css), overlayRule = /\.overlay\s*\{([^}]*)\}/.exec(css);
+const zOf = (r) => Number((/z-index:\s*(\d+)/.exec(r ? r[1] : '') || [])[1]);
+if (!(zOf(cardRule) > zOf(overlayRule)))
+  fail(`the hover card (z-index ${zOf(cardRule)}) sits under the sheet it is drawn in (${zOf(overlayRule)})`);
+// A reading the backend does not have says so rather than showing a number.
+hit._on.mousemove[0]({ clientX: 360, clientY: 80 });
+if (!/no reading/.test(hover.textContent || '')) fail(`a gap in the chart hovers as a value: "${hover.textContent}"`);
+
+// The node measuring it is one tap away, beside the breaker's own editor.
+const toNode = query(sheet(), 'button', true).find(b => b.textContent === 'Edit node');
+if (!toNode || toNode.hidden) fail('the chart offers no way to open the node measuring the breaker');
+toNode.onclick();
+await wait(80);
+if (!query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Nodes').classList.contains('active'))
+  fail('Edit node did not open the Nodes page');
+link.click();
+await wait(120);
+drawingNow.onclick();
+await wait(120);
 // The window is picked here, and asked for at the step that window deserves.
 const asks = () => series.slice();
 if (!asks().some(u => /minutes=1440&step=900/.test(u))) fail(`the day window was not asked for: ${asks().join(' | ')}`);
