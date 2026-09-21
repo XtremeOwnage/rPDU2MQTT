@@ -31,7 +31,7 @@ namespace rPDU2MQTT.Services.Gui;
 /// Optional embedded web GUI for viewing, editing and testing the configuration.
 /// Hosts a small Kestrel app (Basic-auth protected) only when Gui.Enabled is set.
 /// </summary>
-public sealed class GuiService : IHostedService, IAsyncDisposable
+public sealed partial class GuiService : IHostedService, IAsyncDisposable
 {
     private readonly Config config;
     private readonly IHiveMQClient mqtt;
@@ -377,7 +377,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
         // The same rule the exporter applies.
-        var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native);
+        var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native)
+            .Concat(Core.Flow.LocationExport.DeviceIds(config.EnergyFlow)).ToList();
 
         var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
 
@@ -1116,6 +1117,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
+
+        MapLocationEndpoints(app);
 
         // Restart a tier — or everything.
         app.MapPost("/api/restart", async (HttpContext ctx) =>

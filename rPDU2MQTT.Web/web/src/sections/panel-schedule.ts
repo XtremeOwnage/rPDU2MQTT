@@ -6,6 +6,7 @@ import { sparkline } from '../charts.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { column, rowOf } from '../panel-layout.js';
+import { locationChoices, choiceSelect } from '../location-options.js';
 
 /// A breaker as the API reports it, with its chain and power resolved.
 type Leg = { leg: number; wire: string; clamp: string | null; channel: string | null; reversed: boolean };
@@ -58,12 +59,15 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   nodeSel.title = 'The energy-flow node that is this panel. Its reading is the power coming in, and a circuit mapped to one of its breakers is placed beneath it.';
   const feeders = el('span', { class: 'ps-feeders' });
   const feedAdd = el('select', { class: 'ps-feed-add' }) as HTMLSelectElement;
+  // Where the panel is mounted, from the locations on the Floor Plans page.
+  const whereBox = el('span', { class: 'ps-where' });
   feedAdd.title = 'Add a node that feeds this panel.';
   const settings = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('label', { class: 'ld-inst' }, 'Name ', nameIn),
     el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
     el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
-    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
+    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd),
+    el('label', { class: 'ld-inst' }, 'Mounted in ', whereBox));
   sec.appendChild(settings);
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
@@ -277,6 +281,23 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     wholeBox.onchange = () => drawPickers();
     drawPickers();
 
+    // The rooms and areas the circuit serves (#459), and what is placed on it on the floor plans (#464).
+    const served = new Set<string>(entry?.Rooms || []);
+    const serves = el('div', { class: 'ps-serves' });
+    const places = locationChoices();
+    places.forEach(([id, label]) => {
+      const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
+      cb.checked = served.has(id);
+      cb.onchange = () => { if (cb.checked) served.add(id); else served.delete(id); };
+      serves.appendChild(el('label', { class: 'ld-inst' }, cb, ' ' + label.trim()));
+    });
+    const servesField = field('Serves', places.length ? serves : el('div', { class: 'desc', text: 'No rooms yet — add them on the Floor Plans page.' }),
+      'The rooms and areas this circuit feeds. A room then lists it among the circuits serving it.');
+    const onIt = ((state.data?.EnergyFlow?.Placements || []) as any[]).filter(p => wasNumber && p.Circuit === `${panel.id}/${wasNumber}`);
+    const placedField = field('Placed on it', onIt.length
+      ? el('ul', { class: 'ps-placed' }, ...onIt.map(p => el('li', { text: `${p.Label || p.Kind}${p.Room ? ' — ' + p.Room : ''}` })))
+      : el('div', { class: 'desc', text: 'Nothing on the floor plans is linked to this circuit.' }));
+
     const save = btn('Apply', 'primary');
     save.onclick = () => {
       const panelNode = configPanel(panel.id)?.Node || '';
@@ -307,13 +328,17 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       target.Poles = Number(poles.value) || 1;
       target.Half = half.value ? Number(half.value) : null;
       target.State = stateSel.value;
+      target.Rooms = [...served];
       if (!entry) {
         const p = configPanel(panel.id);
         if (p) ensure(p, 'Breakers', []).push(target);
       }
-      // A renamed breaker keeps the clamps that were recorded against its old number.
-      if (wasNumber && wasNumber !== newNumber)
+      // A renamed breaker keeps the clamps, placements and devices that were recorded against its old number.
+      if (wasNumber && wasNumber !== newNumber) {
         clampsIn().filter((c: any) => c.Panel === panel.id && c.Breaker === wasNumber).forEach((c: any) => { c.Breaker = newNumber; });
+        const was = `${panel.id}/${wasNumber}`, now = `${panel.id}/${newNumber}`;
+        [...((flowIn().Placements || []) as any[]), ...((flowIn().Nodes || []) as any[])].forEach((x: any) => { if (x.Circuit === was) x.Circuit = now; });
+      }
       const whole = target.Poles === 2 && wholeBox.checked;
       pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
       // One CT for the whole circuit leaves no second leg to record.
@@ -344,7 +369,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
         field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows),
+        field('State', stateSel), pickerRows, servesField, placedField),
       footer: [save, remove],
     });
   };
@@ -460,6 +485,11 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const slots = Number(cfg?.Slots) || drawn.slots;
     const rows = Math.ceil(slots / 2);
     nameIn.value = cfg?.Name ?? drawn.name;
+    whereBox.innerHTML = '';
+    const whereSel = choiceSelect(locationChoices(), cfg?.Location || '', '— not placed —');
+    whereSel.title = 'The room, area or floor this panel is mounted in.';
+    whereSel.onchange = () => { if (cfg) { cfg.Location = whereSel.value || undefined; refreshDirty(); } };
+    whereBox.appendChild(whereSel);
     slotsIn.value = String(slots);
 
     // Which node is this panel, and what feeds it.

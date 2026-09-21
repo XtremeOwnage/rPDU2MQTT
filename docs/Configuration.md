@@ -1156,6 +1156,129 @@ Notes:
   says how much more leaves it than arrives. On lifetime energy that is expected; on `Energy today` it means
   a feeder is missing or not reporting.
 
+### Floor plans
+
+The **Floor Plans** page (under Energy Flow) draws each floor with its rooms and areas, the outlets, fixtures
+and devices placed in them, and the circuits feeding them. In **View** each room is shaded by what it draws now,
+today, or this week; **Rooms** draws and edits the outlines; **Place** drops items onto the plan. It is built to
+be used on a tablet while walking the house: pinch to zoom, drag to pan, and the side panel drops below the plan
+on a narrow screen.
+
+Locations are a model of their own, next to the electrical hierarchy:
+
+```yaml
+EnergyFlow:
+  Sites:
+    - Id: home
+      Name: Home
+      Floors:
+        - Id: ground
+          Name: Ground floor
+          Level: 0                       # -1 basement, 1 upstairs; floors are listed in this order
+          Image: 3f9c0e1a2b4d5e6f7a8b9c0d.png   # an uploaded plan, by id (see Plan storage below)
+          Width: 1000                    # drawing units; set from the image's proportions on upload
+          Height: 700
+          Rooms:
+            - Id: kitchen
+              Name: Kitchen
+              Shape: [{X: 0, Y: 0}, {X: 400, Y: 0}, {X: 400, Y: 300}, {X: 0, Y: 300}]
+          Areas:
+            - Id: front
+              Name: Front of house
+              Rooms: [kitchen, office]   # an area takes in whole rooms, and may have an outline of its own
+  Placements:
+    - Id: fridge
+      Kind: appliance                    # outlet, switch, fixture, appliance or device
+      Label: Fridge
+      Room: kitchen
+      X: 120
+      Y: 80
+      Circuit: main_panel/B06            # panel id / breaker number; blank when nobody knows yet
+      Node: fridge_plug                  # the node metering it, if one does
+  AutoLocations:                         # for derived nodes, which have no entry of their own
+    - Match: "outlet:rack_pdu_1:*"
+      Location: office
+  Nodes:
+    - Id: fridge_plug
+      Location: kitchen                  # where a node is
+      Circuit: main_panel/B06            # the circuit it is plugged into
+  Panels:
+    - Id: main_panel
+      Location: garage                   # where the panel is mounted
+      Breakers:
+        - Number: B06
+          Rooms: [kitchen, garage]       # the rooms and areas this circuit serves
+          Node: ""                       # the node that is this circuit; blank uses the one channel measuring it
+```
+
+Ids are shared by sites, floors, rooms and areas, so each must be unique across all of them.
+
+**Where a node is.** Its own `Location`; else an `AutoLocations` rule naming its exact id; else a placement
+metering it; else a wildcard rule; else the rooms its circuit serves (a circuit serving two rooms counts toward
+the smallest place holding both — their area, or their floor). A node with none of these is where its feeder is.
+
+**How a room is totalled.** What flows into the room from outside is counted and what flows back out is taken
+off, so a node between two others in the same room does not need a meter of its own. A total that needs a
+reading nobody has is **unknown** and shown as *no data* — never a partial sum, and never 0. A room with nothing
+metered in it is **unmetered**, which is drawn hatched and is not the same as drawing nothing. A room counts
+toward its areas, its floor and its site.
+
+**Circuits.** A circuit lists the metered devices on it and its **unmetered remainder**: the circuit's reading
+less what is metered on it. The remainder is only reported when every part of it is known. When what is
+metered reads more than the circuit itself, it is flagged — a device is recorded against the wrong circuit or a
+CT is on the wrong wire — and the remainder is left negative rather than clamped. Linking a metered device to a
+circuit offers to place it beneath the circuit in the energy flow; nothing is moved without saying so.
+
+**Tracing an outlet's circuit.** Select an item on an unknown circuit and choose *Trace its circuit*. Plug a
+load into it (or switch the fixture), then switch it on and off, tapping between: the channel that follows every
+switch is the circuit, and the page offers to link the item to that channel's breaker.
+
+**Rooms from tags.** *Tools › Rooms from tags* lists every tag in use, suggests which read like rooms or areas,
+and shows exactly what each would become — places created, nodes placed, rules added, tags removed, and what is
+left alone — before anything is written.
+
+#### Plan storage
+
+Plan images are never written into the configuration: a Kubernetes custom resource is stored in etcd with a
+limit of about 1.5 MB and is rewritten on every save. They go to plan storage instead, and the floor refers to
+them by id. Uploads are PNG, JPEG, WebP or SVG up to `PlanStorage.MaxMegabytes` (10 by default); a phone photo is
+decoded upright and shrunk in the browser before it is sent. A HEIC photo needs converting to JPEG first. A floor
+whose image is missing or unreadable is drawn on a grid and stays usable.
+
+```yaml
+PlanStorage:
+  Directory: /data/plans        # a persistent volume. Blank uses $RPDU2MQTT_PLANS_DIRECTORY, else 'plans' beside the program
+  MaxMegabytes: 10
+  ObjectStore:                  # an S3-compatible bucket instead of a directory; setting Bucket switches to it
+    Endpoint: http://minio:9000
+    Bucket: house
+    Region: us-east-1
+    AccessKeyId: rpdu2mqtt
+    # SecretAccessKey: from RPDU2MQTT_PLANS_SECRET_KEY
+    Prefix: floorplans/
+    PathStyle: true
+```
+
+- **Kubernetes:** set `floorPlans.persistence.enabled: true` in the chart. It creates a PVC (kept on uninstall),
+  mounts it at `floorPlans.mountPath` on the pod serving the GUI, and points the bridge at it. Use
+  `floorPlans.persistence.existingClaim` for a claim you manage. For a bucket instead, put the secret key in
+  `credentials.plansSecretKey`.
+- **Docker Compose:** mount a volume and point `PlanStorage.Directory` (or `RPDU2MQTT_PLANS_DIRECTORY`) at it.
+- **Plain binary:** any directory the process can write.
+
+#### Rooms in Home Assistant
+
+- Every device this bridge publishes carries its room as `suggested_area` in MQTT discovery, so a new device
+  lands in the right area on its own. (Home Assistant only applies it when it first sees the device.)
+- With the MQTT export on, every room, area, floor and site is published as a tier of its own — power, lifetime
+  energy and energy today — with a device filed in the room's area, ready for the Energy dashboard. A place whose
+  total is unknown is not published.
+- *Tools › Publish rooms to Home Assistant* creates an area for each room, matches existing ones by name, and
+  renames an area it linked before when the room is renamed. It files this bridge's devices that have no area in
+  their room's area and leaves any device someone already put somewhere alone. Everything is previewed first.
+  Removing a room leaves its Home Assistant area in place, and the preview says so. It uses the URL and token
+  under **Home Assistant › Energy Dashboard**. Save afterwards so each room remembers its area.
+
 ## Example Configurations
 
 Here- are a few example configuration files.
