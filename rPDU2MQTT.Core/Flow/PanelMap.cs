@@ -76,9 +76,18 @@ public sealed class PanelMap
         chains.FirstOrDefault(c => c.Legs.Any(l => Same(l.Clamp?.Label, label)));
 
     /// <summary>
+    /// Metrics that do not add up across a breaker's legs. The two poles of a 240 V circuit carry the same
+    /// current at the same voltage, so the breaker's figure is the larger leg's, never their sum — adding
+    /// them would report a 20 A circuit as 40 A and light every warning on the panel.
+    /// </summary>
+    private static bool AddsUp(string metric) =>
+        !string.Equals(metric, "current", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(metric, "voltage", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// A breaker's power: the sum of its legs, or null when any leg has no clamp, no channel or no reading.
     /// Half of a double-pole breaker is not the breaker's power, and a reversed clamp is flipped rather than
-    /// believed as a negative load.
+    /// believed as a negative load. Current and voltage take the larger leg instead of the sum.
     /// </summary>
     public static double? Power(BreakerChain chain, IFlowValueSource? live, string metric = FlowGraphBuilder.DefaultMetric)
         => Power(chain, live, metric, out _);
@@ -92,13 +101,15 @@ public sealed class PanelMap
             ? chain.Legs.Where(l => l.Clamp?.Whole == true).ToList()
             : chain.Legs;
 
+        var adds = AddsUp(metric);
         double total = 0;
         foreach (var leg in legs)
         {
             if (leg.Clamp is null) { gap = PowerGap.NoClamp; return null; }
             if (leg.Channel is null) { gap = PowerGap.NoChannel; return null; }
             if (live is null || !live.TryGetValue(leg.Channel, metric, out var value)) { gap = PowerGap.NoReading; return null; }
-            total += leg.Clamp.Reversed ? -value : value;
+            var reading = leg.Clamp.Reversed ? -value : value;
+            total = adds ? total + reading : Math.Max(total, reading);
         }
         gap = PowerGap.None;
         return total;

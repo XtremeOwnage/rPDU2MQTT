@@ -1155,6 +1155,16 @@
 .ps-chart { margin: var(--sp-2) 0; overflow-x: auto; }
 .ps-chart .spark { width: 100%; height: auto; }
 .ps-power.is-nodata { color: var(--faint); font-style: italic; }
+/* How hard the circuit is working against the breaker holding it, from its current against its rating. */
+.ps-power.is-easy { color: var(--good); }
+.ps-power.is-busy { color: var(--warn); }
+.ps-power.is-over { color: var(--bad); font-weight: 700; }
+/* A breaker holding two slots has the room of two: its details are read at that size. */
+.ps-cell.is-double { justify-content: center; }
+.ps-cell.is-double .ps-desc { font-size: 15px; }
+.ps-cell.is-double .ps-power { font-size: 14px; }
+.ps-cell.is-double .ps-num { font-size: 13px; }
+.ps-unit { min-width: 6em; }
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }

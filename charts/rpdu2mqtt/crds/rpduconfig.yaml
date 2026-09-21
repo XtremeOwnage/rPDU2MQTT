@@ -1240,6 +1240,16 @@ spec:
                               Description:
                                 type: string
                                 description: What this breaker feeds, in the words the directory uses. For example 'Lights, Garage, Kitchen'.
+                              Gauge:
+                                type: string
+                                description: "The wire's gauge, as written on the cable — for example '12 AWG THWN' or '6 AWG'. Free text: the rating that matters is the breaker's, and the gauge is what says whether the wire can carry it."
+                              Conductor:
+                                type: string
+                                enum:
+                                - ''
+                                - copper
+                                - aluminium
+                                description: What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.
                               State:
                                 type: string
                                 enum:

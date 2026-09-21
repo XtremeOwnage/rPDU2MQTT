@@ -90,6 +90,26 @@ public class PanelMapTests
     }
 
     [Fact]
+    public void CurrentDoesNotAddUpAcrossTheLegs()
+    {
+        // Both poles of a 240 V circuit carry the same current, so a 20 A breaker reading 18 A on each leg is
+        // drawing 18 A, not 36 A — which would be over its rating and wrong.
+        var map = PanelMap.For(Wiring());
+        var live = new Fixed(new()
+        {
+            ["n30_1_1|current"] = 18, ["n30_1_2|current"] = 17.6,
+            ["n30_1_1|realpower"] = 2100, ["n30_1_2|realpower"] = 2050,
+            ["n30_1_1|voltage"] = 121.2, ["n30_1_2|voltage"] = 120.8,
+        });
+        var range = map.Breaker("main_panel", "1,3")!;
+
+        Assert.Equal(18, PanelMap.Power(range, live, "current"));
+        Assert.Equal(121.2, PanelMap.Power(range, live, "voltage"));
+        // Power still adds: the two legs are carrying separate halves of the load.
+        Assert.Equal(4150, PanelMap.Power(range, live, "realpower"));
+    }
+
+    [Fact]
     public void HalfADoublePole_IsNotTheBreakersPower()
     {
         var map = PanelMap.For(Wiring());

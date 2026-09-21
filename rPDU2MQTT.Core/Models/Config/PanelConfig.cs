@@ -97,6 +97,14 @@ public class BreakerConfig
     [Description("What this breaker feeds, in the words the directory uses. For example 'Lights, Garage, Kitchen'.")]
     public string Description { get; set; } = "";
 
+    /// <summary>The conductor size of the wire leaving this breaker, as it is written on the cable.</summary>
+    [Description("The wire's gauge, as written on the cable — for example '12 AWG THWN' or '6 AWG'. Free text: the rating that matters is the breaker's, and the gauge is what says whether the wire can carry it.")]
+    public string Gauge { get; set; } = "";
+
+    [AllowedValues("copper", "aluminium")]
+    [Description("What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.")]
+    public string Conductor { get; set; } = "";
+
     /// <summary>Identified, not yet identified, or an empty slot. New breakers start unknown: a blank row claims nothing.</summary>
     [AllowedValues(BreakerState.Identified, BreakerState.Unknown, BreakerState.Unused)]
     [DefaultValue(BreakerState.Unknown)]

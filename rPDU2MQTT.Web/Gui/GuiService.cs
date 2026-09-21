@@ -1069,10 +1069,15 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                         half = chain.Breaker.Half,
                         amps = chain.Breaker.Amps,
                         wire = chain.Breaker.Wire,
+                        gauge = chain.Breaker.Gauge,
+                        conductor = chain.Breaker.Conductor,
                         description = chain.Breaker.Description,
                         state = Models.Config.BreakerState.Of(chain.Breaker.State),
                         // Null power is a gap, never a zero: `gap` says which link of the chain is missing.
                         power,
+                        // What it is drawing in amps, so the panel can show that instead and say how close to
+                        // the breaker's rating it is. Read, never inferred from watts.
+                        current = Core.Flow.PanelMap.Power(chain, live, "current"),
                         gap = gap.ToString().ToLowerInvariant(),
                         legs = chain.Legs.Select(l => new
                         {

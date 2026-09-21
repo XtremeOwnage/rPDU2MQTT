@@ -25,20 +25,27 @@ const config = {
       Id: 'main_panel', Name: 'Main Panel', Slots: 12,
       Breakers: [
         { Slot: 1, Number: '1,3', Poles: 2, Amps: 60, Description: 'AC Heat Strips', State: 'identified' },
-        { Slot: 6, Number: 'B06', Wire: 'W11', Amps: 20, Description: 'Lights, Garage, Kitchen', State: 'identified' },
+        { Slot: 6, Number: 'B06', Wire: 'W11', Gauge: '12 AWG THWN', Conductor: 'copper', Amps: 20, Description: 'Lights, Garage, Kitchen', State: 'identified' },
         { Slot: 9, Number: 'B09', Wire: 'W04', Description: 'Bathroom Lights', State: 'unknown' },
+        { Slot: 10, Number: 'B10', Wire: 'W13', Amps: 15, Description: 'Garage Freezer', State: 'identified' },
+        // Measured, but nobody has written down what breaker holds it.
+        { Slot: 12, Number: 'B12', Wire: 'W14', Description: 'Hall lights', State: 'identified' },
       ],
     }],
     Clamps: [
       { Label: 'C2', Panel: 'main_panel', Breaker: '1,3', Leg: 1, Wire: 'W01', Channel: 'n30_1_1' },
       { Label: 'C3', Panel: 'main_panel', Breaker: '1,3', Leg: 2, Wire: 'W02', Channel: 'n30_1_2' },
       { Label: 'C1', Panel: 'main_panel', Breaker: 'B06', Leg: 1, Wire: 'W11', Channel: 'n30_1_5' },
+      { Label: 'C5', Panel: 'main_panel', Breaker: 'B10', Leg: 1, Wire: 'W13', Channel: 'n30_1_8' },
+      { Label: 'C6', Panel: 'main_panel', Breaker: 'B12', Leg: 1, Wire: 'W14', Channel: 'n30_1_9' },
     ],
   },
 };
 
 // What each monitor channel reads.
-const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, main_panel: 2600 };
+const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, n30_1_9: 150, main_panel: 2600 };
+// What each channel reads in amps: the kitchen circuit is working hard against its 20 A breaker.
+const amps = { n30_1_1: 9.2, n30_1_2: 9.4, n30_1_5: 17.2, n30_1_8: 9.5, n30_1_9: 1.3 };
 // What the mains are sitting at, where anything measures it.
 const voltage = { main_panel: 241.3 };
 const nodes = [
@@ -46,6 +53,7 @@ const nodes = [
   { id: 'n30_1_2', label: 'N30 1-2', kind: 'breaker', value: 1150 },
   { id: 'n30_1_5', label: 'N30 1-5', kind: 'breaker', value: 240 },
   { id: 'n30_1_8', label: 'N30 1-8', kind: 'breaker', value: 100 },
+  { id: 'n30_1_9', label: 'N30 1-9', kind: 'breaker', value: 150 },
   { id: 'main_panel', label: 'Main Panel', kind: 'panel', value: 2600 },
   { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 },
   { id: 'main_panel#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 60 },
@@ -68,18 +76,21 @@ const resolve = (flow) => ({
       }
       // One CT measuring the whole circuit is the breaker's power; the other leg is then not expected.
       const counted = legs.some(l => l.whole) ? legs.filter(l => l.whole) : legs;
-      let sum = 0, gap = 'none';
+      let sum = 0, gap = 'none', current = null;
       for (const l of counted) {
         if (!l.clamp) { gap = 'noclamp'; break; }
         if (!l.channel) { gap = 'nochannel'; break; }
         if (reading[l.channel] == null) { gap = 'noreading'; break; }
         sum += reading[l.channel];
+        // Both legs of a 240 V circuit carry the same current, so the breaker's figure is the larger leg's.
+        if (amps[l.channel] != null) current = Math.max(current ?? 0, amps[l.channel]);
       }
       return {
         slot: b.Slot, occupies: (b.Poles || 1) === 2 ? [b.Slot, b.Slot + 2] : [b.Slot],
         number: b.Number, poles: b.Poles || 1, half: b.Half ?? null, amps: b.Amps ?? null,
-        wire: b.Wire || '', description: b.Description || '', state: b.State || 'unknown',
-        power: gap === 'none' ? sum : null, gap, legs,
+        wire: b.Wire || '', gauge: b.Gauge || '', conductor: b.Conductor || '',
+        description: b.Description || '', state: b.State || 'unknown',
+        power: gap === 'none' ? sum : null, current: gap === 'none' ? current : null, gap, legs,
       };
     }),
   })),
@@ -215,6 +226,33 @@ if (/\b0 W/.test(textOf(unmapped()))) fail(`an unmapped breaker reads as zero: $
 if (!/measuring this breaker/i.test(readings(9)[0].title || ''))
   fail(`nothing says why the power is missing: "${readings(9)[0].title}"`);
 
+// The same reading in the unit the question is being asked in, and coloured by how hard the circuit is
+// working against the breaker holding it.
+const unit = () => query(sec, '.ps-unit');
+if (!unit()) fail('there is no way to switch between watts and amps');
+if (!/240 W/.test(textOf(cellAt(6)))) fail('the panel does not open in watts');
+const power6 = () => readings(6)[0];
+// 17.2 A of a 20 A breaker is 86% of it; 9.5 of 15 is 63%; 9.4 of 60 is 16%.
+if (!power6().classList.contains('is-over')) fail(`17.2 A of a 20 A breaker is not marked as over: ${power6().className}`);
+if (!readings(10)[0].classList.contains('is-busy')) fail(`9.5 A of a 15 A breaker is not marked as busy: ${readings(10)[0].className}`);
+if (!readings(1)[0].classList.contains('is-easy')) fail(`9.4 A of a 60 A breaker is not marked as easy: ${readings(1)[0].className}`);
+if (!/17\.2 A of 20 A/.test(power6().title || '')) fail(`the reading does not say how it sits against the rating: "${power6().title}"`);
+// A breaker with no rating is reading 1.3 A, and is still not coloured: how hard it is working is a
+// question about its rating, and inventing one would answer it with a number nobody wrote down.
+if (/is-(easy|busy|over)/.test(readings(12)[0].className || ''))
+  fail(`a breaker with no rating was coloured anyway: ${readings(12)[0].className}`);
+unit().value = 'A';
+unit().onchange({});
+await wait(60);
+if (!/17\.2 A/.test(textOf(cellAt(6)))) fail(`switching to amps did not change the reading: ${textOf(cellAt(6))}`);
+if (/240 W/.test(textOf(cellAt(6)))) fail('the watts reading stayed after switching to amps');
+unit().value = 'W';
+unit().onchange({});
+await wait(60);
+
+// The wire's gauge is on the row, beside its label and rating.
+if (!/12 AWG THWN/.test(textOf(cellAt(6)))) fail(`the wire's gauge is not shown: ${textOf(cellAt(6))}`);
+
 // The gaps in the directory are visible at a glance.
 if (!/\?\?\?\?/.test(textOf(unmapped()))) fail(`an unknown breaker is not marked as unidentified: ${textOf(unmapped())}`);
 const empty = () => cells().find(c => c.classList.contains('is-empty'));
@@ -277,12 +315,12 @@ const hunt = () => query(sheet(), '.ps-hunt');
 const shownCount = () => (query(sheet(), 'span', true).map(s => s.textContent).find(t => /channels$/.test(t || '')) || '');
 const optionsOf = () => (nodeSel().children || []).map(o => o.value).filter(Boolean);
 if (!hunt()) fail('the channel picker cannot be searched');
-if (!/4 of 4 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
+if (!/5 of 5 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
 hunt().value = '1_8';
 hunt().oninput({});
 await wait(30);
 if (JSON.stringify(optionsOf()) !== JSON.stringify(['n30_1_8'])) fail(`typing did not narrow the list: ${optionsOf().join(', ')}`);
-if (!/1 of 4 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
+if (!/1 of 5 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
 // A filter that matches nothing must not quietly unpick what is already chosen.
 nodeSel().value = 'n30_1_8';
 hunt().value = 'zzz';
@@ -294,7 +332,7 @@ if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out 
 hunt().value = '';
 hunt().oninput({});
 await wait(30);
-if (optionsOf().length !== 4) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
+if (optionsOf().length !== 5) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
 
 nodeSel().value = 'n30_1_8';
 await apply();

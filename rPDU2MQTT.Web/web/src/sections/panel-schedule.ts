@@ -11,7 +11,8 @@ import { column, rowOf } from '../panel-layout.js';
 type Leg = { leg: number; wire: string; clamp: string | null; channel: string | null; reversed: boolean };
 type Breaker = {
   slot: number; number: string; poles: number; half: number | null; amps: number | null;
-  wire: string; description: string; state: string; power: number | null; gap: string; legs: Leg[];
+  wire: string; gauge: string; conductor: string; description: string; state: string;
+  power: number | null; current: number | null; gap: string; legs: Leg[];
 };
 type Panel = { id: string; name: string; slots: number; rows: number; node: string; incoming: number | null; volts: number | null; breakers: Breaker[] };
 
@@ -39,9 +40,14 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const panelSel = el('select', { title: 'Which panel to show.' }) as HTMLSelectElement;
   const refresh = btn('Refresh');
   const addPanel = btn('Add panel');
+  // Watts or amps: the same reading, in the unit the question is being asked in.
+  const unitSel = el('select', { class: 'ps-unit' }) as HTMLSelectElement;
+  [['W', 'watts'], ['A', 'amps']].forEach(([v, t]) => unitSel.appendChild(el('option', { value: v, text: t })));
+  unitSel.title = 'Show what each breaker is drawing in watts, or in amps against its rating.';
+  unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), refresh, addPanel, status));
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
@@ -202,6 +208,10 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const number = text(b?.number || String(slot), 'as written, e.g. B06 or 26.1');
     const description = text(b?.description || '', 'what it feeds');
     const wire = text(b?.wire || '', 'e.g. W11');
+    const gauge = text(b?.gauge || '', 'e.g. 12 AWG THWN');
+    const conductor = el('select', {}) as HTMLSelectElement;
+    [['', 'not stated'], ['copper', 'copper'], ['aluminium', 'aluminium']].forEach(([v, t]) => conductor.appendChild(el('option', { value: v, text: t })));
+    conductor.value = b?.conductor || '';
     const amps = el('input', { type: 'number', min: '1', placeholder: 'e.g. 20' }) as HTMLInputElement;
     amps.value = b?.amps == null ? '' : String(b.amps);
     const poles = el('select', {}) as HTMLSelectElement;
@@ -291,6 +301,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       target.Number = newNumber;
       target.Description = description.value.trim();
       target.Wire = wire.value.trim();
+      target.Gauge = gauge.value.trim();
+      target.Conductor = conductor.value;
       target.Amps = amps.value ? Number(amps.value) : null;
       target.Poles = Number(poles.value) || 1;
       target.Half = half.value ? Number(half.value) : null;
@@ -329,7 +341,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     openSheet({
       title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
       body: el('div', {}, field('Breaker number', number), field('What it feeds', description),
-        field('Wire label', wire), field('Rating (A)', amps), field('Poles', poles),
+        field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
+        field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
         field('State', stateSel), pickerRows),
       footer: [save, remove],
@@ -415,7 +428,17 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     load();
   };
 
-  const powerText = (b: Breaker) => b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`;
+  const powerText = (b: Breaker) => unitSel.value === 'A'
+    ? (b.current == null ? 'no data' : `${b.current.toFixed(1)} A`)
+    : (b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`);
+
+  /// How hard the circuit is working, against the breaker holding it. Only ever from a current reading —
+  /// dividing watts by a voltage nobody measured would be a number we made up.
+  const loadOf = (b: Breaker) => (b.current == null || !b.amps ? null : b.current / b.amps);
+  const loadClass = (b: Breaker) => {
+    const load = loadOf(b);
+    return load == null ? '' : load >= 0.8 ? ' is-over' : load >= 0.6 ? ' is-busy' : ' is-easy';
+  };
 
   /// Whether a breaker's number says anything the slot stamp has not already said: "1,3" in slots 1+3 has not,
   /// but "B06" and a tandem's "26.1" have.
@@ -484,7 +507,9 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         const place = `${rowOf(cell.slot)} / span ${cell.span}`;
         const box = el('div', {
           // The column decides which way the breaker faces: handles point at the bus bar down the middle.
-          class: 'ps-cell ' + (left ? 'is-left' : 'is-right') + (cell.halves.length ? '' : ' is-empty'),
+          // A breaker holding two slots has the room of two, so it is read at the size it is drawn.
+          class: 'ps-cell ' + (left ? 'is-left' : 'is-right') + (cell.span === 2 ? ' is-double' : '')
+            + (cell.halves.length ? '' : ' is-empty'),
           style: { gridColumn: left ? '2' : '3', gridRow: place },
         });
         box.dataset.slot = String(cell.slot);
@@ -520,14 +545,17 @@ export function addPanelScheduleSection(nav: any, sections: any) {
               el('span', { class: 'ps-desc', text: b.state === 'unused' ? 'Unused' : b.description || 'Not identified' }),
               // The directory's own mark for a circuit nobody has confirmed, description or not.
               ...(b.state === 'unknown' ? [el('span', { class: 'ps-mark', text: '????', title: 'Nobody has identified this circuit yet.' })] : []),
-              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : ''].filter(Boolean).join(' · ') }));
+              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : '', b.gauge].filter(Boolean).join(' · ') }));
             open.title = 'Edit this breaker — what it feeds, its wire, rating, and the node measuring it.';
             open.onclick = () => edit(drawn, b, cell.slot);
             // The reading is its own target: what a circuit is drawing now is also the way into what it has been drawing.
-            const reading = el('button', { class: 'ps-power' + (b.power == null ? ' is-nodata' : ''), text: powerText(b) });
-            reading.title = b.power == null
+            const shown = unitSel.value === 'A' ? b.current : b.power;
+            const reading = el('button', { class: 'ps-power' + (shown == null ? ' is-nodata' : loadClass(b)), text: powerText(b) });
+            const load = loadOf(b);
+            reading.title = shown == null
               ? (GAPS[b.gap] || 'No reading for this breaker.')
-              : `Measured by ${b.legs.map(l => l.channel).filter(Boolean).join(' + ')}. Tap for what it has been drawing.`;
+              : (load == null ? '' : `${b.current!.toFixed(1)} A of ${b.amps} A — ${Math.round(load * 100)}% of the breaker. `)
+                + `Measured by ${b.legs.map(l => l.channel).filter(Boolean).join(' + ')}. Tap for what it has been drawing.`;
             reading.onclick = () => history(drawn, b);
             box.appendChild(el('div', { class: 'ps-half is-' + b.state }, open, reading));
           });
