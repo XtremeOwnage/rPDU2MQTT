@@ -192,7 +192,7 @@ export function makeDom({ bodies }) {
     clearTimeout() { },
     setInterval: () => 0, clearInterval() { },
     confirm: () => true,
-    fetch: async (url) => ({ ok: true, status: 200, text: async () => '', json: async () => bodies(String(url)) }),
+    fetch: async (url, opts) => ({ ok: true, status: 200, text: async () => '', json: async () => bodies(String(url), opts) }),
     // EventSource is deliberately absent: it exercises the no-push path, where every section must still
     // work off its manual refresh / polling fallback.
   };

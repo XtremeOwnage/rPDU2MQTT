@@ -1637,6 +1637,8 @@ function sparkline(opts
   const { values, color, units } = opts;
   const w = opts.width ?? 132, h = opts.height ?? 40;
   const pad = 3;                                   // room for the 2px stroke and the hover dot's ring
+  // With a grid, the scale needs room down the left and the times need room along the bottom.
+  const padL = opts.grid ? 44 : pad, padB = opts.grid ? 16 : pad;
 
   const known = values.filter((v)              => v != null && Number.isFinite(v));
   if (known.length < 2) {
@@ -1648,14 +1650,36 @@ function sparkline(opts
 
   const lo = Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
-  const x = (i        ) => pad + (values.length === 1 ? 0 : (i * (w - pad * 2)) / (values.length - 1));
-  const y = (v        ) => h - pad - ((v - lo) / span) * (h - pad * 2);
+  const x = (i        ) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
+  const y = (v        ) => h - padB - ((v - lo) / span) * (h - padB - pad);
 
   const svg = svgTag('svg', {
-    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark',
-    preserveAspectRatio: 'none', role: 'img',
+    viewBox: `0 0 ${w} ${h}`, width: w, height: h, class: 'spark' + (opts.grid ? ' spark-gridded' : ''),
+    // A stretched strip is fine for a bare line, but it would stretch the grid's labels with it.
+    preserveAspectRatio: opts.grid ? 'xMidYMid meet' : 'none', role: 'img',
     'aria-label': `Trend: ${formatNum(known[0])} to ${formatNum(known[known.length - 1])} ${units}`,
   });
+
+  // A light grid, drawn first so it sits behind the line: the scale down the side, the time along the bottom.
+  if (opts.grid) {
+    const ticks = 4;
+    for (let i = 0; i <= ticks; i++) {
+      const v = lo + (span / ticks) * i, yy = y(v);
+      svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: w - pad, y2: yy, class: 'spark-grid' }));
+      const label = svgTag('text', { x: padL - 6, y: yy + 3, 'text-anchor': 'end', class: 'spark-axis' });
+      // Units on the top line only: repeating them down the side says nothing five times.
+      label.textContent = formatNum(Number(v.toFixed(hi < 10 ? 2 : 0))) + (i === ticks && units ? ' ' + units : '');
+      svg.appendChild(label);
+    }
+    const steps = 4;
+    for (let i = 1; i < steps && opts.at; i++) {
+      const idx = Math.round(((values.length - 1) * i) / steps), xx = x(idx);
+      svg.appendChild(svgTag('line', { x1: xx, y1: pad, x2: xx, y2: h - padB, class: 'spark-grid' }));
+      const when = svgTag('text', { x: xx, y: h - 4, 'text-anchor': 'middle', class: 'spark-axis' });
+      when.textContent = opts.at(idx);
+      svg.appendChild(when);
+    }
+  }
 
   // The area fades from the line down to nothing. A flat wash reads as a solid block of colour and buries
   // the shape it is meant to sit under; a fade keeps the line the thing you look at.
@@ -1708,13 +1732,25 @@ function sparkline(opts
     cx: x(lastAt), cy: y(last), r: 2.4, fill: color, stroke: 'var(--panel2)', 'stroke-width': '1.5',
   }));
 
+  // Where the pointer is, drawn on the chart: a line down through it and a dot on the reading it names, so
+  // the card's figure is tied to a place rather than left to be found.
+  const cross = svgTag('line', { class: 'spark-cross', x1: 0, x2: 0, y1: pad, y2: h - padB, visibility: 'hidden' });
+  const cursor = svgTag('circle', { class: 'spark-cursor', cx: 0, cy: 0, r: 3, fill: color, visibility: 'hidden' });
+  svg.appendChild(cross);
+  svg.appendChild(cursor);
+
   // The hover layer. The plot is 40px tall, so the target is the whole strip and the nearest point wins —
   // asking someone to hit a 2px line with a mouse is asking them not to bother.
   const hit = svgTag('rect', { x: 0, y: 0, width: w, height: h, fill: 'transparent', class: 'spark-hit' });
   svg.appendChild(hit);
   hit.addEventListener('mousemove', (ev     ) => {
     const box = svg.getBoundingClientRect?.() ?? { left: 0, width: w };
-    const frac = box.width ? (ev.clientX - box.left) / box.width : 0;
+    // The pointer, in the chart's own coordinates, then measured across the plot rather than the whole box:
+    // with a grid the plot starts past the scale down the side, and ignoring that slid every position right,
+    // by the width of that gutter at the left and by nothing at all at the right.
+    const scale = box.width ? box.width / w : 1;
+    const px = (ev.clientX - box.left) / scale;
+    const frac = (px - padL) / Math.max(1, w - padL - pad);
     const i = Math.max(0, Math.min(values.length - 1, Math.round(frac * (values.length - 1))));
     const v = values[i];
     const c = hoverCard();
@@ -1724,8 +1760,24 @@ function sparkline(opts
     c.classList.add('show');
     c.style.left = `${ev.clientX + 12}px`;
     c.style.top = `${ev.clientY + 12}px`;
+
+    const at = x(i);
+    cross.setAttribute('x1', String(at));
+    cross.setAttribute('x2', String(at));
+    cross.setAttribute('visibility', 'visible');
+    // A moment with no reading has nowhere to put the dot; the line still says where you are.
+    if (v == null) cursor.setAttribute('visibility', 'hidden');
+    else {
+      cursor.setAttribute('cx', String(at));
+      cursor.setAttribute('cy', String(y(v)));
+      cursor.setAttribute('visibility', 'visible');
+    }
   });
-  hit.addEventListener('mouseleave', () => hideCard());
+  hit.addEventListener('mouseleave', () => {
+    hideCard();
+    cross.setAttribute('visibility', 'hidden');
+    cursor.setAttribute('visibility', 'hidden');
+  });
 
   return svg;
 }
@@ -2889,6 +2941,30 @@ function verdictOf(toggles        , candidates             , found             ,
   const more = toggles < 2 ? 1 : found.length > 2 ? 2 : 1;
   return `${found.length} channels still match all ${toggles} toggles: ${found.slice(0, 3).map(c => c.label).join(', ')}. `
     + `${more} more toggle${more > 1 ? 's' : ''} should separate them.`;
+}
+
+// ── panel-layout.ts ─────────────────────────────────────────────
+// Where a breaker sits in the panel as it is drawn (#453): odd slots down the left column, even down the
+// right, a double-pole spanning the next slot in its own column, and a tandem sharing one slot.
+
+/// One drawn position: the slot, how many rows it covers, and the breaker (or two tandem halves) in it.
+
+const isLeft = (slot        ) => slot % 2 === 1;
+const rowOf = (slot        ) => Math.floor((slot + 1) / 2);
+
+/// The cells of one column, top to bottom. A slot a double-pole reaches into is not drawn again.
+function column                   (slots        , breakers     , left         )                {
+  const cells                = [];
+  const covered = new Set        ();
+  for (let slot = left ? 1 : 2; slot <= slots; slot += 2) {
+    if (covered.has(slot)) continue;
+    const halves = breakers.filter(b => b.slot === slot).sort((a, b) => (a.half || 1) - (b.half || 1));
+    // A double-pole in the last slot of a column has nothing to reach into, so it is drawn as one.
+    const spans = halves.some(b => (b.poles || 1) === 2) && slot + 2 <= slots;
+    if (spans) covered.add(slot + 2);
+    cells.push({ slot, span: spans ? 2 : 1, halves });
+  }
+  return cells;
 }
 
 // ── sections/paths.ts ───────────────────────────────────────────
@@ -9324,6 +9400,581 @@ function addCircuitFinderSection(nav     , sections     ) {
   return { link, sec };
 }
 
+// ── sections/panel-schedule.ts ──────────────────────────────────
+// The panel schedule (#453): a panel drawn as it is — two columns of slots, a breaker handle on each — with
+// each breaker's number, wire, rating, what it feeds and the live power of the channel measuring it (#454).
+// Slots, breakers, tandem halves and the node measuring each leg are all edited here.
+
+/// A breaker as the API reports it, with its chain and power resolved.
+
+/// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
+const GAPS                         = {
+  noclamp: 'Nothing is measuring this breaker yet — pick the node its circuit is on. A double-pole needs both legs, unless one CT measures the whole circuit.',
+  nochannel: 'Its clamp is not plugged into a monitor channel yet.',
+  noreading: 'Its channel has no current reading.',
+};
+
+/// The kinds of node a breaker's circuit can be. A panel or the grid carries the breaker, it is not the breaker.
+const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node'];
+
+function addPanelScheduleSection(nav     , sections     ) {
+  const link = navLink(nav, 'Panel Schedule', '🗂');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Panel Schedule' }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Each panel as its own directory: the slots laid out as they are in the panel, odd down the left and even '
+    + 'down the right, with what each breaker feeds and the power of the node measuring it. A breaker with '
+    + 'nothing mapped to it reads no data rather than zero. Tap a breaker to edit it, or an empty slot to fill it in.'));
+
+  const panelSel = el('select', { title: 'Which panel to show.' })                     ;
+  const refresh = btn('Refresh');
+  const addPanel = btn('Add panel');
+  // Watts or amps: the same reading, in the unit the question is being asked in.
+  const unitSel = el('select', { class: 'ps-unit' })                     ;
+  [['W', 'watts'], ['A', 'amps']].forEach(([v, t]) => unitSel.appendChild(el('option', { value: v, text: t })));
+  unitSel.title = 'Show what each breaker is drawing in watts, or in amps against its rating.';
+  unitSel.onchange = () => render();
+  const status = el('span', { class: 'ld-count' });
+  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, status));
+
+  // The panel's own settings: what it is called, and how many slots it has.
+  const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' })                    ;
+  const slotsIn = el('input', { type: 'number', min: '2', max: '200', step: '2', class: 'ps-slots' })                    ;
+  slotsIn.title = 'How many breaker positions the panel has, counting both columns. A 42-space panel has 42.';
+  // The node that is this panel: its reading is the power coming in, and its breakers' circuits hang beneath it.
+  const nodeSel = el('select', { class: 'ps-panel-node' })                     ;
+  nodeSel.title = 'The energy-flow node that is this panel. Its reading is the power coming in, and a circuit mapped to one of its breakers is placed beneath it.';
+  const feeders = el('span', { class: 'ps-feeders' });
+  const feedAdd = el('select', { class: 'ps-feed-add' })                     ;
+  feedAdd.title = 'Add a node that feeds this panel.';
+  const settings = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('label', { class: 'ld-inst' }, 'Name ', nameIn),
+    el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
+    el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
+    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
+  sec.appendChild(settings);
+  const incoming = el('div', { class: 'desc ps-incoming' });
+  sec.appendChild(incoming);
+
+  const grid = el('div', { class: 'ps-grid' });
+  // The enclosure: the two columns of breakers either side of the bus bar down the middle.
+  sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
+
+  let panels          = [];
+  let nodes                                                = [];
+
+  const flowIn = () => ensure(state.data, 'EnergyFlow', {});
+  const panelsIn = ()        => ensure(flowIn(), 'Panels', []);
+  const clampsIn = ()        => ensure(flowIn(), 'Clamps', []);
+  const linksIn = ()        => ensure(flowIn(), 'Links', []);
+  const shown = () => panels.find(p => p.id === panelSel.value) || panels[0];
+  const labelOf = (id        ) => nodes.find(n => n.id === id)?.label || id;
+  /// What feeds a node today, according to the flow links.
+  const parentsOf = (node        ) => linksIn().filter((l     ) => l.To === node).map((l     ) => String(l.From));
+  /// A breaker's circuit hangs beneath the panel: whatever fed it before is replaced, never left beside it.
+  const reparent = (node        , parent        ) => {
+    const links = linksIn();
+    for (let i = links.length - 1; i >= 0; i--) if (links[i].To === node) links.splice(i, 1);
+    links.push({ From: parent, To: node });
+  };
+  /// The config entry behind the drawn panel: edits land there, and it is what the drawing follows.
+  const configPanel = (id        ) => panelsIn().find((p     ) => p.Id === id);
+
+  const load = async () => {
+    status.textContent = 'loading…';
+    let r     ;
+    // Resolved from the directory on screen rather than the saved one, so an edit is drawn before Save.
+    const holding = { EnergyFlow: { Panels: panelsIn(), Clamps: clampsIn() } };
+    try {
+      r = panelsIn().length
+        ? await api('/api/panels/resolve', { method: 'POST', body: JSON.stringify(holding) })
+        : await api('/api/panels');
+    }
+    catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+    if (!r.body?.ok) { status.textContent = r.body?.message || 'Could not read the panels.'; panels = []; render(); return; }
+    panels = r.body.panels || [];
+    const keep = panelSel.value;
+    panelSel.innerHTML = '';
+    panels.forEach(p => panelSel.appendChild(el('option', { value: p.id, text: p.name || p.id })));
+    if (panels.some(p => p.id === keep)) panelSel.value = keep;
+    status.textContent = '';
+    // The nodes a breaker's circuit can be: whatever the bridge already reads.
+    try {
+      const f      = await api('/api/flow');
+      if (f?.body?.ok) nodes = (f.body.nodes || [])
+        .filter((n     ) => n.id && !String(n.id).includes('#'))
+        .map((n     ) => ({ id: n.id, label: n.label || n.id, kind: n.kind || 'node' }));
+    } catch { /* the page still draws without the picker's choices */ }
+    render();
+  };
+  refresh.onclick = () => load();
+  panelSel.onchange = () => render();
+
+  addPanel.onclick = () => {
+    const id = (prompt('An id for the panel, e.g. main_panel') || '').trim();
+    if (!id) return;
+    panelsIn().push({ Id: id, Name: id, Slots: 42, Breakers: [] });
+    refreshDirty();
+    toast(`Added panel ${id}. Press Save to keep it.`, true);
+    load();
+  };
+
+  nameIn.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p) return;
+    p.Name = nameIn.value.trim() || p.Id;
+    refreshDirty();
+    render();
+  };
+  nodeSel.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p) return;
+    p.Node = nodeSel.value;
+    refreshDirty();
+    load();
+  };
+  feedAdd.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p?.Node || !feedAdd.value) return;
+    if (!parentsOf(p.Node).includes(feedAdd.value)) linksIn().push({ From: feedAdd.value, To: p.Node });
+    feedAdd.value = '';
+    refreshDirty();
+    render();
+  };
+  slotsIn.onchange = () => {
+    const p = configPanel(panelSel.value);
+    if (!p) return;
+    // Two slots to a row, so an odd count would leave half a row: the panel is sized in rows.
+    const want = Math.max(2, Math.min(200, Number(slotsIn.value) || 42));
+    p.Slots = want % 2 ? want + 1 : want;
+    slotsIn.value = String(p.Slots);
+    refreshDirty();
+    render();
+  };
+
+  /// The breaker in the config this drawn one came from, so an edit lands on the real entry.
+  const configBreaker = (panelId        , b         ) => {
+    const p = configPanel(panelId);
+    if (!p) return null;
+    return ensure(p, 'Breakers', []).find((x     ) => x.Slot === b.slot && (x.Number || '') === b.number) || null;
+  };
+
+  /// The clamp recording which node measures one leg of a breaker, if anything does.
+  const clampFor = (panelId        , number        , leg        ) =>
+    clampsIn().find((c     ) => c.Panel === panelId && c.Breaker === number && (c.Leg || 1) === leg) || null;
+
+  /// Point a leg at a node, or at nothing. The chain is kept — the pick writes the clamp behind it.
+  const mapLeg = (panelId        , number        , leg        , channel        , wire        , whole = false) => {
+    const existing = clampFor(panelId, number, leg);
+    if (!channel) {
+      const at = clampsIn().indexOf(existing);
+      if (at >= 0) clampsIn().splice(at, 1);
+      return;
+    }
+    if (existing) { existing.Channel = channel; existing.Whole = whole; if (wire) existing.Wire = wire; return; }
+    clampsIn().push({ Label: `${number} L${leg}`, Panel: panelId, Breaker: number, Leg: leg, Wire: wire, Channel: channel, Whole: whole });
+  };
+
+  /// Which breaker a node is already measuring, so the picker can say so rather than let it be claimed twice.
+  const takenBy = (channel        , panelId        , number        , leg        ) => {
+    const other = clampsIn().find((c     ) => c.Channel === channel
+      && !(c.Panel === panelId && c.Breaker === number && (c.Leg || 1) === leg));
+    return other ? `${other.Panel}/${other.Breaker}` : '';
+  };
+
+  const edit = (panel       , b                , slot        , presetHalf         ) => {
+    const entry = b ? configBreaker(panel.id, b) : null;
+    const wasNumber = b?.number || '';
+    const field = (label        , input     , hint         ) =>
+      el('div', { class: 'ps-field' }, el('label', { class: 'ps-label', text: label }), input,
+        ...(hint ? [el('div', { class: 'desc', style: { margin: '2px 0 0' }, text: hint })] : []));
+    const text = (value        , placeholder = '') => {
+      const i = el('input', { type: 'text', placeholder })                    ;
+      i.value = value;
+      return i;
+    };
+    const number = text(b?.number || String(slot), 'as written, e.g. B06 or 26.1');
+    const description = text(b?.description || '', 'what it feeds');
+    const wire = text(b?.wire || '', 'e.g. W11');
+    const gauge = text(b?.gauge || '', 'e.g. 12 AWG THWN');
+    const conductor = el('select', {})                     ;
+    [['', 'not stated'], ['copper', 'copper'], ['aluminium', 'aluminium']].forEach(([v, t]) => conductor.appendChild(el('option', { value: v, text: t })));
+    conductor.value = b?.conductor || '';
+    const amps = el('input', { type: 'number', min: '1', placeholder: 'e.g. 20' })                    ;
+    amps.value = b?.amps == null ? '' : String(b.amps);
+    const poles = el('select', {})                     ;
+    [['1', 'single pole'], ['2', 'double pole (spans the next slot down)']].forEach(([v, t]) => poles.appendChild(el('option', { value: v, text: t })));
+    poles.value = String(b?.poles || 1);
+    const half = el('select', {})                     ;
+    [['', 'the whole slot'], ['1', 'tandem, upper half'], ['2', 'tandem, lower half']].forEach(([v, t]) => half.appendChild(el('option', { value: v, text: t })));
+    half.value = String(b?.half || presetHalf || '');
+    const stateSel = el('select', {})                     ;
+    [['identified', 'Identified'], ['unknown', 'Not identified yet'], ['unused', 'Unused slot']]
+      .forEach(([v, t]) => stateSel.appendChild(el('option', { value: v, text: t })));
+    stateSel.value = b?.state || 'unknown';
+
+    // One picker per leg: which node the bridge already reads is this circuit. A 240 V circuit is often
+    // measured by a single CT, which is the whole breaker rather than half of it.
+    const wholeBox = el('input', { type: 'checkbox', class: 'ps-whole' })                    ;
+    wholeBox.checked = !!clampFor(panel.id, wasNumber, 1)?.Whole;
+    const pickers                      = [];
+    const pickerRows = el('div', {});
+    // A house has more channels than anyone wants to scroll: type to narrow them.
+    const hunt = el('input', { type: 'search', class: 'ps-hunt', placeholder: 'filter channels by name or id…' })                    ;
+    const huntCount = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
+    const candidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind));
+    /// The channels worth showing: those matching what was typed, and whatever is already picked, which must
+    /// never be filtered out from under the person looking at it.
+    const matching = (chosen        ) => {
+      const q = hunt.value.trim().toLowerCase();
+      return candidates().filter(n => !q || n.id.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || n.id === chosen);
+    };
+    const drawPickers = () => {
+      pickerRows.innerHTML = '';
+      pickers.length = 0;
+      const doublePole = Number(poles.value) === 2;
+      if (doublePole)
+        pickerRows.appendChild(el('div', { class: 'ps-field' },
+          el('label', { class: 'ld-inst' }, wholeBox, ' One CT measures the whole circuit, not one leg')));
+      pickerRows.appendChild(el('div', { class: 'ps-field' }, el('label', { class: 'ld-inst' }, hunt, huntCount)));
+      const legs = doublePole && !wholeBox.checked ? [1, 2] : [1];
+      legs.forEach(leg => {
+        const chosen = clampFor(panel.id, wasNumber, leg)?.Channel || '';
+        const sel = el('select', { class: 'ps-node' })                     ;
+        const fill = (keep        ) => {
+          sel.innerHTML = '';
+          sel.appendChild(el('option', { value: '', text: '— nothing measuring it —' }));
+          const shown = matching(keep);
+          shown.forEach(n => {
+            const taken = takenBy(n.id, panel.id, wasNumber || number.value, leg);
+            sel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})${taken ? ` — already on ${taken}` : ''}` }));
+          });
+          sel.value = keep;
+          huntCount.textContent = `${shown.length} of ${candidates().length} channels`;
+        };
+        fill(chosen);
+        (sel       )._fill = fill;
+        pickers.push(sel);
+        pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', sel,
+          legs.length > 1 ? 'Both legs need a node before this breaker reports its power.' : ''));
+      });
+      // Filtering keeps whatever is picked, so narrowing the list never quietly unpicks it.
+      hunt.oninput = () => pickers.forEach(p => (p       )._fill(p.value));
+    };
+    poles.onchange = () => drawPickers();
+    wholeBox.onchange = () => drawPickers();
+    drawPickers();
+
+    const save = btn('Apply', 'primary');
+    save.onclick = () => {
+      const panelNode = configPanel(panel.id)?.Node || '';
+      const picked = pickers.map(s => s.value).filter(Boolean);
+      // A circuit belongs beneath the panel feeding it. One that hangs somewhere else today is not moved
+      // quietly: what it is fed by now, and what that becomes, is said before anything is written.
+      const moving = panelNode
+        ? picked.map(ch => ({ ch, from: parentsOf(ch).filter(f => f !== panelNode) })).filter(x => x.from.length)
+        : [];
+      if (moving.length) {
+        const where = nameIn.value.trim() || panel.name || panel.id;
+        const lines = moving.map(m => `• ${labelOf(m.ch)} is fed by ${m.from.map(labelOf).join(', ')}`);
+        const ok = confirm(`${lines.join('\n')}\n\nMapping ${moving.length > 1 ? 'them' : 'it'} to breaker `
+          + `${number.value.trim() || slot} places ${moving.length > 1 ? 'them' : 'it'} beneath ${where} instead, `
+          + `and the old feeder link${moving.reduce((n, m) => n + m.from.length, 0) > 1 ? 's are' : ' is'} removed.`
+          + `\n\nOK to move, Cancel to leave it as it is.`);
+        if (!ok) return;
+      }
+      const target = entry || { Slot: slot };
+      const newNumber = number.value.trim() || String(slot);
+      target.Slot = slot;
+      target.Number = newNumber;
+      target.Description = description.value.trim();
+      target.Wire = wire.value.trim();
+      target.Gauge = gauge.value.trim();
+      target.Conductor = conductor.value;
+      target.Amps = amps.value ? Number(amps.value) : null;
+      target.Poles = Number(poles.value) || 1;
+      target.Half = half.value ? Number(half.value) : null;
+      target.State = stateSel.value;
+      if (!entry) {
+        const p = configPanel(panel.id);
+        if (p) ensure(p, 'Breakers', []).push(target);
+      }
+      // A renamed breaker keeps the clamps that were recorded against its old number.
+      if (wasNumber && wasNumber !== newNumber)
+        clampsIn().filter((c     ) => c.Panel === panel.id && c.Breaker === wasNumber).forEach((c     ) => { c.Breaker = newNumber; });
+      const whole = target.Poles === 2 && wholeBox.checked;
+      pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
+      // One CT for the whole circuit leaves no second leg to record.
+      if (whole || target.Poles === 1) mapLeg(panel.id, newNumber, 2, '', '');
+      // The panel is now what feeds these circuits, in the flow graph as well as on paper.
+      if (panelNode) picked.forEach(ch => reparent(ch, panelNode));
+      refreshDirty();
+      closeSheet();
+      toast('Breaker updated. Press Save to keep it.', true);
+      load();
+    };
+    const remove = btn('Remove', 'danger');
+    remove.hidden = !entry;
+    remove.onclick = () => {
+      const p = configPanel(panel.id);
+      const list = p ? ensure(p, 'Breakers', []) : [];
+      const at = list.indexOf(entry);
+      if (at >= 0) list.splice(at, 1);
+      refreshDirty();
+      closeSheet();
+      toast('Breaker removed. Press Save to keep it.', true);
+      load();
+    };
+
+    openSheet({
+      title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
+      body: el('div', {}, field('Breaker number', number), field('What it feeds', description),
+        field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
+        field('Rating (A)', amps), field('Poles', poles),
+        field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
+        field('State', stateSel), pickerRows),
+      footer: [save, remove],
+    });
+  };
+
+  /// Windows worth asking a breaker about, and how finely each is sampled.
+  const WINDOWS                     = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
+
+  /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
+  const history = (panel       , b         ) => {
+    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
+    const plot = el('div', { class: 'ps-chart' });
+    const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
+    const note = el('div', { class: 'desc' });
+    let window = WINDOWS[1][0];
+
+    const load = async () => {
+      if (!channels.length) {
+        plot.innerHTML = '';
+        note.textContent = GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.';
+        return;
+      }
+      plot.innerHTML = '';
+      note.textContent = 'Reading…';
+      let r     ;
+      try { r = await api(`/api/flow/series?${window}&metric=realpower`); }
+      catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+      const body = r?.body;
+      if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+      const series = (body.series || []).filter((s     ) => channels.includes(s.node));
+      if (!series.length) { note.textContent = `The history backend holds nothing for ${channels.join(', ')} in this window.`; return; }
+      // A leg with no reading at some moment leaves the breaker unknown then, exactly as its power is.
+      const at           = body.at || [];
+      const values = at.map((_, i) => {
+        let total = 0;
+        for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
+        return total                 ;
+      });
+      const known = values.filter((v)              => v != null);
+      // What the line is: the breaker, and the channels it is summed from.
+      legend.innerHTML = '';
+      legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+        el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }),
+        `${b.number}${b.description ? ' — ' + b.description : ''}`));
+      channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+        `${labelOf(ch)} (${ch})`)));
+      plot.appendChild(sparkline({
+        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160, grid: true,
+        at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+      }));
+      note.textContent = known.length
+        ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} W · `
+          + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} W · from ${channels.join(' + ')}`
+        : `No readings stored for ${channels.join(', ')} in this window.`;
+    };
+
+    const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+    const buttons = WINDOWS.map(([q, label]) => {
+      const b2 = btn(label);
+      b2.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b2.classList.add('primary'); load(); };
+      picker.appendChild(b2);
+      return b2;
+    });
+    buttons[1].classList.add('primary');
+
+    const toEditor = btn('Edit breaker');
+    toEditor.onclick = () => edit(panel, b, b.slot);
+    // The node measuring it is a thing of its own — its bindings and its label live on the Nodes page.
+    const toNode = btn('Edit node');
+    toNode.hidden = !channels.length;
+    toNode.title = channels.length ? `Open ${labelOf(channels[0])} (${channels[0]}) in the node editor.` : '';
+    toNode.onclick = () => {
+      closeSheet();
+      editNodeOnNextOpen(channels[0]);
+      (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+    };
+    openSheet({
+      title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
+      body: el('div', {}, picker, plot, legend, note),
+      footer: [toNode, toEditor],
+    });
+    load();
+  };
+
+  const powerText = (b         ) => unitSel.value === 'A'
+    ? (b.current == null ? 'no data' : `${b.current.toFixed(1)} A`)
+    : (b.power == null ? 'no data' : `${Math.round(b.power).toLocaleString('en-US')} W`);
+
+  /// How hard the circuit is working, against the breaker holding it. Only ever from a current reading —
+  /// dividing watts by a voltage nobody measured would be a number we made up.
+  const loadOf = (b         ) => (b.current == null || !b.amps ? null : b.current / b.amps);
+  const loadClass = (b         ) => {
+    const load = loadOf(b);
+    return load == null ? '' : load >= 0.8 ? ' is-over' : load >= 0.6 ? ' is-busy' : ' is-easy';
+  };
+
+  /// Whether a breaker's number says anything the slot stamp has not already said: "1,3" in slots 1+3 has not,
+  /// but "B06" and a tandem's "26.1" have.
+  const saysMore = (number        , slotLabel        ) => {
+    const digits = (s        ) => (s.match(/\d+/g) || []).join(',');
+    return !!number && digits(number) !== digits(slotLabel);
+  };
+
+  const render = () => {
+    grid.innerHTML = '';
+    const drawn = shown();
+    const cfg = drawn ? configPanel(drawn.id) : null;
+    settings.hidden = !drawn;
+    if (!drawn) {
+      grid.appendChild(el('div', { class: 'desc', text: 'No panels yet. Add one to start a directory, then fill in its slots.' }));
+      return;
+    }
+    // The config is what is being edited, so the drawing follows it rather than the last answer from the API.
+    const slots = Number(cfg?.Slots) || drawn.slots;
+    const rows = Math.ceil(slots / 2);
+    nameIn.value = cfg?.Name ?? drawn.name;
+    slotsIn.value = String(slots);
+
+    // Which node is this panel, and what feeds it.
+    const panelNode = cfg?.Node ?? drawn.node ?? '';
+    nodeSel.innerHTML = '';
+    nodeSel.appendChild(el('option', { value: '', text: '— not mapped —' }));
+    nodes.forEach(n => nodeSel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    nodeSel.value = panelNode;
+    feeders.innerHTML = '';
+    const fedBy = panelNode ? parentsOf(panelNode) : [];
+    fedBy.forEach(from => {
+      const chip = el('span', { class: 'ps-chip' }, el('span', { text: labelOf(from) }));
+      const drop = el('button', { class: 'ps-chip-x', text: '×', title: `${labelOf(from)} no longer feeds this panel` });
+      drop.onclick = () => {
+        const links = linksIn();
+        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === panelNode && links[i].From === from) links.splice(i, 1);
+        refreshDirty();
+        render();
+      };
+      chip.appendChild(drop);
+      feeders.appendChild(chip);
+    });
+    if (!fedBy.length) feeders.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: panelNode ? 'nothing yet' : 'pick the panel’s node first' }));
+    feedAdd.innerHTML = '';
+    feedAdd.appendChild(el('option', { value: '', text: '+ add a feeder' }));
+    nodes.filter(n => n.id !== panelNode && !fedBy.includes(n.id))
+      .forEach(n => feedAdd.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    // A panel is fed from one place. Once that is said, the way to change it is to drop it and pick again.
+    feedAdd.hidden = !panelNode || fedBy.length > 0;
+    feedAdd.disabled = !panelNode;
+
+    // The mains figure: power, and the voltage beside it when whatever measures the panel reports one.
+    const volts = drawn.volts == null ? '' : ` at ${drawn.volts.toFixed(1)} V`;
+    incoming.textContent = !panelNode
+      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one above.'
+      : drawn.incoming == null
+        ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
+        : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
+    // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
+    // the two rows it spans had nothing else in them and split its height between them instead.
+    grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;
+
+    [true, false].forEach(left => {
+      column(slots, drawn.breakers, left).forEach(cell => {
+        const place = `${rowOf(cell.slot)} / span ${cell.span}`;
+        const box = el('div', {
+          // The column decides which way the breaker faces: handles point at the bus bar down the middle.
+          // A breaker holding two slots has the room of two, so it is read at the size it is drawn.
+          class: 'ps-cell ' + (left ? 'is-left' : 'is-right') + (cell.span === 2 ? ' is-double' : '')
+            + (cell.halves.length ? '' : ' is-empty'),
+          style: { gridColumn: left ? '2' : '3', gridRow: place },
+        });
+        box.dataset.slot = String(cell.slot);
+        const slotLabel = String(cell.slot) + (cell.span === 2 ? `+${cell.slot + 2}` : '');
+        // Stamped down the outside edge of the frame, as a panel is: one number per slot, counted down.
+        const stamped = el('div', {
+          class: 'ps-nums',
+          style: { gridColumn: left ? '1' : '4', gridRow: place },
+        }, ...(cell.span === 2 ? [cell.slot, cell.slot + 2] : [cell.slot]).map(n => el('span', { text: String(n) })));
+        stamped.setAttribute('aria-hidden', 'true');
+        grid.appendChild(stamped);
+        if (!cell.halves.length) {
+          const blank = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));
+          blank.setAttribute('aria-hidden', 'true');
+          const add = el('button', { class: 'ps-open is-empty' }, blank, el('span', { class: 'ps-desc', text: 'empty' }));
+          add.title = `Slot ${cell.slot} — nothing recorded. Tap to add a breaker.`;
+          add.onclick = () => edit(drawn, null, cell.slot);
+          box.appendChild(add);
+        } else {
+          cell.halves.forEach(b => {
+            // The breaker as it looks in the panel, not a control: nothing here can switch one. A double-pole
+            // is two handles with a tie between them, as it is on the wall.
+            const poles = b.poles === 2 && cell.span === 2 ? 2 : 1;
+            const handle = el('span', { class: 'ps-breaker is-' + b.state });
+            for (let i = 0; i < poles; i++)
+              handle.appendChild(el('span', { class: 'ps-pole is-' + b.state },
+                el('span', { class: 'ps-throw', text: b.amps ? String(b.amps) : '' })));
+            if (poles === 2) handle.appendChild(el('span', { class: 'ps-tie' }));
+            handle.setAttribute('aria-hidden', 'true');
+            const open = el('button', { class: 'ps-open' },
+              handle,
+              ...(saysMore(b.number, slotLabel) ? [el('span', { class: 'ps-num', text: b.number })] : []),
+              el('span', { class: 'ps-desc', text: b.state === 'unused' ? 'Unused' : b.description || 'Not identified' }),
+              // The directory's own mark for a circuit nobody has confirmed, description or not.
+              ...(b.state === 'unknown' ? [el('span', { class: 'ps-mark', text: '????', title: 'Nobody has identified this circuit yet.' })] : []),
+              el('span', { class: 'ps-meta', text: [b.wire, b.amps ? `${b.amps} A` : '', b.gauge].filter(Boolean).join(' · ') }));
+            open.title = 'Edit this breaker — what it feeds, its wire, rating, and the node measuring it.';
+            open.onclick = () => edit(drawn, b, cell.slot);
+            // The reading is its own target: what a circuit is drawing now is also the way into what it has been drawing.
+            const shown = unitSel.value === 'A' ? b.current : b.power;
+            const reading = el('button', { class: 'ps-power' + (shown == null ? ' is-nodata' : loadClass(b)), text: powerText(b) });
+            const load = loadOf(b);
+            reading.title = shown == null
+              ? (GAPS[b.gap] || 'No reading for this breaker.')
+              : (load == null ? '' : `${b.current .toFixed(1)} A of ${b.amps} A — ${Math.round(load * 100)}% of the breaker. `)
+                + `Measured by ${b.legs.map(l => l.channel).filter(Boolean).join(' + ')}. Tap for what it has been drawing.`;
+            reading.onclick = () => history(drawn, b);
+            box.appendChild(el('div', { class: 'ps-half is-' + b.state }, open, reading));
+          });
+          // A breaker declared as one half of a tandem leaves the other half of its slot to fill in. Saying
+          // a slot is shared is the editor's business; what is in the other half is the panel's.
+          const lone = cell.halves.length === 1 ? cell.halves[0] : null;
+          if (lone?.half) {
+            const missing = lone.half === 1 ? 2 : 1;
+            const vacant = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));
+            vacant.setAttribute('aria-hidden', 'true');
+            const other = el('button', { class: 'ps-open is-empty' }, vacant,
+              el('span', { class: 'ps-desc', text: missing === 1 ? 'empty upper half' : 'empty lower half' }));
+            other.title = `Slot ${cell.slot} shares two breakers; this half is empty. Tap to fill it in.`;
+            other.onclick = () => edit(drawn, null, cell.slot, missing);
+            box.appendChild(other);
+          }
+        }
+        grid.appendChild(box);
+      });
+    });
+  };
+
+  link.onclick = () => { activate(link, sec); load(); };
+  // A schedule is read while someone is at the panel, so it keeps up with the channels behind it.
+  setInterval(() => { if (sec.classList.contains('active')) load(); }, 10000);
+  return { link, sec };
+}
+
 // ── sections/export.ts ──────────────────────────────────────────
 // A synthetic section that exports the current form state as config.yaml or an RpduConfig manifest — and
 // takes one back (#214), merged into what's on screen or replacing it whole.
@@ -10278,7 +10929,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.

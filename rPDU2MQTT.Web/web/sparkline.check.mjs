@@ -63,6 +63,8 @@ const sparks = (root) => query(root, 'svg', true).filter(s => (s.attrs.class || 
 const empties = (root) => query(root, '.spark-empty', true);
 // A drawn line is a <path> with a stroke; the area beneath it is the one with a fill-opacity.
 const lines = (svg) => query(svg, 'path', true).filter(p => p.attrs.stroke && p.attrs.stroke !== 'none');
+// A grid is opt-in: a strip this size has no room for one, and the shape is the whole message here.
+const gridded = (root) => sparks(root).filter(s => query(s, 'line', true).some(l => l.attrs.class === 'spark-grid'));
 
 // --- With readings: a line per tile whose nodes all reported.
 const withData = {
@@ -114,6 +116,7 @@ const partial = {
 };
 const half = await render(partial);
 // Solar has no complete step, so it gets no line; the grid, which reported throughout, still does.
+if (gridded(half).length) fail('an Energy strip drew a grid; there is no room for one at that size');
 const tiles = query(half, '.energy-tile', true);
 const solarTile = tiles.find(t => t.classList.has('solar'));
 if (!solarTile) fail(`no solar tile; tiles present: ${JSON.stringify(tiles.map(t => t.className))}`);

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -38,10 +40,16 @@ public class PanelConfig
     [Description("How many breaker positions the panel has, counting both columns. A 42-space panel has 42. Odd numbers fill the left column; even numbers the right, as they are stamped in the panel.")]
     public int Slots { get; set; } = 42;
 
+    /// <summary>The energy-flow node that is this panel: what feeds it, and what its circuits hang beneath.</summary>
+    [Description("The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.")]
+    public string Node { get; set; } = "";
+
     [Description("The breakers in this panel's slots.")]
     public List<BreakerConfig> Breakers { get; set; } = new();
 
-    /// <summary>Rows of slots down the panel: two slots to a row, left and right.</summary>
+    /// <summary>Rows of slots down the panel: two slots to a row, left and right. Derived, never stored.</summary>
+    [JsonIgnore]
+    [YamlIgnore]
     public int Rows => (Slots + 1) / 2;
 
     /// <summary>A slot number the panel actually has.</summary>
@@ -88,6 +96,14 @@ public class BreakerConfig
 
     [Description("What this breaker feeds, in the words the directory uses. For example 'Lights, Garage, Kitchen'.")]
     public string Description { get; set; } = "";
+
+    /// <summary>The conductor size of the wire leaving this breaker, as it is written on the cable.</summary>
+    [Description("The wire's gauge, as written on the cable — for example '12 AWG THWN' or '6 AWG'. Free text: the rating that matters is the breaker's, and the gauge is what says whether the wire can carry it.")]
+    public string Gauge { get; set; } = "";
+
+    [AllowedValues("copper", "aluminium")]
+    [Description("What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.")]
+    public string Conductor { get; set; } = "";
 
     /// <summary>Identified, not yet identified, or an empty slot. New breakers start unknown: a blank row claims nothing.</summary>
     [AllowedValues(BreakerState.Identified, BreakerState.Unknown, BreakerState.Unused)]
