@@ -81,14 +81,24 @@ await new Promise(r => setTimeout(r, 50));
 if (nodesDrawn().some(r => cn(r).includes('on-path'))) fail('clicking the active tag did not clear the highlight');
 
 // --- The rule editor: a pattern that matches nothing is the failure mode worth naming -----------------
-const nodesLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Nodes');
-if (!nodesLink) fail('no Nodes tab');
-nodesLink.click();
+// The rules that tag PDUs and outlets sit with the tags they apply, not among the nodes.
+const rulesTab = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Tags');
+if (!rulesTab) fail('no Tags tab');
+rulesTab.click();
 await new Promise(r => setTimeout(r, 200));
-const nodesSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
-const ruleRows = query(nodesSec, 'tr', true).filter(r => query(r, 'input', true)
+const rulesSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+const ruleRows = query(rulesSec, 'tr', true).filter(r => query(r, 'input', true)
   .some(i => (i.value || '').includes('outlet:rack_pdu_1:*') || (i.value || '').includes('nothing:*')));
-if (ruleRows.length !== 2) fail(`the tag rules are not editable on the Nodes page (${ruleRows.length} row(s))`);
+if (ruleRows.length !== 2) fail(`the tag rules are not editable on the Tags page (${ruleRows.length} row(s))`);
+// …and not left behind on the Nodes page, which would be two editors for one list.
+const nodesTab = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Nodes');
+nodesTab.click();
+await new Promise(r => setTimeout(r, 200));
+const nodesOnly = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (query(nodesOnly, 'tr', true).some(r => query(r, 'input', true).some(i => (i.value || '').includes('outlet:rack_pdu_1:*'))))
+  fail('the tag rules are still on the Nodes page as well');
+rulesTab.click();
+await new Promise(r => setTimeout(r, 200));
 
 const covered = ruleRows.map(r => r.textContent).join(' | ');
 if (!/1 node\(s\)/.test(covered)) fail(`a rule does not say what it covers: ${covered}`);
@@ -103,10 +113,12 @@ if (!/nothing/.test(covered)) fail(`a rule matching no node is not called out: $
 const ruleChips = ruleRows.flatMap(r => query(r, '.tag-chip', true)).map(c => c.textContent.replace('\u2715', '').trim());
 if (!ruleChips.includes('rack-1')) fail(`the rule's tags are not chips: ${ruleChips.join(', ') || '(none)'}`);
 
-// Every tag the document defines, listed in one place with what carries it. That list is the Tags page
-// now (#424) rather than a panel at the foot of this one; the Nodes page points at it.
-if (!/Tags page/i.test(nodesSec.textContent || ''))
+// Every tag the document defines, listed in one place with what carries it, and the rules that apply them
+// to derived nodes. The Nodes page points at both that and the Groups page rather than holding either.
+if (!/Tags page/i.test(nodesOnly.textContent || ''))
   fail('the Nodes page does not point at where tags are managed');
+if (!/Groups page/i.test(nodesOnly.textContent || ''))
+  fail('the Nodes page does not point at where groups are managed');
 
 const tagsLink = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Tags');
 if (!tagsLink) fail('no Tags tab');
@@ -118,7 +130,7 @@ const managerRows = query(tagsSec, 'tr', true)
 if (managerRows.length !== 2) fail(`the tag manager does not list every defined tag (${managerRows.length} row(s))`);
 
 // Back to Nodes for what follows.
-nodesLink.click();
+nodesTab.click();
 await new Promise(r => setTimeout(r, 200));
 
 // A free-entry box completes from the tags that already exist.

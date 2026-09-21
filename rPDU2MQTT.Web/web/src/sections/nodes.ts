@@ -193,12 +193,24 @@ export function wouldLoop(links: any[], from: string, to: string) {
 }
 
 // Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab).
-export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void) {
+export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void, query = '') {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
+  // What the filter leaves. The node being edited stays whatever is typed, so narrowing the table never
+  // closes the editor out from under whoever is using it.
+  const q = query.trim().toLowerCase();
+  const all = customNodes;
+  if (q) {
+    const hit = (n: any) => [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+      .some((v: any) => String(v || '').toLowerCase().includes(q));
+    customNodes = all.filter((n: any) => hit(n) || n.Id === editing.id);
+    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` }));
+  }
+
   if (!customNodes.length) {
+    if (q) { box.appendChild(el('div', { class: 'desc', text: `Nothing matches “${query.trim()}”.` })); return box; }
     closeNodeModal();
     box.appendChild(el('div', { class: 'desc', text: 'No virtual nodes yet — add one above.' }));
     return box;
@@ -329,8 +341,11 @@ export function addNodesSection(nav: any, sections: any) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const instSel = instanceSelector(() => load());
+  // A hierarchy of any size is a long table: type to narrow it by id, name, kind or tag.
+  const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' }) as HTMLInputElement;
+  hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(count); sec.appendChild(bar);
+  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(count); sec.appendChild(bar);
   const ed: any = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph: any = null;
   const editing: { id: string | null } = { id: null };
@@ -372,14 +387,15 @@ export function addNodesSection(nav: any, sections: any) {
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    ed.appendChild(renderGroupManager(flow, cand, render));
-    ed.appendChild(renderAutoTagRules(flow, cand, render));
-    // The tag manager has a page of its own now — two editors for one list is two places to disagree.
-    ed.appendChild(el('div', { class: 'desc', style: { margin: '18px 0 0' } },
-      el('span', { text: 'Tags are defined and managed on the ' }),
-      el('a', { text: 'Tags page', onclick: () => (document.querySelector('nav a[data-label="Tags"]') as any)?.click() }),
-      el('span', { text: ' — what each is for, what carries it, and which destinations decide on it.' })));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }));
+    // Groups and the PDU/outlet tag rules have pages of their own: this one is for the nodes.
+    const goTo = (label: string) => (document.querySelector(`nav a[data-label="${label}"]`) as any)?.click();
+    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
+      el('span', { text: 'Groups are managed on the ' }),
+      el('a', { text: 'Groups page', onclick: () => goTo('Groups') }),
+      el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),
+      el('a', { text: 'Tags page', onclick: () => goTo('Tags') }),
+      el('span', { text: '.' })));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }, hunt.value));
   };
 
   const load = async () => {
