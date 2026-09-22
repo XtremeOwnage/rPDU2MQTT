@@ -383,7 +383,9 @@ query(sheet(), 'input', true).find(i => (i.placeholder || i.getAttribute('placeh
 button('Add floor', sheet()).onclick();
 const upstairs = config.EnergyFlow.Sites[0].Floors.find(f => f.Name === 'Upstairs');
 if (!upstairs || Math.abs(upstairs.Width - 60 * ft * 100) > 1) fail(`adding a floor did not make a 60 ft plot: ${JSON.stringify(upstairs)}`);
-if (!query(sec, '.fp-empty') || query(sec, '.fp-empty').hidden) fail('an empty floor does not say how to start');
+if (!query(sec, '.fp-empty').hidden) fail('the empty-floor card covers the plan while drawing');
+button('View', sec).onclick();
+if (query(sec, '.fp-empty').hidden) fail('an empty floor does not say how to start');
 
 // Usable on a tablet and a phone: the side panel drops below the plan, the tools run across, pinch is ours.
 if (!/\.fp-svg\s*\{[^}]*touch-action:\s*none/.test(css)) fail('the plan does not take over touch, so a pinch would zoom the page');

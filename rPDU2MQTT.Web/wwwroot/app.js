@@ -11819,6 +11819,11 @@ function addFloorPlanSection(nav     , sections     ) {
     if (c) { side.appendChild(el('h4', { text: it.Kind === 'panel' ? 'Fed from' : 'Its circuit' })); side.appendChild(circuitRow(c)); }
     else if (it.Circuit) side.appendChild(el('div', { class: 'fp-note is-warn', text: `${it.Circuit} is not a breaker in any panel, so its circuit reads as unknown.` }));
 
+    if (it.Kind === 'panel' && it.Panel) {
+      const open = btn('Open its panel schedule');
+      open.onclick = () => (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Panel Schedule')?.click();
+      side.appendChild(actions(open));
+    }
     const wired = runsIn().filter((r     ) => r.From === it.Id || r.To === it.Id);
     if (wired.length) {
       side.appendChild(el('h4', { text: 'Wired to' }));
@@ -12128,10 +12133,12 @@ function addFloorPlanSection(nav     , sections     ) {
     const body = el('div', { class: 'fp-sheet' });
     const name = el('input', { type: 'text', value: f.Name || '' })                    ;
     name.onchange = () => act(() => { f.Name = name.value.trim() || f.Id; });
+    const siteName = el('input', { type: 'text', value: fl.site.Name || '' })                    ;
+    siteName.onchange = () => act(() => { fl.site.Name = siteName.value.trim() || fl.site.Id; });
     const level = el('input', { type: 'number', value: String(f.Level ?? 0), step: '1' })                    ;
     level.onchange = () => act(() => { f.Level = Number(level.value) || 0; });
     const { w, h } = floorSize();
-    body.append(field('Name', name), field('Level', level),
+    body.append(el('div', { class: 'fp-two' }, field('Floor name', name), field('Site name', siteName)), field('Level', level),
       el('div', { class: 'fp-two' },
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
@@ -12382,14 +12389,15 @@ function addFloorPlanSection(nav     , sections     ) {
     const fl = floorNow();
     empty.innerHTML = '';
     const bare = !!fl && !fl.floor.Image && !roomsNow().some(r => (r.Shape || []).length >= 3) && !itemsNow().length;
-    empty.hidden = !bare && !!fl;
+    // In Edit the tools say how to start, and the card would only sit over where you are drawing.
+    empty.hidden = !!fl && (!bare || mode === 'edit');
     if (!fl) {
       const start = btn('Add a site and floor', 'primary');
       start.onclick = () => addSheet();
       empty.append(el('div', { class: 'fp-empty-title', text: 'No floors yet' }), el('div', { class: 'desc', text: 'A floor is the plot you draw on: rooms, the yard, and everything placed in them.' }), start);
       return;
     }
-    if (!bare) return;
+    if (!bare || mode === 'edit') return;
     const up = btn('Upload a plan image', 'primary');
     up.onclick = () => backgroundSheet();
     const draw = btn('Draw a room');
