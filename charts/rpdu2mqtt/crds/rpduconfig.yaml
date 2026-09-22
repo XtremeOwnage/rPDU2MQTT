@@ -1611,6 +1611,9 @@ spec:
                         Rotation:
                           type: number
                           description: How far it is turned, in degrees clockwise. Its front faces down the plan at 0.
+                        Footprint:
+                          type: string
+                          description: 'What appliance it is drawn as, seen from above: washer, dryer, fridge, freezer, range, dishwasher, water-heater, furnace, condenser, rack or hot-tub. Blank draws a plain box.'
                         Round:
                           type: boolean
                           description: Drawn round rather than square, such as a water heater; Width is its diameter.

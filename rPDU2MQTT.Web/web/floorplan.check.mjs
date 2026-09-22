@@ -653,6 +653,8 @@ if (Math.abs(washer.X - (washer.Depth / 2 + 0.5)) > 0.2 || washer.Rotation !== 2
 if (washer.Room !== 'kitchen') fail('the washer is not in the kitchen');
 const body = query(sec, 'g', true).find(g => g.classList.contains('fp-body') && g.dataset?.item === washer.Id);
 if (!body || Number(query(body, 'rect', false)?.getAttribute('width')) !== washer.Width) fail('the washer is not drawn at its size');
+if (washer.Footprint !== 'washer') fail('the washer does not remember what it is');
+if (!query(body, 'g', true).some(g => g.classList.contains('fp-art')) || !query(body, 'circle', true).length) fail('the washer is not drawn as a washer');
 // Its corner handle sizes it, and the knob turns it.
 toolBtn('Select').onclick();
 tap(body, washer.X, washer.Y);

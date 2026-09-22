@@ -12,7 +12,7 @@ import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, pl
 import { planHistory } from '../plan-history.js';
 import { searchSelect, type Choice } from '../search-select.js';
 import { planSolve, planSharedCorners, planCornerAngle, planEdgeCorners, planRefsAfterInsert, planRefsAfterRemove, planRefsWithout, type PlanRef, type PlanConstraint } from '../plan-constraints.js';
-import { PLAN_FOOTPRINTS, planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
+import { PLAN_FOOTPRINTS, planFootprintArt, planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -429,6 +429,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
     it.X = planRound(w.pt.X + n.X * (D / 2 + 0.5)); it.Y = planRound(w.pt.Y + n.Y * (D / 2 + 0.5));
   };
   const isSized = (it: any) => !!it && Number(it.Width) > 0 && Number(it.Depth) > 0;
+  /// Which appliance a sized item is drawn as: its own record, or, for one placed before that was kept, its name.
+  const footprintOf = (it: any) => it?.Footprint || PLAN_FOOTPRINTS.find(f => f[1] === it?.Label)?.[0] || '';
   const placeOnWall = (it: any, q: Pt & { facing: number | null }) => {
     it.X = q.X; it.Y = q.Y;
     if (q.facing == null) delete it.Facing; else it.Facing = q.facing;
@@ -721,6 +723,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       let rr = r;
+      let hasArt = false;
       if (sized) {
         const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
         body.dataset.item = item.Id;
@@ -730,17 +733,24 @@ export function addFloorPlanSection(nav: any, sections: any) {
         if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
         body.appendChild(shape);
         // The front, where the door or the controls are.
-        if (!item.Round) body.appendChild(svgEl('line', { x1: -W * 0.38, y1: D / 2 - 4 * u, x2: W * 0.38, y2: D / 2 - 4 * u, class: 'fp-body-front', 'stroke-width': 3 * u }));
+        // The appliance itself, seen from above, when it is one we know how to draw.
+        const art = planFootprintArt(footprintOf(item), W, D, u);
+        if (art) { body.appendChild(art); body.classList.add('has-art'); }
+        else if (!item.Round) body.appendChild(svgEl('line', { x1: -W * 0.38, y1: D / 2 - 4 * u, x2: W * 0.38, y2: D / 2 - 4 * u, class: 'fp-body-front', 'stroke-width': 3 * u }));
         svg.appendChild(body);
+        hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
         const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
         if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
         g.appendChild(disc);
       }
-      const glyph = planGlyph(item.Kind || 'outlet', rr);
-      glyph.setAttribute('stroke-width', 1.4 * u);
-      g.appendChild(glyph);
+      // An appliance drawn as itself needs no icon on top.
+      if (!hasArt) {
+        const glyph = planGlyph(item.Kind || 'outlet', rr);
+        glyph.setAttribute('stroke-width', 1.4 * u);
+        g.appendChild(glyph);
+      }
       // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
       if (item.Gfci) {
         const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.85},${-r * 0.8})` });
@@ -1338,7 +1348,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         const fp = PLAN_FOOTPRINTS.find(f => f[0] === itemPreset);
         if (fp) {
           const inch = 0.0254 * scale();
-          Object.assign(it, { Kind: fp[2], Label: fp[1], Width: planRound(fp[3] * inch), Depth: planRound(fp[4] * inch), Rotation: 0 });
+          Object.assign(it, { Kind: fp[2], Label: fp[1], Footprint: fp[0], Width: planRound(fp[3] * inch), Depth: planRound(fp[4] * inch), Rotation: 0 });
           if (fp[5]) it.Round = true;
           fitToWall(it, gridSnapped(p), p);
         } else placeOnWall(it, q);
@@ -1527,8 +1537,10 @@ export function addFloorPlanSection(nav: any, sections: any) {
         const size = sys() === 'imperial' ? `${w}″ × ${d}″` : `${Math.round(w * 2.54)} × ${Math.round(d * 2.54)} cm`;
         const b = el('button', { class: 'fp-kind is-size' + (itemPreset === key ? ' is-on' : ''), type: 'button', title: `${label}, ${round ? `${size.split(' ×')[0]} across` : size}` });
         const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
-        icon.appendChild(round ? svgEl('circle', { r: 11, class: 'fp-body-shape' }) : svgEl('rect', { x: -11, y: -11 * d / Math.max(w, d), width: 22 * w / Math.max(w, d), height: 22 * d / Math.max(w, d), rx: 2, class: 'fp-body-shape' }));
-        const gl = planGlyph(kind, 8); gl.setAttribute('stroke-width', '1.3'); icon.appendChild(gl);
+        const bw = 22 * w / Math.max(w, d), bd = 22 * d / Math.max(w, d);
+        icon.appendChild(round ? svgEl('circle', { r: 11, class: 'fp-body-shape' }) : svgEl('rect', { x: -bw / 2, y: -bd / 2, width: bw, height: bd, rx: 2, class: 'fp-body-shape' }));
+        const art = planFootprintArt(key, bw, bd, 0.55);
+        if (art) icon.appendChild(art);
         b.append(icon, el('span', { text: label }));
         b.setAttribute('aria-label', label);
         b.setAttribute('aria-pressed', String(itemPreset === key));
@@ -1996,7 +2008,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         const fp = PLAN_FOOTPRINTS.find(f => f[0] === v);
         if (!fp) return;
         act(() => {
-          it.Width = planRound(fp[3] * inch); it.Depth = planRound(fp[4] * inch);
+          it.Width = planRound(fp[3] * inch); it.Depth = planRound(fp[4] * inch); it.Footprint = fp[0];
           if (fp[5]) it.Round = true; else delete it.Round;
           if (!it.Label) it.Label = fp[1];
           if (it.Rotation == null) it.Rotation = 0;
@@ -2015,7 +2027,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         round.checked = !!it.Round;
         round.onchange = () => act(() => { if (round.checked) { it.Round = true; it.Depth = it.Width; } else delete it.Round; });
         const icon = btn('Draw as an icon');
-        icon.onclick = () => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; });
+        icon.onclick = () => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; delete it.Footprint; });
         side.appendChild(field('Turned', el('div', { class: 'fp-colour-row' }, turn, el('span', { class: 'fp-opts-note', text: '°' }), r90), 'Its front faces the room when it is dropped by a wall. Drag the knob above it to turn it, or its corner to size it.'));
         side.appendChild(el('div', { class: 'fp-colour-row' }, el('label', { class: 'ld-inst fp-check' }, round, ' Round'), icon));
       }

@@ -1568,3 +1568,9 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-rot-stem { stroke: var(--accent); pointer-events: none; }
 .fp-rot { cursor: grab; }
 .fp-resize { cursor: nwse-resize; }
+/* Appliances seen from above: their lines in the body's own ink, softer details, solid knobs and handles. */
+.fp-art rect, .fp-art circle, .fp-art line { fill: none; stroke: var(--fg); stroke-linecap: round; pointer-events: none; }
+.fp-art .is-soft { stroke: var(--muted); }
+.fp-art .is-fill { fill: var(--muted); stroke: none; }
+.fp-body.has-art .fp-body-shape { fill: var(--panel3); }
+.fp-kind.is-size .fp-art rect, .fp-kind.is-size .fp-art circle, .fp-kind.is-size .fp-art line { stroke-width: .8px; }

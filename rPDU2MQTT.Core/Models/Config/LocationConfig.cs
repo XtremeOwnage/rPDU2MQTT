@@ -297,6 +297,9 @@ public class PlacementConfig
     [Description("How far it is turned, in degrees clockwise. Its front faces down the plan at 0.")]
     public double? Rotation { get; set; }
 
+    [Description("What appliance it is drawn as, seen from above: washer, dryer, fridge, freezer, range, dishwasher, water-heater, furnace, condenser, rack or hot-tub. Blank draws a plain box.")]
+    public string Footprint { get; set; } = "";
+
     [DefaultValue(false)]
     [Description("Drawn round rather than square, such as a water heater; Width is its diameter.")]
     public bool Round { get; set; }

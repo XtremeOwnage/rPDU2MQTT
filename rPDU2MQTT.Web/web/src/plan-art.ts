@@ -172,3 +172,101 @@ export function planCircuitColor(ref: string): string {
   for (let i = 0; i < ref.length; i++) h = (h * 31 + ref.charCodeAt(i)) >>> 0;
   return PLAN_CIRCUIT_COLOURS[h % PLAN_CIRCUIT_COLOURS.length];
 }
+
+/// An appliance seen from above, drawn inside its own footprint of W × D drawing units, its front toward +Y.
+/// `u` is drawing units per screen pixel, so the lines stay a pixel or two wide at any zoom.
+export function planFootprintArt(key: string, W: number, D: number, u: number): any | null {
+  const g = svgEl('g', { class: 'fp-art' });
+  const sw = 1.4 * u;
+  const hw = W / 2, hd = D / 2, m = Math.min(W, D);
+  const rect = (x: number, y: number, w: number, h: number, rx = 0, cls = '') => g.appendChild(svgEl('rect', { x, y, width: w, height: h, rx, 'stroke-width': sw, class: cls }));
+  const circle = (cx: number, cy: number, r: number, cls = '') => g.appendChild(svgEl('circle', { cx, cy, r, 'stroke-width': sw, class: cls }));
+  const line = (x1: number, y1: number, x2: number, y2: number, cls = '') => g.appendChild(svgEl('line', { x1, y1, x2, y2, 'stroke-width': sw, class: cls }));
+  const knobs = (y: number, n: number, r: number) => { for (let i = 0; i < n; i++) circle(-hw * 0.6 + (i + 0.5) * (hw * 1.2 / n), y, r, 'is-fill'); };
+  switch (key) {
+    case 'washer': {
+      const con = D * 0.18;
+      rect(-hw * 0.88, -hd * 0.94, W * 0.88, con, m * 0.03);
+      knobs(-hd * 0.94 + con / 2, 3, m * 0.035);
+      circle(0, con / 2, m * 0.34);
+      circle(0, con / 2, m * 0.26, 'is-soft');
+      break;
+    }
+    case 'dryer': {
+      const con = D * 0.18;
+      rect(-hw * 0.88, -hd * 0.94, W * 0.88, con, m * 0.03);
+      knobs(-hd * 0.94 + con / 2, 2, m * 0.035);
+      rect(-hw * 0.72, -hd * 0.94 + con + D * 0.08, W * 0.72, D * 0.58, m * 0.05);
+      line(-hw * 0.4, -hd * 0.94 + con + D * 0.2, hw * 0.4, -hd * 0.94 + con + D * 0.2, 'is-soft');
+      break;
+    }
+    case 'fridge': {
+      // French doors across the front, meeting in the middle, a handle each side of the join; the vent at the back.
+      line(-hw * 0.92, hd * 0.5, hw * 0.92, hd * 0.5);
+      line(0, hd * 0.5, 0, hd * 0.94);
+      rect(-W * 0.07, hd * 0.6, W * 0.025, D * 0.24, W * 0.012, 'is-fill');
+      rect(W * 0.045, hd * 0.6, W * 0.025, D * 0.24, W * 0.012, 'is-fill');
+      rect(-hw * 0.7, -hd * 0.86, W * 0.7, D * 0.1, m * 0.02, 'is-soft');
+      for (let i = 1; i < 6; i++) line(-hw * 0.7 + i * W * 0.7 / 6, -hd * 0.84, -hw * 0.7 + i * W * 0.7 / 6, -hd * 0.68, 'is-soft');
+      break;
+    }
+    case 'freezer': {
+      line(-hw * 0.92, -hd * 0.72, hw * 0.92, -hd * 0.72);
+      rect(-hw * 0.8, -hd * 0.6, W * 0.8, D * 0.7, m * 0.04, 'is-soft');
+      rect(-hw * 0.25, hd * 0.72, W * 0.25, D * 0.06, m * 0.02, 'is-fill');
+      break;
+    }
+    case 'range': {
+      const con = D * 0.14;
+      rect(-hw * 0.92, -hd * 0.94, W * 0.92, con, 0);
+      knobs(-hd * 0.94 + con / 2, 4, m * 0.03);
+      const top = -hd * 0.94 + con, span = hd * 0.94 * 2 - con;
+      [[-0.25, 0.3, 0.19], [0.25, 0.3, 0.14], [-0.25, 0.72, 0.14], [0.25, 0.72, 0.19]].forEach(([x, y, r]) => { circle(x * W, top + y * span, r * m); circle(x * W, top + y * span, r * m * 0.55, 'is-soft'); });
+      break;
+    }
+    case 'dishwasher': {
+      rect(-hw * 0.9, -hd * 0.9, W * 0.9, D * 0.82, m * 0.03, 'is-soft');
+      line(-hw * 0.9, hd * 0.6, hw * 0.9, hd * 0.6);
+      rect(-hw * 0.5, hd * 0.72, W * 0.5, D * 0.06, m * 0.02, 'is-fill');
+      break;
+    }
+    case 'water-heater': {
+      circle(0, 0, m * 0.36, 'is-soft');
+      circle(0, 0, m * 0.1);
+      circle(-m * 0.22, -m * 0.22, m * 0.05, 'is-fill');
+      circle(m * 0.22, -m * 0.22, m * 0.05, 'is-fill');
+      break;
+    }
+    case 'furnace': {
+      rect(-hw * 0.86, -hd * 0.86, W * 0.86, D * 0.86, m * 0.03, 'is-soft');
+      circle(0, -hd * 0.45, m * 0.14);
+      line(-hw * 0.86, hd * 0.55, hw * 0.86, hd * 0.55);
+      for (let i = 1; i < 4; i++) line(-hw * 0.86 + i * W * 0.86 / 4, hd * 0.62, -hw * 0.86 + i * W * 0.86 / 4, hd * 0.8, 'is-soft');
+      break;
+    }
+    case 'condenser': {
+      const r = m * 0.42;
+      circle(0, 0, r);
+      circle(0, 0, r * 0.72, 'is-soft');
+      circle(0, 0, r * 0.42, 'is-soft');
+      for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; line(Math.cos(a) * r * 0.18, Math.sin(a) * r * 0.18, Math.cos(a) * r, Math.sin(a) * r, 'is-soft'); }
+      circle(0, 0, r * 0.14, 'is-fill');
+      break;
+    }
+    case 'rack': {
+      rect(-hw * 0.84, -hd * 0.9, W * 0.84, D * 0.9, m * 0.02, 'is-soft');
+      const rows = 7;
+      for (let i = 1; i < rows; i++) line(-hw * 0.84, -hd * 0.9 + i * D * 0.9 / rows, hw * 0.84, -hd * 0.9 + i * D * 0.9 / rows, 'is-soft');
+      for (let i = 0; i < rows; i++) circle(hw * 0.6, -hd * 0.9 + (i + 0.5) * D * 0.9 / rows, m * 0.03, 'is-fill');
+      break;
+    }
+    case 'hot-tub': {
+      rect(-hw * 0.8, -hd * 0.8, W * 0.8, D * 0.8, m * 0.2, 'is-soft');
+      rect(-hw * 0.45, -hd * 0.45, W * 0.45, D * 0.45, m * 0.12);
+      [[-0.62, -0.3], [-0.62, 0.3], [0.62, -0.3], [0.62, 0.3], [-0.3, -0.62], [0.3, -0.62], [-0.3, 0.62], [0.3, 0.62]].forEach(([x, y]) => circle(x * hw, y * hd, m * 0.022, 'is-fill'));
+      break;
+    }
+    default: return null;
+  }
+  return g;
+}
