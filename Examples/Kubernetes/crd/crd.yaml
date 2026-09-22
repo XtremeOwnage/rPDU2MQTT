@@ -1428,6 +1428,17 @@ spec:
                                       - snow
                                       - stairs
                                       description: 'The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water, snow, or stairs for a stairwell. Blank is plain.'
+                                    SurfaceColor:
+                                      type: string
+                                      description: "The surface's colour, like #7a5c3e: the carpet, the tile, the paint. Blank uses the surface's own. With a plain surface it fills the room."
+                                    Locked:
+                                      type: boolean
+                                      description: 'Lock the room: it cannot be moved, reshaped or deleted until it is unlocked.'
+                                    LockedWalls:
+                                      type: array
+                                      items:
+                                        type: integer
+                                      description: 'Walls that are locked in place, by number: wall n runs from corner n to the next.'
                                     HaArea:
                                       type: string
                                       description: The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.
@@ -1460,6 +1471,9 @@ spec:
                                           Y:
                                             type: number
                                       description: "The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own."
+                                    Locked:
+                                      type: boolean
+                                      description: "Lock the area's outline: it cannot be moved, reshaped or deleted until it is unlocked."
                                 description: Areas on this floor. An area can span several rooms, such as 'upstairs' or 'server corner', and may overlap them.
                               Openings:
                                 type: array
@@ -1504,6 +1518,48 @@ spec:
                                       type: boolean
                                       description: Swing the door to the other side of the wall.
                                 description: Doors, windows and openings in the walls on this floor.
+                              Constraints:
+                                type: array
+                                items:
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                                  properties:
+                                    Id:
+                                      type: string
+                                      description: Stable unique id for this constraint.
+                                    Kind:
+                                      type: string
+                                      enum:
+                                      - ''
+                                      - coincident
+                                      - colinear
+                                      - parallel
+                                      - perpendicular
+                                      - horizontal
+                                      - vertical
+                                      - angle
+                                      - length
+                                      description: Coincident (two corners), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).
+                                    Refs:
+                                      type: array
+                                      items:
+                                        type: object
+                                        x-kubernetes-preserve-unknown-fields: true
+                                        properties:
+                                          Room:
+                                            type: string
+                                            description: The id of the room or area.
+                                          Corner:
+                                            type: integer
+                                            description: The corner, counted from 0 in the outline. Blank when this refers to a wall.
+                                          Edge:
+                                            type: integer
+                                            description: 'The wall, counted from 0: wall n runs from corner n to the next. Blank when this refers to a corner.'
+                                      description: The corners or walls it holds, each a room or area id with a corner or wall number counted from 0.
+                                    Value:
+                                      type: number
+                                      description: For a length, in drawing units; for an angle, in degrees, signed the way the outline turns at that corner.
+                                description: "Geometric constraints between the corners and walls of this floor's rooms and areas: coincident, colinear, parallel, perpendicular, horizontal, vertical, a fixed angle or a fixed length. Kept as the plan is edited."
                           description: The floors of this site.
                     description: 'Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.'
                   Placements:

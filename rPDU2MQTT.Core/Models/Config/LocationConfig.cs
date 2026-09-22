@@ -71,6 +71,53 @@ public class FloorConfig
 
     [Description("Doors, windows and openings in the walls on this floor.")]
     public List<OpeningConfig> Openings { get; set; } = new();
+
+    [Description("Geometric constraints between the corners and walls of this floor's rooms and areas: coincident, colinear, parallel, perpendicular, horizontal, vertical, a fixed angle or a fixed length. Kept as the plan is edited.")]
+    public List<PlanConstraintConfig> Constraints { get; set; } = new();
+}
+
+/// <summary>What a plan constraint holds (#463).</summary>
+public static class PlanConstraintKind
+{
+    public const string Coincident = "coincident";
+    public const string Colinear = "colinear";
+    public const string Parallel = "parallel";
+    public const string Perpendicular = "perpendicular";
+    public const string Horizontal = "horizontal";
+    public const string Vertical = "vertical";
+    public const string Angle = "angle";
+    public const string Length = "length";
+}
+
+/// <summary>A constraint on corners and walls of the rooms and areas on a floor (#463).</summary>
+public class PlanConstraintConfig
+{
+    [Description("Stable unique id for this constraint.")]
+    public string Id { get; set; } = "";
+
+    [AllowedValues(PlanConstraintKind.Coincident, PlanConstraintKind.Colinear, PlanConstraintKind.Parallel, PlanConstraintKind.Perpendicular,
+        PlanConstraintKind.Horizontal, PlanConstraintKind.Vertical, PlanConstraintKind.Angle, PlanConstraintKind.Length)]
+    [Description("Coincident (two corners), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).")]
+    public string Kind { get; set; } = PlanConstraintKind.Length;
+
+    [Description("The corners or walls it holds, each a room or area id with a corner or wall number counted from 0.")]
+    public List<PlanRefConfig> Refs { get; set; } = new();
+
+    [Description("For a length, in drawing units; for an angle, in degrees, signed the way the outline turns at that corner.")]
+    public double? Value { get; set; }
+}
+
+/// <summary>A corner or wall of a room or area, by position in its outline.</summary>
+public class PlanRefConfig
+{
+    [Description("The id of the room or area.")]
+    public string Room { get; set; } = "";
+
+    [Description("The corner, counted from 0 in the outline. Blank when this refers to a wall.")]
+    public int? Corner { get; set; }
+
+    [Description("The wall, counted from 0: wall n runs from corner n to the next. Blank when this refers to a corner.")]
+    public int? Edge { get; set; }
 }
 
 /// <summary>The textures a room, an outdoor zone or the ground can be drawn with (#463).</summary>
@@ -155,6 +202,17 @@ public class RoomConfig
     [Description("The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water, snow, or stairs for a stairwell. Blank is plain.")]
     public string Surface { get; set; } = "";
 
+    [RegularExpression("^(#[0-9a-fA-F]{6})?$", ErrorMessage = "A surface colour is written like #7a5c3e.")]
+    [Description("The surface's colour, like #7a5c3e: the carpet, the tile, the paint. Blank uses the surface's own. With a plain surface it fills the room.")]
+    public string SurfaceColor { get; set; } = "";
+
+    [DefaultValue(false)]
+    [Description("Lock the room: it cannot be moved, reshaped or deleted until it is unlocked.")]
+    public bool Locked { get; set; }
+
+    [Description("Walls that are locked in place, by number: wall n runs from corner n to the next.")]
+    public List<int> LockedWalls { get; set; } = new();
+
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]
     public string HaArea { get; set; } = "";
 }
@@ -173,6 +231,10 @@ public class AreaConfig
 
     [Description("The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own.")]
     public List<PlanPoint> Shape { get; set; } = new();
+
+    [DefaultValue(false)]
+    [Description("Lock the area's outline: it cannot be moved, reshaped or deleted until it is unlocked.")]
+    public bool Locked { get; set; }
 }
 
 /// <summary>A point on a floor plan, in the floor's drawing units.</summary>

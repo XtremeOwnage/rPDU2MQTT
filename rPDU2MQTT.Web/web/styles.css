@@ -1523,3 +1523,35 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-gfci circle { fill: var(--good); stroke: var(--panel); }
 .fp-gfci text { fill: var(--accent-fg); text-anchor: middle; dominant-baseline: middle; font-weight: 800; pointer-events: none; }
 .fp-protected-dot { fill: var(--good); stroke: var(--panel); pointer-events: none; }
+
+/* Floor Plans: the persistence warning, locks, constraints and their picks, the colour row. */
+.fp-banner { display: grid; gap: 6px; margin: 0 0 var(--sp-3); padding: 12px 16px; border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-bg); color: var(--fg); font-size: 13.5px; }
+.fp-banner[hidden] { display: none; }
+.fp-banner.is-strong { border-width: 2px; border-color: var(--bad); background: var(--bad-bg); font-size: 14.5px; }
+.fp-banner strong { color: var(--bad); }
+.fp-lock.is-on, .fp-toggle.is-on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.fp-lock .fp-tool-icon, .fp-toggle .fp-tool-icon { width: 15px; height: 15px; vertical-align: -3px; }
+.fp-wall-list { display: grid; gap: 4px; }
+.fp-wall-row { display: grid; grid-template-columns: 4.2em minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.fp-wall-row.is-picked .fp-wall-k { color: var(--accent); font-weight: 700; }
+.fp-wall-k { color: var(--muted); font-size: 12.5px; }
+.fp-wall-row .fp-len { width: 100%; }
+.fp-toggle { min-width: 36px; }
+.fp-wall-locked { stroke: var(--series-4); fill: none; pointer-events: none; opacity: .9; }
+.fp-lock-badge path { fill: none; stroke: var(--series-4); stroke-width: 2.2; stroke-linejoin: round; }
+.fp-cons rect { fill: var(--panel); stroke: var(--series-7); }
+.fp-cons text { fill: var(--series-7); text-anchor: middle; dominant-baseline: middle; font-weight: 700; pointer-events: none; }
+.fp-cons.is-unmet rect { stroke: var(--bad); fill: var(--bad-bg); }
+.fp-cons.is-unmet text { fill: var(--bad); }
+.fp-cons { pointer-events: none; }
+.fp-cons-ring { fill: none; stroke: var(--series-7); pointer-events: none; }
+.fp-cons-ring.is-unmet { stroke: var(--bad); }
+.fp-pick { fill: none; stroke: var(--series-7); opacity: .75; pointer-events: none; stroke-linecap: round; }
+.fp-opts-note.is-picks { color: var(--series-7); font-weight: 600; }
+.fp-deg { width: 5em; }
+.fp-colour-row { display: flex; gap: 8px; align-items: center; }
+.fp-colour { width: 48px; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2); }
+.fp-surface.is-solid { opacity: .9; }
+.fp-list-row.is-unmet { border-color: var(--bad); }
+.fp-chip-x { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 4px; }
+.fp-chip-x:hover { color: var(--bad); }

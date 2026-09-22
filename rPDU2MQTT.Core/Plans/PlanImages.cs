@@ -54,8 +54,11 @@ public interface IPlanImageStore
 }
 
 /// <summary>Uploading, naming and reading plan images, whichever store holds them.</summary>
-public sealed partial class PlanImages(IPlanImageStore store, PlanStorageConfig config)
+public sealed partial class PlanImages(IPlanImageStore store, PlanStorageConfig config, bool fallback = false)
 {
+    /// <summary>Nothing was configured, so images go to a directory beside the program — lost with its container.</summary>
+    public bool Fallback => fallback;
+
     [GeneratedRegex("^[a-f0-9]{24}\\.(png|jpg|webp|svg)$")]
     private static partial Regex IdPattern();
 
@@ -99,7 +102,8 @@ public sealed partial class PlanImages(IPlanImageStore store, PlanStorageConfig 
             : !string.IsNullOrWhiteSpace(config.Directory) ? new DirectoryPlanImageStore(config.Directory)
             : !string.IsNullOrWhiteSpace(mounted) ? new DirectoryPlanImageStore(mounted)
             : cache ?? new DirectoryPlanImageStore(Path.Combine(AppContext.BaseDirectory, "plans"));
-        return new PlanImages(store, config);
+        var fallback = !config.ObjectStore.IsEnabled() && string.IsNullOrWhiteSpace(config.Directory) && string.IsNullOrWhiteSpace(mounted) && cache is null;
+        return new PlanImages(store, config, fallback);
     }
 }
 

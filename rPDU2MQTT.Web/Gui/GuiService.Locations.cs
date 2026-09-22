@@ -239,7 +239,14 @@ public sealed partial class GuiService
         app.MapGet("/api/plans/storage", (HttpContext ctx) =>
         {
             var images = Plans();
-            return Results.Json(new { ok = true, where = images.Store.Describe, limits = images.Limits, maxBytes = images.MaxBytes }, ConfigSchema.Json);
+            // Persistent unless nothing was named: then images sit beside the program and go with its container.
+            var persistent = !images.Fallback;
+            return Results.Json(new
+            {
+                ok = true, where = images.Store.Describe, limits = images.Limits, maxBytes = images.MaxBytes, persistent,
+                why = persistent ? null : "No plan storage is configured, so uploaded plan images are kept beside the program and are lost when it restarts or its container is replaced. Set PlanStorage.Directory to a persistent volume (on Kubernetes, floorPlans.persistence.enabled), an S3 bucket, or turn on the shared cache.",
+                configWritable = configSource.CanWrite,
+            }, ConfigSchema.Json);
         });
 
         app.MapPost("/api/plans/images", async (HttpContext ctx) =>

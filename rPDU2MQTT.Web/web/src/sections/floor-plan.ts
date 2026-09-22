@@ -11,7 +11,8 @@ import { type Pt, planDownstream, planProtectedBy, planRect, planArea, planCentr
 import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, planSnapStep, planScaleBar, planDefaultPlot } from '../plan-units.js';
 import { planHistory } from '../plan-history.js';
 import { searchSelect, type Choice } from '../search-select.js';
-import { PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
+import { planSolve, planSharedCorners, planCornerAngle, planEdgeCorners, planRefsAfterInsert, planRefsAfterRemove, planRefsWithout, type PlanRef, type PlanConstraint } from '../plan-constraints.js';
+import { planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -30,7 +31,7 @@ type Live = {
 };
 type SelType = 'room' | 'area' | 'item' | 'opening' | 'run';
 type Selection = { type: SelType; id: string } | null;
-type Tool = 'select' | 'pan' | 'room' | 'outline' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'measure';
+type Tool = 'select' | 'pan' | 'room' | 'outline' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'constrain' | 'measure';
 
 /// Why a place has no total, in the words the page uses. Never a zero.
 const FP_STATE_TEXT: Record<string, string> = {
@@ -50,6 +51,7 @@ const FP_TOOLS: [Tool, string, string, string][] = [
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
   ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
+  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: coincident, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
@@ -69,6 +71,8 @@ function fpToolIcon(tool: string): any {
     case 'item': p('M12 3 A9 9 0 1 0 12.01 3 Z M9.5 8 V12 M14.5 8 V12 M12 15.5 V16'); break;
     case 'wire': p('M4 18 C8 18 8 6 12 6 S16 18 20 18 M4 18 A1.5 1.5 0 1 0 4.01 18 M20 18 A1.5 1.5 0 1 0 20.01 18'); break;
     case 'measure': p('M3 16 L16 3 L21 8 L8 21 Z M7 12 L9 14 M10 9 L12 11 M13 6 L15 8'); break;
+    case 'constrain': p('M4 20 L20 4 M4 20 H13 M8 20 A6 6 0 0 0 7 15 M17 7 L20 4 L17 1'); break;
+    case 'lock': p('M7 11 V8 A5 5 0 0 1 17 8 V11 M5 11 H19 V21 H5 Z'); break;
     case 'undo': p('M9 7 L4 12 L9 17 M4 12 H14 A6 6 0 0 1 14 24'); break;
     case 'redo': p('M15 7 L20 12 L15 17 M20 12 H10 A6 6 0 0 0 10 24'); break;
   }
@@ -85,6 +89,27 @@ export function addFloorPlanSection(nav: any, sections: any) {
     'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
     + 'and devices on it with the cable runs between them. View shades each room by what it draws — a room with '
     + 'nothing metered reads unmetered, never zero. Edit draws and moves everything; Ctrl+Z undoes.'));
+
+  // Where things are kept, and whether they will survive a restart: said loudly, above everything, when they will not.
+  const banner = el('div', { class: 'fp-banner' });
+  banner.hidden = true;
+  sec.appendChild(banner);
+  let storage: any = null;
+  const readStorage = async () => {
+    try { const r: any = await api('/api/plans/storage'); storage = r.body?.ok ? r.body : null; } catch { storage = null; }
+    drawBanner();
+  };
+  const drawBanner = () => {
+    banner.innerHTML = '';
+    const lines: [string, string][] = [];
+    if (storage && storage.configWritable === false)
+      lines.push(['Floor plan changes cannot be saved.', 'The configuration source is read-only, so rooms, items and wiring drawn here are lost when this page is closed. Make the configuration writable, or export the plans to keep them.']);
+    if (storage && storage.persistent === false)
+      lines.push(['Plan images will not be kept.', storage.why || 'No persistent plan storage is configured.']);
+    banner.hidden = !lines.length;
+    banner.classList.toggle('is-strong', mode === 'edit');
+    lines.forEach(([title, text]) => banner.appendChild(el('div', { class: 'fp-banner-line' }, el('strong', { text: '⚠ ' + title }), el('span', { text: ' ' + text }))));
+  };
 
   // --- Config access -------------------------------------------------------------------------------
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
@@ -227,6 +252,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const bgBtn = btn('Background');
   bgBtn.title = 'Upload a floor plan image to draw over, set how strongly it shows, and set the scale.';
   const toolsBtn = btn('Tools…');
+  const exportBtn = btn('Export…');
+  exportBtn.title = 'Download this floor as a picture, or every floor plan as a file you can import again.';
   const printBtn = btn('Print');
   printBtn.title = 'Print this floor, with its rooms, wiring and legend.';
   printBtn.onclick = () => { try { (window as any).print?.(); } catch { /* no print dialog here */ } };
@@ -238,7 +265,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
-    printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
+    exportBtn, printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns: Record<string, any> = {};
@@ -405,7 +432,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
     sel.forEach(x => {
       if (x.type === 'room' || x.type === 'area') {
         const s = shapeOf(x);
-        if (!s) return;
+        if (!s || shapeHeld(s)) return;
         shapes.add(s);
         if (x.type === 'room') {
           itemsIn().forEach((it: any) => { if (it.Room === s.Id) items.add(it); });
@@ -445,6 +472,61 @@ export function addFloorPlanSection(nav: any, sections: any) {
     return !!r && runPath(r).length > 0 && runPath(r).every(inB);
   };
 
+  // --- Locks, shared corners and constraints -------------------------------------------------------
+  const constraintsNow = (): PlanConstraint[] => { const f = floorNow()?.floor; return f ? ensure(f, 'Constraints', []) : []; };
+  const setConstraints = (list: PlanConstraint[]) => { const f = floorNow()?.floor; if (f) f.Constraints = list; };
+  /// The outlines on this floor, as the solver sees them.
+  const shapesNow = () => [...roomsNow(), ...areasNow()].filter(x => (x.Shape || []).length >= 3);
+  const shapeById = (id: string) => shapesNow().find(x => x.Id === id);
+  /// A corner that must stay put: its room is locked, or a locked wall ends there.
+  const cornerLocked = (sh: any, i: number) => {
+    if (!sh) return false;
+    if (sh.Locked) return true;
+    const n = (sh.Shape || []).length;
+    return (sh.LockedWalls || []).some((e: number) => e === i || ((e + 1) % n) === i);
+  };
+  /// A shape that cannot move as a whole: locked, or holding a locked wall.
+  const shapeHeld = (sh: any) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
+  let lastSolve: { worst: number; unmet: string[] } = { worst: 0, unmet: [] };
+  /// Bring every constraint on this floor back into line, holding still the corners named.
+  const solve = (fixed: string[] = []) => {
+    if (!constraintsNow().length) { lastSolve = { worst: 0, unmet: [] }; return; }
+    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed));
+  };
+  const keysOf = (sh: any) => (sh?.Shape || []).map((_: any, i: number) => `${sh.Id}#${i}`);
+  const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
+  let cPicks: PlanRef[] = [];
+  const sameRef = (a: PlanRef, b: PlanRef) => a.Room === b.Room && (a.Corner ?? null) === (b.Corner ?? null) && (a.Edge ?? null) === (b.Edge ?? null);
+  /// The corner or wall under the pointer: a corner when one is close, else the nearest wall.
+  const pickRef = (p: Pt): PlanRef | null => {
+    const reach = 14 * upp() * hs();
+    let best: PlanRef | null = null, bestD = reach;
+    shapesNow().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
+    if (best) return best;
+    bestD = reach * 0.85;
+    shapesNow().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => {
+      const r2 = sh.Shape[(i + 1) % sh.Shape.length];
+      const n = planNearestOnSegment(p, q, r2);
+      const d = Math.hypot(n.X - p.X, n.Y - p.Y);
+      if (d <= bestD) { bestD = d; best = { Room: sh.Id, Edge: i }; }
+    }));
+    return best;
+  };
+  /// Where a wall's middle is, and which way it runs.
+  const edgeMid = (r: PlanRef) => {
+    const sh = shapeById(r.Room);
+    if (!sh || r.Edge == null) return null;
+    const [i, j] = planEdgeCorners(sh, r.Edge);
+    const a = sh.Shape[i], b = sh.Shape[j];
+    return { a, b, mid: { X: (a.X + b.X) / 2, Y: (a.Y + b.Y) / 2 }, len: Math.hypot(b.X - a.X, b.Y - a.Y), centre: planCentroid(sh.Shape) };
+  };
+  const cornerPt = (r: PlanRef) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
+  const addConstraint = (kind: string, refs: PlanRef[], value?: number) => {
+    const id = freshIn(constraintsNow(), kind);
+    act(() => { constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null }); solve(); cPicks = []; });
+    if (lastSolve.unmet.includes(id)) toast('That constraint cannot hold with the others, or with what is locked. It is kept, and marked in red; Ctrl+Z takes it back.', false);
+  };
+
   // --- Drawing -------------------------------------------------------------------------------------
   const shadeOf = (v: number | null, max: number) => {
     if (v == null || max <= 0) return '';
@@ -467,6 +549,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
 
     const defs = svgEl('defs');
     planTextures(s).forEach(p => defs.appendChild(p));
+    // A surface in a colour of its own gets a pattern of its own, drawn in that colour.
+    const tints = new Set<string>(roomsNow().filter(r => r.Surface && r.SurfaceColor).map(r => `${r.Surface}|${r.SurfaceColor}`));
+    tints.forEach(k => { const [name, colour] = k.split('|'); defs.appendChild(planTexture(name, s, colour)); });
     // The grid is in real units: a foot or half a metre, with a heavier line every five feet or metre.
     const minor = planGridStep(sys()) * s, major = minor * (sys() === 'imperial' ? 5 : 2);
     const gp = svgEl('pattern', { id: 'fp-grid', width: major, height: major, patternUnits: 'userSpaceOnUse' });
@@ -518,7 +603,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3).sort((a, b) => Number(!!b.Outdoor) - Number(!!a.Outdoor));
     rooms.forEach(room => {
       const poly: Pt[] = room.Shape;
-      if (room.Surface) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface', fill: `url(#fp-tex-${room.Surface})` }));
+      if (room.Surface) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface', fill: `url(#${planTextureId(room.Surface, room.SurfaceColor || '')})` }));
+      else if (room.SurfaceColor) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface is-solid', fill: room.SurfaceColor }));
     });
     const labels: any[] = [];
     rooms.forEach(room => {
@@ -690,6 +776,54 @@ export function addFloorPlanSection(nav: any, sections: any) {
       });
     }
 
+    // Locked walls, drawn over in the lock colour; a locked room wears a padlock by its name.
+    shapesNow().forEach(sh => {
+      (sh.LockedWalls || []).forEach((e: number) => {
+        const m = edgeMid({ Room: sh.Id, Edge: e });
+        if (m) svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-wall-locked', 'stroke-width': 7 * u, 'stroke-dasharray': `${3 * u} ${3 * u}` }));
+      });
+      if (sh.Locked) {
+        const c = planCentroid(sh.Shape);
+        const lk = svgEl('g', { class: 'fp-lock-badge', transform: `translate(${c.X},${c.Y - font * 2.1}) scale(${u * 0.7})` });
+        lk.appendChild(svgEl('path', { d: 'M-5 -1 V-4 A5 5 0 0 1 5 -4 V-1 M-7 -1 H7 V9 H-7 Z' }));
+        svg.appendChild(lk);
+      }
+    });
+    // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
+    if (mode === 'edit' || showSizes) {
+      const pill = (at: Pt, text: string, unmet: boolean) => {
+        const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
+        const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
+        g.appendChild(svgEl('rect', { x: -w / 2, y: -hh / 2, width: w, height: hh, rx: hh / 2, 'stroke-width': u }));
+        const t = svgEl('text', { y: u, 'font-size': 10.5 * u }); t.textContent = text; g.appendChild(t);
+        svg.appendChild(g);
+      };
+      const inward = (m: any, px: number) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
+      let pair = 0;
+      constraintsNow().forEach(c => {
+        const unmet = lastSolve.unmet.includes(c.Id);
+        if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
+          const m = edgeMid(c.Refs[0]);
+          if (m) pill(inward(m, c.Kind === 'length' ? 16 : 34), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'H' : 'V', unmet);
+        } else if (c.Kind === 'angle') {
+          const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
+          if (q && sh) { const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1; pill({ X: q.X + dx / d * 22 * u, Y: q.Y + dy / d * 22 * u }, `${Math.round(Math.abs(Number(c.Value) || 0))}°`, unmet); }
+        } else if (c.Kind === 'coincident') {
+          const q = cornerPt(c.Refs[0]);
+          if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-cons-ring' + (unmet ? ' is-unmet' : ''), 'stroke-width': 2 * u }));
+        } else {
+          pair++;
+          const sym = c.Kind === 'parallel' ? '∥' : c.Kind === 'perpendicular' ? '⊥' : '≡';
+          c.Refs.forEach(r => { const m = edgeMid(r); if (m) pill(inward(m, 34), `${sym}${pair}`, unmet); });
+        }
+      });
+    }
+    // What the Constrain tool has picked.
+    if (mode === 'edit' && tool === 'constrain') cPicks.forEach(r => {
+      if (r.Corner != null) { const q = cornerPt(r); if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 10 * u * hs(), class: 'fp-pick', 'stroke-width': 3 * u })); }
+      else { const m = edgeMid(r); if (m) svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-pick', 'stroke-width': 7 * u })); }
+    });
+
     // The plot's edges, to drag it bigger or smaller: every side, and the corners.
     if (mode === 'edit' && tool === 'select') {
       const hr = 8 * u * hs();
@@ -841,8 +975,21 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const target = extra.length ? null : shapeOf(selection);
       const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
       const under = hitSel(hit);
-      if (hit.corner != null && target) { gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner; }
-      else if (hit.mid != null && target) { gesture.kind = 'insert'; gesture.index = hit.mid; }
+      if (hit.corner != null && target) {
+        gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner;
+        // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
+        gesture.linked = e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, hit.corner);
+        const held = cornerLocked(target, hit.corner) || gesture.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner));
+        if (held) { gesture.kind = 'none'; saidLocked(); }
+      }
+      else if (hit.mid != null && target) {
+        // Dragging a wall's middle slides the whole wall, keeping its direction; its neighbours stretch to follow.
+        const [i, j] = planEdgeCorners(target, hit.mid);
+        gesture.kind = 'wall'; gesture.index = hit.mid;
+        gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
+        const held = gesture.ends.some((x: any) => cornerLocked(target, x.k) || x.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner)));
+        if (held) { gesture.kind = 'none'; saidLocked(); }
+      }
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
       else if (under && additive) { gesture.kind = 'none'; }
@@ -851,6 +998,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
         if (!isSel(under.type, under.id)) selectHit(hit);
         gesture.kind = 'group';
         gesture.members = movable(selected());
+        const m0 = gesture.members;
+        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length) { gesture.kind = 'none'; saidLocked(); }
         gesture.single = selected().length === 1 ? selection : null;
       } else {
         gesture.kind = 'marquee';
@@ -946,17 +1095,36 @@ export function addFloorPlanSection(nav: any, sections: any) {
         const box = boundsOf(m);
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
+        if (m.shapes.length) solve(m.shapes.flatMap((x: any) => keysOf(x.sh)));
       }
-    } else if (k === 'insert') {
+    } else if (k === 'wall') {
       begin();
       const s = shapeOf(selection);
-      const poly: Pt[] = s.Shape;
-      poly.splice(gesture.index + 1, 0, snapped(p, s));
-      gesture.kind = 'corner'; gesture.index = gesture.index + 1; selectedCorner = gesture.index;
+      if (s) {
+        const [a, b] = gesture.ends;
+        const L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+        const nx = -(b.Y - a.Y) / L, ny = (b.X - a.X) / L;
+        let off = (p.X - gesture.start.X) * nx + (p.Y - gesture.start.Y) * ny;
+        const g2 = snapOn ? snapStep() : 0;
+        if (g2) off = Math.round(off / g2) * g2;
+        const fixed: string[] = [];
+        gesture.ends.forEach((x: any) => {
+          const q = clampPt({ X: x.X + nx * off, Y: x.Y + ny * off });
+          s.Shape[x.k] = q; fixed.push(`${s.Id}#${x.k}`);
+          x.linked.forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
+        });
+        solve(fixed);
+      }
     } else if (k === 'corner') {
       begin();
       const s = shapeOf(selection);
-      if (s) s.Shape[gesture.index] = snapped(p, s);
+      if (s) {
+        const q = snapped(p, s);
+        s.Shape[gesture.index] = q;
+        const fixed = [`${s.Id}#${gesture.index}`];
+        (gesture.linked || []).forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
+        solve(fixed);
+      }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
     } else if (k === 'runpt' || k === 'runinsert') {
@@ -1053,6 +1221,16 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const tap = (g: any, p: Pt) => {
     const hit = g.hit;
     // A corner or a wire bend: tapped once it is selected, tapped twice (or double-clicked) it is removed.
+    if (mode === 'edit' && tool === 'select' && hit.mid != null) {
+      // Double-tapping a wall's middle puts a corner there; a single tap does nothing but keep the room selected.
+      const key = `${selection?.type}:${selection?.id}:m${hit.mid}`;
+      const now = Date.now();
+      const twice = !!lastTap && lastTap.key === key && now - lastTap.at < 450;
+      lastTap = twice ? null : { key, at: now };
+      if (twice) insertCorner(hit.mid);
+      render();
+      return;
+    }
     if (mode === 'edit' && tool === 'select' && (hit.corner != null || hit.runpt != null)) {
       const key = `${selection?.type}:${selection?.id}:${hit.corner != null ? 'c' + hit.corner : 'b' + hit.runpt}`;
       const now = Date.now();
@@ -1112,6 +1290,14 @@ export function addFloorPlanSection(nav: any, sections: any) {
       }
       if (hit.item && hit.item !== wireDraft.from) { finishWire(hit.item); return; }
       wireDraft.pts.push(drawSnap(wireLast(), p));
+      render();
+      return;
+    }
+    if (tool === 'constrain') {
+      const pick = pickRef(p);
+      if (!pick) { cPicks = []; render(); return; }
+      const at = cPicks.findIndex(r => sameRef(r, pick));
+      if (at >= 0) cPicks.splice(at, 1); else { cPicks.push(pick); if (cPicks.length > 2) cPicks.shift(); }
       render();
       return;
     }
@@ -1269,6 +1455,37 @@ export function addFloorPlanSection(nav: any, sections: any) {
         cancel.onclick = () => { wireDraft = null; render(); };
         add(done, cancel, el('span', { class: 'fp-opts-note', text: 'Tap bends, then the item it ends at.' }));
       }
+    } else if (tool === 'constrain') {
+      const corners = cPicks.filter(r => r.Corner != null), edges = cPicks.filter(r => r.Edge != null);
+      if (!cPicks.length) add(el('span', { class: 'fp-opts-note', text: 'Tap a corner or a wall, or two of them. Tap again to let one go.' }));
+      else add(el('span', { class: 'fp-opts-note is-picks', text: cPicks.map(refName).join(' + ') }));
+      const go = (label: string, fn: () => void, title = '') => { const b = btn(label, 'primary'); if (title) b.title = title; b.onclick = fn; add(b); };
+      if (edges.length === 1 && cPicks.length === 1) {
+        const e = edgeMid(edges[0])!;
+        let want = e.len;
+        add(lenInput(e.len, u => { want = u; }));
+        go('Fix length', () => addConstraint('length', edges, Math.round(want * 10) / 10), 'Hold this wall at this length.');
+        go('Level', () => addConstraint('horizontal', edges), 'Hold this wall horizontal on the plan.');
+        go('Plumb', () => addConstraint('vertical', edges), 'Hold this wall vertical on the plan.');
+      } else if (corners.length === 1 && cPicks.length === 1) {
+        const sh = shapeById(corners[0].Room)!;
+        const cur = planCornerAngle(sh, corners[0].Corner!);
+        const deg = el('input', { type: 'number', class: 'fp-deg', value: String(Math.round(Math.abs(cur))), min: '1', max: '359', step: '1' }) as HTMLInputElement;
+        add(deg, el('span', { class: 'fp-opts-note', text: '°' }));
+        go('Hold angle', () => { const v = Math.max(1, Math.min(179.9, Number(deg.value) || 90)); addConstraint('angle', corners, Math.sign(cur || 1) * v); }, 'Hold the corner at this angle.');
+        go('Square', () => addConstraint('angle', corners, Math.sign(cur || 1) * 90), 'Hold the corner at 90°.');
+      } else if (corners.length === 2) {
+        go('Coincident', () => addConstraint('coincident', corners), 'Make the two corners one: a shared corner.');
+      } else if (edges.length === 2) {
+        go('In line', () => addConstraint('colinear', edges), 'Colinear: the two walls lie along one line.');
+        go('Parallel', () => addConstraint('parallel', edges));
+        go('Square', () => addConstraint('perpendicular', edges), 'Perpendicular: the two walls meet at a right angle.');
+        const a = edgeMid(edges[0])!, b = edgeMid(edges[1])!;
+        go('Same length', () => { addConstraint('length', [edges[1]], Math.round(a.len * 10) / 10); }, `Fix the second wall at the first one’s length, ${len(a.len)} (it is ${len(b.len)} now).`);
+      } else if (cPicks.length === 2) {
+        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, or two walls.' }));
+      }
+      if (cPicks.length) { const clear = btn('Clear'); clear.onclick = () => { cPicks = []; render(); }; add(clear); }
     } else if (tool === 'measure') {
       if (measure?.b) {
         const d = Math.hypot(measure.b.X - measure.a.X, measure.b.Y - measure.a.Y);
@@ -1424,6 +1641,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   };
 
   const drawFloorSummary = (fl: any) => {
+    if (lastSolve.unmet.length) side.appendChild(el('div', { class: 'fp-note is-bad', text: `${lastSolve.unmet.length} constraint${lastSolve.unmet.length > 1 ? 's' : ''} cannot all hold: ${constraintsNow().filter(c => lastSolve.unmet.includes(c.Id)).map(describeConstraint).join('; ')}. Remove one, or unlock what it pulls against.` }));
     const fp = placeOf(fl.floor.Id), sp = placeOf(fl.site.Id);
     side.appendChild(el('h3', { text: fl.floor.Name || fl.floor.Id }));
     const { w, h } = floorSize();
@@ -1452,6 +1670,23 @@ export function addFloorPlanSection(nav: any, sections: any) {
     }
   };
 
+  /// A constraint in words: what it holds, and between what.
+  const refName = (r: PlanRef) => { const sh = shapeById(r.Room); const nm = sh?.Name || r.Room; return r.Corner != null ? `${nm} corner ${r.Corner + 1}` : `${nm} wall ${(r.Edge ?? 0) + 1}`; };
+  const describeConstraint = (c: PlanConstraint) => {
+    const [a, b] = c.Refs;
+    switch (c.Kind) {
+      case 'length': return `${refName(a)} fixed at ${len(Number(c.Value) || 0)}`;
+      case 'angle': return `${refName(a)} at ${Math.round(Math.abs(Number(c.Value) || 0) * 10) / 10}°`;
+      case 'horizontal': return `${refName(a)} level`;
+      case 'vertical': return `${refName(a)} plumb`;
+      case 'coincident': return `${refName(a)} on ${refName(b)}`;
+      case 'colinear': return `${refName(a)} in line with ${refName(b)}`;
+      case 'parallel': return `${refName(a)} parallel to ${refName(b)}`;
+      case 'perpendicular': return `${refName(a)} square to ${refName(b)}`;
+    }
+    return c.Kind;
+  };
+
   const drawShape = (type: 'room' | 'area', s: any, editing: boolean) => {
     const p = placeOf(s.Id);
     const name = el('input', { type: 'text', class: 'fp-name', value: s.Name || '' }) as HTMLInputElement;
@@ -1462,36 +1697,104 @@ export function addFloorPlanSection(nav: any, sections: any) {
     side.appendChild(valueLine(p));
 
     const poly: Pt[] = s.Shape || [];
+    const held = !!s.Locked;
+    if (editing) {
+      // Locked, it cannot be moved, reshaped or deleted; the solver holds it still.
+      const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
+      lock.setAttribute('aria-pressed', String(held));
+      lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
+      side.appendChild(actions(lock));
+    }
+    /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
+    const settle = () => {
+      const n = s.Shape.length;
+      constraintsNow().forEach(c => {
+        if (c.Kind !== 'length' || c.Refs[0]?.Room !== s.Id || c.Refs[0].Edge == null) return;
+        const [i, j] = planEdgeCorners(s, c.Refs[0].Edge);
+        if (i < n && j < n) c.Value = Math.round(Math.hypot(s.Shape[j].X - s.Shape[i].X, s.Shape[j].Y - s.Shape[i].Y) * 10) / 10;
+      });
+      solve(keysOf(s));
+    };
+    const lengthFix = (edge: number) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
       side.appendChild(el('h4', { text: 'Size' }));
       side.appendChild(row('Floor area', areaText(poly)));
       if (editing && type === 'room' && planIsBox(poly)) {
         // A rectangle is sized by its inside measurements; its top-left corner stays put.
         const b = planBounds(poly);
-        const setBox = (w: number, h: number) => act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); });
-        side.appendChild(el('div', { class: 'fp-two' }, field('Width', lenInput(b.w, w => setBox(w, b.h))), field('Depth', lenInput(b.h, h => setBox(b.w, h)))));
-      } else if (editing) {
-        // Any other outline is sized wall by wall: changing a wall's length moves the corner at its far end.
-        const walls = el('div', { class: 'fp-walls' });
-        poly.forEach((a, i) => {
-          const bpt = poly[(i + 1) % poly.length];
-          const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
-          walls.appendChild(field(`Wall ${i + 1}`, lenInput(L, want => act(() => {
+        const setBox = (w: number, h: number) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); settle(); }); };
+        const wi = lenInput(b.w, w => setBox(w, b.h)), di = lenInput(b.h, h => setBox(b.w, h));
+        if (held) { wi.disabled = true; di.disabled = true; }
+        side.appendChild(el('div', { class: 'fp-two' }, field('Width', wi), field('Depth', di)));
+      }
+      side.appendChild(el('h4', { text: 'Walls' }));
+      const walls = el('div', { class: 'fp-wall-list' });
+      poly.forEach((a, i) => {
+        const bpt = poly[(i + 1) % poly.length];
+        const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
+        const wallLocked = (s.LockedWalls || []).includes(i);
+        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(L) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
+        // Typing a wall's length moves the corner at its far end along the wall.
+        const inp = lenInput(L, want => {
+          if (held || cornerLocked(s, (i + 1) % poly.length)) { saidLocked(); render(); return; }
+          act(() => {
             if (!L) return;
             const k = want / L;
             s.Shape[(i + 1) % poly.length] = { X: planRound(a.X + (bpt.X - a.X) * k), Y: planRound(a.Y + (bpt.Y - a.Y) * k) };
-          }))));
+            const fix = lengthFix(i); if (fix) fix.Value = Math.round(want * 10) / 10;
+            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`]);
+          });
         });
-        side.appendChild(walls);
-      } else {
-        poly.forEach((a, i) => { const bpt = poly[(i + 1) % poly.length]; side.appendChild(row(`Wall ${i + 1}`, len(Math.hypot(bpt.X - a.X, bpt.Y - a.Y)))); });
-      }
+        inp.disabled = held;
+        const fixed = lengthFix(i);
+        const fixBtn = el('button', { class: 'small fp-toggle' + (fixed ? ' is-on' : ''), type: 'button', text: 'Fix', title: fixed ? 'Let this wall’s length change again.' : 'Hold this wall at its length as the rest is edited.' });
+        fixBtn.onclick = () => act(() => {
+          const f = lengthFix(i);
+          if (f) setConstraints(constraintsNow().filter(c => c !== f));
+          else constraintsNow().push({ Id: freshIn(constraintsNow(), 'length'), Kind: 'length', Refs: [{ Room: s.Id, Edge: i }], Value: Math.round(L * 10) / 10 });
+        });
+        const lockBtn = el('button', { class: 'small fp-toggle' + (wallLocked ? ' is-on' : ''), type: 'button', title: wallLocked ? 'Unlock this wall.' : 'Lock this wall where it is: neither end moves.' }, fpToolIcon('lock'));
+        lockBtn.setAttribute('aria-label', wallLocked ? 'Unlock wall' : 'Lock wall');
+        lockBtn.setAttribute('aria-pressed', String(wallLocked));
+        lockBtn.onclick = () => act(() => { const list = ensure(s, 'LockedWalls', []); const at = list.indexOf(i); if (at >= 0) list.splice(at, 1); else list.push(i); if (!list.length) delete s.LockedWalls; });
+        walls.appendChild(el('div', { class: 'fp-wall-row' + (selectedCorner === i ? ' is-picked' : '') }, el('span', { class: 'fp-wall-k', text: `Wall ${i + 1}` }), inp, fixBtn, lockBtn));
+      });
+      side.appendChild(walls);
+      if (editing) side.appendChild(el('div', { class: 'desc', text: 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
     }
 
     if (editing && type === 'room') {
       side.appendChild(el('div', { class: 'fp-two' },
         field('Kind', select([['room', 'Room'], ['outdoor', 'Outdoor zone']], s.Outdoor ? 'outdoor' : 'room', v => act(() => { s.Outdoor = v === 'outdoor'; if (s.Outdoor && !s.Surface) s.Surface = 'grass'; }))),
         field('Surface', select(PLAN_SURFACES, s.Surface || '', v => act(() => { s.Surface = v; })))));
+      // The surface's own colour, or one chosen for it: the carpet, the tile, the paint.
+      const colour = el('input', { type: 'color', class: 'fp-colour', value: s.SurfaceColor || (PLAN_SURFACE_COLOURS[s.Surface || ''] || ['#c8c8c8'])[0] }) as HTMLInputElement;
+      colour.title = 'The colour of its surface';
+      colour.oninput = () => { s.SurfaceColor = colour.value; drawPlan(); };
+      colour.onchange = () => { history.push(); s.SurfaceColor = colour.value; changed(); render(); };
+      const reset = btn(s.Surface ? 'Its own colour' : 'No colour');
+      reset.disabled = !s.SurfaceColor;
+      reset.onclick = () => act(() => { delete s.SurfaceColor; });
+      side.appendChild(field('Colour', el('div', { class: 'fp-colour-row' }, colour, reset), s.Surface ? 'Recolours the surface; its pattern stays.' : 'With a plain surface, fills the room.'));
+    }
+
+    // The constraints that hold this room, each removable.
+    const mine = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id));
+    if (mine.length) {
+      side.appendChild(el('h4', { text: 'Constraints' }));
+      const cl2 = el('div', { class: 'fp-list' });
+      mine.forEach(c => {
+        const unmet = lastSolve.unmet.includes(c.Id);
+        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text: describeConstraint(c) }),
+          el('span', { class: 'fp-list-val' + (unmet ? ' is-nodata' : ''), text: unmet ? 'cannot hold' : 'holds' }));
+        if (editing) {
+          const x = el('button', { class: 'fp-chip-x', type: 'button', text: '×', title: 'Remove this constraint' });
+          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => k !== c)); });
+          rowEl.appendChild(x);
+        }
+        cl2.appendChild(rowEl);
+      });
+      side.appendChild(cl2);
     }
     if (type === 'area') {
       const box = el('div', { class: 'fp-checks' });
@@ -1545,7 +1848,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const redraw = btn(poly.length >= 3 ? 'Redraw outline' : 'Draw outline', poly.length >= 3 ? '' : 'primary');
       redraw.onclick = () => {
         if (poly.length >= 3 && !confirm('Draw a new outline for it? The current one is replaced.')) return;
-        act(() => { s.Shape = []; });
+        if (s.Locked) { saidLocked(); return; }
+        act(() => { s.Shape = []; setConstraints(planRefsWithout(constraintsNow(), s.Id)); });
         tool = type === 'area' ? 'area' : s.Outdoor ? 'zone' : 'room';
         render();
       };
@@ -1757,10 +2061,29 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const removeCorner = () => {
     const sh = extra.length ? null : shapeOf(selection);
     if (!sh || selectedCorner < 0 || selectedCorner >= (sh.Shape || []).length) return false;
+    if (cornerLocked(sh, selectedCorner)) { saidLocked(); return true; }
     if (sh.Shape.length <= 3) { toast('An outline needs at least three corners.', false); return true; }
-    const at = selectedCorner;
-    act(() => { sh.Shape.splice(at, 1); selectedCorner = -1; });
+    const at = selectedCorner, count = sh.Shape.length;
+    act(() => {
+      sh.Shape.splice(at, 1); selectedCorner = -1;
+      setConstraints(planRefsAfterRemove(constraintsNow(), sh.Id, at, count));
+      sh.LockedWalls = (sh.LockedWalls || []).filter((e: number) => e !== at && e !== (at - 1 + count) % count).map((e: number) => e > at ? e - 1 : e);
+      solve();
+    });
     return true;
+  };
+  /// A corner in the middle of a wall, so the wall can bend there.
+  const insertCorner = (edge: number) => {
+    const sh = extra.length ? null : shapeOf(selection);
+    if (!sh) return;
+    if (sh.Locked || (sh.LockedWalls || []).includes(edge)) { saidLocked(); return; }
+    const [i, j] = planEdgeCorners(sh, edge);
+    act(() => {
+      sh.Shape.splice(i + 1, 0, { X: planRound((sh.Shape[i].X + sh.Shape[j].X) / 2), Y: planRound((sh.Shape[i].Y + sh.Shape[j].Y) / 2) });
+      planRefsAfterInsert(constraintsNow(), sh.Id, i + 1);
+      sh.LockedWalls = (sh.LockedWalls || []).map((e: number) => e > edge ? e + 1 : e);
+      selectedCorner = i + 1;
+    });
   };
   /// Take out the selected bend of a wire; its path joins straight across.
   const removeBend = () => {
@@ -1774,7 +2097,10 @@ export function addFloorPlanSection(nav: any, sections: any) {
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
   const deleteSelection = () => {
-    const all = selected();
+    const chosen = selected();
+    if (!chosen.length) return;
+    const all = chosen.filter(x => !((x.type === 'room' || x.type === 'area') && shapeOf(x)?.Locked));
+    if (all.length < chosen.length) toast('Locked rooms and areas stay; unlock them to delete them.', false);
     if (!all.length) return;
     const rooms = all.filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
     const inRooms = itemsIn().filter((it: any) => rooms.some((r: any) => r.Id === it.Room) && !all.some(x => x.type === 'item' && x.id === it.Id)).length;
@@ -1790,7 +2116,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
         else {
           const sh = shapeOf(x);
-          if (!sh) return;
+          if (!sh || sh.Locked) return;
+          setConstraints(planRefsWithout(constraintsNow(), sh.Id));
           const list = x.type === 'room' ? roomsNow() : areasNow();
           list.splice(list.indexOf(sh), 1);
           if (x.type === 'room') { itemsIn().forEach((it: any) => { if (it.Room === sh.Id) { it.Room = ''; it.Floor = floorNow()!.floor.Id; } }); areasNow().forEach(ar => { ar.Rooms = (ar.Rooms || []).filter((id: string) => id !== sh.Id); }); }
@@ -2134,6 +2461,113 @@ export function addFloorPlanSection(nav: any, sections: any) {
     uploadImage(picked, t => { status.textContent = t; });
   });
 
+  // --- Export and import ---------------------------------------------------------------------------
+  const download = (blob: Blob, name: string) => {
+    const a: any = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  };
+  const asDataUrl = (b: Blob) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
+  const imageAsDataUrl = async (id: string) => { try { const r = await fetch(`/api/plans/images/${encodeURIComponent(id)}`); return r.ok ? await asDataUrl(await r.blob()) : null; } catch { return null; } };
+  const fileStem = () => String(floorNow()?.floor.Name || floorNow()?.floor.Id || 'floor').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'floor';
+  /// The floor as a standalone SVG: the whole plot, no handles, every colour written out and the image embedded.
+  const svgMarkup = async () => {
+    const keep = { vb: { ...vb }, selection, extra, cPicks, mode };
+    selection = null; extra = []; cPicks = []; mode = 'view';
+    const { w, h } = floorSize();
+    vb = { x: 0, y: 0, w, h };
+    drawPlan();
+    const clone: any = svg.cloneNode(true);
+    const from: any[] = [svg, ...svg.querySelectorAll('*')], to: any[] = [clone, ...clone.querySelectorAll('*')];
+    const props = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap', 'stroke-linejoin', 'opacity', 'fill-opacity', 'stroke-opacity',
+      'font-size', 'font-weight', 'font-family', 'font-style', 'text-anchor', 'dominant-baseline', 'paint-order'];
+    from.forEach((node, i) => {
+      const cs: any = getComputedStyle(node);
+      to[i].setAttribute('style', props.map(p => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+    });
+    clone.querySelectorAll('.fp-hit, .fp-handle, .fp-mid, .fp-plot-handle, .fp-marquee, .fp-pick, title').forEach((n: any) => n.remove());
+    const img = clone.querySelector('image');
+    const id = floorNow()?.floor.Image;
+    if (img && id) { const data = await imageAsDataUrl(id); if (data) img.setAttribute('href', data); else img.remove(); }
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    clone.setAttribute('width', String(Math.round(w)));
+    clone.setAttribute('height', String(Math.round(h)));
+    vb = keep.vb; selection = keep.selection; extra = keep.extra; cPicks = keep.cPicks; mode = keep.mode;
+    drawPlan();
+    return new XMLSerializer().serializeToString(clone);
+  };
+  const exportSvg = async () => download(new Blob([await svgMarkup()], { type: 'image/svg+xml' }), `${fileStem()}.svg`);
+  const exportPng = async () => {
+    const markup = await svgMarkup();
+    const { w, h } = floorSize();
+    const k = Math.min(4, 4096 / Math.max(w, h));
+    const img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup);
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * k); canvas.height = Math.round(h * k);
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor || '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(b => { if (b) download(b, `${fileStem()}.png`); else toast('Could not draw the picture.', false); }, 'image/png');
+  };
+  /// Every floor plan as one file: sites, floors, rooms, items and wiring, with the plan images inside it.
+  const exportJson = async () => {
+    const f = flowIn();
+    const ids = [...new Set(floorsAll().map(x => x.floor.Image).filter(Boolean))] as string[];
+    const images: Record<string, string> = {};
+    for (const id of ids) { const d = await imageAsDataUrl(id); if (d) images[id] = d; }
+    const doc = { format: 'rpdu2mqtt-floorplans', version: 1, exported: new Date().toISOString(),
+      Sites: f.Sites || [], Placements: f.Placements || [], Runs: f.Runs || [], AutoLocations: f.AutoLocations || [], Images: images };
+    download(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' }), 'floor-plans.json');
+  };
+  const importJson = async (file: File) => {
+    let doc: any;
+    try { doc = JSON.parse(await file.text()); } catch { toast('That file is not JSON.', false); return; }
+    if (doc?.format !== 'rpdu2mqtt-floorplans' || !Array.isArray(doc.Sites)) { toast('That is not a floor plans export from this bridge.', false); return; }
+    const floors = doc.Sites.reduce((n: number, x: any) => n + (x.Floors || []).length, 0);
+    if (!confirm(`Replace the floor plans here with the file's ${doc.Sites.length} site(s) and ${floors} floor(s), ${(doc.Placements || []).length} item(s) and ${(doc.Runs || []).length} wire(s)?\n\nCtrl+Z undoes it, and nothing is kept until you press Save.`)) return;
+    let failed = 0;
+    for (const [id, data] of Object.entries(doc.Images || {})) {
+      try {
+        const blob = await (await fetch(String(data))).blob();
+        const r = await fetch('/api/plans/images', { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+        const b = await r.json().catch(() => ({}));
+        if (!b.ok || b.id !== id) failed++;
+      } catch { failed++; }
+    }
+    act(() => {
+      const f = flowIn();
+      f.Sites = doc.Sites; f.Placements = doc.Placements || []; f.Runs = doc.Runs || [];
+      if (Array.isArray(doc.AutoLocations)) f.AutoLocations = doc.AutoLocations;
+      floorId = ''; selection = null; extra = []; viewFor = '';
+    });
+    toast(failed ? `Imported, but ${failed} plan image(s) could not be stored.` : 'Imported. Press Save to keep it.', !failed);
+  };
+  const exportSheet = () => {
+    const body = el('div', { class: 'fp-sheet' });
+    const file = el('input', { type: 'file', accept: 'application/json,.json', class: 'fp-file' }) as HTMLInputElement;
+    file.onchange = async () => { const picked = file.files?.[0]; if (picked) { closeSheet(); await importJson(picked); } };
+    const option = (label: string, text: string, fn: () => any, primary = false) => {
+      const b = btn(label, primary ? 'primary' : '');
+      b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e: any) { toast(e?.message || 'Export failed.', false); } b.disabled = false; };
+      return el('div', { class: 'fp-tool-row' }, b, el('div', { class: 'desc', text }));
+    };
+    body.append(
+      option('This floor as SVG', 'A drawing that stays sharp at any size, with the plan image inside it.', exportSvg, true),
+      option('This floor as PNG', 'A picture, for sharing or a document.', exportPng),
+      option('All floor plans (JSON)', 'Every site, floor, room, item and wire, with the plan images inside — a backup you can import here or on another bridge.', exportJson),
+      option('Import floor plans…', 'Replace the floor plans here with an exported file.', () => file.click()),
+      file);
+    openSheet({ title: 'Export', body });
+  };
+  exportBtn.onclick = exportSheet;
+
   const toolsSheet = () => {
     const body = el('div', { class: 'fp-sheet' });
     const tags = btn('Rooms from tags…');
@@ -2331,10 +2765,13 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (fl && viewFor !== key) { fit(); viewFor = key; }
     if (fl) stage.style.aspectRatio = `${Number(fl.floor.Width) || 1000} / ${Number(fl.floor.Height) || 700}`;
     stage.classList.toggle('is-empty', !fl);
+    // Whether the constraints hold, read from a copy: opening a floor never moves anything.
+    lastSolve = constraintsNow().length ? planSolve(JSON.parse(JSON.stringify(shapesNow())), constraintsNow(), new Set(), 0) : { worst: 0, unmet: [] };
     drawSub();
     drawPlan();
     drawSide();
     drawEmpty();
+    drawBanner();
   };
 
   window.addEventListener('keydown', (e: any) => {
@@ -2390,7 +2827,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   });
   window.addEventListener('keyup', (e: any) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
-  link.onclick = () => { activate(link, sec); render(); load(); };
+  link.onclick = () => { activate(link, sec); render(); load(); readStorage(); };
   // The live view keeps up with the house while it is on screen.
   setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
   return { link, sec };

@@ -80,7 +80,7 @@ const { sandbox, getEl } = makeDom({
     if (url.includes('/api/locations/migrate')) { const b = JSON.parse(opts.body); posted.migrate = b; return { ok: true, tags: migrateTags, plan: b.mappings ? migratePlan : { creates: [], nodes: [], rules: [], removeTags: [], skipped: [] } }; }
     if (url.includes('/api/ha/areas/preview')) return { ok: true, plan: haPlan };
     if (url.includes('/api/ha/areas/apply')) return { ok: true, plan: haPlan, linked: { kitchen: 'area_kitchen' }, failed: [], message: 'Published 1 room(s) as areas.' };
-    if (url.includes('/api/plans/storage')) return { ok: true, where: 'the directory /data/plans', limits: 'PNG, JPEG, WebP or SVG, up to 10 MB.' };
+    if (url.includes('/api/plans/storage')) return { ok: true, where: 'the directory /app/plans', limits: 'PNG, JPEG, WebP or SVG, up to 10 MB.', persistent: false, configWritable: true, why: 'No plan storage is configured, so uploaded plan images are lost when it restarts.' };
     if (url.includes('/api/schema')) return schema;
     if (url.includes('/api/instances')) return { ok: true, instances: [] };
     if (url.includes('/api/config')) return config;
@@ -121,6 +121,53 @@ h.undo(); if (box.v !== 2) fail('undo did not go back one step');
 h.undo(); if (box.v !== 1) fail('undo did not go back two steps');
 h.redo(); if (box.v !== 2) fail('redo did not come forward');
 h.push(); box.v = 9; if (h.canRedo()) fail('a new change did not clear what could be redone');
+
+// --- The constraint solver ---
+const { planSolve } = sandbox;
+const sq = () => ({ Id: 'a', Shape: rect(0, 0, 400, 300) });
+const near1 = (a, b) => Math.abs(a - b) <= 1;
+{
+  const a = sq();
+  const r = planSolve([a], [{ Id: 'c', Kind: 'length', Refs: [{ Room: 'a', Edge: 0 }], Value: 500 }], new Set(['a#0', 'a#3']));
+  if (!near1(Math.hypot(a.Shape[1].X - a.Shape[0].X, a.Shape[1].Y - a.Shape[0].Y), 500) || r.unmet.length) fail(`a fixed length did not hold: ${JSON.stringify(a.Shape)}`);
+  if (a.Shape[0].X !== 0 || a.Shape[0].Y !== 0) fail('a held corner moved');
+}
+{
+  const a = { Id: 'a', Shape: [{ X: 0, Y: 0 }, { X: 100, Y: 12 }, { X: 60, Y: 90 }] };
+  planSolve([a], [{ Id: 'h', Kind: 'horizontal', Refs: [{ Room: 'a', Edge: 0 }] }]);
+  if (!near1(a.Shape[0].Y, a.Shape[1].Y)) fail(`a level wall is not level: ${JSON.stringify(a.Shape)}`);
+}
+{
+  const a = { Id: 'a', Shape: [{ X: 0, Y: 0 }, { X: 100, Y: 0 }, { X: 60, Y: 90 }] };
+  planSolve([a], [{ Id: 'g', Kind: 'angle', Refs: [{ Room: 'a', Corner: 1 }], Value: 90 * Math.sign(sandbox.planCornerAngle(a, 1)) }], new Set(['a#0', 'a#1']));
+  if (!near1(Math.abs(sandbox.planCornerAngle(a, 1)), 90)) fail(`a square corner is not square: ${sandbox.planCornerAngle(a, 1)}`);
+}
+{
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: [{ X: 200, Y: 0 }, { X: 300, Y: 30 }, { X: 300, Y: 100 }, { X: 200, Y: 100 }] };
+  planSolve([a, b], [{ Id: 'p', Kind: 'perpendicular', Refs: [{ Room: 'a', Edge: 0 }, { Room: 'b', Edge: 0 }] }], new Set(['a#0', 'a#1', 'a#2', 'a#3']));
+  const d = Math.atan2(b.Shape[1].Y - b.Shape[0].Y, b.Shape[1].X - b.Shape[0].X) * 180 / Math.PI;
+  if (!near1(Math.abs(d), 90)) fail(`two walls held square are not: ${d}°`);
+}
+{
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(150, 10, 250, 110) };
+  planSolve([a, b], [{ Id: 'l', Kind: 'colinear', Refs: [{ Room: 'a', Edge: 0 }, { Room: 'b', Edge: 0 }] }], new Set(['a#0', 'a#1', 'a#2', 'a#3']));
+  if (!near1(b.Shape[0].Y, 0) || !near1(b.Shape[1].Y, 0)) fail(`two walls held in line are not: ${JSON.stringify(b.Shape)}`);
+}
+{
+  // Rooms sharing a wall share its corners: a length held on one room's wall moves the corner in both.
+  const a = { Id: 'a', Shape: rect(0, 0, 400, 300) }, b = { Id: 'b', Shape: rect(400, 0, 800, 300) };
+  planSolve([a, b], [{ Id: 'k', Kind: 'length', Refs: [{ Room: 'a', Edge: 0 }], Value: 450 }], new Set(['a#0', 'a#3', 'b#1', 'b#2']));
+  if (!near1(a.Shape[1].X, 450) || !near1(b.Shape[0].X, 450)) fail(`a shared corner did not move in both rooms: ${a.Shape[1].X}, ${b.Shape[0].X}`);
+}
+{
+  const a = { Id: 'a', Shape: rect(0, 0, 400, 300), Locked: true };
+  const r = planSolve([a], [{ Id: 'k', Kind: 'length', Refs: [{ Room: 'a', Edge: 0 }], Value: 500 }]);
+  if (a.Shape[1].X !== 400) fail('a locked room was moved by a constraint');
+  if (!r.unmet.includes('k')) fail('a constraint a lock prevents is not reported as unmet');
+  const b = { Id: 'b', Shape: rect(0, 0, 400, 300) };
+  const c = planSolve([b], [{ Id: 'x', Kind: 'length', Refs: [{ Room: 'b', Edge: 0 }], Value: 500 }, { Id: 'y', Kind: 'length', Refs: [{ Room: 'b', Edge: 0 }], Value: 300 }]);
+  if (!c.unmet.length) fail('two lengths for one wall are not reported as conflicting');
+}
 
 // --- The page ---
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Floor Plans');
@@ -519,6 +566,80 @@ if (floor().Openings[0].Angle === moved.Angle && Math.abs(floor().Openings[0].An
 // The wire's panel gives its length on the plan and its circuit.
 tap(query(sec, 'polyline', true).find(p => p.dataset?.run), 300, 100);
 if (!/Length on the plan/.test(textOf(side())) || !/Supply side\s*Fridge/.test(textOf(side()))) fail(`the wire's panel does not describe it: ${textOf(side())}`);
+
+// Rooms sharing a wall share its corners: dragging the kitchen's corner moves the office's with it.
+toolBtn('Select').onclick();
+key('Escape');
+tap(polygonFor('kitchen'), 200, 150);
+const kCorner = (i) => query(sec, 'circle', true).find(c => c.dataset?.corner === String(i));
+drag(kCorner(1), [400, 0], [420, 0]);
+if (!(Math.abs(roomById('office').Shape[0].X - roomById('kitchen').Shape[1].X) < 0.01) || !(roomById('kitchen').Shape[1].X > 410)) fail(`a shared corner did not move in both rooms: kitchen ${JSON.stringify(roomById('kitchen').Shape[1])}, office ${JSON.stringify(roomById('office').Shape[0])}`);
+key('z', { ctrlKey: true });
+// Dragging a wall's middle slides the wall, and the neighbour sharing it follows.
+tap(polygonFor('office'), 600, 150);
+const wallMid = (i) => query(sec, 'circle', true).find(c => c.dataset?.mid === String(i));
+drag(wallMid(3), [400, 150], [430, 150]);
+const oS = roomById('office').Shape, kS = roomById('kitchen').Shape;
+if (!(oS[0].X > 420 && oS[3].X > 420 && Math.abs(oS[0].X - oS[3].X) < 0.01)) fail(`sliding the office's wall did not move it square: ${JSON.stringify(oS)}`);
+if (!(Math.abs(kS[1].X - oS[0].X) < 0.01 && Math.abs(kS[2].X - oS[3].X) < 0.01)) fail(`the kitchen did not follow the wall it shares: ${JSON.stringify(kS)}`);
+key('z', { ctrlKey: true });
+
+// Constraints: the kitchen's top wall fixed at its length holds while its far corner is dragged.
+toolBtn('Constrain').onclick();
+tap(svg, 200, 2);
+if (!/Kitchen wall 1/.test(textOf(query(sec, '.fp-opts')))) fail(`tapping a wall with Constrain did not pick it: ${textOf(query(sec, '.fp-opts'))}`);
+button('Fix length', sec).onclick();
+const fixedLen = floor().Constraints?.find(c => c.Kind === 'length');
+if (!fixedLen || Math.abs(fixedLen.Value - 400) > 0.5) fail(`fixing a wall's length did not record it: ${JSON.stringify(floor().Constraints)}`);
+if (!query(sec, 'g', true).some(g => g.classList.contains('fp-cons'))) fail('the constraint is not shown on the plan');
+tap(svg, 2, 150);
+tap(svg, 200, 298);
+button('Parallel', sec).onclick();
+if (!floor().Constraints.some(c => c.Kind === 'parallel')) fail('two walls could not be held parallel');
+toolBtn('Select').onclick();
+tap(polygonFor('kitchen'), 200, 150);
+drag(kCorner(0), [0, 0], [-0, 40]);
+const k0 = roomById('kitchen').Shape;
+if (Math.abs(Math.hypot(k0[1].X - k0[0].X, k0[1].Y - k0[0].Y) - 400) > 1) fail(`the fixed wall did not keep its length: ${JSON.stringify(k0)}`);
+if (!/Constraints/.test(textOf(side())) || !/fixed at/.test(textOf(side()))) fail('the room does not list its constraints');
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Constraints || []).length) fail(`undo did not take the constraints back: ${JSON.stringify(floor().Constraints)}`);
+
+// A locked room does not move, reshape or delete.
+tap(polygonFor('kitchen'), 200, 150);
+button(' Lock', side())?.onclick?.() ?? query(side(), 'button', true).find(b => b.classList.contains('fp-lock')).onclick();
+if (!roomById('kitchen').Locked) fail('the room could not be locked');
+const kBefore = JSON.stringify(roomById('kitchen').Shape);
+drag(polygonFor('kitchen'), [200, 150], [260, 200]);
+if (JSON.stringify(roomById('kitchen').Shape) !== kBefore) fail('a locked room moved');
+key('Delete');
+if (!roomById('kitchen')) fail('a locked room was deleted');
+query(side(), 'button', true).find(b => b.classList.contains('fp-lock')).onclick();
+if (roomById('kitchen').Locked) fail('the room could not be unlocked');
+// …and a single wall can be locked.
+query(side(), '.fp-wall-row', true)[0].querySelectorAll('button')[1].onclick();
+if (!(roomById('kitchen').LockedWalls || []).includes(0)) fail('a wall could not be locked');
+drag(kCorner(1), [400, 0], [420, 30]);
+if (roomById('kitchen').Shape[1].X !== 400) fail('a corner of a locked wall moved');
+key('z', { ctrlKey: true });
+
+// The carpet's colour: a surface recoloured draws in a pattern of its own.
+act_surface: {
+  const surfaceSel = query(side(), 'select', true).find(x => query(x, 'option', true).some(o => o.value === 'carpet'));
+  surfaceSel.value = 'carpet'; surfaceSel.onchange();
+  const colour = query(side(), 'input', true).find(i => i.classList.contains('fp-colour'));
+  colour.value = '#aa3344'; colour.onchange();
+  if (roomById('kitchen').SurfaceColor !== '#aa3344') fail('the carpet colour was not kept');
+  if (!query(sec, 'pattern', true).some(p => p.getAttribute('id') === 'fp-tex-carpet-aa3344')) fail('the recoloured carpet has no pattern of its own');
+  if (!query(sec, 'polygon', true).some(p => p.getAttribute('fill') === 'url(#fp-tex-carpet-aa3344)')) fail('the kitchen is not drawn in its carpet colour');
+}
+
+// Nowhere persistent to keep plan images: said above everything.
+if (query(sec, '.fp-banner').hidden || !/will not be kept/.test(textOf(query(sec, '.fp-banner')))) fail(`there is no warning that plan images will be lost: ${textOf(query(sec, '.fp-banner'))}`);
+// Export: pictures of the floor, and every plan as a file to import again.
+button('Export…', sec).onclick();
+['This floor as SVG', 'This floor as PNG', 'All floor plans (JSON)', 'Import floor plans…'].forEach(t => { if (!button(t, sheet())) fail(`the export sheet has no "${t}"`); });
+shut();
 
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();

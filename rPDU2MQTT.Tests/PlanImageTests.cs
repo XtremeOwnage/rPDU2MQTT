@@ -92,6 +92,9 @@ public class PlanImageTests : IDisposable
         var cache = new Memory();
 
         Assert.Same(cache, PlanImages.For(new PlanStorageConfig(), cache: cache).Store);
+        Assert.False(PlanImages.For(new PlanStorageConfig(), cache: cache).Fallback);
+        Assert.True(PlanImages.For(new PlanStorageConfig()).Fallback);
+        Assert.False(PlanImages.For(new PlanStorageConfig { Directory = dir }).Fallback);
         Assert.IsType<DirectoryPlanImageStore>(PlanImages.For(new PlanStorageConfig { Directory = dir }, cache: cache).Store);
     }
 

@@ -1173,6 +1173,7 @@ them. **View** shades each room by what it draws now, today, or this week. **Edi
 | Door / Window | D / W | Tap a wall; the opening snaps into it and lies along it. Doors can be single, double, sliding or garage. |
 | Item | I | Place an outlet, switch, light, fan, appliance, device, HVAC unit, junction box, EV charger, panel, utility meter, utility pole, transformer, solar array, battery, inverter or generator. |
 | Wire | L | Draw a cable run from the supply side: tap the item feeding it, each bend, and the item it goes to. Bends snap to wall corners and edges. A branch circuit, a feeder, or the utility service from the pole. |
+| Constrain | K | Tap corners or walls, then hold them: two corners coincident; two walls in line, parallel or square; a wall level, plumb or at a fixed length; a corner at an angle. |
 | Measure | M | Tap two points to measure between them, and set the plan's scale from a distance you know. |
 
 The wheel zooms about the pointer and Shift+wheel pans; a pinch zooms on a tablet; the middle button, or holding Space, pans while any tool is in hand. **Floor settings › Arrange** centres the drawing on its plot, or fits the plot to the drawing. Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
@@ -1194,6 +1195,18 @@ meter, the pole — and counts toward the floor's total. Outdoor zones are rooms
 **Circuits at a glance.** Tapping an item or a wire, in View or Edit, brings its whole circuit forward — every item and wire on it, and the rooms it serves — and fades the rest.
 
 **GFCI outlets.** Tick *GFCI outlet* on an outlet (or keep *GFCI* on while placing them). Wires run from the supply side to the load side, shown by an arrow and reversible from the wire's panel, so what is downstream of a GFCI is everything its wires lead to. Selecting the GFCI lists and lights up everything it protects; a protected outlet says which GFCI protects it, and carries a green dot when the wiring is shown.
+
+**Shared walls.** Corners that sit on top of one another belong to every room that meets there: dragging one moves it in all of them, and dragging a wall's middle dot slides the whole wall, with its neighbour following. Hold Alt to pull a shared corner apart. Double-click a wall's middle dot to add a corner.
+
+**Locks.** A room or area can be locked from its panel: it cannot then be moved, reshaped or deleted until it is unlocked. Single walls can be locked too — neither end moves.
+
+**Constraints.** Kept on each floor (`Constraints`), and held as the plan is edited: whatever is dragged or typed stays where it was put and the rest gives way. Locked rooms and walls never give way. A constraint that cannot hold with the others is marked in red, and the floor says which. Each room lists its constraints, each removable; a wall's *Fix* button holds it at its length.
+
+**Surface colours.** A room's surface can be recoloured (`SurfaceColor`) — the carpet, the tile, the paint — keeping its pattern; with a plain surface the colour fills the room.
+
+**Export.** *Export…* downloads the floor as SVG or PNG, or every floor plan as one JSON file with its images inside, which *Import floor plans…* reads back here or on another bridge.
+
+**Storage warnings.** When no persistent plan storage is configured, or the configuration cannot be saved, the page says so in a banner above the plan.
 
 **Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).
 

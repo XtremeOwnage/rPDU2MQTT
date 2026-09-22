@@ -25,33 +25,61 @@ export const PLAN_SUPPLY_KINDS = ['panel', 'meter', 'pole', 'transformer', 'sola
 
 export const PLAN_OPENINGS: [string, string][] = [['door', 'Door'], ['double-door', 'Double door'], ['sliding-door', 'Sliding door'], ['garage-door', 'Garage door'], ['window', 'Window'], ['opening', 'Opening']];
 
-/// A texture at real size: `s` is drawing units per metre, so a floorboard is a floorboard at any scale.
-export function planTextures(s: number): any[] {
-  const out: any[] = [];
-  const pat = (id: string, w: number, h: number, base: string, ...kids: any[]) => {
-    const p = svgEl('pattern', { id: 'fp-tex-' + id, width: w * s, height: h * s, patternUnits: 'userSpaceOnUse' });
-    p.appendChild(svgEl('rect', { width: w * s, height: h * s, fill: base }));
-    kids.forEach(k => p.appendChild(k));
-    out.push(p);
-  };
-  const line = (x1: number, y1: number, x2: number, y2: number, stroke: string, w = 0.008) => svgEl('line', { x1: x1 * s, y1: y1 * s, x2: x2 * s, y2: y2 * s, stroke, 'stroke-width': w * s });
-  const dot = (x: number, y: number, r: number, fill: string) => svgEl('circle', { cx: x * s, cy: y * s, r: r * s, fill });
-  const path = (d: string, stroke: string, w = 0.008, fill = 'none') => svgEl('path', { d: d.replace(/-?\d*\.?\d+/g, n => String(Number(n) * s)), stroke, 'stroke-width': w * s, fill });
+/// Each surface's own colours: its base, a darker detail, and a lighter one.
+export const PLAN_SURFACE_COLOURS: Record<string, [string, string, string]> = {
+  wood: ['#c99d6b', '#a37649', '#dcb689'], tile: ['#e4ded1', '#bbb3a1', '#f2eee6'], carpet: ['#959cb2', '#848ca4', '#a6adc1'],
+  concrete: ['#c4c3bd', '#adaca5', '#d2d1cb'], stone: ['#b4ac9d', '#958d7e', '#c7c0b3'], grass: ['#78ab5d', '#5d9146', '#93c476'],
+  gravel: ['#cbbfa6', '#a99c83', '#ddd3bf'], dirt: ['#a4815f', '#8b6949', '#b8977a'], deck: ['#b17d50', '#7c5535', '#c49269'],
+  pavers: ['#b9684c', '#8c4a33', '#cc8065'], water: ['#76aad6', '#5b91c2', '#93bfe3'], snow: ['#f2f5f9', '#dde4ee', '#ffffff'],
+  stairs: ['#d3cbbd', '#8f8676', '#b7ae9e'],
+};
 
-  pat('wood', 1.2, 0.3, '#c99d6b', line(0, 0.15, 1.2, 0.15, '#a37649'), line(0, 0.3, 1.2, 0.3, '#a37649'), line(0.45, 0, 0.45, 0.15, '#a37649'), line(1.0, 0.15, 1.0, 0.3, '#a37649'));
-  pat('tile', 0.3, 0.3, '#e4ded1', path('M0 0 H0.3 M0 0 V0.3', '#bbb3a1', 0.012));
-  pat('carpet', 0.1, 0.1, '#959cb2', dot(0.03, 0.03, 0.012, '#848ca4'), dot(0.08, 0.07, 0.01, '#a6adc1'));
-  pat('concrete', 0.5, 0.5, '#c4c3bd', dot(0.1, 0.12, 0.012, '#adaca5'), dot(0.33, 0.07, 0.008, '#b3b2ab'), dot(0.27, 0.38, 0.014, '#aaa9a2'), dot(0.44, 0.29, 0.007, '#d2d1cb'), dot(0.06, 0.41, 0.009, '#b6b5ae'));
-  pat('stone', 0.6, 0.6, '#b4ac9d', path('M0 0.25 L0.22 0.2 L0.3 0 M0.22 0.2 L0.35 0.42 L0.6 0.36 M0.35 0.42 L0.28 0.6 M0.3 0 L0.55 0.12 L0.6 0.36', '#958d7e', 0.012));
-  pat('grass', 0.3, 0.3, '#78ab5d', path('M0.05 0.12 l0.02 -0.07 M0.18 0.27 l-0.015 -0.06 M0.24 0.1 l0.02 -0.06 M0.11 0.24 l0.01 -0.05', '#5d9146', 0.012), path('M0.2 0.2 l0.012 -0.05 M0.02 0.28 l0.015 -0.05', '#93c476', 0.01));
-  pat('gravel', 0.15, 0.15, '#cbbfa6', dot(0.03, 0.04, 0.014, '#a99c83'), dot(0.1, 0.03, 0.01, '#ddd3bf'), dot(0.07, 0.1, 0.016, '#b4a78e'), dot(0.13, 0.12, 0.01, '#9d9078'));
-  pat('dirt', 0.25, 0.25, '#a4815f', dot(0.05, 0.06, 0.01, '#8b6949'), dot(0.17, 0.12, 0.008, '#b8977a'), dot(0.1, 0.2, 0.012, '#886646'));
-  pat('deck', 1.5, 0.28, '#b17d50', line(0, 0.14, 1.5, 0.14, '#7c5535', 0.014), line(0, 0.28, 1.5, 0.28, '#7c5535', 0.014), line(0.6, 0, 0.6, 0.14, '#7c5535', 0.01), line(1.25, 0.14, 1.25, 0.28, '#7c5535', 0.01));
-  pat('pavers', 0.4, 0.2, '#b9684c', path('M0 0 H0.4 M0 0.1 H0.4 M0.2 0 V0.1 M0 0.1 V0.2 M0.4 0.1 V0.2', '#8c4a33', 0.012));
-  pat('water', 0.6, 0.3, '#76aad6', path('M0 0.15 q0.075 -0.06 0.15 0 t0.15 0 t0.15 0 t0.15 0', '#5b91c2', 0.014));
-  pat('stairs', 1.0, 0.28, '#d3cbbd', line(0, 0.27, 1.0, 0.27, '#8f8676', 0.018), line(0, 0.25, 1.0, 0.25, '#b7ae9e', 0.008));
-  pat('snow', 0.4, 0.4, '#f2f5f9', dot(0.08, 0.1, 0.01, '#dde4ee'), dot(0.3, 0.25, 0.012, '#e3e9f1'), dot(0.2, 0.36, 0.008, '#d6dee9'));
-  return out;
+/// A colour lighter or darker by a fraction: a detail drawn in the same colour as what it sits on.
+export function planShade(hex: string, by: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(c => Math.round(by < 0 ? c * (1 + by) : c + (255 - c) * by));
+  return '#' + ch.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
+}
+
+/// The pattern id for a surface, in its own colours or in a chosen one.
+export function planTextureId(name: string, colour = ''): string {
+  return 'fp-tex-' + name + (colour ? '-' + colour.replace('#', '').toLowerCase() : '');
+}
+
+/// One surface texture at real size, in its own colours or recoloured from a base colour. `s` is units per metre.
+export function planTexture(name: string, s: number, colour = ''): any {
+  const own = PLAN_SURFACE_COLOURS[name];
+  const [base, dark, light] = colour ? [colour, planShade(colour, -0.2), planShade(colour, 0.18)] : own || ['#cccccc', '#aaaaaa', '#eeeeee'];
+  const p = svgEl('pattern', { id: planTextureId(name, colour), patternUnits: 'userSpaceOnUse' });
+  const size = (w: number, h: number) => { p.setAttribute('width', w * s); p.setAttribute('height', h * s); p.appendChild(svgEl('rect', { width: w * s, height: h * s, fill: base })); };
+  const add = (e: any) => p.appendChild(e);
+  const line = (x1: number, y1: number, x2: number, y2: number, stroke: string, w = 0.008) => add(svgEl('line', { x1: x1 * s, y1: y1 * s, x2: x2 * s, y2: y2 * s, stroke, 'stroke-width': w * s }));
+  const dot = (x: number, y: number, r: number, fill: string) => add(svgEl('circle', { cx: x * s, cy: y * s, r: r * s, fill }));
+  const path = (d: string, stroke: string, w = 0.008) => add(svgEl('path', { d: d.replace(/-?\d*\.?\d+/g, n => String(Number(n) * s)), stroke, 'stroke-width': w * s, fill: 'none' }));
+  switch (name) {
+    case 'wood': size(1.2, 0.3); line(0, 0.15, 1.2, 0.15, dark); line(0, 0.3, 1.2, 0.3, dark); line(0.45, 0, 0.45, 0.15, dark); line(1.0, 0.15, 1.0, 0.3, dark); break;
+    case 'tile': size(0.3, 0.3); path('M0 0 H0.3 M0 0 V0.3', dark, 0.012); break;
+    case 'carpet': size(0.1, 0.1); dot(0.03, 0.03, 0.012, dark); dot(0.08, 0.07, 0.01, light); break;
+    case 'concrete': size(0.5, 0.5); dot(0.1, 0.12, 0.012, dark); dot(0.33, 0.07, 0.008, dark); dot(0.27, 0.38, 0.014, dark); dot(0.44, 0.29, 0.007, light); dot(0.06, 0.41, 0.009, dark); break;
+    case 'stone': size(0.6, 0.6); path('M0 0.25 L0.22 0.2 L0.3 0 M0.22 0.2 L0.35 0.42 L0.6 0.36 M0.35 0.42 L0.28 0.6 M0.3 0 L0.55 0.12 L0.6 0.36', dark, 0.012); break;
+    case 'grass': size(0.3, 0.3); path('M0.05 0.12 l0.02 -0.07 M0.18 0.27 l-0.015 -0.06 M0.24 0.1 l0.02 -0.06 M0.11 0.24 l0.01 -0.05', dark, 0.012); path('M0.2 0.2 l0.012 -0.05 M0.02 0.28 l0.015 -0.05', light, 0.01); break;
+    case 'gravel': size(0.15, 0.15); dot(0.03, 0.04, 0.014, dark); dot(0.1, 0.03, 0.01, light); dot(0.07, 0.1, 0.016, dark); dot(0.13, 0.12, 0.01, dark); break;
+    case 'dirt': size(0.25, 0.25); dot(0.05, 0.06, 0.01, dark); dot(0.17, 0.12, 0.008, light); dot(0.1, 0.2, 0.012, dark); break;
+    case 'deck': size(1.5, 0.28); line(0, 0.14, 1.5, 0.14, dark, 0.014); line(0, 0.28, 1.5, 0.28, dark, 0.014); line(0.6, 0, 0.6, 0.14, dark, 0.01); line(1.25, 0.14, 1.25, 0.28, dark, 0.01); break;
+    case 'pavers': size(0.4, 0.2); path('M0 0 H0.4 M0 0.1 H0.4 M0.2 0 V0.1 M0 0.1 V0.2 M0.4 0.1 V0.2', dark, 0.012); break;
+    case 'water': size(0.6, 0.3); path('M0 0.15 q0.075 -0.06 0.15 0 t0.15 0 t0.15 0 t0.15 0', dark, 0.014); break;
+    case 'snow': size(0.4, 0.4); dot(0.08, 0.1, 0.01, dark); dot(0.3, 0.25, 0.012, dark); dot(0.2, 0.36, 0.008, dark); break;
+    case 'stairs': size(1.0, 0.28); line(0, 0.27, 1.0, 0.27, dark, 0.018); line(0, 0.25, 1.0, 0.25, light, 0.008); break;
+    default: size(1, 1); break;
+  }
+  return p;
+}
+
+/// Every surface texture in its own colours.
+export function planTextures(s: number): any[] {
+  return Object.keys(PLAN_SURFACE_COLOURS).map(name => planTexture(name, s));
 }
 
 /// A pictogram for a placed item, centred on 0,0 inside a disc of radius r.
