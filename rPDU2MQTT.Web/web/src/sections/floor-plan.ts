@@ -1,12 +1,16 @@
-// Floor Plans (#470): each floor drawn with its rooms and areas (#463), the outlets, fixtures and devices placed
-// on it and the circuits feeding them (#464, #465), shaded live by what each room draws (#466), with a trace
-// that finds an outlet's breaker from the outlet (#468). Built for a tablet carried round the house.
+// Floor Plans (#470): each floor drawn at real size with its rooms, outdoor zones and areas, doors and windows
+// (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
+// #465), shaded live by what each room draws (#466), with a trace that finds an outlet's breaker from the
+// outlet (#468). One Edit mode with a tool palette, undo and redo, and sizes in feet or metres.
 import { activate, api, btn, closeSheet, el, ensure, navLink, openSheet, svgEl, toast, formatMeasure } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { sparkline } from '../charts.js';
 import { analyse, type Level } from '../circuit-finder.js';
-import { type Pt, planRect, planArea, planCentroid, planShapeAt, planSnap, planMove, planClamp, planRound, planScaleMax, planNearestOnSegment } from '../plan-geometry.js';
+import { type Pt, planRect, planArea, planCentroid, planShapeAt, planSnap, planMove, planClamp, planRound, planScaleMax, planNearestOnSegment, planNearestWall, planPathLength, planIsBox, planBounds, planContains } from '../plan-geometry.js';
+import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, planSnapStep, planScaleBar, planDefaultPlot } from '../plan-units.js';
+import { planHistory } from '../plan-history.js';
+import { PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -23,10 +27,9 @@ type Live = {
   places: Record<string, Place>; nodes: PlanNode[]; circuits: Circuit[]; placements: Record<string, { value: number | null; circuitKnown: boolean }>;
   units: string; problems: string[]; message: string | null;
 };
-type Selection = { type: 'room' | 'area' | 'item'; id: string } | null;
-
-/// What can be placed, and how each is drawn: a pictogram inside a circle.
-const FP_KINDS: [string, string][] = [['outlet', 'Outlet'], ['switch', 'Switch'], ['fixture', 'Light fixture'], ['appliance', 'Appliance'], ['device', 'Device']];
+type SelType = 'room' | 'area' | 'item' | 'opening' | 'run';
+type Selection = { type: SelType; id: string } | null;
+type Tool = 'select' | 'pan' | 'room' | 'outline' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'measure';
 
 /// Why a place has no total, in the words the page uses. Never a zero.
 const FP_STATE_TEXT: Record<string, string> = {
@@ -34,17 +37,41 @@ const FP_STATE_TEXT: Record<string, string> = {
   unknown: 'A reading this total needs is missing, so it is not shown.',
 };
 
-/// A glyph for a placed item, centred on 0,0 at radius r.
-function fpGlyph(kind: string, r: number): any {
-  const g = svgEl('g', { class: 'fp-glyph' });
-  const line = (x1: number, y1: number, x2: number, y2: number) => g.appendChild(svgEl('line', { x1, y1, x2, y2 }));
-  const k = r * 0.45;
-  if (kind === 'outlet') { line(-k * 0.5, -k * 0.6, -k * 0.5, k * 0.2); line(k * 0.5, -k * 0.6, k * 0.5, k * 0.2); g.appendChild(svgEl('circle', { cx: 0, cy: k * 0.75, r: k * 0.18 })); }
-  else if (kind === 'switch') { g.appendChild(svgEl('rect', { x: -k * 0.45, y: -k, width: k * 0.9, height: k * 2, rx: k * 0.2 })); line(0, -k * 0.6, 0, 0); }
-  else if (kind === 'fixture') { g.appendChild(svgEl('circle', { cx: 0, cy: 0, r: k * 0.45 })); [0, 45, 90, 135, 180, 225, 270, 315].forEach(a => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); line(c * k * 0.7, s * k * 0.7, c * k, s * k); }); }
-  else if (kind === 'appliance') { g.appendChild(svgEl('rect', { x: -k, y: -k, width: k * 2, height: k * 2, rx: k * 0.25 })); g.appendChild(svgEl('circle', { cx: 0, cy: k * 0.15, r: k * 0.5 })); }
-  else { g.appendChild(svgEl('rect', { x: -k, y: -k * 0.7, width: k * 2, height: k * 1.3, rx: k * 0.2 })); line(-k * 0.4, k * 0.9, k * 0.4, k * 0.9); }
-  return g;
+/// The palette: [tool, name, shortcut, what it does].
+const FP_TOOLS: [Tool, string, string, string][] = [
+  ['select', 'Select', 'V', 'Select and move anything: rooms, their corners, items, doors, windows and wire bends.'],
+  ['pan', 'Pan', 'H', 'Drag to move around the plan. Two fingers or the wheel with Ctrl also pan and zoom.'],
+  ['room', 'Room', 'R', 'Drag a rectangle to draw a room, or add one by its measurements.'],
+  ['outline', 'Outline', 'P', 'Tap each corner of an odd-shaped room; tap the first corner again to close it.'],
+  ['zone', 'Outdoor', 'O', 'Drag out a yard, porch, patio, driveway or deck.'],
+  ['area', 'Area', 'A', 'Drag out an area that may span rooms, such as upstairs or the server corner.'],
+  ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
+  ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
+  ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
+  ['wire', 'Wire', 'L', 'Draw a cable run: tap where it starts, tap each bend, and tap the item it ends at.'],
+  ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
+];
+
+/// A small line icon for each tool, drawn in the button's own colour.
+function fpToolIcon(tool: string): any {
+  const s = svgEl('svg', { viewBox: '0 0 24 24', class: 'fp-tool-icon', 'aria-hidden': 'true' });
+  const p = (d: string) => s.appendChild(svgEl('path', { d }));
+  switch (tool) {
+    case 'select': p('M5 3 L5 19 L9.5 14.5 L12.5 21 L15 20 L12 13.5 L18 13.5 Z'); break;
+    case 'pan': p('M12 3 V21 M3 12 H21 M12 3 L9.5 5.5 M12 3 L14.5 5.5 M12 21 L9.5 18.5 M12 21 L14.5 18.5 M3 12 L5.5 9.5 M3 12 L5.5 14.5 M21 12 L18.5 9.5 M21 12 L18.5 14.5'); break;
+    case 'room': p('M4 5 H20 V19 H4 Z M4 12 H10'); break;
+    case 'outline': p('M4 7 L11 4 L20 8 L18 19 L6 18 Z'); break;
+    case 'zone': p('M12 3 L7 11 H10 L6 17 H18 L14 11 H17 Z M12 17 V21'); break;
+    case 'area': p('M4 5 H7 M10 5 H14 M17 5 H20 V8 M20 11 V14 M20 17 V19 H17 M14 19 H10 M7 19 H4 V16 M4 13 V10 M4 7 V5'); break;
+    case 'door': p('M4 20 H20 M6 20 V6 M6 6 A14 14 0 0 1 20 20'); break;
+    case 'window': p('M3 9 H21 M3 12 H21 M3 15 H21 M3 9 V15 M21 9 V15'); break;
+    case 'item': p('M12 3 A9 9 0 1 0 12.01 3 Z M9.5 8 V12 M14.5 8 V12 M12 15.5 V16'); break;
+    case 'wire': p('M4 18 C8 18 8 6 12 6 S16 18 20 18 M4 18 A1.5 1.5 0 1 0 4.01 18 M20 18 A1.5 1.5 0 1 0 20.01 18'); break;
+    case 'measure': p('M3 16 L16 3 L21 8 L8 21 Z M7 12 L9 14 M10 9 L12 11 M13 6 L15 8'); break;
+    case 'undo': p('M9 7 L4 12 L9 17 M4 12 H14 A6 6 0 0 1 14 24'); break;
+    case 'redo': p('M15 7 L20 12 L15 17 M20 12 H10 A6 6 0 0 0 10 24'); break;
+  }
+  return s;
 }
 
 export function addFloorPlanSection(nav: any, sections: any) {
@@ -54,14 +81,15 @@ export function addFloorPlanSection(nav: any, sections: any) {
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
   sec.appendChild(el('div', { class: 'desc' },
-    'Each floor with its rooms and areas, and the outlets, fixtures and devices in them. View shades each room by '
-    + 'what it draws — a room with nothing metered reads unmetered, never zero. Rooms draws and edits the outlines; '
-    + 'Place drops items onto the plan and links each to the circuit feeding it.'));
+    'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
+    + 'and devices on it with the cable runs between them. View shades each room by what it draws — a room with '
+    + 'nothing metered reads unmetered, never zero. Edit draws and moves everything; Ctrl+Z undoes.'));
 
   // --- Config access -------------------------------------------------------------------------------
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
   const sitesIn = (): any[] => ensure(flowIn(), 'Sites', []);
   const itemsIn = (): any[] => ensure(flowIn(), 'Placements', []);
+  const runsIn = (): any[] => ensure(flowIn(), 'Runs', []);
   const floorsAll = () => sitesIn().flatMap((s: any) => ensure(s, 'Floors', []).map((f: any) => ({ site: s, floor: f })));
   const floorById = (id: string) => floorsAll().find(x => x.floor.Id === id) || null;
   const allIds = () => new Set<string>(sitesIn().flatMap((s: any) => [s.Id, ...ensure(s, 'Floors', []).flatMap((f: any) =>
@@ -73,10 +101,10 @@ export function addFloorPlanSection(nav: any, sections: any) {
     while (taken.has(id)) id = `${stem}_${n++}`;
     return id;
   };
-  const freshItemId = (kind: string) => {
-    const taken = new Set(itemsIn().map((p: any) => p.Id));
-    let n = itemsIn().length + 1, id = `${kind}_${n}`;
-    while (taken.has(id)) id = `${kind}_${++n}`;
+  const freshIn = (list: any[], stem: string) => {
+    const taken = new Set(list.map((p: any) => p.Id));
+    let n = list.length + 1, id = `${stem}_${n}`;
+    while (taken.has(id)) id = `${stem}_${++n}`;
     return id;
   };
 
@@ -84,29 +112,40 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const remembered = (key: string, fallback: string) => { try { return localStorage.getItem('rpdu-fp-' + key) || fallback; } catch { return fallback; } };
   const remember = (key: string, v: string) => { try { localStorage.setItem('rpdu-fp-' + key, v); } catch { /* this session only */ } };
   let floorId = remembered('floor', '');
-  let mode: 'view' | 'rooms' | 'place' = 'view';
-  let tool: 'select' | 'rect' | 'poly' = 'select';
-  let drawKind: 'room' | 'area' = 'room';
-  let armed: string | null = null;
+  let mode: 'view' | 'edit' = 'view';
+  let tool: Tool = 'select';
+  let itemKind = remembered('kind', 'outlet');
+  let doorKind = 'door';
+  let wireKind = 'circuit';
   let snapOn = remembered('snap', '1') === '1';
+  let showWiring = remembered('wiring', '1') === '1';
+  let showSizes = remembered('sizes', '0') === '1';
   let period = remembered('period', 'now');
   let selection: Selection = null;
   let selectedCorner = -1;
   let draft: Pt[] = [];
   let rectStart: Pt | null = null, rectEnd: Pt | null = null;
+  let wireDraft: { from: string; pts: Pt[] } | null = null;
+  let measure: { a: Pt; b: Pt | null } | null = null;
   let live: Live | null = null;
   let imageFailed = '';
   let vb = { x: 0, y: 0, w: 1000, h: 700 };
   let viewFor = '';
   let dragging = false;
+  let hover: Pt | null = null;
 
   const floorNow = () => floorById(floorId) || floorsAll()[0] || null;
   const roomsNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
   const areasNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Areas', []) : []; };
+  const openingsNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Openings', []) : []; };
   const shapeOf = (sel: Selection) => sel?.type === 'room' ? roomsNow().find(r => r.Id === sel.id)
     : sel?.type === 'area' ? areasNow().find(a => a.Id === sel.id) : null;
   const itemOf = (id: string) => itemsIn().find((p: any) => p.Id === id);
-  const itemsNow = () => { const ids = new Set(roomsNow().map(r => r.Id)); return itemsIn().filter((p: any) => ids.has(p.Room)); };
+  const runOf = (id: string) => runsIn().find((r: any) => r.Id === id);
+  const openingOf = (id: string) => openingsNow().find((o: any) => o.Id === id);
+  const onFloor = (it: any, f: any) => it.Floor === f.Id || (!it.Floor && ensure(f, 'Rooms', []).some((r: any) => r.Id === it.Room));
+  const itemsNow = () => { const f = floorNow()?.floor; return f ? itemsIn().filter((p: any) => onFloor(p, f)) : []; };
+  const runsNow = () => { const f = floorNow()?.floor; return f ? runsIn().filter((r: any) => r.Floor === f.Id) : []; };
   const placeOf = (id: string) => live?.places[id] || null;
   const nameOfPlace = (id: string) => {
     for (const s of sitesIn()) {
@@ -120,45 +159,111 @@ export function addFloorPlanSection(nav: any, sections: any) {
   };
   const circuitOf = (ref: string) => live?.circuits.find(c => c.ref === ref) || null;
   const circuitLabel = (c: Circuit) => `${c.panelName} · ${c.number}${c.description ? ' — ' + c.description : ''}`;
+  const refLabel = (ref: string) => { const c = circuitOf(ref); return c ? circuitLabel(c) : ref; };
   const nodeLabel = (id: string) => live?.nodes.find(n => n.id === id)?.label || id;
+  const kindName = (k: string) => PLAN_KINDS.find(x => x[0] === k)?.[1] || k;
+  const itemName = (it: any) => it.Label || kindName(it.Kind || 'outlet');
   const units = () => live?.units || 'W';
-  const fmt = (v: number | null | undefined) => v == null ? 'no data' : formatMeasure(Math.round(v * (units() === 'W' ? 1 : 100)) / (units() === 'W' ? 1 : 100), units());
+  const fmt = (v: number | null | undefined) => v == null ? 'no data' : formatMeasure(units() === 'W' ? Math.round(v) : Math.round(v * 100) / 100, units());
+
+  // Real sizes: drawing units per metre on this floor, and the unit system the GUI settings ask for.
+  const sys = () => planUnitSystem(state.data?.Gui?.DistanceUnits, (globalThis as any).navigator?.language);
+  const scale = () => Math.max(1, Number(floorNow()?.floor.Scale) || 100);
+  const len = (unitsLong: number) => planFmtLen(unitsLong / scale(), sys());
+  const areaText = (poly: Pt[]) => planFmtArea(Math.abs(planArea(poly)) / (scale() * scale()), sys());
+  const toUnits = (text: string) => { const m = planParseLen(text, sys()); return m == null || m <= 0 ? null : m * scale(); };
+  const lenInput = (unitsLong: number, onSet: (u: number) => void, placeholder = '') => {
+    const i = el('input', { type: 'text', class: 'fp-len', value: unitsLong > 0 ? len(unitsLong) : '', placeholder: placeholder || (sys() === 'imperial' ? `12' 6"` : '3.75 m') }) as HTMLInputElement;
+    i.onchange = () => {
+      const u = toUnits(i.value);
+      if (u == null) { i.classList.add('is-bad'); i.title = sys() === 'imperial' ? `Write it like 12' 6", 12 6 or 150"` : 'Write it like 3.75 m, 3 m 75 cm or 375 cm'; return; }
+      i.classList.remove('is-bad');
+      onSet(u);
+    };
+    return i;
+  };
+
+  // --- Undo and redo -------------------------------------------------------------------------------
+  // Snapshots of everything the page edits; restored in place so every other page keeps its reference.
+  const history = planHistory(() => flowIn(), v => { const cur = flowIn(); Object.keys(cur).forEach(k => delete cur[k]); Object.assign(cur, v); });
   const changed = () => { refreshDirty(); schedule(); };
+  /// One undoable change: remember what was, make the change, redraw.
+  const act = (fn: () => void) => { history.push(); fn(); changed(); render(); };
+  const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
+  const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
+  const cleanSelection = () => {
+    if (!selection) return;
+    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id)
+      : selection.type === 'opening' ? !openingOf(selection.id) : !shapeOf(selection);
+    if (gone) selection = null;
+    selectedCorner = -1;
+  };
 
   // --- Layout --------------------------------------------------------------------------------------
   const floorSel = el('select', { class: 'fp-floor', title: 'Which floor to show.' }) as HTMLSelectElement;
-  floorSel.onchange = () => { floorId = floorSel.value; remember('floor', floorId); selection = null; draft = []; viewFor = ''; render(); };
+  floorSel.onchange = () => { floorId = floorSel.value; remember('floor', floorId); selection = null; draft = []; wireDraft = null; measure = null; viewFor = ''; render(); };
+  const addBtn = btn('+ Floor');
+  addBtn.title = 'Add a floor, or a new site with its first floor.';
   const floorBtn = btn('Floor settings');
-  const addBtn = btn('Add…');
+  const bgBtn = btn('Background');
+  bgBtn.title = 'Upload a floor plan image to draw over, set how strongly it shows, and set the scale.';
   const toolsBtn = btn('Tools…');
+  const undoBtn = el('button', { class: 'small fp-icon-btn', type: 'button', title: 'Undo (Ctrl+Z)' }, fpToolIcon('undo'));
+  undoBtn.setAttribute('aria-label', 'Undo');
+  undoBtn.onclick = () => undo();
+  const redoBtn = el('button', { class: 'small fp-icon-btn', type: 'button', title: 'Redo (Ctrl+Y)' }, fpToolIcon('redo'));
+  redoBtn.setAttribute('aria-label', 'Redo');
+  redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
-  sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), floorBtn, addBtn, toolsBtn, status));
+  sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
+    el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns: Record<string, any> = {};
-  ([['view', 'View'], ['rooms', 'Rooms'], ['place', 'Place']] as const).forEach(([m, label]) => {
+  ([['view', 'View'], ['edit', 'Edit']] as const).forEach(([m, label]) => {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
     b.setAttribute('role', 'tab');
-    b.onclick = () => { mode = m; tool = 'select'; armed = null; draft = []; rectStart = null; selectedCorner = -1; render(); };
+    b.onclick = () => { mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render(); };
     modeBtns[m] = b;
     modeBar.appendChild(b);
   });
   const subBar = el('div', { class: 'fp-sub' });
   sec.appendChild(el('div', { class: 'fp-modes' }, modeBar, subBar));
 
+  const palette = el('div', { class: 'fp-palette', role: 'toolbar' });
+  palette.setAttribute('aria-label', 'Drawing tools');
+  const toolBtns: Record<string, any> = {};
+  FP_TOOLS.forEach(([t, name, key, what]) => {
+    const b = el('button', { class: 'fp-tool', type: 'button', title: `${name} (${key}) — ${what}` }, fpToolIcon(t), el('span', { class: 'fp-tool-name', text: name }));
+    b.setAttribute('aria-label', name);
+    b.onclick = () => pickTool(t);
+    toolBtns[t] = b;
+    palette.appendChild(b);
+  });
+  const opts = el('div', { class: 'fp-opts' });
+
   const svg = svgEl('svg', { class: 'fp-svg', role: 'img' });
-  const zoomIn = el('button', { class: 'fp-zbtn', text: '+', title: 'Zoom in', type: 'button' });
-  const zoomOut = el('button', { class: 'fp-zbtn', text: '−', title: 'Zoom out', type: 'button' });
-  const zoomFit = el('button', { class: 'fp-zbtn', text: '⤢', title: 'Fit the floor', type: 'button' });
+  const zoomIn = el('button', { class: 'fp-zbtn', text: '+', title: 'Zoom in (+)', type: 'button' });
+  const zoomOut = el('button', { class: 'fp-zbtn', text: '−', title: 'Zoom out (−)', type: 'button' });
+  const zoomFit = el('button', { class: 'fp-zbtn', text: '⤢', title: 'Fit the floor (0)', type: 'button' });
   const hint = el('div', { class: 'fp-hint' });
-  const stage = el('div', { class: 'fp-stage' }, svg, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), hint);
+  const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
+  const empty = el('div', { class: 'fp-empty' });
+  const stage = el('div', { class: 'fp-stage' }, svg, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
-  sec.appendChild(el('div', { class: 'fp-body' }, el('div', { class: 'fp-main' }, stage, legend), side));
+  const body = el('div', { class: 'fp-body' }, palette, el('div', { class: 'fp-main' }, opts, stage, legend), side);
+  sec.appendChild(body);
+
+  const pickTool = (t: Tool) => {
+    if (mode !== 'edit') mode = 'edit';
+    tool = t; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
+    render();
+  };
 
   // --- Coordinates ---------------------------------------------------------------------------------
   const floorSize = () => { const f = floorNow()?.floor; return { w: Number(f?.Width) || 1000, h: Number(f?.Height) || 700 }; };
-  /// Plan units per screen pixel: what keeps handles and labels the same size on screen at any zoom.
+  /// Plan units per screen pixel: what keeps handles, strokes and labels the same size on screen at any zoom.
   const upp = () => {
     const r = svg.getBoundingClientRect?.();
     if (!r || !r.width || !r.height) return vb.w / 1000;
@@ -166,36 +271,67 @@ export function addFloorPlanSection(nav: any, sections: any) {
   };
   const toPlan = (e: any): Pt => {
     const r = svg.getBoundingClientRect();
-    const scale = Math.min(r.width / vb.w, r.height / vb.h) || 1;
-    const ox = (r.width - vb.w * scale) / 2, oy = (r.height - vb.h * scale) / 2;
-    return { X: vb.x + (e.clientX - r.left - ox) / scale, Y: vb.y + (e.clientY - r.top - oy) / scale };
+    const k = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+    const ox = (r.width - vb.w * k) / 2, oy = (r.height - vb.h * k) / 2;
+    return { X: vb.x + (e.clientX - r.left - ox) / k, Y: vb.y + (e.clientY - r.top - oy) / k };
   };
   const fit = () => { const { w, h } = floorSize(); const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 }; };
   const zoomAt = (p: Pt, factor: number) => {
-    const { w, h } = floorSize();
-    const nw = Math.max(w * 0.05, Math.min(w * 4, vb.w / factor));
+    const { w } = floorSize();
+    const nw = Math.max(w * 0.02, Math.min(w * 4, vb.w / factor));
     const f = vb.w / nw;
     vb = { x: p.X - (p.X - vb.x) / f, y: p.Y - (p.Y - vb.y) / f, w: nw, h: vb.h / f };
     drawPlan();
   };
-  zoomIn.onclick = () => zoomAt({ X: vb.x + vb.w / 2, Y: vb.y + vb.h / 2 }, 1.4);
-  zoomOut.onclick = () => zoomAt({ X: vb.x + vb.w / 2, Y: vb.y + vb.h / 2 }, 1 / 1.4);
+  const centre = () => ({ X: vb.x + vb.w / 2, Y: vb.y + vb.h / 2 });
+  zoomIn.onclick = () => zoomAt(centre(), 1.4);
+  zoomOut.onclick = () => zoomAt(centre(), 1 / 1.4);
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
-  const othersFor = (exclude: any) => [...roomsNow(), ...areasNow()].filter(s => s !== exclude && (s.Shape || []).length >= 3).map(s => s.Shape as Pt[]);
+  const outlinesOf = (list: any[]) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape as Pt[]);
+  const othersFor = (exclude: any) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
+  const snapStep = () => planSnapStep(sys()) * scale();
+  const clampPt = (p: Pt) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p: Pt, exclude: any = null) => {
-    const { w, h } = floorSize();
-    if (!snapOn) return { X: planRound(p.X), Y: planRound(p.Y) };
-    const s = planSnap(p, othersFor(exclude), 12 * upp(), Math.max(w, h) / 100);
-    return { X: planRound(Math.max(0, Math.min(w, s.pt.X))), Y: planRound(Math.max(0, Math.min(h, s.pt.Y))) };
+    if (!snapOn) return clampPt(p);
+    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep()).pt);
   };
+  const gridSnapped = (p: Pt) => { if (!snapOn) return clampPt(p); const g = snapStep(); return clampPt({ X: Math.round(p.X / g) * g, Y: Math.round(p.Y / g) * g }); };
+  /// Where an item actually is: its own point.
+  const itemPt = (id: string): Pt | null => { const it = itemOf(id); return it ? { X: Number(it.X) || 0, Y: Number(it.Y) || 0 } : null; };
+  /// A run's whole path: its start item, its bends, and its end item.
+  const runPath = (r: any): Pt[] => {
+    const pts: Pt[] = [];
+    const a = r.From ? itemPt(r.From) : null;
+    if (a) pts.push(a);
+    (r.Points || []).forEach((p: Pt) => pts.push(p));
+    const b = r.To ? itemPt(r.To) : null;
+    if (b) pts.push(b);
+    return pts;
+  };
+  /// Where a wall is for a door or window: near enough to one, on it and lying along it.
+  const wallAt = (p: Pt) => {
+    const w = planNearestWall(p, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    return w && w.dist <= Math.max(0.6 * scale(), 16 * upp()) ? w : null;
+  };
+  const openingWidth = (kind: string) => {
+    const imp = sys() === 'imperial';
+    const inch = 0.0254;
+    const m = kind === 'window' ? (imp ? 36 * inch : 1.2) : kind === 'double-door' ? (imp ? 60 * inch : 1.5) : kind === 'sliding-door' ? (imp ? 72 * inch : 1.8)
+      : kind === 'garage-door' ? (imp ? 108 * inch : 2.7) : (imp ? 36 * inch : 0.9);
+    return planRound(m * scale());
+  };
+  /// The circuit a selection is about, so the plan can bring it forward and fade the rest.
+  const focusCircuit = () => selection?.type === 'item' ? itemOf(selection.id)?.Circuit || ''
+    : selection?.type === 'run' ? runOf(selection.id)?.Circuit || '' : '';
 
   // --- Drawing -------------------------------------------------------------------------------------
   const shadeOf = (v: number | null, max: number) => {
     if (v == null || max <= 0) return '';
     const t = Math.max(0, Math.min(1, v / max));
-    return `color-mix(in srgb, var(--accent) ${Math.round(12 + t * 68)}%, transparent)`;
+    return `color-mix(in srgb, var(--accent) ${Math.round(18 + t * 64)}%, transparent)`;
   };
+  const points = (poly: Pt[]) => poly.map(q => `${q.X},${q.Y}`).join(' ');
 
   const drawPlan = () => {
     svg.innerHTML = '';
@@ -204,96 +340,177 @@ export function addFloorPlanSection(nav: any, sections: any) {
     svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
     svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     svg.setAttribute('aria-label', fl ? `Floor plan of ${fl.floor.Name || fl.floor.Id}` : 'No floor');
-    svg.classList.toggle('is-editing', mode !== 'view');
+    svg.classList.toggle('is-editing', mode === 'edit' && tool !== 'select' && tool !== 'pan');
+    svg.classList.toggle('is-panning', tool === 'pan' || mode === 'view');
     const u = upp();
+    const s = scale();
 
     const defs = svgEl('defs');
-    const grid = Math.max(w, h) / 50;
-    const gp = svgEl('pattern', { id: 'fp-grid', width: grid, height: grid, patternUnits: 'userSpaceOnUse' });
-    gp.appendChild(svgEl('path', { d: `M ${grid} 0 L 0 0 0 ${grid}`, class: 'fp-gridline', 'stroke-width': u }));
+    planTextures(s).forEach(p => defs.appendChild(p));
+    // The grid is in real units: a foot or half a metre, with a heavier line every five feet or metre.
+    const minor = planGridStep(sys()) * s, major = minor * (sys() === 'imperial' ? 5 : 2);
+    const gp = svgEl('pattern', { id: 'fp-grid', width: major, height: major, patternUnits: 'userSpaceOnUse' });
+    if (minor / u >= 7) for (let x = minor; x < major - 1e-6; x += minor) {
+      gp.appendChild(svgEl('line', { x1: x, y1: 0, x2: x, y2: major, class: 'fp-gridline', 'stroke-width': u }));
+      gp.appendChild(svgEl('line', { x1: 0, y1: x, x2: major, y2: x, class: 'fp-gridline', 'stroke-width': u }));
+    }
+    gp.appendChild(svgEl('path', { d: `M ${major} 0 L 0 0 0 ${major}`, class: 'fp-gridline is-major', 'stroke-width': u }));
     const hatch = svgEl('pattern', { id: 'fp-hatch', width: 10 * u, height: 10 * u, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
     hatch.appendChild(svgEl('line', { x1: 0, y1: 0, x2: 0, y2: 10 * u, class: 'fp-hatchline', 'stroke-width': 1.5 * u }));
     defs.append(gp, hatch);
     svg.appendChild(defs);
+    legend.innerHTML = '';
+    if (!fl) { drawScaleBar(); return; }
 
-    if (!fl) return;
-    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, class: 'fp-paper' }));
+    // Ground, then the plan image, then the grid while editing or where there is no image.
+    const ground = fl.floor.Ground;
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, class: 'fp-paper' + (ground ? ' is-textured' : ''), fill: ground ? `url(#fp-tex-${ground})` : null }));
     const image = fl.floor.Image;
     if (image && imageFailed !== image) {
-      const img = svgEl('image', { href: `/api/plans/images/${encodeURIComponent(image)}`, x: 0, y: 0, width: w, height: h, preserveAspectRatio: 'xMidYMid meet', class: 'fp-image' });
+      const img = svgEl('image', { href: `/api/plans/images/${encodeURIComponent(image)}`, x: 0, y: 0, width: w, height: h, preserveAspectRatio: 'xMidYMid meet', class: 'fp-image', opacity: String(fl.floor.ImageOpacity ?? 0.85) });
       img.addEventListener('error', () => { imageFailed = image; drawPlan(); drawSide(); });
       svg.appendChild(img);
     }
-    if (!image || imageFailed === image || mode !== 'view')
+    if (!image || imageFailed === image || mode === 'edit')
       svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, fill: 'url(#fp-grid)', class: 'fp-gridrect' }));
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, class: 'fp-edge', 'stroke-width': u }));
 
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
+    const focus = focusCircuit();
     const label = (poly: Pt[], lines: string[], cls: string) => {
       const c = planCentroid(poly);
       const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * font * 0.6, class: cls, 'font-size': font });
-      lines.forEach((ln, i) => { const s = svgEl('tspan', { x: c.X, dy: i ? font * 1.2 : 0 }); s.textContent = ln; t.appendChild(s); });
+      lines.forEach((ln, i) => { const sp = svgEl('tspan', { x: c.X, dy: i ? font * 1.2 : 0 }); sp.textContent = ln; t.appendChild(sp); });
       return t;
     };
 
-    roomsNow().forEach(room => {
-      const poly: Pt[] = room.Shape || [];
-      if (poly.length < 3) return;
+    // Rooms and outdoor zones: surface first, then the live shading over it, then the walls.
+    const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3).sort((a, b) => Number(!!b.Outdoor) - Number(!!a.Outdoor));
+    rooms.forEach(room => {
+      const poly: Pt[] = room.Shape;
+      if (room.Surface) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface', fill: `url(#fp-tex-${room.Surface})` }));
+    });
+    const labels: any[] = [];
+    rooms.forEach(room => {
+      const poly: Pt[] = room.Shape;
       const p = placeOf(room.Id);
       const st = p?.state || 'unmetered';
       const sel = selection?.type === 'room' && selection.id === room.Id;
       const shape = svgEl('polygon', {
-        points: poly.map(q => `${q.X},${q.Y}`).join(' '),
-        class: `fp-room is-${mode === 'view' ? st : 'edit'}${sel ? ' is-selected' : ''}`,
-        'stroke-width': (sel ? 3 : 1.5) * u,
+        points: points(poly),
+        class: `fp-room ${room.Outdoor ? 'is-outdoor' : 'is-indoor'} is-${mode === 'view' ? st : 'edit'}${room.Surface ? ' has-surface' : ''}${sel ? ' is-selected' : ''}`,
+        'stroke-width': (room.Outdoor ? 1.5 : sel ? 5 : 4) * u,
       });
+      if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
       if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p!.value, max);
-      if (mode === 'view' && st === 'unmetered') shape.setAttribute('fill', 'url(#fp-hatch)');
+      if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
       const lines = [room.Name || room.Id];
       if (mode === 'view') lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
-      svg.appendChild(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '')));
+      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(poly));
+      labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
     });
 
     areasNow().forEach(area => {
       const poly: Pt[] = area.Shape || [];
       if (poly.length < 3) return;
       const sel = selection?.type === 'area' && selection.id === area.Id;
-      const shape = svgEl('polygon', { points: poly.map(q => `${q.X},${q.Y}`).join(' '), class: 'fp-area' + (sel ? ' is-selected' : ''), 'stroke-width': (sel ? 3 : 2) * u, 'stroke-dasharray': `${8 * u} ${5 * u}` });
+      const shape = svgEl('polygon', { points: points(poly), class: 'fp-area' + (sel ? ' is-selected' : ''), 'stroke-width': (sel ? 3 : 2) * u, 'stroke-dasharray': `${8 * u} ${5 * u}` });
       shape.dataset.area = area.Id;
       svg.appendChild(shape);
-      svg.appendChild(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
+      labels.push(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
     });
 
-    // Placed items keep their size on screen at any zoom, and a circuit nobody has identified is ringed.
-    const r = 11 * u;
+    // Doors and windows cut the walls they sit in.
+    openingsNow().forEach(o => {
+      const g = planOpening(o, u);
+      if (selection?.type === 'opening' && selection.id === o.Id) g.classList.add('is-selected');
+      svg.appendChild(g);
+    });
+
+    // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
+    if (showWiring || mode === 'edit') runsNow().forEach(r => {
+      const path = runPath(r);
+      if (path.length < 2) return;
+      const sel = selection?.type === 'run' && selection.id === r.Id;
+      const dim = focus && r.Circuit !== focus;
+      const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${r.Circuit ? '' : ' is-unknown'}` });
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      const hit = svgEl('polyline', { points: points(path), class: 'fp-hit fp-run-hit', 'stroke-width': 14 * u });
+      hit.dataset.run = r.Id;
+      g.appendChild(hit);
+      svg.appendChild(g);
+      if (sel && mode === 'edit') {
+        (r.Points || []).forEach((q: Pt, i: number) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-handle' }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        for (let i = 0; i + 1 < path.length; i++) {
+          const m = svgEl('circle', { cx: (path[i].X + path[i + 1].X) / 2, cy: (path[i].Y + path[i + 1].Y) / 2, r: 5 * u, class: 'fp-mid' });
+          m.dataset.runmid = String(i);
+          svg.appendChild(m);
+        }
+      }
+    });
+
+    // Placed items keep their size on screen at any zoom. An item on an unknown circuit is ringed and marked.
+    const r = 12 * u;
     itemsNow().forEach((item: any) => {
       const sel = selection?.type === 'item' && selection.id === item.Id;
-      const known = !!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true);
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y})` });
+      const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
+      const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
+      const dim = focus && item.Circuit !== focus;
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : ''), transform: `translate(${item.X},${item.Y})` });
       g.dataset.item = item.Id;
-      g.appendChild(svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 2.5 : 1.5) * u }));
-      const glyph = fpGlyph(item.Kind || 'outlet', r);
+      const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
+      if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+      g.appendChild(disc);
+      const glyph = planGlyph(item.Kind || 'outlet', r);
       glyph.setAttribute('stroke-width', 1.4 * u);
       g.appendChild(glyph);
       if (!known) {
-        const badge = svgEl('text', { x: r * 0.8, y: -r * 0.6, class: 'fp-item-q', 'font-size': font * 0.9 });
+        const badge = svgEl('text', { x: r * 0.85, y: -r * 0.6, class: 'fp-item-q', 'font-size': font * 0.9 });
         badge.textContent = '?';
         g.appendChild(badge);
       }
+      if (item.Label && (sel || showSizes)) {
+        const t = svgEl('text', { x: 0, y: r + font, class: 'fp-item-label', 'font-size': font * 0.85 });
+        t.textContent = item.Label;
+        g.appendChild(t);
+      }
       const title = svgEl('title');
-      title.textContent = `${item.Label || item.Kind}${item.Circuit ? ' — ' + item.Circuit : ' — circuit unknown'}`;
+      title.textContent = `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) : supply ? '' : ' — circuit unknown'}`;
       g.appendChild(title);
       svg.appendChild(g);
     });
 
+    labels.forEach(t => svg.appendChild(t));
+
+    // Wall lengths along the selected room's edges, or every room's when sizes are on.
+    const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
+    dimsFor.forEach(rm => {
+      const poly: Pt[] = rm.Shape;
+      const sign = planArea(poly) >= 0 ? 1 : -1;
+      poly.forEach((a, i) => {
+        const b = poly[(i + 1) % poly.length];
+        const L = Math.hypot(b.X - a.X, b.Y - a.Y);
+        if (L / u < 40) return;
+        const nx = -(b.Y - a.Y) / L * sign, ny = (b.X - a.X) / L * sign;
+        let ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
+        if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+        const mx = (a.X + b.X) / 2 - nx * 11 * u, my = (a.Y + b.Y) / 2 - ny * 11 * u;
+        const t = svgEl('text', { x: mx, y: my, class: 'fp-dim', 'font-size': font * 0.85, transform: `rotate(${ang} ${mx} ${my})` });
+        t.textContent = len(L);
+        svg.appendChild(t);
+      });
+    });
+
     // Editing handles: each corner, and a midpoint on each edge that adds a corner when dragged.
-    const target = mode === 'rooms' ? shapeOf(selection) : null;
+    const target = mode === 'edit' ? shapeOf(selection) : null;
     if (target && (target.Shape || []).length >= 3) {
       const poly: Pt[] = target.Shape;
-      poly.forEach((q, i) => {
-        const a = q, b = poly[(i + 1) % poly.length];
+      poly.forEach((a, i) => {
+        const b = poly[(i + 1) % poly.length];
         const mid = svgEl('circle', { cx: (a.X + b.X) / 2, cy: (a.Y + b.Y) / 2, r: 6 * u, class: 'fp-mid' });
         mid.dataset.mid = String(i);
         svg.appendChild(mid);
@@ -305,42 +522,84 @@ export function addFloorPlanSection(nav: any, sections: any) {
       });
     }
 
-    // What is being drawn right now.
+    // What is being drawn right now, with its size.
     if (rectStart && rectEnd) {
       const poly = planRect(rectStart, rectEnd);
-      svg.appendChild(svgEl('polygon', { points: poly.map(q => `${q.X},${q.Y}`).join(' '), class: 'fp-draft', 'stroke-width': 2 * u }));
+      svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-draft', 'stroke-width': 2 * u }));
+      const b = planBounds(poly);
+      const t = svgEl('text', { x: b.x + b.w / 2, y: b.y + b.h / 2, class: 'fp-draft-size', 'font-size': font });
+      t.textContent = `${len(b.w)} × ${len(b.h)}`;
+      svg.appendChild(t);
     }
     if (draft.length) {
-      svg.appendChild(svgEl('polyline', { points: draft.map(q => `${q.X},${q.Y}`).join(' '), class: 'fp-draft', 'stroke-width': 2 * u }));
+      const pts = hover ? [...draft, hover] : draft;
+      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft', 'stroke-width': 2 * u }));
       draft.forEach((q, i) => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: (i === 0 ? 9 : 6) * u, class: 'fp-draft-pt' + (i === 0 ? ' is-first' : '') })));
     }
+    if (wireDraft) {
+      const start = wireDraft.from ? itemPt(wireDraft.from) : null;
+      const pts = [...(start ? [start] : []), ...wireDraft.pts, ...(hover ? [hover] : [])];
+      if (pts.length) {
+        svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft is-wire', 'stroke-width': 2.5 * u }));
+        wireDraft.pts.forEach(q => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 5 * u, class: 'fp-draft-pt' })));
+      }
+    }
+    if (measure) {
+      const b = measure.b || hover;
+      if (b) {
+        svg.appendChild(svgEl('line', { x1: measure.a.X, y1: measure.a.Y, x2: b.X, y2: b.Y, class: 'fp-measure', 'stroke-width': 2 * u }));
+        const t = svgEl('text', { x: (measure.a.X + b.X) / 2, y: (measure.a.Y + b.Y) / 2 - 8 * u, class: 'fp-measure-text', 'font-size': font });
+        t.textContent = len(Math.hypot(b.X - measure.a.X, b.Y - measure.a.Y));
+        svg.appendChild(t);
+      }
+      [measure.a, ...(measure.b ? [measure.b] : [])].forEach(q => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 5 * u, class: 'fp-measure-pt' })));
+    }
 
-    // The scale the shading is on, with what it means at each end.
-    legend.innerHTML = '';
-    if (mode === 'view' && roomsNow().some(rm => (rm.Shape || []).length >= 3)) {
+    // The scale the shading is on, with what the unshaded rooms mean.
+    if (mode === 'view' && rooms.length) {
       legend.append(
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unknown' }), 'no data'));
     }
+    drawScaleBar();
   };
+
+  const drawScaleBar = () => {
+    const u = upp();
+    const bar = planScaleBar(90 * u / scale(), sys());
+    const px = bar.m * scale() / u;
+    (scaleBar.children[0] as any).style.width = `${Math.round(px)}px`;
+    scaleBar.children[1].textContent = bar.label;
+    scaleBar.hidden = !floorNow();
+  };
+
 
   // --- Pointer handling ----------------------------------------------------------------------------
   const pointers = new Map<number, { x: number; y: number }>();
   let gesture: any = null;
   let pinch: { d: number; mid: Pt; vb: typeof vb } | null = null;
 
+  /// What is under the pointer, found by walking up from the element it landed on.
   const hitOf = (e: any) => {
-    const t = e.target;
-    const d = t?.dataset || {};
-    if (d.corner != null) return { corner: Number(d.corner) };
-    if (d.mid != null) return { mid: Number(d.mid) };
-    const g = t?.closest ? t.closest('[data-item]') : null;
-    if (g?.dataset?.item) return { item: g.dataset.item };
-    if (d.item) return { item: d.item };
-    if (d.area) return { area: d.area };
-    if (d.room) return { room: d.room };
-    return {};
+    for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) {
+      const d = n.dataset || {};
+      if (d.corner != null) return { corner: Number(d.corner) };
+      if (d.mid != null) return { mid: Number(d.mid) };
+      if (d.runpt != null) return { runpt: Number(d.runpt) };
+      if (d.runmid != null) return { runmid: Number(d.runmid) };
+      if (d.item) return { item: d.item as string };
+      if (d.opening) return { opening: d.opening as string };
+      if (d.run) return { run: d.run as string };
+      if (d.area) return { area: d.area as string };
+      if (d.room) return { room: d.room as string };
+    }
+    return {} as any;
+  };
+  const selectHit = (hit: any) => {
+    selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
+      : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
+    selectedCorner = -1;
   };
 
   svg.addEventListener('pointerdown', (e: any) => {
@@ -351,49 +610,57 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mid: toPlan({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }), vb: { ...vb } };
       gesture = null;
+      rectStart = null; rectEnd = null;
       return;
     }
     const p = toPlan(e);
     const hit = hitOf(e);
-    gesture = { start: p, sx: e.clientX, sy: e.clientY, hit, moved: false, vb: { ...vb } };
+    gesture = { start: p, sx: e.clientX, sy: e.clientY, hit, moved: false, pushed: false, vb: { ...vb }, kind: 'pan' };
 
-    if (mode === 'rooms') {
+    if (mode === 'edit' && tool === 'select') {
       const target = shapeOf(selection);
+      const run = selection?.type === 'run' ? runOf(selection.id) : null;
       if (hit.corner != null && target) { gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner; }
-      else if (hit.mid != null && target) {
-        const poly: Pt[] = target.Shape;
-        const i = hit.mid;
-        poly.splice(i + 1, 0, planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]));
-        gesture.kind = 'corner'; gesture.index = i + 1; selectedCorner = i + 1;
-      }
-      else if (tool === 'rect') { gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart; }
-      else if (tool === 'poly') gesture.kind = 'poly';
+      else if (hit.mid != null && target) { gesture.kind = 'insert'; gesture.index = hit.mid; }
+      else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; }
+      else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
+      else if (hit.item) { selectHit(hit); gesture.kind = 'item'; const it = itemOf(hit.item); gesture.orig = { X: it.X, Y: it.Y }; }
+      else if (hit.opening) { selectHit(hit); gesture.kind = 'opening'; const o = openingOf(hit.opening); gesture.orig = { X: o.X, Y: o.Y, Angle: o.Angle }; }
+      else if (hit.run) { selectHit(hit); gesture.kind = 'none'; }
       else if (hit.room || hit.area) {
-        selection = hit.room ? { type: 'room', id: hit.room } : { type: 'area', id: hit.area };
-        selectedCorner = -1;
+        selectHit(hit);
         const s = shapeOf(selection);
-        gesture.kind = 'move'; gesture.orig = (s?.Shape || []).map((q: Pt) => ({ ...q }));
+        gesture.kind = 'move';
+        gesture.orig = (s?.Shape || []).map((q: Pt) => ({ ...q }));
+        // A room carries what is in it and the doors and windows in its walls.
+        if (selection!.type === 'room') {
+          gesture.items = itemsIn().filter((it: any) => it.Room === s.Id).map((it: any) => ({ it, X: it.X, Y: it.Y }));
+          const near = 0.2 * scale();
+          gesture.openings = openingsNow().filter(o => { const w = planNearestWall({ X: o.X, Y: o.Y }, [s.Shape]); return w && w.dist <= near; }).map(o => ({ o, X: o.X, Y: o.Y }));
+          gesture.runs = runsNow().filter(r => [r.From, r.To].some(id => gesture.items.some((x: any) => x.it.Id === id))).map(r => ({ r, pts: (r.Points || []).map((q: Pt) => ({ ...q })) }));
+        }
       }
-      else gesture.kind = 'pan';
-    } else if (mode === 'place') {
-      if (hit.item) { selection = { type: 'item', id: hit.item }; gesture.kind = 'item'; const it = itemOf(hit.item); gesture.orig = { X: it.X, Y: it.Y }; }
-      else gesture.kind = armed ? 'drop' : 'pan';
-    } else {
-      gesture.kind = 'pan';
+    } else if (mode === 'edit' && (tool === 'room' || tool === 'zone' || tool === 'area')) {
+      gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
+    } else if (mode === 'edit' && tool !== 'pan') {
+      gesture.kind = 'tap';
     }
     dragging = true;
     drawPlan();
   });
 
   svg.addEventListener('pointermove', (e: any) => {
-    if (!pointers.has(e.pointerId)) return;
+    if (!pointers.has(e.pointerId)) {
+      // Hovering: the next corner, bend or measuring point follows the pointer.
+      if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? gridSnapped(toPlan(e)) : snapped(toPlan(e)); drawPlan(); }
+      return;
+    }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pointers.size >= 2) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
-      const f = d / pinch.d;
       const { w } = floorSize();
-      const nw = Math.max(w * 0.05, Math.min(w * 4, pinch.vb.w / f));
+      const nw = Math.max(w * 0.02, Math.min(w * 4, pinch.vb.w / (d / pinch.d)));
       const k = nw / pinch.vb.w;
       vb = { x: pinch.mid.X - (pinch.mid.X - pinch.vb.x) * k, y: pinch.mid.Y - (pinch.mid.Y - pinch.vb.y) * k, w: nw, h: pinch.vb.h * k };
       const now = toPlan({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
@@ -405,36 +672,70 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (!gesture.moved && Math.hypot(e.clientX - gesture.sx, e.clientY - gesture.sy) < 6) return;
     gesture.moved = true;
     const p = toPlan(e);
+    // A drag is one change: remembered once, as it starts.
+    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; } };
     const { w, h } = floorSize();
-    if (gesture.kind === 'pan') {
+    const k = gesture.kind;
+    if (k === 'pan' || k === 'tap' || k === 'none') {
+      if (k !== 'pan' && mode === 'edit' && tool !== 'pan') { gesture.kind = 'pan'; }
       const r = svg.getBoundingClientRect();
-      const scale = Math.min(r.width / gesture.vb.w, r.height / gesture.vb.h) || 1;
-      vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / scale, y: gesture.vb.y - (e.clientY - gesture.sy) / scale };
-    } else if (gesture.kind === 'corner') {
+      const sc = Math.min(r.width / gesture.vb.w, r.height / gesture.vb.h) || 1;
+      vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / sc, y: gesture.vb.y - (e.clientY - gesture.sy) / sc };
+    } else if (k === 'insert') {
+      begin();
+      const s = shapeOf(selection);
+      const poly: Pt[] = s.Shape;
+      poly.splice(gesture.index + 1, 0, snapped(p, s));
+      gesture.kind = 'corner'; gesture.index = gesture.index + 1; selectedCorner = gesture.index;
+    } else if (k === 'corner') {
+      begin();
       const s = shapeOf(selection);
       if (s) s.Shape[gesture.index] = snapped(p, s);
-    } else if (gesture.kind === 'move') {
+    } else if (k === 'move') {
+      begin();
       const s = shapeOf(selection);
       if (s) {
         let dx = p.X - gesture.start.X, dy = p.Y - gesture.start.Y;
-        // The first corner snaps, and the rest follow it, so a room slides into place against its neighbour.
+        // The first corner snaps and the rest follow, so a room slides into place against its neighbour.
         const first = gesture.orig[0];
         const want = snapped({ X: first.X + dx, Y: first.Y + dy }, s);
         dx = want.X - first.X; dy = want.Y - first.Y;
         s.Shape = planClamp(planMove(gesture.orig, dx, dy), w, h);
+        (gesture.items || []).forEach((x: any) => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
+        (gesture.openings || []).forEach((x: any) => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
+        (gesture.runs || []).forEach((x: any) => { x.r.Points = planMove(x.pts, dx, dy).map((q: Pt) => ({ X: planRound(q.X), Y: planRound(q.Y) })); });
       }
-    } else if (gesture.kind === 'rect') {
+    } else if (k === 'rect') {
       rectEnd = snapped(p);
-    } else if (gesture.kind === 'item') {
+    } else if (k === 'item') {
+      begin();
       const it = itemOf(selection!.id);
-      if (it) { it.X = planRound(Math.max(0, Math.min(w, gesture.orig.X + p.X - gesture.start.X))); it.Y = planRound(Math.max(0, Math.min(h, gesture.orig.Y + p.Y - gesture.start.Y))); }
+      if (it) { const q = gridSnapped({ X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y }); it.X = q.X; it.Y = q.Y; }
+    } else if (k === 'opening') {
+      begin();
+      const o = openingOf(selection!.id);
+      const want = { X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y };
+      const wall = wallAt(want);
+      if (o) { const q = wall ? wall.pt : clampPt(want); o.X = planRound(q.X); o.Y = planRound(q.Y); if (wall) o.Angle = Math.round(wall.angle * 10) / 10; }
+    } else if (k === 'runpt' || k === 'runinsert') {
+      begin();
+      const r = runOf(selection!.id);
+      if (r) {
+        const pts = ensure(r, 'Points', []);
+        if (k === 'runinsert') {
+          // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
+          const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
+          pts.splice(at, 0, gridSnapped(p));
+          gesture.kind = 'runpt'; gesture.index = at;
+        } else pts[gesture.index] = gridSnapped(p);
+      }
     }
     drawPlan();
   });
 
   const endPointer = (e: any) => {
     pointers.delete(e.pointerId);
-    if (pinch) { if (pointers.size < 2) pinch = null; if (!pointers.size) { dragging = false; } return; }
+    if (pinch) { if (pointers.size < 2) pinch = null; if (!pointers.size) dragging = false; return; }
     const g = gesture;
     gesture = null;
     dragging = false;
@@ -443,83 +744,153 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const { w, h } = floorSize();
 
     if (!g.moved) {
-      // A tap.
-      if (mode === 'view' || (mode === 'rooms' && tool === 'select' && g.kind === 'pan') || (mode === 'place' && g.kind === 'pan')) {
-        selection = g.hit.item ? { type: 'item', id: g.hit.item } : g.hit.room ? { type: 'room', id: g.hit.room } : g.hit.area ? { type: 'area', id: g.hit.area } : null;
-        selectedCorner = -1;
-      } else if (g.kind === 'poly') {
-        const q = snapped(p);
-        const first = draft[0];
-        if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
-        else draft.push(q);
-      } else if (g.kind === 'drop' && armed) {
-        const room = planShapeAt(roomsNow(), p);
-        const id = freshItemId(armed);
-        itemsIn().push({ Id: id, Kind: armed, Label: '', Room: room?.Id || '', X: planRound(p.X), Y: planRound(p.Y), Circuit: '', Node: '' });
-        selection = { type: 'item', id };
-        if (!room) toast('Dropped outside every room. Draw the room around it, or move it into one.', false);
-        changed();
-      } else if (g.kind === 'rect') { rectStart = null; rectEnd = null; }
-      render();
+      tap(g, p);
       return;
     }
-
     if (g.kind === 'rect' && rectStart && rectEnd) {
       const poly = planRect(rectStart, rectEnd);
       rectStart = null; rectEnd = null;
-      if (Math.abs(planArea(poly)) > (Math.max(w, h) / 100) ** 2) finishOutline(poly);
-    } else if (g.kind === 'corner' || g.kind === 'move') {
+      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) finishOutline(poly);
+      else render();
+      return;
+    }
+    if (g.kind === 'corner' || g.kind === 'move') {
       const s = shapeOf(selection);
       if (s) s.Shape = planClamp(s.Shape, w, h);
-      changed();
-    } else if (g.kind === 'item') {
-      const it = itemOf(selection!.id);
-      // Moving an item into another room moves it there.
-      const room = planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
-      if (room && room.Id !== it.Room) { it.Room = room.Id; toast(`Moved into ${room.Name || room.Id}.`, true); }
-      changed();
     }
+    if (g.kind === 'item') {
+      const it = itemOf(selection!.id);
+      // Where it lands is where it is: a room, an outdoor zone, or outdoors on this floor.
+      const room = planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
+      if ((room?.Id || '') !== (it.Room || '')) { it.Room = room?.Id || ''; toast(room ? `Moved into ${room.Name || room.Id}.` : 'Moved outside every room: it is outdoors on this floor.', true); }
+      it.Floor = floorNow()?.floor.Id || it.Floor;
+    }
+    if (g.pushed) changed();
     render();
   };
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e: any) => { pointers.delete(e.pointerId); gesture = null; pinch = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
+  svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
+  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
   svg.addEventListener('wheel', (e: any) => {
-    // Ctrl/⌘ + wheel zooms, as everywhere else in the GUI; a plain wheel scrolls the page past the plan.
+    // Ctrl/⌘ + wheel zooms (a trackpad pinch arrives this way too); a plain wheel scrolls the page past the plan.
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
     zoomAt(toPlan(e), e.deltaY < 0 ? 1.15 : 1 / 1.15);
   }, { passive: false });
 
+  /// A tap, by tool.
+  const tap = (g: any, p: Pt) => {
+    const hit = g.hit;
+    if (mode === 'view' || tool === 'select' || tool === 'pan') {
+      if (tool !== 'pan') selectHit(hit);
+      render();
+      return;
+    }
+    if (tool === 'outline') {
+      const q = snapped(p);
+      const first = draft[0];
+      if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
+      else { draft.push(q); render(); }
+      return;
+    }
+    if (tool === 'room' || tool === 'zone' || tool === 'area') { rectStart = null; rectEnd = null; render(); return; }
+    if (tool === 'item') {
+      if (hit.item) { selectHit(hit); render(); return; }
+      const q = gridSnapped(p);
+      const room = planShapeAt(roomsNow(), q);
+      const id = freshIn(itemsIn(), itemKind.replace(/-/g, '_'));
+      act(() => {
+        itemsIn().push({ Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow()!.floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' });
+        selection = { type: 'item', id };
+      });
+      if (!room && !PLAN_SUPPLY_KINDS.includes(itemKind)) toast('Placed outdoors — outside every room. That is fine for an exterior light or a yard outlet.', true);
+      return;
+    }
+    if (tool === 'door' || tool === 'window') {
+      const kind = tool === 'window' ? 'window' : doorKind;
+      const wall = wallAt(p);
+      const q = wall ? wall.pt : clampPt(p);
+      const id = freshIn(openingsNow(), kind.replace(/-/g, '_'));
+      act(() => {
+        openingsNow().push({ Id: id, Kind: kind, X: planRound(q.X), Y: planRound(q.Y), Angle: wall ? Math.round(wall.angle * 10) / 10 : 0, Width: openingWidth(kind), Swing: 'left', Flip: false });
+        selection = { type: 'opening', id };
+      });
+      if (!wall) toast('No wall there, so it was placed where you tapped. Drag it onto a wall and it lines up.', false);
+      return;
+    }
+    if (tool === 'wire') {
+      if (!wireDraft) {
+        wireDraft = hit.item ? { from: hit.item, pts: [] } : { from: '', pts: [gridSnapped(p)] };
+        render();
+        return;
+      }
+      if (hit.item && hit.item !== wireDraft.from) { finishWire(hit.item); return; }
+      wireDraft.pts.push(gridSnapped(p));
+      render();
+      return;
+    }
+    if (tool === 'measure') {
+      const q = snapped(p);
+      if (!measure || measure.b) measure = { a: q, b: null };
+      else measure.b = q;
+      render();
+    }
+  };
+
   /// A drawn outline becomes the selected room or area when it has none yet, and a new one otherwise.
   const finishOutline = (poly: Pt[]) => {
     const { w, h } = floorSize();
     const shape = planClamp(poly, w, h);
-    draft = [];
+    draft = []; hover = null;
+    const kind = tool === 'area' ? 'area' : 'room';
+    const outdoor = tool === 'zone';
     const target = shapeOf(selection);
-    if (target && (target.Shape || []).length < 3 && (selection!.type === drawKind)) { target.Shape = shape; }
-    else if (drawKind === 'area') {
-      const name = `Area ${areasNow().length + 1}`;
+    act(() => {
+      if (target && (target.Shape || []).length < 3 && selection!.type === kind) { target.Shape = shape; return; }
+      if (kind === 'area') {
+        const name = `Area ${areasNow().length + 1}`;
+        const id = freshId(name);
+        // An area drawn over rooms takes them in.
+        const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3 && planContains(shape, planCentroid(r.Shape))).map(r => r.Id);
+        areasNow().push({ Id: id, Name: name, Rooms: rooms, Shape: shape });
+        selection = { type: 'area', id };
+        return;
+      }
+      const name = outdoor ? `Yard ${roomsNow().filter(r => r.Outdoor).length + 1}` : `Room ${roomsNow().filter(r => !r.Outdoor).length + 1}`;
       const id = freshId(name);
-      // An area drawn over rooms takes them in.
-      const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3 && planShapeAt([{ Shape: shape }], planCentroid(r.Shape))).map(r => r.Id);
-      areasNow().push({ Id: id, Name: name, Rooms: rooms, Shape: shape });
-      selection = { type: 'area', id };
-    } else {
-      const name = `Room ${roomsNow().length + 1}`;
-      const id = freshId(name);
-      roomsNow().push({ Id: id, Name: name, Shape: shape });
+      roomsNow().push({ Id: id, Name: name, Shape: shape, Outdoor: outdoor, Surface: outdoor ? 'grass' : '' });
       selection = { type: 'room', id };
       // Items already dropped inside it are now in it.
-      itemsIn().forEach((it: any) => { if (!it.Room && planShapeAt([{ Shape: shape }], { X: it.X, Y: it.Y })) it.Room = id; });
-    }
+      itemsNow().forEach((it: any) => { if (!it.Room && planContains(shape, { X: it.X, Y: it.Y })) it.Room = id; });
+    });
     tool = 'select';
-    changed();
     render();
     // Straight to its name: nobody wants to live with "Room 4".
     setTimeout(() => (side.querySelector?.('.fp-name') as any)?.focus?.(), 0);
   };
 
-  // --- Toolbars ------------------------------------------------------------------------------------
+  /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
+  const finishWire = (to: string) => {
+    const d = wireDraft;
+    wireDraft = null; hover = null;
+    if (!d) return;
+    const pathLen = (d.from ? 1 : 0) + d.pts.length + (to ? 1 : 0);
+    if (pathLen < 2) { render(); return; }
+    const from = d.from ? itemOf(d.from) : null, end = to ? itemOf(to) : null;
+    const circuit = from?.Circuit || end?.Circuit || '';
+    const id = freshIn(runsIn(), 'run');
+    let adopted = '';
+    act(() => {
+      runsIn().push({ Id: id, Kind: wireKind, Floor: floorNow()!.floor.Id, Circuit: wireKind === 'circuit' ? circuit : '', From: d.from, To: to, Points: d.pts, Label: '' });
+      // Wiring an item to one on a known circuit puts it on that circuit — said, and undoable.
+      if (wireKind === 'circuit' && circuit) [from, end].forEach(it => { if (it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) { it.Circuit = circuit; adopted = itemName(it); } });
+      selection = { type: 'run', id };
+    });
+    if (adopted) toast(`${adopted} is wired to ${refLabel(circuit)}, so it is now on that circuit. Ctrl+Z undoes it.`, true);
+  };
+
+  // --- Tool options --------------------------------------------------------------------------------
   const seg = (options: [string, string][], value: string, onPick: (v: string) => void, title = '') => {
     const box = el('div', { class: 'fp-seg fp-seg-sm' });
     if (title) box.title = title;
@@ -531,6 +902,12 @@ export function addFloorPlanSection(nav: any, sections: any) {
     });
     return box;
   };
+  const check = (label: string, on: boolean, set: (v: boolean) => void, title = '') => {
+    const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    cb.checked = on;
+    cb.onchange = () => set(cb.checked);
+    return el('label', { class: 'ld-inst fp-check', title }, cb, ' ' + label);
+  };
 
   const drawSub = () => {
     subBar.innerHTML = '';
@@ -538,48 +915,131 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (mode === 'view') {
       subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week']], period, v => { period = v; remember('period', v); load(); },
         'Shade by what each room is drawing now, or by the energy it has used over a period.'));
-    } else if (mode === 'rooms') {
-      subBar.appendChild(seg([['select', 'Select'], ['rect', 'Rectangle'], ['poly', 'Outline']], tool, v => { tool = v as any; draft = []; render(); }));
-      subBar.appendChild(seg([['room', 'Room'], ['area', 'Area']], drawKind, v => { drawKind = v as any; render(); }, 'Draw a room, or an area that may span rooms.'));
-      const snap = el('input', { type: 'checkbox' }) as HTMLInputElement;
-      snap.checked = snapOn;
-      snap.onchange = () => { snapOn = snap.checked; remember('snap', snapOn ? '1' : '0'); };
-      subBar.appendChild(el('label', { class: 'ld-inst fp-snap', title: 'Corners snap to other rooms’ corners and edges, then to the grid.' }, snap, ' Snap'));
-      if (tool === 'poly' && draft.length) {
+    }
+    subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
+    subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
+    if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
+
+    palette.hidden = mode !== 'edit';
+    body.classList.toggle('is-editing', mode === 'edit');
+    Object.entries(toolBtns).forEach(([t, b]) => { b.classList.toggle('is-on', mode === 'edit' && t === tool); b.setAttribute('aria-pressed', String(mode === 'edit' && t === tool)); });
+    undoBtn.disabled = !history.canUndo();
+    redoBtn.disabled = !history.canRedo();
+
+    opts.innerHTML = '';
+    opts.hidden = mode !== 'edit';
+    if (mode === 'edit') drawOpts();
+    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
+      : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    hint.textContent = how;
+    hint.hidden = !how || (mode === 'view' && !!selection);
+  };
+
+  const drawOpts = () => {
+    const add = (...n: any[]) => n.forEach(x => opts.appendChild(x));
+    if (tool === 'room' || tool === 'zone') {
+      const bySize = btn(tool === 'zone' ? 'Add an outdoor zone by size…' : 'Add a room by size…', 'primary');
+      bySize.onclick = () => roomBySize(tool === 'zone');
+      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan.' }));
+    } else if (tool === 'outline') {
+      if (draft.length) {
         const done = btn('Finish outline', 'primary');
         done.disabled = draft.length < 3;
         done.onclick = () => finishOutline(draft);
-        const undo = btn('Undo point');
-        undo.onclick = () => { draft.pop(); render(); };
+        const back = btn('Undo point');
+        back.onclick = () => { draft.pop(); render(); };
         const cancel = btn('Cancel');
         cancel.onclick = () => { draft = []; render(); };
-        subBar.append(done, undo, cancel);
-      }
-    } else {
-      const kinds = el('div', { class: 'fp-seg fp-seg-sm fp-kinds' });
-      FP_KINDS.forEach(([k, label]) => {
-        const b = el('button', { class: 'fp-seg-btn fp-kind' + (armed === k ? ' is-on' : ''), type: 'button', title: `Tap the plan to place ${label.toLowerCase()}s. Tap again to stop.` });
-        const icon = svgEl('svg', { viewBox: '-12 -12 24 24', class: 'fp-kind-icon' });
-        icon.appendChild(svgEl('circle', { r: 11, class: 'fp-item-disc' }));
-        const gl = fpGlyph(k, 11); gl.setAttribute('stroke-width', '1.4'); icon.appendChild(gl);
-        b.append(icon, el('span', { text: label }));
-        b.setAttribute('aria-pressed', String(armed === k));
-        b.setAttribute('aria-label', label);
-        b.onclick = () => { armed = armed === k ? null : k; render(); };
-        kinds.appendChild(b);
+        add(done, back, cancel, el('span', { class: 'fp-opts-note', text: `${draft.length} corner${draft.length === 1 ? '' : 's'}` }));
+      } else add(el('span', { class: 'fp-opts-note', text: 'Tap the first corner. Double-tap or tap the first corner again to close.' }));
+    } else if (tool === 'door') {
+      add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
+    } else if (tool === 'item') {
+      const grid = el('div', { class: 'fp-kinds' });
+      ['Inside', 'Power'].forEach(group => {
+        grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? 'Loads' : 'Supply & utility' }));
+        PLAN_KINDS.filter(k => k[2] === group).forEach(([k, label]) => {
+          const b = el('button', { class: 'fp-kind' + (itemKind === k ? ' is-on' : ''), type: 'button', title: label });
+          const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
+          icon.appendChild(svgEl('circle', { r: 12, class: 'fp-item-disc' }));
+          const gl = planGlyph(k, 12); gl.setAttribute('stroke-width', '1.4'); icon.appendChild(gl);
+          b.append(icon, el('span', { text: label }));
+          b.setAttribute('aria-pressed', String(itemKind === k));
+          b.setAttribute('aria-label', label);
+          b.onclick = () => { itemKind = k; remember('kind', k); render(); };
+          grid.appendChild(b);
+        });
       });
-      subBar.appendChild(kinds);
+      add(grid);
+    } else if (tool === 'wire') {
+      add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service']], wireKind, v => { wireKind = v; render(); },
+        'A branch circuit, a feeder between panels, or the utility service from the pole.'));
+      if (wireDraft) {
+        const done = btn('Finish here', 'primary');
+        done.disabled = (wireDraft.from ? 1 : 0) + wireDraft.pts.length < 2;
+        done.onclick = () => finishWire('');
+        const cancel = btn('Cancel');
+        cancel.onclick = () => { wireDraft = null; render(); };
+        add(done, cancel, el('span', { class: 'fp-opts-note', text: 'Tap bends, then the item it ends at.' }));
+      }
+    } else if (tool === 'measure') {
+      if (measure?.b) {
+        const d = Math.hypot(measure.b.X - measure.a.X, measure.b.Y - measure.a.Y);
+        const real = el('input', { type: 'text', class: 'fp-len', placeholder: sys() === 'imperial' ? `e.g. 12' 6"` : 'e.g. 3.75 m' }) as HTMLInputElement;
+        const set = btn('Set scale', 'primary');
+        set.title = 'Make the plan’s scale such that this line is the length you typed. Rooms keep their outlines; their sizes change.';
+        set.onclick = () => {
+          const m = planParseLen(real.value, sys());
+          if (!m || m <= 0 || d <= 0) { real.classList.add('is-bad'); return; }
+          act(() => { floorNow()!.floor.Scale = Math.round((d / m) * 1000) / 1000; });
+          measure = null;
+          toast(`Scale set: that line is ${planFmtLen(m, sys())}. Every size on this floor now reads in real units.`, true);
+        };
+        add(el('span', { class: 'fp-measure-read', text: len(d) }), el('span', { class: 'fp-opts-note', text: 'It is really' }), real, set);
+      } else add(el('span', { class: 'fp-opts-note', text: measure ? 'Tap the second point.' : 'Tap the first point.' }));
+    } else if (tool === 'select') {
+      add(el('span', { class: 'fp-opts-note', text: 'Drag to move. Arrow keys nudge; Delete removes; Ctrl+Z undoes.' }));
+    } else {
+      add(el('span', { class: 'fp-opts-note', text: FP_TOOLS.find(t => t[0] === tool)?.[3] || '' }));
     }
-    hint.textContent = mode === 'rooms'
-      ? (tool === 'rect' ? `Drag across the plan to draw a ${drawKind}.` : tool === 'poly' ? `Tap each corner of the ${drawKind}; tap the first corner again to close it.` : 'Tap a room to select it; drag it or its corners. Drag a small dot to add a corner.')
-      : mode === 'place' ? (armed ? `Tap the plan to place a ${armed}.` : 'Pick what to place above, or tap an item to edit it.')
-      : '';
-    hint.hidden = !hint.textContent;
   };
+
+  const roomBySize = (outdoor: boolean) => {
+    const body = el('div', { class: 'fp-sheet' });
+    const name = el('input', { type: 'text', placeholder: outdoor ? 'Back yard' : 'Kitchen' }) as HTMLInputElement;
+    let wU = 0, hU = 0;
+    const wIn = lenInput(0, u => { wU = u; }), hIn = lenInput(0, u => { hU = u; });
+    const surface = el('select', {}) as HTMLSelectElement;
+    PLAN_SURFACES.forEach(([v, l]) => surface.appendChild(el('option', { value: v, text: l })));
+    surface.value = outdoor ? 'grass' : '';
+    body.append(field('Name', name), el('div', { class: 'fp-two' }, field('Width', wIn, 'Inside wall to inside wall.'), field('Depth', hIn)), field('Surface', surface),
+      el('div', { class: 'desc', text: 'It is placed in the middle of the view; drag it where it goes. Sizes are in ' + (sys() === 'imperial' ? 'feet and inches' : 'metres') + ' — change that under GUI › Distance units.' }));
+    const add = btn(outdoor ? 'Add zone' : 'Add room', 'primary');
+    add.onclick = () => {
+      wIn.onchange?.(null as any); hIn.onchange?.(null as any);
+      if (!wU || !hU) { toast('Give it a width and a depth.', false); return; }
+      const c = snapped(centre());
+      const shape = planClamp(planRect({ X: c.X - wU / 2, Y: c.Y - hU / 2 }, { X: c.X + wU / 2, Y: c.Y + hU / 2 }), floorSize().w, floorSize().h);
+      const nm = name.value.trim() || (outdoor ? 'Yard' : `Room ${roomsNow().length + 1}`);
+      const id = freshId(nm);
+      act(() => { roomsNow().push({ Id: id, Name: nm, Shape: shape, Outdoor: outdoor, Surface: surface.value }); selection = { type: 'room', id }; tool = 'select'; });
+      closeSheet();
+    };
+    openSheet({ title: outdoor ? 'Add an outdoor zone' : 'Add a room', body, footer: [add] });
+    setTimeout(() => name.focus?.(), 0);
+  };
+
 
   // --- Side panel ----------------------------------------------------------------------------------
   const row = (label: string, value: any, cls = '') => el('div', { class: 'fp-row ' + cls }, el('span', { class: 'fp-row-k', text: label }), typeof value === 'string' ? el('span', { class: 'fp-row-v', text: value }) : value);
   const field = (label: string, input: any, hintText = '') => el('label', { class: 'fp-field' }, el('span', { class: 'fp-field-k', text: label }), input, ...(hintText ? [el('span', { class: 'fp-field-hint', text: hintText })] : []));
+  const select = (choices: [string, string][], value: string, onPick: (v: string) => void) => {
+    const s = el('select', {}) as HTMLSelectElement;
+    choices.forEach(([v, t]) => s.appendChild(el('option', { value: v, text: t })));
+    s.value = value;
+    s.onchange = () => onPick(s.value);
+    return s;
+  };
   const valueLine = (p: Place | null) => {
     if (!p) return el('div', { class: 'fp-big is-unmetered', text: 'unmetered' });
     const box = el('div', {});
@@ -588,6 +1048,13 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (p.missing.length) box.appendChild(el('div', { class: 'desc', text: 'Waiting on: ' + p.missing.map(m => m.label).join(', ') }));
     if (p.split.length) box.appendChild(el('div', { class: 'desc', text: 'Fed from inside and outside this place, so its share cannot be told: ' + p.split.map(m => m.label).join(', ') }));
     return box;
+  };
+  const actions = (...b: any[]) => el('div', { class: 'fp-actions' }, ...b);
+  const listRow = (name: string, val: string, onclick: (() => void) | null, valCls = '') => {
+    const kids = [el('span', { class: 'fp-list-name', text: name }), el('span', { class: 'fp-list-val ' + valCls, text: val })];
+    const b = onclick ? el('button', { class: 'fp-list-row', type: 'button' }, ...kids) : el('div', { class: 'fp-list-row is-static' }, ...kids);
+    if (onclick) b.onclick = onclick;
+    return b;
   };
 
   /// Every circuit serving a place: breakers that say they serve it, and the circuits of what is placed or metered in it.
@@ -600,81 +1067,124 @@ export function addFloorPlanSection(nav: any, sections: any) {
     live.nodes.forEach(n => { if (n.circuit && inPlace(n.placed)) refs.add(n.circuit); });
     return live.circuits.filter(c => refs.has(c.ref));
   };
-  /// Does an area take in this room?
   const areaTakesIn = (areaId: string, roomId: string) => areasNow().some(a => a.Id === areaId && (a.Rooms || []).includes(roomId));
 
   const circuitRow = (c: Circuit) => {
     const b = el('button', { class: 'fp-list-row', type: 'button' },
+      el('span', { class: 'fp-swatch-dot', style: { background: planCircuitColor(c.ref) } }),
       el('span', { class: 'fp-list-name', text: circuitLabel(c) }),
       el('span', { class: 'fp-list-val' + (c.power == null ? ' is-nodata' : ''), text: c.power == null ? 'no data' : formatMeasure(Math.round(c.power), 'W') }));
     if (c.exceeded) b.appendChild(el('span', { class: 'fp-flag', text: 'devices read more than the circuit', title: 'A device is on a different circuit than recorded, or a CT is on the wrong wire.' }));
     b.onclick = () => openCircuit(c);
     return b;
   };
+  const circuitChoices = (): [string, string][] => [['', '— not known yet —'], ...(live?.circuits || []).map(c => [c.ref, circuitLabel(c)] as [string, string])];
 
   const drawSide = () => {
     side.innerHTML = '';
     const fl = floorNow();
     if (!fl) {
       side.appendChild(el('h3', { text: 'Start with a floor' }));
-      side.appendChild(el('div', { class: 'desc', text: 'Add a site and its first floor. Rooms from your Version 2.0 room tags can be brought in under Tools.' }));
+      side.appendChild(el('div', { class: 'desc', text: 'Add a site and its first floor, then draw its rooms or upload its plan. Rooms from your Version 2.0 room tags can be brought in under Tools.' }));
       const start = btn('Add a site and floor', 'primary');
       start.onclick = () => addSheet();
       side.appendChild(start);
       return;
     }
     if (imageFailed && imageFailed === fl.floor.Image)
-      side.appendChild(el('div', { class: 'fp-note is-warn', text: 'This floor’s plan image could not be loaded, so it is drawn on a grid. Upload it again under Floor settings.' }));
+      side.appendChild(el('div', { class: 'fp-note is-warn', text: 'This floor’s plan image could not be loaded, so it is drawn on a grid. Upload it again under Background.' }));
     (live?.problems || []).forEach(pr => side.appendChild(el('div', { class: 'fp-note is-warn', text: pr })));
     if (live?.message) side.appendChild(el('div', { class: 'fp-note', text: live.message }));
-
     if (selection) {
       const back = el('button', { class: 'fp-back', type: 'button', text: '‹ All rooms' });
       back.onclick = () => { selection = null; selectedCorner = -1; render(); };
       side.appendChild(back);
     }
-    if (selection?.type === 'item') return drawItem(itemOf(selection.id));
-    if (selection && shapeOf(selection)) return drawShape(selection.type as 'room' | 'area', shapeOf(selection));
+    const editing = mode === 'edit';
+    if (selection?.type === 'item') return drawItem(itemOf(selection.id), editing);
+    if (selection?.type === 'opening') return drawOpening(openingOf(selection.id), editing);
+    if (selection?.type === 'run') return drawRun(runOf(selection.id), editing);
+    if (selection && shapeOf(selection)) return drawShape(selection.type as 'room' | 'area', shapeOf(selection), editing);
     drawFloorSummary(fl);
   };
 
   const drawFloorSummary = (fl: any) => {
     const fp = placeOf(fl.floor.Id), sp = placeOf(fl.site.Id);
     side.appendChild(el('h3', { text: fl.floor.Name || fl.floor.Id }));
+    const { w, h } = floorSize();
+    side.appendChild(el('div', { class: 'fp-id', text: `${len(w)} × ${len(h)} plot · ${fl.site.Name || fl.site.Id}` }));
     side.appendChild(valueLine(fp));
     if (sp) side.appendChild(row(fl.site.Name || fl.site.Id, sp.state === 'known' ? fmt(sp.value) : sp.state === 'unknown' ? 'no data' : 'unmetered'));
     const list = el('div', { class: 'fp-list' });
     const undrawn: any[] = [];
-    [...roomsNow().map(r => ['room', r]), ...areasNow().map(a => ['area', a])].forEach(([type, s]: any) => {
-      if ((s.Shape || []).length < 3 && type === 'room') undrawn.push(s);
+    [...roomsNow().map(r => [r.Outdoor ? 'zone' : 'room', r]), ...areasNow().map(a => ['area', a])].forEach(([type, s]: any) => {
+      if ((s.Shape || []).length < 3 && type !== 'area') undrawn.push(s);
       const p = placeOf(s.Id);
-      const b = el('button', { class: 'fp-list-row', type: 'button' },
-        el('span', { class: 'fp-list-name', text: (s.Name || s.Id) + (type === 'area' ? ' (area)' : '') }),
-        el('span', { class: 'fp-list-val is-' + (p?.state || 'unmetered'), text: p?.state === 'known' ? fmt(p.value) : p?.state === 'unknown' ? 'no data' : 'unmetered' }));
-      b.onclick = () => { selection = { type, id: s.Id }; render(); };
-      list.appendChild(b);
+      list.appendChild(listRow((s.Name || s.Id) + (type === 'area' ? ' (area)' : type === 'zone' ? ' (outdoor)' : ''),
+        p?.state === 'known' ? fmt(p.value) : p?.state === 'unknown' ? 'no data' : 'unmetered',
+        () => { selection = { type: type === 'area' ? 'area' : 'room', id: s.Id }; render(); }, 'is-' + (p?.state || 'unmetered')));
     });
     side.appendChild(el('h4', { text: 'Rooms and areas' }));
-    side.appendChild(list.children.length ? list : el('div', { class: 'desc', text: 'No rooms yet. Switch to Rooms and draw one.' }));
-    if (undrawn.length) side.appendChild(el('div', { class: 'desc', text: `${undrawn.length} room${undrawn.length > 1 ? 's have' : ' has'} no outline yet: select one, then draw it in Rooms.` }));
+    side.appendChild(list.children.length ? list : el('div', { class: 'desc', text: 'No rooms yet. Choose Edit, then Room, and drag one out — or add one by its measurements.' }));
+    if (undrawn.length) side.appendChild(el('div', { class: 'desc', text: `${undrawn.length} room${undrawn.length > 1 ? 's have' : ' has'} no outline yet: select one, then draw it.` }));
+    const outside = itemsNow().filter((it: any) => !it.Room);
+    if (outside.length) {
+      side.appendChild(el('h4', { text: 'Outdoors' }));
+      const ol = el('div', { class: 'fp-list' });
+      outside.forEach((it: any) => ol.appendChild(listRow(itemName(it), it.Circuit ? refLabel(it.Circuit) : PLAN_SUPPLY_KINDS.includes(it.Kind) ? kindName(it.Kind) : 'circuit unknown',
+        () => { selection = { type: 'item', id: it.Id }; render(); })));
+      side.appendChild(ol);
+    }
   };
 
-  const drawShape = (type: 'room' | 'area', s: any) => {
+  const drawShape = (type: 'room' | 'area', s: any, editing: boolean) => {
     const p = placeOf(s.Id);
-    const editing = mode !== 'view';
     const name = el('input', { type: 'text', class: 'fp-name', value: s.Name || '' }) as HTMLInputElement;
     name.placeholder = type === 'room' ? 'Kitchen' : 'Upstairs';
-    name.onchange = () => { s.Name = name.value.trim() || s.Id; changed(); drawPlan(); };
-    side.appendChild(el('div', { class: 'fp-side-head' }, editing ? name : el('h3', { text: s.Name || s.Id }), el('span', { class: 'fp-pill', text: type })));
+    name.onchange = () => act(() => { s.Name = name.value.trim() || s.Id; });
+    side.appendChild(el('div', { class: 'fp-side-head' }, editing ? name : el('h3', { text: s.Name || s.Id }), el('span', { class: 'fp-pill', text: type === 'area' ? 'area' : s.Outdoor ? 'outdoor' : 'room' })));
     side.appendChild(el('div', { class: 'fp-id', text: s.Id }));
     side.appendChild(valueLine(p));
 
+    const poly: Pt[] = s.Shape || [];
+    if (poly.length >= 3) {
+      side.appendChild(el('h4', { text: 'Size' }));
+      side.appendChild(row('Floor area', areaText(poly)));
+      if (editing && type === 'room' && planIsBox(poly)) {
+        // A rectangle is sized by its inside measurements; its top-left corner stays put.
+        const b = planBounds(poly);
+        const setBox = (w: number, h: number) => act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); });
+        side.appendChild(el('div', { class: 'fp-two' }, field('Width', lenInput(b.w, w => setBox(w, b.h))), field('Depth', lenInput(b.h, h => setBox(b.w, h)))));
+      } else if (editing) {
+        // Any other outline is sized wall by wall: changing a wall's length moves the corner at its far end.
+        const walls = el('div', { class: 'fp-walls' });
+        poly.forEach((a, i) => {
+          const bpt = poly[(i + 1) % poly.length];
+          const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
+          walls.appendChild(field(`Wall ${i + 1}`, lenInput(L, want => act(() => {
+            if (!L) return;
+            const k = want / L;
+            s.Shape[(i + 1) % poly.length] = { X: planRound(a.X + (bpt.X - a.X) * k), Y: planRound(a.Y + (bpt.Y - a.Y) * k) };
+          }))));
+        });
+        side.appendChild(walls);
+      } else {
+        poly.forEach((a, i) => { const bpt = poly[(i + 1) % poly.length]; side.appendChild(row(`Wall ${i + 1}`, len(Math.hypot(bpt.X - a.X, bpt.Y - a.Y)))); });
+      }
+    }
+
+    if (editing && type === 'room') {
+      side.appendChild(el('div', { class: 'fp-two' },
+        field('Kind', select([['room', 'Room'], ['outdoor', 'Outdoor zone']], s.Outdoor ? 'outdoor' : 'room', v => act(() => { s.Outdoor = v === 'outdoor'; if (s.Outdoor && !s.Surface) s.Surface = 'grass'; }))),
+        field('Surface', select(PLAN_SURFACES, s.Surface || '', v => act(() => { s.Surface = v; })))));
+    }
     if (type === 'area') {
       const box = el('div', { class: 'fp-checks' });
       roomsNow().forEach(r => {
         const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
         cb.checked = (s.Rooms || []).includes(r.Id);
-        cb.onchange = () => { const list = ensure(s, 'Rooms', []); const at = list.indexOf(r.Id); if (cb.checked && at < 0) list.push(r.Id); if (!cb.checked && at >= 0) list.splice(at, 1); changed(); };
+        cb.disabled = !editing;
+        cb.onchange = () => act(() => { const list = ensure(s, 'Rooms', []); const at = list.indexOf(r.Id); if (cb.checked && at < 0) list.push(r.Id); if (!cb.checked && at >= 0) list.splice(at, 1); });
         box.appendChild(el('label', { class: 'ld-inst' }, cb, ' ' + (r.Name || r.Id)));
       });
       side.appendChild(el('h4', { text: 'Takes in' }));
@@ -685,7 +1195,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
     side.appendChild(el('h4', { text: 'Circuits serving it' }));
     const cl = el('div', { class: 'fp-list' });
     circuits.forEach(c => cl.appendChild(circuitRow(c)));
-    side.appendChild(circuits.length ? cl : el('div', { class: 'desc', text: 'No circuit is recorded as serving it. Set the rooms a breaker serves from its circuit, or link what is placed here to a circuit.' }));
+    side.appendChild(circuits.length ? cl : el('div', { class: 'desc', text: 'No circuit is recorded as serving it. Tick the rooms a breaker serves from its circuit, or link what is placed here to a circuit.' }));
 
     const items = itemsIn().filter((it: any) => it.Room === s.Id || (type === 'area' && (s.Rooms || []).includes(it.Room)));
     const metered = (live?.nodes || []).filter(n => n.placed === s.Id && !items.some((it: any) => it.Node === n.id));
@@ -693,13 +1203,10 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const il = el('div', { class: 'fp-list' });
     items.forEach((it: any) => {
       const v = live?.placements[it.Id]?.value;
-      const b = el('button', { class: 'fp-list-row', type: 'button' },
-        el('span', { class: 'fp-list-name', text: `${it.Label || FP_KINDS.find(k => k[0] === it.Kind)?.[1] || it.Kind}` }),
-        el('span', { class: 'fp-list-val' + (it.Node && v == null ? ' is-nodata' : ''), text: it.Node ? fmt(v) : it.Circuit ? it.Circuit : 'circuit unknown' }));
-      b.onclick = () => { selection = { type: 'item', id: it.Id }; render(); };
-      il.appendChild(b);
+      il.appendChild(listRow(itemName(it), it.Node ? fmt(v) : it.Circuit ? refLabel(it.Circuit) : 'circuit unknown',
+        () => { selection = { type: 'item', id: it.Id }; render(); }, it.Node && v == null ? 'is-nodata' : ''));
     });
-    metered.forEach(n => il.appendChild(el('div', { class: 'fp-list-row is-static' }, el('span', { class: 'fp-list-name', text: n.label }), el('span', { class: 'fp-list-val', text: fmt(n.value) }))));
+    metered.forEach(n => il.appendChild(listRow(n.label, fmt(n.value), null)));
     side.appendChild(il.children.length ? il : el('div', { class: 'desc', text: 'Nothing placed or metered here yet.' }));
 
     // What it has been drawing: the same rollup at every moment in history.
@@ -720,89 +1227,169 @@ export function addFloorPlanSection(nav: any, sections: any) {
     side.append(el('h4', { text: 'Trend' }), trendBtn, trend);
 
     if (editing) {
-      const actions = el('div', { class: 'fp-actions' });
-      const redraw = btn((s.Shape || []).length >= 3 ? 'Redraw outline' : 'Draw outline', (s.Shape || []).length >= 3 ? '' : 'primary');
-      redraw.onclick = () => { mode = 'rooms'; drawKind = type; tool = 'rect'; if ((s.Shape || []).length >= 3 && !confirm('Draw a new outline for it? The current one is replaced.')) return; s.Shape = []; render(); };
-      actions.appendChild(redraw);
-      if (selectedCorner >= 0 && (s.Shape || []).length > 3) {
-        const dropCorner = btn('Remove corner');
-        dropCorner.onclick = () => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; changed(); render(); };
-        actions.appendChild(dropCorner);
-      }
-      const del = btn('Delete', 'danger');
-      del.onclick = () => {
-        const inIt = itemsIn().filter((it: any) => it.Room === s.Id).length;
-        if (!confirm(`Delete ${type} ${s.Name || s.Id}?${inIt ? `\n\n${inIt} placed item(s) are in it; they stay on the plan with no room.` : ''}`)) return;
-        const list = type === 'room' ? roomsNow() : areasNow();
-        list.splice(list.indexOf(s), 1);
-        if (type === 'room') { itemsIn().forEach((it: any) => { if (it.Room === s.Id) it.Room = ''; }); areasNow().forEach(a => { a.Rooms = (a.Rooms || []).filter((x: string) => x !== s.Id); }); }
-        selection = null;
-        changed();
+      const redraw = btn(poly.length >= 3 ? 'Redraw outline' : 'Draw outline', poly.length >= 3 ? '' : 'primary');
+      redraw.onclick = () => {
+        if (poly.length >= 3 && !confirm('Draw a new outline for it? The current one is replaced.')) return;
+        act(() => { s.Shape = []; });
+        tool = type === 'area' ? 'area' : s.Outdoor ? 'zone' : 'room';
         render();
       };
-      actions.appendChild(del);
-      side.appendChild(actions);
+      const btns = [redraw];
+      if (selectedCorner >= 0 && poly.length > 3) {
+        const dropCorner = btn('Remove corner');
+        dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
+        btns.push(dropCorner);
+      }
+      const del = btn('Delete', 'danger');
+      del.onclick = () => deleteSelection();
+      btns.push(del);
+      side.appendChild(actions(...btns));
     }
   };
 
-  const drawItem = (it: any) => {
+  const drawItem = (it: any, editing: boolean) => {
     if (!it) { selection = null; return drawSide(); }
-    const editing = mode !== 'view';
-    const kind = el('select', {}) as HTMLSelectElement;
-    FP_KINDS.forEach(([k, l]) => kind.appendChild(el('option', { value: k, text: l })));
-    kind.value = it.Kind || 'outlet';
-    kind.onchange = () => { it.Kind = kind.value; changed(); drawPlan(); };
-    const lbl = el('input', { type: 'text', class: 'fp-name', value: it.Label || '', placeholder: 'e.g. Fridge, Desk outlet' }) as HTMLInputElement;
-    lbl.onchange = () => { it.Label = lbl.value.trim(); changed(); drawPlan(); };
-    const room = el('select', {}) as HTMLSelectElement;
-    room.appendChild(el('option', { value: '', text: '— no room —' }));
-    roomsNow().forEach(r => room.appendChild(el('option', { value: r.Id, text: r.Name || r.Id })));
-    room.value = it.Room || '';
-    room.onchange = () => { it.Room = room.value; changed(); };
-
-    const circuit = el('select', {}) as HTMLSelectElement;
-    circuit.appendChild(el('option', { value: '', text: '— not known yet —' }));
-    (live?.circuits || []).forEach(c => circuit.appendChild(el('option', { value: c.ref, text: circuitLabel(c) })));
-    if (it.Circuit && !circuitOf(it.Circuit)) circuit.appendChild(el('option', { value: it.Circuit, text: `${it.Circuit} (not in any panel)` }));
-    circuit.value = it.Circuit || '';
-    circuit.onchange = () => { it.Circuit = circuit.value; offerBeneath(it); changed(); render(); };
-
-    const node = el('select', {}) as HTMLSelectElement;
-    node.appendChild(el('option', { value: '', text: '— not individually metered —' }));
-    (live?.nodes || []).filter(n => !['grid', 'panel', 'inverter', 'battery', 'solar'].includes(n.kind)).forEach(n => node.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
-    if (it.Node && !(live?.nodes || []).some(n => n.id === it.Node)) node.appendChild(el('option', { value: it.Node, text: it.Node }));
-    node.value = it.Node || '';
-    node.onchange = () => { it.Node = node.value; offerBeneath(it); changed(); render(); };
-
-    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: it.Label || FP_KINDS.find(k => k[0] === it.Kind)?.[1] || 'Item' }), el('span', { class: 'fp-pill', text: it.Kind })));
+    const supply = PLAN_SUPPLY_KINDS.includes(it.Kind);
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: itemName(it) }), el('span', { class: 'fp-pill', text: kindName(it.Kind) })));
+    const where = it.Room ? nameOfPlace(it.Room) : 'Outdoors';
     if (editing) {
-      side.append(field('Label', lbl), field('Kind', kind), field('Room', room),
-        field('Circuit', circuit, 'The breaker feeding it. Unknown is fine — trace it below.'),
-        field('Metered by', node, 'A smart plug, ESPHome sensor, PDU outlet or anything else reading this item alone.'));
+      const lbl = el('input', { type: 'text', class: 'fp-name', value: it.Label || '', placeholder: 'e.g. Fridge, Porch light, Desk outlet' }) as HTMLInputElement;
+      lbl.onchange = () => act(() => { it.Label = lbl.value.trim(); });
+      const rooms: [string, string][] = [['', 'Outdoors / not in a room'], ...roomsNow().map(r => [r.Id, (r.Name || r.Id) + (r.Outdoor ? ' (outdoor)' : '')] as [string, string])];
+      side.append(field('Label', lbl),
+        el('div', { class: 'fp-two' },
+          field('Kind', select(PLAN_KINDS.map(k => [k[0], k[1]] as [string, string]), it.Kind || 'outlet', v => act(() => { it.Kind = v; }))),
+          field('Where', select(rooms, it.Room || '', v => act(() => { it.Room = v; it.Floor = floorNow()!.floor.Id; })))));
+      if (it.Kind === 'panel') {
+        const panels: [string, string][] = [['', '— which panel? —'], ...ensure(flowIn(), 'Panels', []).map((p: any) => [p.Id, p.Name || p.Id] as [string, string])];
+        side.appendChild(field('Panel', select(panels, it.Panel || '', v => act(() => { it.Panel = v; })), 'The panel in the Panel Schedule this is. Wires drawn from it can carry its circuits.'));
+      }
+      if (!supply || it.Kind === 'panel') {
+        const circuits = circuitChoices();
+        if (it.Circuit && !circuits.some(([v]) => v === it.Circuit)) circuits.push([it.Circuit, `${it.Circuit} (not in any panel)`]);
+        side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', select(circuits, it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }),
+          it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
+      }
+      const nodes: [string, string][] = [['', '— not individually metered —'], ...(live?.nodes || []).map(n => [n.id, `${n.label} (${n.id})`] as [string, string])];
+      if (it.Node && !nodes.some(([v]) => v === it.Node)) nodes.push([it.Node, it.Node]);
+      side.appendChild(field('Metered by', select(nodes, it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }),
+        'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
     } else {
-      side.append(row('Room', it.Room ? nameOfPlace(it.Room) : 'none'), row('Circuit', it.Circuit || 'not known yet'), row('Metered by', it.Node ? nodeLabel(it.Node) : 'not metered'));
+      side.append(row('Where', where));
+      if (!supply || it.Circuit) side.append(row('Circuit', it.Circuit ? refLabel(it.Circuit) : 'not known yet'));
+      if (it.Kind === 'panel' && it.Panel) side.append(row('Panel', it.Panel));
+      side.append(row('Metered by', it.Node ? nodeLabel(it.Node) : 'not metered'));
     }
     if (it.Node) side.appendChild(row('Reading', fmt(live?.placements[it.Id]?.value)));
 
     const c = it.Circuit ? circuitOf(it.Circuit) : null;
-    if (c) {
-      side.appendChild(el('h4', { text: 'Its circuit' }));
-      side.appendChild(circuitRow(c));
-    } else if (it.Circuit) {
-      side.appendChild(el('div', { class: 'fp-note is-warn', text: `${it.Circuit} is not a breaker in any panel, so its circuit reads as unknown.` }));
+    if (c) { side.appendChild(el('h4', { text: it.Kind === 'panel' ? 'Fed from' : 'Its circuit' })); side.appendChild(circuitRow(c)); }
+    else if (it.Circuit) side.appendChild(el('div', { class: 'fp-note is-warn', text: `${it.Circuit} is not a breaker in any panel, so its circuit reads as unknown.` }));
+
+    const wired = runsIn().filter((r: any) => r.From === it.Id || r.To === it.Id);
+    if (wired.length) {
+      side.appendChild(el('h4', { text: 'Wired to' }));
+      const wl = el('div', { class: 'fp-list' });
+      wired.forEach((r: any) => {
+        const other = r.From === it.Id ? r.To : r.From;
+        wl.appendChild(listRow(other ? itemName(itemOf(other) || { Kind: '?' }) : 'a loose end', `${len(planPathLength(runPath(r)))} · ${r.Kind}`,
+          () => { selection = { type: 'run', id: r.Id }; render(); }));
+      });
+      side.appendChild(wl);
     }
 
-    const actions = el('div', { class: 'fp-actions' });
-    const trace = btn(it.Circuit ? 'Trace again' : 'Trace its circuit', it.Circuit ? '' : 'primary');
-    trace.title = 'Switch a load on this outlet on and off; the channel that follows is its circuit.';
-    trace.onclick = () => traceItem(it);
-    actions.appendChild(trace);
-    if (editing) {
-      const del = btn('Delete', 'danger');
-      del.onclick = () => { if (!confirm(`Remove ${it.Label || it.Kind} from the plan?`)) return; itemsIn().splice(itemsIn().indexOf(it), 1); selection = null; changed(); render(); };
-      actions.appendChild(del);
+    const btns: any[] = [];
+    if (!supply) {
+      const trace = btn(it.Circuit ? 'Trace again' : 'Trace its circuit', it.Circuit ? '' : 'primary');
+      trace.title = 'Switch a load on this outlet on and off; the channel that follows is its circuit.';
+      trace.onclick = () => traceItem(it);
+      btns.push(trace);
     }
-    side.appendChild(actions);
+    if (editing) {
+      const wire = btn('Wire from here');
+      wire.title = 'Start a cable run at this item; tap the bends and then the item it goes to.';
+      wire.onclick = () => { tool = 'wire'; wireDraft = { from: it.Id, pts: [] }; render(); };
+      const del = btn('Delete', 'danger');
+      del.onclick = () => deleteSelection();
+      btns.push(wire, del);
+    }
+    side.appendChild(actions(...btns));
+  };
+
+  const drawOpening = (o: any, editing: boolean) => {
+    if (!o) { selection = null; return drawSide(); }
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: PLAN_OPENINGS.find(x => x[0] === o.Kind)?.[1] || 'Opening' })));
+    if (!editing) { side.appendChild(row('Width', len(o.Width))); return; }
+    side.append(
+      el('div', { class: 'fp-two' },
+        field('Kind', select(PLAN_OPENINGS, o.Kind || 'door', v => act(() => { o.Kind = v; }))),
+        field('Width', lenInput(Number(o.Width) || 0, w => act(() => { o.Width = planRound(w); })))));
+    if ((o.Kind || 'door') !== 'window' && o.Kind !== 'opening') {
+      side.appendChild(el('div', { class: 'fp-two' },
+        field('Hinges', select([['left', 'Left'], ['right', 'Right']], o.Swing || 'left', v => act(() => { o.Swing = v; }))),
+        field('Opens', select([['in', 'This side'], ['out', 'Other side']], o.Flip ? 'out' : 'in', v => act(() => { o.Flip = v === 'out'; })))));
+    }
+    const turn = btn('Rotate 90°');
+    turn.onclick = () => act(() => { o.Angle = ((Number(o.Angle) || 0) + 90) % 360; });
+    const del = btn('Delete', 'danger');
+    del.onclick = () => deleteSelection();
+    side.appendChild(actions(turn, del));
+    side.appendChild(el('div', { class: 'desc', text: 'Drag it along a wall to move it; it lines up with whichever wall it is dropped on.' }));
+  };
+
+  const drawRun = (r: any, editing: boolean) => {
+    if (!r) { selection = null; return drawSide(); }
+    const from = r.From ? itemOf(r.From) : null, to = r.To ? itemOf(r.To) : null;
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run` }), el('span', { class: 'fp-pill', text: r.Kind })));
+    side.appendChild(row('From', from ? itemName(from) : 'a loose end'));
+    side.appendChild(row('To', to ? itemName(to) : 'a loose end'));
+    side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
+    if (editing) {
+      const note = el('input', { type: 'text', value: r.Label || '', placeholder: 'e.g. through the attic' }) as HTMLInputElement;
+      note.onchange = () => act(() => { r.Label = note.value.trim(); });
+      side.append(field('Kind', select([['circuit', 'Branch circuit'], ['feeder', 'Feeder'], ['service', 'Utility service']], r.Kind || 'circuit', v => act(() => { r.Kind = v; }))),
+        field('Circuit', select(circuitChoices(), r.Circuit || '', v => act(() => {
+          r.Circuit = v;
+          // Both ends of a branch circuit are on it, unless one says otherwise already.
+          [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
+        })), 'Setting it also puts either end with no circuit of its own on this one.'),
+        field('Note', note));
+      const del = btn('Delete', 'danger');
+      del.onclick = () => deleteSelection();
+      side.appendChild(actions(del));
+      side.appendChild(el('div', { class: 'desc', text: 'Drag a bend to move it; drag a small dot to add a bend.' }));
+    } else if (r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
+    const c = r.Circuit ? circuitOf(r.Circuit) : null;
+    if (c) side.appendChild(circuitRow(c));
+  };
+
+  const deleteSelection = () => {
+    if (!selection) return;
+    const sel = selection;
+    if (sel.type === 'item') {
+      const it = itemOf(sel.id);
+      if (!it) return;
+      act(() => {
+        itemsIn().splice(itemsIn().indexOf(it), 1);
+        // Runs ending at it keep their path and become loose at that end.
+        runsIn().forEach((r: any) => { if (r.From === it.Id) { r.Points.unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { r.Points.push({ X: it.X, Y: it.Y }); r.To = ''; } });
+        selection = null;
+      });
+    } else if (sel.type === 'opening') act(() => { openingsNow().splice(openingsNow().indexOf(openingOf(sel.id)), 1); selection = null; });
+    else if (sel.type === 'run') act(() => { runsIn().splice(runsIn().indexOf(runOf(sel.id)), 1); selection = null; });
+    else {
+      const s = shapeOf(sel);
+      if (!s) return;
+      const inIt = itemsIn().filter((it: any) => it.Room === s.Id).length;
+      if (inIt && !confirm(`Delete ${s.Name || s.Id}? ${inIt} item(s) in it stay on the plan, outdoors.`)) return;
+      act(() => {
+        const list = sel.type === 'room' ? roomsNow() : areasNow();
+        list.splice(list.indexOf(s), 1);
+        if (sel.type === 'room') { itemsIn().forEach((it: any) => { if (it.Room === s.Id) { it.Room = ''; it.Floor = floorNow()!.floor.Id; } }); areasNow().forEach(a => { a.Rooms = (a.Rooms || []).filter((x: string) => x !== s.Id); }); }
+        selection = null;
+      });
+      toast(`Deleted. Ctrl+Z brings it back.`, true);
+    }
   };
 
   /// A metered device on a known circuit belongs beneath that circuit in the energy flow; moving it is offered, never done quietly.
@@ -814,10 +1401,13 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (feeders.length === 1 && feeders[0] === c.node) return;
     const from = feeders.length ? `It is fed by ${feeders.map(nodeLabel).join(', ')} now; that link is replaced.` : 'Nothing feeds it in the energy flow yet.';
     if (!confirm(`Place ${nodeLabel(it.Node)} beneath ${circuitLabel(c)} (${nodeLabel(c.node)}) in the energy flow?\n\n${from}\n\nCancel leaves the energy flow as it is.`)) return;
-    for (let i = links.length - 1; i >= 0; i--) if (links[i].To === it.Node) links.splice(i, 1);
-    links.push({ From: c.node, To: it.Node });
+    act(() => {
+      for (let i = links.length - 1; i >= 0; i--) if (links[i].To === it.Node) links.splice(i, 1);
+      links.push({ From: c.node, To: it.Node });
+    });
     toast('Placed beneath its circuit. Press Save to keep it.', true);
   };
+
 
   // --- Circuit sheet (#464, #465) --------------------------------------------------------------------
   const openCircuit = (c: Circuit) => {
@@ -837,7 +1427,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const placed = itemsIn().filter((it: any) => it.Circuit === c.ref);
     if (!placed.length) body.appendChild(el('div', { class: 'desc', text: 'Nothing placed on the plan is linked to this circuit yet.' }));
     placed.forEach((it: any) => {
-      const fl = floorsAll().find(x => ensure(x.floor, 'Rooms', []).some((r: any) => r.Id === it.Room));
+      const fl = floorsAll().find(x => onFloor(it, x.floor));
       const b = el('button', { class: 'fp-list-row', type: 'button' },
         el('span', { class: 'fp-list-name', text: it.Label || it.Kind }),
         el('span', { class: 'fp-list-val', text: [it.Room ? nameOfPlace(it.Room) : 'no room', fl ? fl.floor.Name || fl.floor.Id : ''].filter(Boolean).join(' · ') }));
@@ -851,7 +1441,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       floorsAll().forEach(({ floor }) => [...ensure(floor, 'Rooms', []), ...ensure(floor, 'Areas', [])].forEach((r: any) => {
         const cb = el('input', { type: 'checkbox' }) as HTMLInputElement;
         cb.checked = (breaker.Rooms || []).includes(r.Id);
-        cb.onchange = () => { const list = ensure(breaker, 'Rooms', []); const at = list.indexOf(r.Id); if (cb.checked && at < 0) list.push(r.Id); if (!cb.checked && at >= 0) list.splice(at, 1); changed(); };
+        cb.onchange = () => act(() => { const list = ensure(breaker, 'Rooms', []); const at = list.indexOf(r.Id); if (cb.checked && at < 0) list.push(r.Id); if (!cb.checked && at >= 0) list.splice(at, 1); });
         box.appendChild(el('label', { class: 'ld-inst' }, cb, ` ${r.Name || r.Id}`, el('span', { class: 'fp-muted', text: ` · ${floor.Name || floor.Id}` })));
       }));
       body.appendChild(box.children.length ? box : el('div', { class: 'desc', text: 'No rooms yet.' }));
@@ -904,7 +1494,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       }
       matches.forEach(c => {
         const b = btn(`Link to ${circuitLabel(c)}`, 'primary');
-        b.onclick = () => { it.Circuit = c.ref; changed(); closeSheet(); toast(`Linked to ${circuitLabel(c)}. Press Save to keep it.`, true); render(); };
+        b.onclick = () => { closeSheet(); act(() => { it.Circuit = c.ref; }); toast(`Linked to ${circuitLabel(c)}. Press Save to keep it.`, true); };
         offer.appendChild(b);
       });
     };
@@ -920,7 +1510,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
     paint();
   };
 
-  // --- Sheets: add, floor settings, tools ----------------------------------------------------------
+
+
+  // --- Sheets: floors, background, tools -----------------------------------------------------------
   const addSheet = () => {
     const body = el('div', { class: 'fp-sheet' });
     const siteName = el('input', { type: 'text', placeholder: 'Home' }) as HTMLInputElement;
@@ -934,24 +1526,33 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const sync = () => { siteRow.hidden = siteSel.value !== '__new'; };
     siteSel.onchange = sync;
     sync();
-    body.append(field('Site', siteSel), siteRow, field('Floor name', floorName), field('Level', level, '0 is the ground floor, 1 the one above, −1 a basement.'));
+    const plot = planDefaultPlot(sys());
+    let wU = plot.w * 100, hU = plot.h * 100;
+    const wIn = el('input', { type: 'text', class: 'fp-len', value: planFmtLen(plot.w, sys()) }) as HTMLInputElement;
+    const hIn = el('input', { type: 'text', class: 'fp-len', value: planFmtLen(plot.h, sys()) }) as HTMLInputElement;
+    const read = () => { const w = planParseLen(wIn.value, sys()), h = planParseLen(hIn.value, sys()); if (w) wU = w * 100; if (h) hU = h * 100; };
+    body.append(field('Site', siteSel), siteRow, field('Floor name', floorName), field('Level', level, '0 is the ground floor, 1 the one above, −1 a basement.'),
+      el('div', { class: 'fp-two' }, field('Plot width', wIn), field('Plot depth', hIn)),
+      el('div', { class: 'desc', text: 'The whole lot you want to draw on, yard included. Upload a plan image afterwards, or draw on the grid.' }));
     const add = btn('Add floor', 'primary');
     add.onclick = () => {
-      let site = sitesIn().find((s: any) => s.Id === siteSel.value);
-      if (!site) {
-        const nm = siteName.value.trim() || 'Home';
-        site = { Id: freshId(nm), Name: nm, Floors: [] };
-        sitesIn().push(site);
-      }
-      const nm = floorName.value.trim() || `Floor ${ensure(site, 'Floors', []).length + 1}`;
-      const f = { Id: freshId(nm), Name: nm, Level: Number(level.value) || 0, Width: 1000, Height: 700, Image: '', Rooms: [], Areas: [] };
-      site.Floors.push(f);
-      floorId = f.Id; remember('floor', floorId); viewFor = '';
+      read();
+      const nm = floorName.value.trim();
+      act(() => {
+        let site = sitesIn().find((s: any) => s.Id === siteSel.value);
+        if (!site) {
+          const sn = siteName.value.trim() || 'Home';
+          site = { Id: freshId(sn), Name: sn, Floors: [] };
+          sitesIn().push(site);
+        }
+        const fname = nm || `Floor ${ensure(site, 'Floors', []).length + 1}`;
+        const f = { Id: freshId(fname), Name: fname, Level: Number(level.value) || 0, Width: Math.round(wU), Height: Math.round(hU), Scale: 100, Image: '', Ground: '', Rooms: [], Areas: [], Openings: [] };
+        site.Floors.push(f);
+        floorId = f.Id; remember('floor', floorId); viewFor = '';
+        mode = 'edit'; tool = 'room';
+      });
       closeSheet();
-      changed();
-      toast(`Added ${nm}. Upload its plan under Floor settings, or draw on the grid. Press Save to keep it.`, true);
-      mode = 'rooms'; tool = 'rect';
-      render();
+      toast('Floor added. Drag out rooms, add one by size, or upload the plan under Background. Press Save to keep it.', true);
     };
     openSheet({ title: 'Add a floor', body, footer: [add] });
   };
@@ -963,51 +1564,101 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const f = fl.floor;
     const body = el('div', { class: 'fp-sheet' });
     const name = el('input', { type: 'text', value: f.Name || '' }) as HTMLInputElement;
-    name.onchange = () => { f.Name = name.value.trim() || f.Id; changed(); render(); };
+    name.onchange = () => act(() => { f.Name = name.value.trim() || f.Id; });
     const level = el('input', { type: 'number', value: String(f.Level ?? 0), step: '1' }) as HTMLInputElement;
-    level.onchange = () => { f.Level = Number(level.value) || 0; changed(); render(); };
-    const limits = el('div', { class: 'desc', text: 'Checking where images are kept…' });
-    api('/api/plans/storage').then((r: any) => { limits.textContent = r.body?.ok ? `${r.body.limits} Kept in ${r.body.where}, never in the configuration. A large photo is shrunk here before it is sent.` : 'Plan storage is not reachable.'; }).catch(() => { limits.textContent = 'Plan storage is not reachable.'; });
-    const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml,.svg,image/*' }) as HTMLInputElement;
-    const upStatus = el('div', { class: 'desc' });
-    file.onchange = async () => {
-      const picked = file.files?.[0];
-      if (!picked) return;
-      upStatus.textContent = 'Preparing…';
-      try {
-        const prepared = await fpPrepareImage(picked);
-        upStatus.textContent = 'Uploading…';
-        const r = await fetch('/api/plans/images', { method: 'POST', headers: { 'Content-Type': prepared.type || 'application/octet-stream' }, body: prepared.blob });
-        const b = await r.json().catch(() => ({}));
-        if (!b.ok) { upStatus.textContent = b.message || `Upload failed (${r.status}).`; return; }
-        f.Image = b.id;
-        imageFailed = '';
-        const drawn = [...ensure(f, 'Rooms', []), ...ensure(f, 'Areas', [])].some((s: any) => (s.Shape || []).length >= 3) || itemsIn().some((it: any) => ensure(f, 'Rooms', []).some((r2: any) => r2.Id === it.Room));
-        if (!drawn && prepared.width && prepared.height) { f.Width = 1000; f.Height = Math.round(1000 * prepared.height / prepared.width); viewFor = ''; }
-        upStatus.textContent = drawn ? 'Uploaded. Rooms already drawn keep their places; the image is fitted to the floor.' : 'Uploaded.';
-        changed();
-        render();
-      } catch (e: any) { upStatus.textContent = e?.message || 'Could not read that image.'; }
-    };
-    const remove = btn('Remove image');
-    remove.hidden = !f.Image;
-    remove.onclick = () => { f.Image = ''; changed(); render(); closeSheet(); };
+    level.onchange = () => act(() => { f.Level = Number(level.value) || 0; });
+    const { w, h } = floorSize();
+    body.append(field('Name', name), field('Level', level),
+      el('div', { class: 'fp-two' },
+        field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
+        field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
+      field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      el('div', { class: 'fp-id', text: `id ${f.Id} · ${fl.site.Name || fl.site.Id} · ${Math.round(scale() * 100) / 100} drawing units per metre` }));
     const del = btn('Delete floor', 'danger');
     del.onclick = () => {
       const rooms = ensure(f, 'Rooms', []).length;
-      if (!confirm(`Delete ${f.Name || f.Id}${rooms ? ` and its ${rooms} room(s)` : ''}? Items placed in its rooms are removed too.`)) return;
-      const ids = new Set(ensure(f, 'Rooms', []).map((r: any) => r.Id));
-      const items = itemsIn();
-      for (let i = items.length - 1; i >= 0; i--) if (ids.has(items[i].Room)) items.splice(i, 1);
-      fl.site.Floors.splice(fl.site.Floors.indexOf(f), 1);
-      floorId = ''; selection = null; viewFor = '';
-      closeSheet(); changed(); render();
+      if (!confirm(`Delete ${f.Name || f.Id}${rooms ? ` and its ${rooms} room(s)` : ''}? What is placed on it goes too. Ctrl+Z brings it back.`)) return;
+      act(() => {
+        const items = itemsIn();
+        for (let i = items.length - 1; i >= 0; i--) if (onFloor(items[i], f)) items.splice(i, 1);
+        const runs = runsIn();
+        for (let i = runs.length - 1; i >= 0; i--) if (runs[i].Floor === f.Id) runs.splice(i, 1);
+        fl.site.Floors.splice(fl.site.Floors.indexOf(f), 1);
+        floorId = ''; selection = null; viewFor = '';
+      });
+      closeSheet();
     };
-    body.append(field('Name', name), field('Level', level), el('div', { class: 'fp-id', text: `id ${f.Id} · ${fl.site.Name || fl.site.Id}` }),
-      el('h4', { text: 'Plan image' }), limits, file, upStatus, remove);
     openSheet({ title: 'Floor settings', body, footer: [del] });
   };
   floorBtn.onclick = floorSheet;
+
+  /// Upload a plan image for the floor on screen. With nothing drawn yet, the plot takes the image's proportions.
+  const uploadImage = async (file: File, say: (s: string) => void) => {
+    const fl = floorNow();
+    if (!fl) { say('Add a floor first.'); return false; }
+    const f = fl.floor;
+    say('Preparing…');
+    try {
+      const prepared = await fpPrepareImage(file);
+      say('Uploading…');
+      const r = await fetch('/api/plans/images', { method: 'POST', headers: { 'Content-Type': prepared.type || 'application/octet-stream' }, body: prepared.blob });
+      const b = await r.json().catch(() => ({}));
+      if (!b.ok) { say(b.message || `Upload failed (${r.status}).`); toast(b.message || 'Upload failed.', false); return false; }
+      const drawn = [...ensure(f, 'Rooms', []), ...ensure(f, 'Areas', [])].some((s: any) => (s.Shape || []).length >= 3) || itemsIn().some((it: any) => onFloor(it, f));
+      act(() => {
+        f.Image = b.id;
+        imageFailed = '';
+        if (!drawn && prepared.width && prepared.height) { f.Height = Math.max(100, Math.round((Number(f.Width) || 1000) * prepared.height / prepared.width)); viewFor = ''; }
+      });
+      say(drawn ? 'Uploaded. What is already drawn stays put; the image is fitted to the plot.' : 'Uploaded.');
+      toast('Plan uploaded. Now set its scale: Edit › Measure, tap two points you know the distance between.', true);
+      return true;
+    } catch (e: any) { say(e?.message || 'Could not read that image.'); toast(e?.message || 'Could not read that image.', false); return false; }
+  };
+
+  const backgroundSheet = () => {
+    const fl = floorNow();
+    if (!fl) return addSheet();
+    const f = fl.floor;
+    const body = el('div', { class: 'fp-sheet' });
+    const where = el('div', { class: 'desc', text: 'Checking where images are kept…' });
+    api('/api/plans/storage').then((r: any) => { where.textContent = r.body?.ok ? `${r.body.limits} Kept in ${r.body.where}, never in the configuration. A large photo is shrunk here before it is sent.` : 'Plan storage is not reachable.'; }).catch(() => { where.textContent = 'Plan storage is not reachable.'; });
+    const upStatus = el('div', { class: 'desc fp-up-status' });
+    const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml,.svg,image/*', class: 'fp-file' }) as HTMLInputElement;
+    file.onchange = async () => { const picked = file.files?.[0]; if (picked && await uploadImage(picked, t => { upStatus.textContent = t; })) closeSheet(); };
+    const choose = btn(f.Image ? 'Replace image…' : 'Choose an image…', 'primary');
+    choose.onclick = () => file.click();
+    const drop = el('div', { class: 'fp-drop' }, el('div', { text: 'Drop a floor plan, a photo of one, or a screenshot here' }), choose, file);
+    drop.addEventListener('dragover', (e: any) => { e.preventDefault(); drop.classList.add('is-over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('is-over'));
+    drop.addEventListener('drop', async (e: any) => { e.preventDefault(); drop.classList.remove('is-over'); const picked = e.dataTransfer?.files?.[0]; if (picked && await uploadImage(picked, t => { upStatus.textContent = t; })) closeSheet(); });
+    body.append(drop, upStatus, where);
+    if (f.Image) {
+      body.appendChild(el('img', { class: 'fp-thumb', src: `/api/plans/images/${encodeURIComponent(f.Image)}`, alt: 'The current plan image' }));
+      const opacity = el('input', { type: 'range', min: '0', max: '1', step: '0.05', value: String(f.ImageOpacity ?? 0.85) }) as HTMLInputElement;
+      opacity.oninput = () => { f.ImageOpacity = Number(opacity.value); drawPlan(); };
+      opacity.onchange = () => { history.push(); refreshDirty(); };
+      const scaleBtn = btn('Set the scale…');
+      scaleBtn.title = 'Measure a distance you know on the image — a wall, a doorway — and say how long it really is.';
+      scaleBtn.onclick = () => { closeSheet(); pickTool('measure'); };
+      const remove = btn('Remove image', 'danger');
+      remove.onclick = () => { act(() => { f.Image = ''; }); closeSheet(); };
+      body.append(field('How strongly it shows', opacity), actions(scaleBtn, remove));
+    }
+    openSheet({ title: 'Background image', body });
+  };
+  bgBtn.onclick = backgroundSheet;
+
+  // Dropping an image anywhere on the plan uploads it for this floor.
+  stage.addEventListener('dragover', (e: any) => { if (e.dataTransfer?.types?.includes?.('Files')) { e.preventDefault(); stage.classList.add('is-drop'); } });
+  stage.addEventListener('dragleave', () => stage.classList.remove('is-drop'));
+  stage.addEventListener('drop', (e: any) => {
+    stage.classList.remove('is-drop');
+    const picked = e.dataTransfer?.files?.[0];
+    if (!picked) return;
+    e.preventDefault();
+    uploadImage(picked, t => { status.textContent = t; });
+  });
 
   const toolsSheet = () => {
     const body = el('div', { class: 'fp-sheet' });
@@ -1016,11 +1667,17 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const ha = btn('Publish rooms to Home Assistant…');
     ha.onclick = () => haSheet();
     body.append(
-      el('div', { class: 'fp-tool' }, tags, el('div', { class: 'desc', text: 'Turn Version 2.0 room and area tags into rooms, with a preview of what each becomes before anything is written.' })),
-      el('div', { class: 'fp-tool' }, ha, el('div', { class: 'desc', text: 'Create or match a Home Assistant area for each room, and file this bridge’s devices in them.' })));
+      el('div', { class: 'fp-tool-row' }, tags, el('div', { class: 'desc', text: 'Turn Version 2.0 room and area tags into rooms, with a preview of what each becomes before anything is written.' })),
+      el('div', { class: 'fp-tool-row' }, ha, el('div', { class: 'desc', text: 'Create or match a Home Assistant area for each room, and file this bridge’s devices in them.' })),
+      el('h4', { text: 'Keys' }),
+      el('div', { class: 'fp-keys' }, ...[
+        ['Ctrl+Z / Ctrl+Y', 'undo / redo'], ['V H R P O A', 'select, pan, room, outline, outdoor, area'], ['D W I L M', 'door, window, item, wire, measure'],
+        ['Delete', 'remove the selection'], ['Arrows', 'nudge; Shift for more'], ['Esc', 'stop drawing'], ['+ − 0', 'zoom in, out, fit'],
+      ].map(([k, t]) => el('div', {}, el('kbd', { text: k }), ' ' + t))));
     openSheet({ title: 'Tools', body });
   };
   toolsBtn.onclick = toolsSheet;
+
 
   const migrateSheet = async () => {
     const body = el('div', { class: 'fp-sheet' });
@@ -1078,6 +1735,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
     };
     apply.onclick = () => {
       if (!plan) return;
+      history.push();
       plan.creates.forEach((c: any) => {
         const f = floorById(c.floor)?.floor;
         if (!f) return;
@@ -1128,6 +1786,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       go.disabled = true;
       const a: any = await api('/api/ha/areas/apply', { method: 'POST', body: JSON.stringify({ EnergyFlow: flowIn() }) }).catch((e: any) => ({ body: { ok: false, message: e?.message } }));
       const linked = a.body?.linked || {};
+      if (Object.keys(linked).length) history.push();
       floorsAll().forEach(({ floor }) => ensure(floor, 'Rooms', []).forEach((rm: any) => { if (linked[rm.Id]) rm.HaArea = linked[rm.Id]; }));
       if (Object.keys(linked).length) changed();
       closeSheet();
@@ -1135,6 +1794,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
     };
     body.appendChild(el('div', { class: 'fp-actions' }, go));
   };
+
+
 
   // --- Loading and rendering -----------------------------------------------------------------------
   let pending: any = null;
@@ -1157,6 +1818,28 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (!dragging) render();
   };
 
+  const drawEmpty = () => {
+    const fl = floorNow();
+    empty.innerHTML = '';
+    const bare = !!fl && !fl.floor.Image && !roomsNow().some(r => (r.Shape || []).length >= 3) && !itemsNow().length;
+    empty.hidden = !bare && !!fl;
+    if (!fl) {
+      const start = btn('Add a site and floor', 'primary');
+      start.onclick = () => addSheet();
+      empty.append(el('div', { class: 'fp-empty-title', text: 'No floors yet' }), el('div', { class: 'desc', text: 'A floor is the plot you draw on: rooms, the yard, and everything placed in them.' }), start);
+      return;
+    }
+    if (!bare) return;
+    const up = btn('Upload a plan image', 'primary');
+    up.onclick = () => backgroundSheet();
+    const draw = btn('Draw a room');
+    draw.onclick = () => pickTool('room');
+    const size = btn('Add a room by size');
+    size.onclick = () => { pickTool('room'); roomBySize(false); };
+    empty.append(el('div', { class: 'fp-empty-title', text: 'An empty floor' }),
+      el('div', { class: 'desc', text: 'Drop a floor plan image here to trace over, or start drawing on the grid.' }), actions(up, draw, size));
+  };
+
   const render = () => {
     const floors = floorsAll();
     floorSel.innerHTML = '';
@@ -1167,20 +1850,51 @@ export function addFloorPlanSection(nav: any, sections: any) {
     floorSel.value = floorId;
     floorSel.disabled = !floors.length;
     floorBtn.disabled = !fl;
-    if (fl && viewFor !== fl.floor.Id + '|' + fl.floor.Width + '|' + fl.floor.Height) { fit(); viewFor = fl.floor.Id + '|' + fl.floor.Width + '|' + fl.floor.Height; }
-    stage.classList.toggle('is-empty', !fl);
+    bgBtn.disabled = !fl;
+    const key = fl ? `${fl.floor.Id}|${fl.floor.Width}|${fl.floor.Height}` : '';
+    if (fl && viewFor !== key) { fit(); viewFor = key; }
     if (fl) stage.style.aspectRatio = `${Number(fl.floor.Width) || 1000} / ${Number(fl.floor.Height) || 700}`;
+    stage.classList.toggle('is-empty', !fl);
     drawSub();
     drawPlan();
     drawSide();
+    drawEmpty();
   };
 
   window.addEventListener('keydown', (e: any) => {
-    if (!sec.classList.contains('active') || /INPUT|SELECT|TEXTAREA/.test(e.target?.tagName || '')) return;
-    if (e.key === 'Escape' && (draft.length || rectStart)) { draft = []; rectStart = null; rectEnd = null; render(); }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && mode !== 'view' && selection) {
-      if (selection.type === 'item') { const it = itemOf(selection.id); if (it && confirm(`Remove ${it.Label || it.Kind} from the plan?`)) { itemsIn().splice(itemsIn().indexOf(it), 1); selection = null; changed(); render(); } }
+    if (!sec.classList.contains('active')) return;
+    if (/INPUT|SELECT|TEXTAREA/.test(e.target?.tagName || '') || e.target?.isContentEditable) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const k = String(e.key || '');
+    if (ctrl && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (ctrl && (k === 'y' || k === 'Y')) { e.preventDefault(); redo(); return; }
+    if (ctrl || e.altKey) return;
+    if (k === 'Escape') {
+      if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
+      else if (selection) { selection = null; render(); }
+      return;
     }
+    if (k === 'Enter' && wireDraft) { finishWire(''); return; }
+    if (k === 'Enter' && draft.length >= 3) { finishOutline(draft); return; }
+    if (k === '+' || k === '=') { zoomAt(centre(), 1.4); return; }
+    if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }
+    if (k === '0') { fit(); drawPlan(); return; }
+    if (mode !== 'edit') return;
+    if ((k === 'Delete' || k === 'Backspace') && selection) { e.preventDefault(); deleteSelection(); return; }
+    if (k.startsWith('Arrow') && selection) {
+      e.preventDefault();
+      const step = snapStep() * (e.shiftKey ? 10 : 1);
+      const dx = k === 'ArrowLeft' ? -step : k === 'ArrowRight' ? step : 0, dy = k === 'ArrowUp' ? -step : k === 'ArrowDown' ? step : 0;
+      act(() => {
+        const s = shapeOf(selection);
+        if (s) s.Shape = planClamp(planMove(s.Shape, dx, dy), floorSize().w, floorSize().h);
+        const it = selection!.type === 'item' ? itemOf(selection!.id) : selection!.type === 'opening' ? openingOf(selection!.id) : null;
+        if (it) { it.X = planRound(it.X + dx); it.Y = planRound(it.Y + dy); }
+      });
+      return;
+    }
+    const byKey = FP_TOOLS.find(t => t[2].toLowerCase() === k.toLowerCase());
+    if (byKey) { e.preventDefault(); pickTool(byKey[0]); }
   });
 
   link.onclick = () => { activate(link, sec); render(); load(); };
@@ -1188,6 +1902,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
   return { link, sec };
 }
+
 
 /// A picked file made ready to upload: a phone photo decoded upright and shrunk, anything else passed through.
 async function fpPrepareImage(file: File): Promise<{ blob: Blob; type: string; width: number; height: number }> {

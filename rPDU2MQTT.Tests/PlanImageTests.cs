@@ -78,6 +78,23 @@ public class PlanImageTests : IDisposable
         Assert.Contains("house", images.Store.Describe);
     }
 
+    private sealed class Memory : IPlanImageStore
+    {
+        public string Describe => "memory";
+        public Task SaveAsync(string id, byte[] bytes, string contentType, CancellationToken ct) => Task.CompletedTask;
+        public Task<PlanImage?> ReadAsync(string id, CancellationToken ct) => Task.FromResult<PlanImage?>(null);
+        public Task DeleteAsync(string id, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public void TheSharedCache_IsUsedOnlyWhenNoDirectoryOrBucketIsNamed()
+    {
+        var cache = new Memory();
+
+        Assert.Same(cache, PlanImages.For(new PlanStorageConfig(), cache: cache).Store);
+        Assert.IsType<DirectoryPlanImageStore>(PlanImages.For(new PlanStorageConfig { Directory = dir }, cache: cache).Store);
+    }
+
     /// <summary>The worked example in the AWS documentation for signing a GET Object request.</summary>
     [Fact]
     public void TheSignature_MatchesAwsWorkedExample()

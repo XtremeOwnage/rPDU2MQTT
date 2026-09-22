@@ -774,6 +774,14 @@ spec:
                   ShowProjectLink:
                     type: boolean
                     description: Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.
+                  DistanceUnits:
+                    type: string
+                    enum:
+                    - ''
+                    - auto
+                    - imperial
+                    - metric
+                    description: "How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language."
                   AuthType:
                     type: string
                     enum:
@@ -1355,6 +1363,26 @@ spec:
                                 description: Height of the plan in drawing units.
                                 minimum: 100
                                 maximum: 100000
+                              Scale:
+                                type: number
+                                description: Drawing units per metre. 100 makes one unit a centimetre. Set it by measuring a known distance on the plan, so room sizes read in feet or metres.
+                                minimum: 1
+                                maximum: 100000
+                              ImageOpacity:
+                                type: number
+                                description: How strongly the plan image shows behind the drawing, from 0 (hidden) to 1.
+                              Ground:
+                                type: string
+                                enum:
+                                - ''
+                                - ''
+                                - grass
+                                - concrete
+                                - gravel
+                                - dirt
+                                - pavers
+                                - snow
+                                description: 'What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.'
                               Rooms:
                                 type: array
                                 items:
@@ -1378,6 +1406,27 @@ spec:
                                           Y:
                                             type: number
                                       description: The room's outline on the plan, as points in drawing units. Empty until the room is drawn.
+                                    Outdoor:
+                                      type: boolean
+                                      description: 'An outdoor zone rather than a room: a yard, porch, patio, driveway or deck. Drawn as ground, not walls.'
+                                    Surface:
+                                      type: string
+                                      enum:
+                                      - ''
+                                      - ''
+                                      - wood
+                                      - tile
+                                      - carpet
+                                      - concrete
+                                      - stone
+                                      - grass
+                                      - gravel
+                                      - dirt
+                                      - deck
+                                      - pavers
+                                      - water
+                                      - snow
+                                      description: 'The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water or snow. Blank is plain.'
                                     HaArea:
                                       type: string
                                       description: The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.
@@ -1411,6 +1460,49 @@ spec:
                                             type: number
                                       description: "The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own."
                                 description: Areas on this floor. An area can span several rooms, such as 'upstairs' or 'server corner', and may overlap them.
+                              Openings:
+                                type: array
+                                items:
+                                  type: object
+                                  x-kubernetes-preserve-unknown-fields: true
+                                  properties:
+                                    Id:
+                                      type: string
+                                      description: Stable unique id for this opening.
+                                    Kind:
+                                      type: string
+                                      enum:
+                                      - ''
+                                      - door
+                                      - double-door
+                                      - sliding-door
+                                      - garage-door
+                                      - window
+                                      - opening
+                                      description: A door, double door, sliding door, garage door, window, or a plain opening.
+                                    X:
+                                      type: number
+                                      description: Centre of the opening across the plan, in drawing units.
+                                    Y:
+                                      type: number
+                                      description: Centre of the opening down the plan, in drawing units.
+                                    Angle:
+                                      type: number
+                                      description: The direction of the wall it sits in, in degrees clockwise from pointing right.
+                                    Width:
+                                      type: number
+                                      description: How wide the opening is, in drawing units.
+                                    Swing:
+                                      type: string
+                                      enum:
+                                      - ''
+                                      - left
+                                      - right
+                                      description: Which end of a door the hinges are at.
+                                    Flip:
+                                      type: boolean
+                                      description: Swing the door to the other side of the wall.
+                                description: Doors, windows and openings in the walls on this floor.
                           description: The floors of this site.
                     description: 'Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.'
                   Placements:
@@ -1431,13 +1523,31 @@ spec:
                           - fixture
                           - appliance
                           - device
-                          description: 'What this is: an outlet, switch, fixture, appliance or device.'
+                          - fan
+                          - hvac
+                          - ev-charger
+                          - junction
+                          - panel
+                          - meter
+                          - pole
+                          - transformer
+                          - solar
+                          - battery
+                          - inverter
+                          - generator
+                          description: 'What this is: an outlet, switch, light fixture, fan, appliance, device, HVAC unit, EV charger, junction box, electrical panel, utility meter, utility pole, transformer, solar array, battery, inverter or generator.'
                         Label:
                           type: string
                           description: What it is called, for example 'Fridge' or 'Desk outlet'.
                         Room:
                           type: string
-                          description: The id of the room it is in.
+                          description: The id of the room or outdoor zone it is in. Blank when it is outdoors, or anywhere not drawn as a room.
+                        Floor:
+                          type: string
+                          description: The id of the floor it is drawn on. Needed for anything outside every room.
+                        Panel:
+                          type: string
+                          description: For an electrical panel placed on the plan, the id of the panel in the panel schedule.
                         X:
                           type: number
                           description: Where it is on the floor plan, across, in drawing units.
@@ -1451,6 +1561,50 @@ spec:
                           type: string
                           description: The energy-flow node metering it, when it is individually metered — a smart plug, an ESPHome sensor, a PDU outlet.
                     description: Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.
+                  Runs:
+                    type: array
+                    items:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      properties:
+                        Id:
+                          type: string
+                          description: Stable unique id for this run.
+                        Kind:
+                          type: string
+                          enum:
+                          - ''
+                          - circuit
+                          - feeder
+                          - service
+                          description: A branch circuit, a feeder between panels, or the utility service.
+                        Floor:
+                          type: string
+                          description: The id of the floor it is drawn on.
+                        Circuit:
+                          type: string
+                          description: "The circuit it carries, as the panel id and breaker number: 'main_panel/B06'. Blank when it is not known."
+                        From:
+                          type: string
+                          description: The placed item it starts at. Blank when it starts at a bare point.
+                        To:
+                          type: string
+                          description: The placed item it ends at. Blank when it ends at a bare point.
+                        Points:
+                          type: array
+                          items:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            properties:
+                              X:
+                                type: number
+                              Y:
+                                type: number
+                          description: 'The path between its ends, in drawing units: bends and, where an end is not an item, the end itself.'
+                        Label:
+                          type: string
+                          description: A note on the run, for example 'through the attic'.
+                    description: 'Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.'
                   AutoLocations:
                     type: array
                     items:

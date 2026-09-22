@@ -86,6 +86,10 @@ public class EnergyFlowConfig
     [Description("Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.")]
     public List<PlacementConfig> Placements { get; set; } = new();
 
+    /// <summary>Cable runs drawn on the floor plans (#464).</summary>
+    [Description("Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.")]
+    public List<RunConfig> Runs { get; set; } = new();
+
     /// <summary>Locations for derived nodes, which have no entry of their own to carry one (#461).</summary>
     [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
     public List<AutoLocationRule> AutoLocations { get; set; } = new();

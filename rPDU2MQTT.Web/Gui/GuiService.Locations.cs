@@ -12,13 +12,14 @@ namespace rPDU2MQTT.Services.Gui;
 public sealed partial class GuiService
 {
     private PlanImages? planImages;
+    private readonly IPlanImageStore? cachePlans;
 
     /// <summary>The plan image store, rebuilt when its settings change.</summary>
     private PlanImages Plans()
     {
         if (planImages is null || !ReferenceEquals(planStorageSeen, config.PlanStorage))
         {
-            planImages = PlanImages.For(config.PlanStorage);
+            planImages = PlanImages.For(config.PlanStorage, cache: cachePlans);
             planStorageSeen = config.PlanStorage;
         }
         return planImages;

@@ -104,3 +104,36 @@ export function planScaleMax(values: (number | null | undefined)[]): number {
   const known = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
   return known.length ? Math.max(...known) : 0;
 }
+
+/// The wall nearest a point: where on it, its direction in degrees, and how far away it is.
+export function planNearestWall(p: Pt, outlines: Pt[][]): { pt: Pt; angle: number; dist: number } | null {
+  let best: { pt: Pt; angle: number; dist: number } | null = null;
+  for (const poly of outlines) for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const q = planNearestOnSegment(p, a, b);
+    const d = Math.hypot(p.X - q.X, p.Y - q.Y);
+    if (!best || d < best.dist) best = { pt: q, angle: Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI, dist: d };
+  }
+  return best;
+}
+
+/// The length along a path of points.
+export function planPathLength(points: Pt[]): number {
+  let s = 0;
+  for (let i = 1; i < points.length; i++) s += Math.hypot(points[i].X - points[i - 1].X, points[i].Y - points[i - 1].Y);
+  return s;
+}
+
+/// Is an outline a rectangle square to the page? Then it can be sized by width and depth.
+export function planIsBox(poly: Pt[]): boolean {
+  if (poly.length !== 4) return false;
+  const xs = new Set(poly.map(p => planRound(p.X))), ys = new Set(poly.map(p => planRound(p.Y)));
+  return xs.size === 2 && ys.size === 2;
+}
+
+/// The bounding box of an outline.
+export function planBounds(poly: Pt[]): { x: number; y: number; w: number; h: number } {
+  const xs = poly.map(p => p.X), ys = poly.map(p => p.Y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}

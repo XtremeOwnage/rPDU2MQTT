@@ -60,7 +60,8 @@ export function formatMeasure(value: any, units?: string): string {
 // SVG element helper (separate namespace from el()).
 export function svgEl(tag: string, attrs?: any): any {
   const e: any = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v as any);
+  // A null or undefined attribute is left off, never written as the text "null".
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null) e.setAttribute(k, v as any);
   return e;
 }
 

@@ -20,6 +20,11 @@ public class GuiConfig
     [Description("Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
     public bool ShowProjectLink { get; set; } = true;
 
+    [DefaultValue("auto")]
+    [AllowedValues("auto", "imperial", "metric")]
+    [Description("How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language.")]
+    public string DistanceUnits { get; set; } = "auto";
+
     [DefaultValue(GuiAuthType.Basic)]
     [Display(Name = "Authentication")]
     [Description("How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).")]

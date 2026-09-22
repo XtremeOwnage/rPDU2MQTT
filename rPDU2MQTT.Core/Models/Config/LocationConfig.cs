@@ -50,11 +50,88 @@ public class FloorConfig
     [Description("Height of the plan in drawing units.")]
     public double Height { get; set; } = 700;
 
+    [Range(1, 100000, ErrorMessage = "Scale must be between 1 and 100000.")]
+    [DefaultValue(100)]
+    [Description("Drawing units per metre. 100 makes one unit a centimetre. Set it by measuring a known distance on the plan, so room sizes read in feet or metres.")]
+    public double Scale { get; set; } = 100;
+
+    [DefaultValue(0.85)]
+    [Description("How strongly the plan image shows behind the drawing, from 0 (hidden) to 1.")]
+    public double ImageOpacity { get; set; } = 0.85;
+
+    [AllowedValues("", Surfaces.Grass, Surfaces.Concrete, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Pavers, Surfaces.Snow)]
+    [Description("What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.")]
+    public string Ground { get; set; } = "";
+
     [Description("The rooms on this floor.")]
     public List<RoomConfig> Rooms { get; set; } = new();
 
     [Description("Areas on this floor. An area can span several rooms, such as 'upstairs' or 'server corner', and may overlap them.")]
     public List<AreaConfig> Areas { get; set; } = new();
+
+    [Description("Doors, windows and openings in the walls on this floor.")]
+    public List<OpeningConfig> Openings { get; set; } = new();
+}
+
+/// <summary>The textures a room, an outdoor zone or the ground can be drawn with (#463).</summary>
+public static class Surfaces
+{
+    public const string Wood = "wood";
+    public const string Tile = "tile";
+    public const string Carpet = "carpet";
+    public const string Concrete = "concrete";
+    public const string Stone = "stone";
+    public const string Grass = "grass";
+    public const string Gravel = "gravel";
+    public const string Dirt = "dirt";
+    public const string Deck = "deck";
+    public const string Pavers = "pavers";
+    public const string Water = "water";
+    public const string Snow = "snow";
+}
+
+/// <summary>What an opening in a wall is (#463).</summary>
+public static class OpeningKind
+{
+    public const string Door = "door";
+    public const string DoubleDoor = "double-door";
+    public const string SlidingDoor = "sliding-door";
+    public const string GarageDoor = "garage-door";
+    public const string Window = "window";
+    public const string Opening = "opening";
+}
+
+/// <summary>A door, window or plain opening, centred on a point of a wall and lying along it (#463).</summary>
+public class OpeningConfig
+{
+    [Description("Stable unique id for this opening.")]
+    public string Id { get; set; } = "";
+
+    [AllowedValues(OpeningKind.Door, OpeningKind.DoubleDoor, OpeningKind.SlidingDoor, OpeningKind.GarageDoor, OpeningKind.Window, OpeningKind.Opening)]
+    [DefaultValue(OpeningKind.Door)]
+    [Description("A door, double door, sliding door, garage door, window, or a plain opening.")]
+    public string Kind { get; set; } = OpeningKind.Door;
+
+    [Description("Centre of the opening across the plan, in drawing units.")]
+    public double X { get; set; }
+
+    [Description("Centre of the opening down the plan, in drawing units.")]
+    public double Y { get; set; }
+
+    [Description("The direction of the wall it sits in, in degrees clockwise from pointing right.")]
+    public double Angle { get; set; }
+
+    [Description("How wide the opening is, in drawing units.")]
+    public double Width { get; set; } = 90;
+
+    [AllowedValues("left", "right")]
+    [DefaultValue("left")]
+    [Description("Which end of a door the hinges are at.")]
+    public string Swing { get; set; } = "left";
+
+    [DefaultValue(false)]
+    [Description("Swing the door to the other side of the wall.")]
+    public bool Flip { get; set; }
 }
 
 /// <summary>A room on a floor, outlined on the plan (#461, #463).</summary>
@@ -68,6 +145,14 @@ public class RoomConfig
 
     [Description("The room's outline on the plan, as points in drawing units. Empty until the room is drawn.")]
     public List<PlanPoint> Shape { get; set; } = new();
+
+    [DefaultValue(false)]
+    [Description("An outdoor zone rather than a room: a yard, porch, patio, driveway or deck. Drawn as ground, not walls.")]
+    public bool Outdoor { get; set; }
+
+    [AllowedValues("", Surfaces.Wood, Surfaces.Tile, Surfaces.Carpet, Surfaces.Concrete, Surfaces.Stone, Surfaces.Grass, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Deck, Surfaces.Pavers, Surfaces.Water, Surfaces.Snow)]
+    [Description("The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water or snow. Blank is plain.")]
+    public string Surface { get; set; } = "";
 
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]
     public string HaArea { get; set; } = "";
@@ -104,8 +189,20 @@ public static class PlacementKind
     public const string Fixture = "fixture";
     public const string Appliance = "appliance";
     public const string Device = "device";
+    public const string Fan = "fan";
+    public const string Hvac = "hvac";
+    public const string EvCharger = "ev-charger";
+    public const string Junction = "junction";
+    public const string Panel = "panel";
+    public const string Meter = "meter";
+    public const string Pole = "pole";
+    public const string Transformer = "transformer";
+    public const string Solar = "solar";
+    public const string Battery = "battery";
+    public const string Inverter = "inverter";
+    public const string Generator = "generator";
 
-    public static readonly string[] All = [Outlet, Switch, Fixture, Appliance, Device];
+    public static readonly string[] All = [Outlet, Switch, Fixture, Appliance, Device, Fan, Hvac, EvCharger, Junction, Panel, Meter, Pole, Transformer, Solar, Battery, Inverter, Generator];
 }
 
 /// <summary>An outlet, switch, fixture, appliance or device placed on a floor plan (#464).</summary>
@@ -114,16 +211,22 @@ public class PlacementConfig
     [Description("Stable unique id for this item.")]
     public string Id { get; set; } = "";
 
-    [AllowedValues(PlacementKind.Outlet, PlacementKind.Switch, PlacementKind.Fixture, PlacementKind.Appliance, PlacementKind.Device)]
+    [AllowedValues(PlacementKind.Outlet, PlacementKind.Switch, PlacementKind.Fixture, PlacementKind.Appliance, PlacementKind.Device, PlacementKind.Fan, PlacementKind.Hvac, PlacementKind.EvCharger, PlacementKind.Junction, PlacementKind.Panel, PlacementKind.Meter, PlacementKind.Pole, PlacementKind.Transformer, PlacementKind.Solar, PlacementKind.Battery, PlacementKind.Inverter, PlacementKind.Generator)]
     [DefaultValue(PlacementKind.Outlet)]
-    [Description("What this is: an outlet, switch, fixture, appliance or device.")]
+    [Description("What this is: an outlet, switch, light fixture, fan, appliance, device, HVAC unit, EV charger, junction box, electrical panel, utility meter, utility pole, transformer, solar array, battery, inverter or generator.")]
     public string Kind { get; set; } = PlacementKind.Outlet;
 
     [Description("What it is called, for example 'Fridge' or 'Desk outlet'.")]
     public string Label { get; set; } = "";
 
-    [Description("The id of the room it is in.")]
+    [Description("The id of the room or outdoor zone it is in. Blank when it is outdoors, or anywhere not drawn as a room.")]
     public string Room { get; set; } = "";
+
+    [Description("The id of the floor it is drawn on. Needed for anything outside every room.")]
+    public string Floor { get; set; } = "";
+
+    [Description("For an electrical panel placed on the plan, the id of the panel in the panel schedule.")]
+    public string Panel { get; set; } = "";
 
     [Description("Where it is on the floor plan, across, in drawing units.")]
     public double X { get; set; }
@@ -146,4 +249,45 @@ public class AutoLocationRule
 
     [Description("The id of the room, area, floor or site the matching nodes are in.")]
     public string Location { get; set; } = "";
+}
+
+/// <summary>What a drawn run of cable is (#464).</summary>
+public static class RunKind
+{
+    /// <summary>A branch circuit from a breaker to what it feeds.</summary>
+    public const string Circuit = "circuit";
+    /// <summary>A feeder between panels, or from a panel to a subpanel.</summary>
+    public const string Feeder = "feeder";
+    /// <summary>The utility service: pole or transformer to the meter and main panel.</summary>
+    public const string Service = "service";
+}
+
+/// <summary>A cable run drawn on a floor plan, from one placed item to another through the points between (#464).</summary>
+public class RunConfig
+{
+    [Description("Stable unique id for this run.")]
+    public string Id { get; set; } = "";
+
+    [AllowedValues(RunKind.Circuit, RunKind.Feeder, RunKind.Service)]
+    [DefaultValue(RunKind.Circuit)]
+    [Description("A branch circuit, a feeder between panels, or the utility service.")]
+    public string Kind { get; set; } = RunKind.Circuit;
+
+    [Description("The id of the floor it is drawn on.")]
+    public string Floor { get; set; } = "";
+
+    [Description("The circuit it carries, as the panel id and breaker number: 'main_panel/B06'. Blank when it is not known.")]
+    public string Circuit { get; set; } = "";
+
+    [Description("The placed item it starts at. Blank when it starts at a bare point.")]
+    public string From { get; set; } = "";
+
+    [Description("The placed item it ends at. Blank when it ends at a bare point.")]
+    public string To { get; set; } = "";
+
+    [Description("The path between its ends, in drawing units: bends and, where an end is not an item, the end itself.")]
+    public List<PlanPoint> Points { get; set; } = new();
+
+    [Description("A note on the run, for example 'through the attic'.")]
+    public string Label { get; set; } = "";
 }

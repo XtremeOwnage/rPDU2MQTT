@@ -446,6 +446,8 @@ public static class ServiceConfiguration
                 sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
             services.AddSingleton<Core.Flow.IPeriodAuditStore>(sp => new Services.RedisPeriodAuditStore(
                 sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix, m => Log.Warning(m)));
+            services.AddSingleton<Core.Plans.IPlanImageStore>(sp => new Services.CachePlanImageStore(
+                sp.GetRequiredService<Services.ICacheClient>(), cfg.Cache.KeyPrefix));
         }
         else
         {

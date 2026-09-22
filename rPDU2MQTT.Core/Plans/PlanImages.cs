@@ -88,14 +88,17 @@ public sealed partial class PlanImages(IPlanImageStore store, PlanStorageConfig 
     public Task DeleteAsync(string id, CancellationToken ct) =>
         IsId(id) ? store.DeleteAsync(id, ct) : Task.CompletedTask;
 
-    /// <summary>The store the configuration asks for: the bucket when one is set, else the directory.</summary>
-    public static PlanImages For(PlanStorageConfig config, HttpClient? http = null)
+    /// <summary>
+    /// The store the configuration asks for: the bucket when one is set, else a named directory, else the shared
+    /// cache when there is one (it survives a restart), else a directory beside the program.
+    /// </summary>
+    public static PlanImages For(PlanStorageConfig config, HttpClient? http = null, IPlanImageStore? cache = null)
     {
-        IPlanImageStore store = config.ObjectStore.IsEnabled()
-            ? new S3PlanImageStore(config.ObjectStore, http ?? new HttpClient())
-            : new DirectoryPlanImageStore(!string.IsNullOrWhiteSpace(config.Directory) ? config.Directory
-                : Environment.GetEnvironmentVariable("RPDU2MQTT_PLANS_DIRECTORY") is { Length: > 0 } mounted ? mounted
-                : Path.Combine(AppContext.BaseDirectory, "plans"));
+        var mounted = Environment.GetEnvironmentVariable("RPDU2MQTT_PLANS_DIRECTORY");
+        IPlanImageStore store = config.ObjectStore.IsEnabled() ? new S3PlanImageStore(config.ObjectStore, http ?? new HttpClient())
+            : !string.IsNullOrWhiteSpace(config.Directory) ? new DirectoryPlanImageStore(config.Directory)
+            : !string.IsNullOrWhiteSpace(mounted) ? new DirectoryPlanImageStore(mounted)
+            : cache ?? new DirectoryPlanImageStore(Path.Combine(AppContext.BaseDirectory, "plans"));
         return new PlanImages(store, config);
     }
 }

@@ -90,8 +90,9 @@ public sealed class LocationIndex
         var exact = rules.FirstOrDefault(r => !r.Match.Contains('*') && Ids.Equals(r.Match.Trim(), nodeId) && Contains(r.Location));
         if (exact is not null) return this[exact.Location]!.Id;
 
-        var placed = (flow.Placements ?? new()).FirstOrDefault(p => Ids.Equals(p.Node, nodeId) && Contains(p.Room));
-        if (placed is not null) return this[placed.Room]!.Id;
+        // An item outside every room is on its floor: outdoors, or anywhere not drawn as a room.
+        var placed = (flow.Placements ?? new()).FirstOrDefault(p => Ids.Equals(p.Node, nodeId) && (Contains(p.Room) || Contains(p.Floor)));
+        if (placed is not null) return this[Contains(placed.Room) ? placed.Room : placed.Floor]!.Id;
 
         var pattern = rules.FirstOrDefault(r => r.Match.Contains('*') && AutoTags.Matches(r.Match.Trim(), nodeId) && Contains(r.Location));
         if (pattern is not null) return this[pattern.Location]!.Id;

@@ -81,6 +81,7 @@ public class LocationModelTests
         flow.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:*", Location = "office" });
         flow.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:3", Location = "garage" });
         flow.Placements.Add(new PlacementConfig { Id = "p1", Room = "bedroom", Node = "outlet:rack:4" });
+        flow.Placements.Add(new PlacementConfig { Id = "p2", Floor = "ground", Kind = PlacementKind.Fixture, Node = "porch_light" });
         flow.Panels.Add(new PanelConfig { Id = "main", Breakers = { new BreakerConfig { Slot = 6, Number = "B06", Rooms = { "kitchen", "garage" } } } });
         flow.Clamps.Add(new CtClampConfig { Panel = "main", Breaker = "B06", Channel = "ch5" });
 
@@ -90,7 +91,8 @@ public class LocationModelTests
         Assert.Equal("garage", index.LocationOf("outlet:rack:3"));     // exact id beats the pattern above it
         Assert.Equal("bedroom", index.LocationOf("outlet:rack:4"));    // a placement beats a pattern
         Assert.Equal("office", index.LocationOf("outlet:rack:1"));
-        Assert.Equal("ground", index.LocationOf("ch5"));               // a circuit serving two rooms is in their floor
+        Assert.Equal("ground", index.LocationOf("ch5"));
+        Assert.Equal("ground", index.LocationOf("porch_light"));       // outdoors, outside every room: on its floor               // a circuit serving two rooms is in their floor
         Assert.Null(index.LocationOf("elsewhere"));
     }
 
