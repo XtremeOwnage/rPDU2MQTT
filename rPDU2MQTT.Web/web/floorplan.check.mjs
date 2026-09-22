@@ -177,6 +177,9 @@ if (!itemEl('fridge') || itemEl('fridge').classList.contains('is-unknown')) fail
 if (!query(sec, '.fp-scalebar-text')?.textContent) fail('there is no scale bar');
 if (!query(sec, '.fp-palette').hidden) fail('the drawing tools show while only viewing');
 
+// A metered item shows its reading under it while viewing.
+if (!labels().some(t => t === '150 W')) fail(`the fridge's reading is not shown on the plan: ${JSON.stringify(labels())}`);
+
 // Tapping a room: its total, the circuits serving it and what is in it.
 tap(kitchen, 200, 150);
 if (!/Kitchen/.test(textOf(query(side(), 'h3')))) fail(`tapping the kitchen did not select it: ${textOf(side())}`);
@@ -248,7 +251,19 @@ if (!placement('pole')) fail('a utility pole could not be placed');
 toolBtn('Select').onclick();
 const outletId = placement('outlet').Id;
 drag(itemEl(outletId), [300, 200], [600, 100]);
-if (placement('outlet').Room !== 'office' || Math.abs(placement('outlet').X - 600) > 7.62) fail(`dragging the outlet into the office did not move it there: ${JSON.stringify(placement('outlet'))}`);
+if (placement('outlet').Room !== 'office' || Math.abs(placement('outlet').X - 600) > 15) fail(`dragging the outlet into the office did not move it there: ${JSON.stringify(placement('outlet'))}`);
+
+// An outlet dropped beside a wall sits on it, and Ctrl+D copies it.
+toolBtn('Item').onclick();
+query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
+tap(svg, 50, 290);
+const wallOutlet = config.EnergyFlow.Placements[config.EnergyFlow.Placements.length - 1];
+if (wallOutlet.Kind !== 'outlet' || wallOutlet.Y !== 300 || wallOutlet.Room !== 'kitchen') fail(`an outlet dropped by the kitchen's wall did not sit on it: ${JSON.stringify(wallOutlet)}`);
+const before = config.EnergyFlow.Placements.length;
+key('d', { ctrlKey: true });
+if (config.EnergyFlow.Placements.length !== before + 1) fail('Ctrl+D did not duplicate the selected outlet');
+key('z', { ctrlKey: true });
+if (config.EnergyFlow.Placements.length !== before) fail('undo did not remove the duplicate');
 
 // A door tapped beside the kitchen's right wall sits in it, lying along it.
 toolBtn('Door').onclick();
@@ -270,6 +285,17 @@ const run = config.EnergyFlow.Runs?.[0];
 if (!run || run.From !== 'fridge' || run.To !== outletId || run.Points.length !== 1) fail(`the wire was not drawn between the two: ${JSON.stringify(run)}`);
 if (run.Circuit !== 'main/B06' || placement('outlet').Circuit !== 'main/B06') fail(`wiring the outlet to the fridge did not put it on the fridge's circuit: ${placement('outlet').Circuit}`);
 if (!query(sec, 'polyline', true).some(p => p.classList.contains('fp-run-line'))) fail('the wire is not drawn');
+
+// The circuit legend brings one circuit forward and fades everything else.
+const chip = query(sec, '.fp-chip', true).find(b => /B06/.test(textOf(b)));
+if (!chip) fail('the circuits on the floor are not listed');
+toolBtn('Select').onclick();
+key('Escape');
+chip.onclick();
+if (!itemEl(porch.Id).classList.contains('is-dim') || itemEl('fridge').classList.contains('is-dim')) fail('picking a circuit did not fade what is not on it');
+query(sec, '.fp-chip', true).find(b => /B06/.test(textOf(b))).onclick();
+if (itemEl(porch.Id).classList.contains('is-dim')) fail('picking the circuit again did not bring everything back');
+if (!button('Print', sec)) fail('there is no way to print the plan');
 
 // Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
 toolBtn('Measure').onclick();

@@ -1449,3 +1449,29 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 /* A breaker's rooms, as a scrolling list of ticks, and what is placed on its circuit. */
 .ps-serves { display: grid; gap: 2px; max-height: 12em; overflow: auto; padding: 4px 8px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); }
 .ps-placed { margin: 0; padding-left: 1.2em; font-size: 13px; }
+
+/* Floor Plans: the floor below as a faint reference, the circuit legend, and printing just the plan. */
+.fp-below { fill: none; stroke: var(--faint); opacity: .7; pointer-events: none; }
+.fp-circuits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
+.fp-circuits-k { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-right: 2px; }
+.fp-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-pill); background: var(--panel); color: var(--fg); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.fp-chip:hover { background: var(--panel3); }
+.fp-chip.is-on { border-color: var(--accent); background: var(--accent-bg); }
+.fp-chip.is-static { cursor: default; color: var(--muted); }
+.fp-chip-n { color: var(--faint); font-variant-numeric: tabular-nums; }
+.fp-swatch-dot.is-unknown { background: transparent; border: 1.5px dashed var(--warn); }
+@media print {
+  body:has(.section.fp.active) nav, body:has(.section.fp.active) .appbar, body:has(.section.fp.active) #savebar,
+  .section.fp.active .fp-bar, .section.fp.active .fp-modes, .section.fp.active .fp-palette, .section.fp.active .fp-opts,
+  .section.fp.active .fp-zoom, .section.fp.active .fp-hint, .section.fp.active .fp-side, .section.fp.active .desc { display: none !important; }
+  .section.fp.active .fp-body { display: block; }
+  .section.fp.active .fp-stage { max-height: none; border: 0; box-shadow: none; break-inside: avoid; }
+}
+.fp-item-read, .fp-run-read {
+  fill: var(--fg); text-anchor: middle; font-weight: 700; pointer-events: none; font-variant-numeric: tabular-nums;
+  paint-order: stroke; stroke: var(--panel); stroke-width: .32em; stroke-linejoin: round;
+}
+.fp-item-read.is-nodata, .fp-run-read.is-nodata { fill: var(--warn); font-weight: 600; }

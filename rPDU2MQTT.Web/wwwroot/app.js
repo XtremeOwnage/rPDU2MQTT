@@ -10614,6 +10614,8 @@ function addFloorPlanSection(nav     , sections     ) {
   let viewFor = '';
   let dragging = false;
   let hover            = null;
+  let focused = '';
+  let showBelow = remembered('below', '1') === '1';
 
   const floorNow = () => floorById(floorId) || floorsAll()[0] || null;
   const roomsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
@@ -10689,6 +10691,9 @@ function addFloorPlanSection(nav     , sections     ) {
   const bgBtn = btn('Background');
   bgBtn.title = 'Upload a floor plan image to draw over, set how strongly it shows, and set the scale.';
   const toolsBtn = btn('Tools…');
+  const printBtn = btn('Print');
+  printBtn.title = 'Print this floor, with its rooms, wiring and legend.';
+  printBtn.onclick = () => { try { (window       ).print?.(); } catch { /* no print dialog here */ } };
   const undoBtn = el('button', { class: 'small fp-icon-btn', type: 'button', title: 'Undo (Ctrl+Z)' }, fpToolIcon('undo'));
   undoBtn.setAttribute('aria-label', 'Undo');
   undoBtn.onclick = () => undo();
@@ -10697,7 +10702,7 @@ function addFloorPlanSection(nav     , sections     ) {
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
-    el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
+    printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns                      = {};
@@ -10803,8 +10808,22 @@ function addFloorPlanSection(nav     , sections     ) {
     return planRound(m * scale());
   };
   /// The circuit a selection is about, so the plan can bring it forward and fade the rest.
-  const focusCircuit = () => selection?.type === 'item' ? itemOf(selection.id)?.Circuit || ''
-    : selection?.type === 'run' ? runOf(selection.id)?.Circuit || '' : '';
+  const focusCircuit = () => selection?.type === 'item' ? itemOf(selection.id)?.Circuit || focused
+    : selection?.type === 'run' ? runOf(selection.id)?.Circuit || focused : focused;
+  /// The floor beneath this one on the same site, drawn faintly to line the one above up with it.
+  const floorBelow = () => {
+    const fl = floorNow();
+    if (!fl) return null;
+    const lower = ensure(fl.site, 'Floors', []).filter((f     ) => (Number(f.Level) || 0) < (Number(fl.floor.Level) || 0));
+    return lower.sort((a     , b     ) => (Number(b.Level) || 0) - (Number(a.Level) || 0))[0] || null;
+  };
+  /// Outlets and switches live on walls: near enough to one, they sit on it.
+  const WALL_KINDS = ['outlet', 'switch'];
+  const onWall = (kind        , q    ) => {
+    if (!snapOn || !WALL_KINDS.includes(kind)) return q;
+    const w = planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    return w && w.dist <= Math.max(0.3 * scale(), 10 * upp()) ? { X: planRound(w.pt.X), Y: planRound(w.pt.Y) } : q;
+  };
 
   // --- Drawing -------------------------------------------------------------------------------------
   const shadeOf = (v               , max        ) => {
@@ -10855,6 +10874,9 @@ function addFloorPlanSection(nav     , sections     ) {
     if (!image || imageFailed === image || mode === 'edit')
       svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, fill: 'url(#fp-grid)', class: 'fp-gridrect' }));
     svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, class: 'fp-edge', 'stroke-width': u }));
+    const below = mode === 'edit' && showBelow ? floorBelow() : null;
+    if (below) ensure(below, 'Rooms', []).filter((r     ) => (r.Shape || []).length >= 3).forEach((r     ) =>
+      svg.appendChild(svgEl('polygon', { points: points(r.Shape), class: 'fp-below', 'stroke-width': 1.5 * u, 'stroke-dasharray': `${4 * u} ${4 * u}` })));
 
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
@@ -10920,6 +10942,14 @@ function addFloorPlanSection(nav     , sections     ) {
       const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${r.Circuit ? '' : ' is-unknown'}` });
       g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      // While viewing, a branch circuit's run carries the circuit's reading at its middle.
+      const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
+      if (mode === 'view' && r.Circuit && path.length >= 2) {
+        const mid = path[Math.floor((path.length - 1) / 2)], nxt = path[Math.floor((path.length - 1) / 2) + 1];
+        const t = svgEl('text', { x: (mid.X + nxt.X) / 2, y: (mid.Y + nxt.Y) / 2 - 7 * u, class: 'fp-run-read' + (cp == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
+        t.textContent = cp == null ? 'no data' : formatMeasure(Math.round(cp), 'W');
+        g.appendChild(t);
+      }
       const hit = svgEl('polyline', { points: points(path), class: 'fp-hit fp-run-hit', 'stroke-width': 14 * u });
       hit.dataset.run = r.Id;
       g.appendChild(hit);
@@ -10954,7 +10984,13 @@ function addFloorPlanSection(nav     , sections     ) {
         badge.textContent = '?';
         g.appendChild(badge);
       }
-      if (item.Label && (sel || showSizes)) {
+      // A metered item shows what it is drawing, right under it, while viewing.
+      const reading = mode === 'view' && item.Node ? live?.placements[item.Id]?.value : undefined;
+      if (mode === 'view' && item.Node) {
+        const t = svgEl('text', { x: 0, y: r + font * 0.95, class: 'fp-item-read' + (reading == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
+        t.textContent = reading == null ? 'no data' : fmt(reading);
+        g.appendChild(t);
+      } else if (item.Label && (sel || showSizes)) {
         const t = svgEl('text', { x: 0, y: r + font, class: 'fp-item-label', 'font-size': font * 0.85 });
         t.textContent = item.Label;
         g.appendChild(t);
@@ -11042,6 +11078,22 @@ function addFloorPlanSection(nav     , sections     ) {
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unknown' }), 'no data'));
+    }
+    // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
+    const refs = [...new Set([...itemsNow().map((i     ) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))]            ;
+    if (showWiring && refs.length) {
+      const box = el('div', { class: 'fp-circuits' }, el('span', { class: 'fp-circuits-k', text: 'Circuits' }));
+      refs.sort().forEach(ref => {
+        const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: 'Bring this circuit forward; tap again to show them all.' },
+          el('span', { class: 'fp-swatch-dot', style: { background: planCircuitColor(ref) } }), refLabel(ref),
+          el('span', { class: 'fp-chip-n', text: String(itemsNow().filter((i     ) => i.Circuit === ref).length) }));
+        b.setAttribute('aria-pressed', String(focused === ref));
+        b.onclick = () => { focused = focused === ref ? '' : ref; drawPlan(); };
+        box.appendChild(b);
+      });
+      const unknown = itemsNow().filter((i     ) => !i.Circuit && !PLAN_SUPPLY_KINDS.includes(i.Kind)).length;
+      if (unknown) box.appendChild(el('span', { class: 'fp-chip is-static' }, el('span', { class: 'fp-swatch-dot is-unknown' }), `${unknown} on an unknown circuit`));
+      legend.appendChild(box);
     }
     drawScaleBar();
   };
@@ -11190,7 +11242,7 @@ function addFloorPlanSection(nav     , sections     ) {
     } else if (k === 'item') {
       begin();
       const it = itemOf(selection .id);
-      if (it) { const q = gridSnapped({ X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y }); it.X = q.X; it.Y = q.Y; }
+      if (it) { const q = onWall(it.Kind, gridSnapped({ X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y })); it.X = q.X; it.Y = q.Y; }
     } else if (k === 'opening') {
       begin();
       const o = openingOf(selection .id);
@@ -11241,7 +11293,7 @@ function addFloorPlanSection(nav     , sections     ) {
     if (g.kind === 'item') {
       const it = itemOf(selection .id);
       // Where it lands is where it is: a room, an outdoor zone, or outdoors on this floor.
-      const room = planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
+      const room = planShapeAt(roomsNow(), p) || planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
       if ((room?.Id || '') !== (it.Room || '')) { it.Room = room?.Id || ''; toast(room ? `Moved into ${room.Name || room.Id}.` : 'Moved outside every room: it is outdoors on this floor.', true); }
       it.Floor = floorNow()?.floor.Id || it.Floor;
     }
@@ -11277,8 +11329,8 @@ function addFloorPlanSection(nav     , sections     ) {
     if (tool === 'room' || tool === 'zone' || tool === 'area') { rectStart = null; rectEnd = null; render(); return; }
     if (tool === 'item') {
       if (hit.item) { selectHit(hit); render(); return; }
-      const q = gridSnapped(p);
-      const room = planShapeAt(roomsNow(), q);
+      const q = onWall(itemKind, gridSnapped(p));
+      const room = planShapeAt(roomsNow(), p) || planShapeAt(roomsNow(), q);
       const id = freshIn(itemsIn(), itemKind.replace(/-/g, '_'));
       act(() => {
         itemsIn().push({ Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow() .floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' });
@@ -11398,6 +11450,7 @@ function addFloorPlanSection(nav     , sections     ) {
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
+    if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
 
     palette.hidden = mode !== 'edit';
@@ -11719,6 +11772,7 @@ function addFloorPlanSection(nav     , sections     ) {
         dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
         btns.push(dropCorner);
       }
+      if (type === 'room' && poly.length >= 3) { const copy = btn('Duplicate'); copy.title = 'A copy beside it (Ctrl+D).'; copy.onclick = () => duplicate(); btns.push(copy); }
       const del = btn('Delete', 'danger');
       del.onclick = () => deleteSelection();
       btns.push(del);
@@ -11785,6 +11839,10 @@ function addFloorPlanSection(nav     , sections     ) {
       btns.push(trace);
     }
     if (editing) {
+      const copy = btn('Duplicate');
+      copy.title = 'A copy beside it (Ctrl+D).';
+      copy.onclick = () => duplicate();
+      btns.push(copy);
       const wire = btn('Wire from here');
       wire.title = 'Start a cable run at this item; tap the bends and then the item it goes to.';
       wire.onclick = () => { tool = 'wire'; wireDraft = { from: it.Id, pts: [] }; render(); };
@@ -11808,11 +11866,13 @@ function addFloorPlanSection(nav     , sections     ) {
         field('Hinges', select([['left', 'Left'], ['right', 'Right']], o.Swing || 'left', v => act(() => { o.Swing = v; }))),
         field('Opens', select([['in', 'This side'], ['out', 'Other side']], o.Flip ? 'out' : 'in', v => act(() => { o.Flip = v === 'out'; })))));
     }
+    const copyOp = btn('Duplicate');
+    copyOp.onclick = () => duplicate();
     const turn = btn('Rotate 90°');
     turn.onclick = () => act(() => { o.Angle = ((Number(o.Angle) || 0) + 90) % 360; });
     const del = btn('Delete', 'danger');
     del.onclick = () => deleteSelection();
-    side.appendChild(actions(turn, del));
+    side.appendChild(actions(turn, copyOp, del));
     side.appendChild(el('div', { class: 'desc', text: 'Drag it along a wall to move it; it lines up with whichever wall it is dropped on.' }));
   };
 
@@ -11840,6 +11900,33 @@ function addFloorPlanSection(nav     , sections     ) {
     } else if (r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
     const c = r.Circuit ? circuitOf(r.Circuit) : null;
     if (c) side.appendChild(circuitRow(c));
+  };
+
+  /// A copy of the selection beside it, selected: an item, a door or window, or a room with nothing in it.
+  const duplicate = () => {
+    if (!selection) return;
+    const off = snapStep() * 4;
+    const sel = selection;
+    if (sel.type === 'item') {
+      const it = itemOf(sel.id);
+      if (!it) return;
+      const id = freshIn(itemsIn(), String(it.Kind || 'item').replace(/-/g, '_'));
+      act(() => { itemsIn().push({ ...JSON.parse(JSON.stringify(it)), Id: id, X: planRound(it.X + off), Y: planRound(it.Y + off), Node: '' }); selection = { type: 'item', id }; });
+    } else if (sel.type === 'opening') {
+      const o = openingOf(sel.id);
+      if (!o) return;
+      const id = freshIn(openingsNow(), String(o.Kind).replace(/-/g, '_'));
+      const a = (Number(o.Angle) || 0) * Math.PI / 180;
+      const step = Number(o.Width) * 1.5;
+      act(() => { openingsNow().push({ ...o, Id: id, X: planRound(o.X + Math.cos(a) * step), Y: planRound(o.Y + Math.sin(a) * step) }); selection = { type: 'opening', id }; });
+    } else if (sel.type === 'room') {
+      const r = shapeOf(sel);
+      if (!r) return;
+      const nm = `${r.Name || r.Id} copy`;
+      const id = freshId(nm);
+      const b = planBounds(r.Shape || []);
+      act(() => { roomsNow().push({ ...JSON.parse(JSON.stringify(r)), Id: id, Name: nm, HaArea: '', Shape: planClamp(planMove(r.Shape, b.w, 0), floorSize().w, floorSize().h) }); selection = { type: 'room', id }; });
+    }
   };
 
   const deleteSelection = () => {
@@ -12341,6 +12428,7 @@ function addFloorPlanSection(nav     , sections     ) {
     const k = String(e.key || '');
     if (ctrl && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && (k === 'y' || k === 'Y')) { e.preventDefault(); redo(); return; }
+    if (ctrl && (k === 'd' || k === 'D') && mode === 'edit' && selection) { e.preventDefault(); duplicate(); return; }
     if (ctrl || e.altKey) return;
     if (k === 'Escape') {
       if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
