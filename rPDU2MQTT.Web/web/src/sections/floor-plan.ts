@@ -12,7 +12,7 @@ import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, pl
 import { planHistory } from '../plan-history.js';
 import { searchSelect, type Choice } from '../search-select.js';
 import { planSolve, planSharedCorners, planCornerAngle, planEdgeCorners, planRefsAfterInsert, planRefsAfterRemove, planRefsWithout, type PlanRef, type PlanConstraint } from '../plan-constraints.js';
-import { planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
+import { PLAN_FOOTPRINTS, planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -153,6 +153,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
   let marquee: { a: Pt; b: Pt } | null = null;
   let spaceDown = false;
   let gfciNext = remembered('gfci', '0') === '1';
+  let showCons = remembered('cons', '1') === '1';
+  let itemPreset = '';
   let selectedCorner = -1;
   let selectedBend = -1;
   let lastTap: { key: string; at: number } | null = null;
@@ -412,6 +414,21 @@ export function addFloorPlanSection(nav: any, sections: any) {
     const facing = (n.X * toward.X + n.Y * toward.Y >= 0 ? w.angle + 90 : w.angle - 90);
     return { X: planRound(w.pt.X), Y: planRound(w.pt.Y), facing: Math.round((((facing % 360) + 360) % 360) * 10) / 10 };
   };
+  /// A sized item near a wall stands with its back to it, facing the room the pointer is in; away from walls it keeps its turn.
+  const fitToWall = (it: any, q: Pt, side: Pt = q) => {
+    const D = Number(it.Depth) || 0;
+    const w = snapOn ? planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor))) : null;
+    if (!w || w.dist > D / 2 + Math.max(0.3 * scale(), 12 * upp())) { const g2 = gridSnapped(q); it.X = g2.X; it.Y = g2.Y; return; }
+    let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
+    if (Math.hypot(toward.X, toward.Y) < 1e-6) toward = { X: q.X - w.pt.X, Y: q.Y - w.pt.Y };
+    const a = w.angle * Math.PI / 180;
+    let n = { X: -Math.sin(a), Y: Math.cos(a) };
+    if (n.X * toward.X + n.Y * toward.Y < 0) n = { X: -n.X, Y: -n.Y };
+    // Its front, local +Y, faces into the room.
+    it.Rotation = Math.round((((Math.atan2(n.Y, n.X) * 180 / Math.PI - 90) % 360) + 360) % 360 * 10) / 10;
+    it.X = planRound(w.pt.X + n.X * (D / 2 + 0.5)); it.Y = planRound(w.pt.Y + n.Y * (D / 2 + 0.5));
+  };
+  const isSized = (it: any) => !!it && Number(it.Width) > 0 && Number(it.Depth) > 0;
   const placeOnWall = (it: any, q: Pt & { facing: number | null }) => {
     it.X = q.X; it.Y = q.Y;
     if (q.facing == null) delete it.Facing; else it.Facing = q.facing;
@@ -695,16 +712,33 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
       const dim = downstream ? !(downstream.items.has(item.Id) || item.Id === gfci!.Id) : !!focus && item.Circuit !== focus;
       const lit = downstream ? downstream.items.has(item.Id) : !!focus && item.Circuit === focus;
+      // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
+      const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
-      const facing = item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
+      const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
       const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
       const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
-      const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
-      if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
-      g.appendChild(disc);
-      const glyph = planGlyph(item.Kind || 'outlet', r);
+      let rr = r;
+      if (sized) {
+        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
+        body.dataset.item = item.Id;
+        const shape = item.Round
+          ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
+          : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
+        if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
+        body.appendChild(shape);
+        // The front, where the door or the controls are.
+        if (!item.Round) body.appendChild(svgEl('line', { x1: -W * 0.38, y1: D / 2 - 4 * u, x2: W * 0.38, y2: D / 2 - 4 * u, class: 'fp-body-front', 'stroke-width': 3 * u }));
+        svg.appendChild(body);
+        rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
+      } else {
+        const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
+        if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+        g.appendChild(disc);
+      }
+      const glyph = planGlyph(item.Kind || 'outlet', rr);
       glyph.setAttribute('stroke-width', 1.4 * u);
       g.appendChild(glyph);
       // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
@@ -727,7 +761,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         const t = svgEl('text', { x: 0, y: r + font * 0.95, class: 'fp-item-read' + (reading == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
         t.textContent = reading == null ? 'no data' : fmt(reading);
         g.appendChild(t);
-      } else if (item.Label && (sel || showSizes)) {
+      } else if (item.Label && (sel || showSizes || (sized && Math.min(W, D) / u > 44))) {
         const t = svgEl('text', { x: 0, y: r + font, class: 'fp-item-label', 'font-size': font * 0.85 });
         t.textContent = item.Label;
         g.appendChild(t);
@@ -758,6 +792,22 @@ export function addFloorPlanSection(nav: any, sections: any) {
         svg.appendChild(t);
       });
     });
+
+    // A sized item's handles: a corner to resize it, and a knob above its back to turn it.
+    const sizedSel = mode === 'edit' && tool === 'select' && !extra.length && selection?.type === 'item' ? itemOf(selection.id) : null;
+    if (isSized(sizedSel)) {
+      const it = sizedSel, W = Number(it.Width), D = Number(it.Depth), t = (Number(it.Rotation) || 0) * Math.PI / 180;
+      const at = (lx: number, ly: number) => ({ X: it.X + lx * Math.cos(t) - ly * Math.sin(t), Y: it.Y + lx * Math.sin(t) + ly * Math.cos(t) });
+      const back = at(0, -D / 2), knob = at(0, -D / 2 - 26 * u);
+      svg.appendChild(svgEl('line', { x1: back.X, y1: back.Y, x2: knob.X, y2: knob.Y, class: 'fp-rot-stem', 'stroke-width': 1.5 * u }));
+      const rot = svgEl('circle', { cx: knob.X, cy: knob.Y, r: 8 * u * hs(), class: 'fp-handle fp-rot' });
+      rot.dataset.rotate = it.Id;
+      svg.appendChild(rot);
+      const cn = at(W / 2, D / 2);
+      const rs = svgEl('rect', { x: cn.X - 7 * u * hs(), y: cn.Y - 7 * u * hs(), width: 14 * u * hs(), height: 14 * u * hs(), class: 'fp-handle fp-resize' });
+      rs.dataset.resize = it.Id;
+      svg.appendChild(rs);
+    }
 
     // Editing handles: each corner, and a midpoint on each edge that adds a corner when dragged.
     const target = mode === 'edit' && !extra.length ? shapeOf(selection) : null;
@@ -790,7 +840,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       }
     });
     // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
-    if (mode === 'edit' || showSizes) {
+    if (showCons) {
       const pill = (at: Pt, text: string, unmet: boolean) => {
         const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
@@ -917,6 +967,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const hitOf = (e: any) => {
     for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) {
       const d = n.dataset || {};
+      if (d.resize) return { resize: d.resize as string };
+      if (d.rotate) return { rotate: d.rotate as string };
       if (d.corner != null) return { corner: Number(d.corner) };
       if (d.mid != null) return { mid: Number(d.mid) };
       if (d.runpt != null) return { runpt: Number(d.runpt) };
@@ -992,6 +1044,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
       }
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
+      else if (hit.resize) { gesture.kind = 'resize'; }
+      else if (hit.rotate) { gesture.kind = 'rotate'; }
       else if (under && additive) { gesture.kind = 'none'; }
       else if (under) {
         // Dragging anything already selected moves the whole selection; anything else is selected first.
@@ -1074,8 +1128,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
       if (one?.type === 'item' && m.items.length === 1 && !m.shapes.length) {
         // One item: it snaps to the grid, and an outlet or switch onto a wall.
         const x = m.items[0];
-        const q = onWall(x.it.Kind, gridSnapped({ X: x.X + dx, Y: x.Y + dy }), p);
-        placeOnWall(x.it, q);
+        if (isSized(x.it)) fitToWall(x.it, { X: x.X + dx, Y: x.Y + dy }, p);
+        else placeOnWall(x.it, onWall(x.it.Kind, gridSnapped({ X: x.X + dx, Y: x.Y + dy }), p));
       } else if (one?.type === 'opening' && m.openings.length === 1 && !m.shapes.length) {
         const x = m.openings[0];
         const want = { X: x.X + dx, Y: x.Y + dy };
@@ -1096,6 +1150,24 @@ export function addFloorPlanSection(nav: any, sections: any) {
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
         if (m.shapes.length) solve(m.shapes.flatMap((x: any) => keysOf(x.sh)));
+      }
+    } else if (k === 'resize' || k === 'rotate') {
+      begin();
+      const it = itemOf(selection!.id);
+      if (it) {
+        const t = (Number(it.Rotation) || 0) * Math.PI / 180;
+        if (k === 'rotate') {
+          // Turned in fifteen-degree steps; Shift turns it freely.
+          let deg = Math.atan2(p.Y - it.Y, p.X - it.X) * 180 / Math.PI + 90;
+          if (!e.shiftKey) deg = Math.round(deg / 15) * 15;
+          it.Rotation = Math.round((((deg % 360) + 360) % 360) * 10) / 10;
+        } else {
+          const lx = (p.X - it.X) * Math.cos(t) + (p.Y - it.Y) * Math.sin(t), ly = -(p.X - it.X) * Math.sin(t) + (p.Y - it.Y) * Math.cos(t);
+          const g2 = snapOn ? snapStep() : 1;
+          const min = 0.1 * scale();
+          it.Width = Math.max(min, Math.round(Math.abs(lx) * 2 / g2) * g2);
+          it.Depth = it.Round ? it.Width : Math.max(min, Math.round(Math.abs(ly) * 2 / g2) * g2);
+        }
       }
     } else if (k === 'wall') {
       begin();
@@ -1263,7 +1335,13 @@ export function addFloorPlanSection(nav: any, sections: any) {
       act(() => {
         const it: any = { Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow()!.floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' };
         if (itemKind === 'outlet' && gfciNext) it.Gfci = true;
-        placeOnWall(it, q);
+        const fp = PLAN_FOOTPRINTS.find(f => f[0] === itemPreset);
+        if (fp) {
+          const inch = 0.0254 * scale();
+          Object.assign(it, { Kind: fp[2], Label: fp[1], Width: planRound(fp[3] * inch), Depth: planRound(fp[4] * inch), Rotation: 0 });
+          if (fp[5]) it.Round = true;
+          fitToWall(it, gridSnapped(p), p);
+        } else placeOnWall(it, q);
         itemsIn().push(it);
         selection = { type: 'item', id };
       });
@@ -1388,6 +1466,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         'Shade by what each room is drawing now, or by the energy it has used over a period.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
+    if (constraintsNow().length) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
@@ -1431,16 +1510,30 @@ export function addFloorPlanSection(nav: any, sections: any) {
       ['Inside', 'Power'].forEach(group => {
         grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? 'Loads' : 'Supply & utility' }));
         PLAN_KINDS.filter(k => k[2] === group).forEach(([k, label]) => {
-          const b = el('button', { class: 'fp-kind' + (itemKind === k ? ' is-on' : ''), type: 'button', title: label });
+          const b = el('button', { class: 'fp-kind' + (itemKind === k && !itemPreset ? ' is-on' : ''), type: 'button', title: label });
           const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
           icon.appendChild(svgEl('circle', { r: 12, class: 'fp-item-disc' }));
           const gl = planGlyph(k, 12); gl.setAttribute('stroke-width', '1.4'); icon.appendChild(gl);
           b.append(icon, el('span', { text: label }));
           b.setAttribute('aria-pressed', String(itemKind === k));
           b.setAttribute('aria-label', label);
-          b.onclick = () => { itemKind = k; remember('kind', k); render(); };
+          b.onclick = () => { itemKind = k; itemPreset = ''; remember('kind', k); render(); };
           grid.appendChild(b);
         });
+      });
+      // Appliances and equipment at their real size: dropped by a wall, they stand with their back to it.
+      grid.appendChild(el('span', { class: 'fp-kinds-group', text: 'At real size' }));
+      PLAN_FOOTPRINTS.forEach(([key, label, kind, w, d, round]) => {
+        const size = sys() === 'imperial' ? `${w}″ × ${d}″` : `${Math.round(w * 2.54)} × ${Math.round(d * 2.54)} cm`;
+        const b = el('button', { class: 'fp-kind is-size' + (itemPreset === key ? ' is-on' : ''), type: 'button', title: `${label}, ${round ? `${size.split(' ×')[0]} across` : size}` });
+        const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
+        icon.appendChild(round ? svgEl('circle', { r: 11, class: 'fp-body-shape' }) : svgEl('rect', { x: -11, y: -11 * d / Math.max(w, d), width: 22 * w / Math.max(w, d), height: 22 * d / Math.max(w, d), rx: 2, class: 'fp-body-shape' }));
+        const gl = planGlyph(kind, 8); gl.setAttribute('stroke-width', '1.3'); icon.appendChild(gl);
+        b.append(icon, el('span', { text: label }));
+        b.setAttribute('aria-label', label);
+        b.setAttribute('aria-pressed', String(itemPreset === key));
+        b.onclick = () => { itemPreset = itemPreset === key ? '' : key; itemKind = kind; render(); };
+        grid.appendChild(b);
       });
       add(grid);
       if (itemKind === 'outlet') add(check('GFCI', gfciNext, v => { gfciNext = v; remember('gfci', v ? '1' : '0'); }, 'Place GFCI outlets: whatever is wired from their load side is protected by them.'));
@@ -1888,6 +1981,35 @@ export function addFloorPlanSection(nav: any, sections: any) {
       if (!supply || it.Kind === 'panel') {
         side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
           it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
+      }
+      // Its real size: width and depth, which way it is turned, and whether it is round.
+      const inch = 0.0254 * scale();
+      const looks = select([['', isSized(it) ? '— its own size —' : '— an icon —'], ...PLAN_FOOTPRINTS.map(f => [f[0], f[1]] as [string, string])], '', v => {
+        const fp = PLAN_FOOTPRINTS.find(f => f[0] === v);
+        if (!fp) return;
+        act(() => {
+          it.Width = planRound(fp[3] * inch); it.Depth = planRound(fp[4] * inch);
+          if (fp[5]) it.Round = true; else delete it.Round;
+          if (!it.Label) it.Label = fp[1];
+          if (it.Rotation == null) it.Rotation = 0;
+        });
+      });
+      side.appendChild(field('Size', looks, isSized(it) ? 'Pick one to take its usual size, or set the size below.' : 'Draw it at its real size, as the appliance it is.'));
+      if (isSized(it)) {
+        const wIn = lenInput(Number(it.Width), v => act(() => { it.Width = planRound(v); if (it.Round) it.Depth = it.Width; }));
+        const dIn = lenInput(Number(it.Depth), v => act(() => { it.Depth = planRound(v); }));
+        side.appendChild(el('div', { class: 'fp-two' }, field(it.Round ? 'Across' : 'Width', wIn), ...(it.Round ? [] : [field('Depth', dIn)])));
+        const turn = el('input', { type: 'number', class: 'fp-deg', value: String(Math.round(Number(it.Rotation) || 0)), step: '15' }) as HTMLInputElement;
+        turn.onchange = () => act(() => { it.Rotation = (((Number(turn.value) || 0) % 360) + 360) % 360; });
+        const r90 = btn('Turn 90°');
+        r90.onclick = () => act(() => { it.Rotation = ((Number(it.Rotation) || 0) + 90) % 360; });
+        const round = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        round.checked = !!it.Round;
+        round.onchange = () => act(() => { if (round.checked) { it.Round = true; it.Depth = it.Width; } else delete it.Round; });
+        const icon = btn('Draw as an icon');
+        icon.onclick = () => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; });
+        side.appendChild(field('Turned', el('div', { class: 'fp-colour-row' }, turn, el('span', { class: 'fp-opts-note', text: '°' }), r90), 'Its front faces the room when it is dropped by a wall. Drag the knob above it to turn it, or its corner to size it.'));
+        side.appendChild(el('div', { class: 'fp-colour-row' }, el('label', { class: 'ld-inst fp-check' }, round, ' Round'), icon));
       }
       if (it.Kind === 'outlet') {
         const g = el('input', { type: 'checkbox' }) as HTMLInputElement;

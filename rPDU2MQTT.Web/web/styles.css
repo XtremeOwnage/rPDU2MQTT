@@ -1555,3 +1555,16 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-list-row.is-unmet { border-color: var(--bad); }
 .fp-chip-x { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 4px; }
 .fp-chip-x:hover { color: var(--bad); }
+
+/* Floor Plans: appliances at their real size, and their resize and turn handles. */
+.fp-body { cursor: pointer; }
+.fp-body-shape { fill: var(--panel2); stroke: var(--accent); stroke-linejoin: round; }
+.fp-body.is-selected .fp-body-shape { fill: var(--accent-bg); stroke: var(--accent-hi); }
+.fp-body.is-unknown .fp-body-shape { stroke: var(--warn); stroke-dasharray: 6 3; }
+.fp-body.is-focus .fp-body-shape { filter: drop-shadow(0 0 4px var(--accent)); }
+.fp-body.is-protected .fp-body-shape { stroke: var(--good) !important; }
+.fp-body-front { stroke: var(--muted); stroke-linecap: round; pointer-events: none; }
+.fp-kind.is-size .fp-body-shape { fill: var(--panel2); stroke: var(--accent); stroke-width: 1.5; }
+.fp-rot-stem { stroke: var(--accent); pointer-events: none; }
+.fp-rot { cursor: grab; }
+.fp-resize { cursor: nwse-resize; }

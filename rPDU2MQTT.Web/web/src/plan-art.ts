@@ -20,6 +20,14 @@ export const PLAN_KINDS: [string, string, string][] = [
   ['generator', 'Generator', 'Power'],
 ];
 
+/// Things with a real footprint, in inches: [key, name, kind, width, depth, round]. Placed at their size, backs to the wall.
+export const PLAN_FOOTPRINTS: [string, string, string, number, number, boolean][] = [
+  ['washer', 'Washer', 'appliance', 27, 30, false], ['dryer', 'Dryer', 'appliance', 27, 30, false], ['fridge', 'Fridge', 'appliance', 36, 30, false],
+  ['freezer', 'Chest freezer', 'appliance', 42, 28, false], ['range', 'Range / oven', 'appliance', 30, 26, false], ['dishwasher', 'Dishwasher', 'appliance', 24, 24, false],
+  ['water-heater', 'Water heater', 'appliance', 22, 22, true], ['furnace', 'Furnace', 'hvac', 21, 28, false], ['condenser', 'AC condenser', 'hvac', 30, 30, false],
+  ['rack', 'Server rack', 'device', 24, 42, false], ['hot-tub', 'Hot tub', 'appliance', 84, 84, false],
+];
+
 /// Kinds that supply or carry power rather than use it; they get a ring of their own.
 export const PLAN_SUPPLY_KINDS = ['panel', 'meter', 'pole', 'transformer', 'solar', 'battery', 'inverter', 'generator'];
 

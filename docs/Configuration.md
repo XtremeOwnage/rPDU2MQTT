@@ -1208,6 +1208,10 @@ meter, the pole — and counts toward the floor's total. Outdoor zones are rooms
 
 **Storage warnings.** When no persistent plan storage is configured, or the configuration cannot be saved, the page says so in a banner above the plan.
 
+**Appliances at their real size.** The Item tool's *At real size* group places a washer, dryer, fridge, chest freezer, range, dishwasher, water heater, furnace, AC condenser, server rack or hot tub at its usual size (`Width`, `Depth`, `Rotation`, `Round`). Dropped near a wall it stands with its back to the wall, facing the room. Selected, its corner handle sizes it and the knob above it turns it (in 15° steps; Shift for any angle), or its panel takes exact measurements. Any item can be given a real size, or drawn as an icon again.
+
+**Showing constraints.** The *Constraints* checkbox shows or hides the constraint markers.
+
 **Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).
 
 **Wiring.** A run between two items shows the path the cable takes, in its circuit's colour; selecting an item or a

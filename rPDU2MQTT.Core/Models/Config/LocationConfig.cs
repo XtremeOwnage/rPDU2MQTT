@@ -288,6 +288,19 @@ public class PlacementConfig
     [Description("The id of the floor it is drawn on. Needed for anything outside every room.")]
     public string Floor { get; set; } = "";
 
+    [Description("For an item drawn at its real size — a washer, a fridge, an AC condenser — its width, in drawing units. Blank draws it as an icon.")]
+    public double? Width { get; set; }
+
+    [Description("Its depth, front to back, in drawing units.")]
+    public double? Depth { get; set; }
+
+    [Description("How far it is turned, in degrees clockwise. Its front faces down the plan at 0.")]
+    public double? Rotation { get; set; }
+
+    [DefaultValue(false)]
+    [Description("Drawn round rather than square, such as a water heater; Width is its diameter.")]
+    public bool Round { get; set; }
+
     [DefaultValue(false)]
     [Description("A GFCI outlet: everything wired downstream of it, from its load terminals, is protected by it.")]
     public bool Gfci { get; set; }

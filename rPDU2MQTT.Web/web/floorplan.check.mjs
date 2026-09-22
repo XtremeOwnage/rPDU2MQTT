@@ -641,6 +641,50 @@ button('Export…', sec).onclick();
 ['This floor as SVG', 'This floor as PNG', 'All floor plans (JSON)', 'Import floor plans…'].forEach(t => { if (!button(t, sheet())) fail(`the export sheet has no "${t}"`); });
 shut();
 
+// Appliances at their real size: a washer dropped by the kitchen's left wall stands with its back to it, facing in.
+toolBtn('Item').onclick();
+query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Washer').onclick();
+key('0');
+tap(svg, 30, 150);
+const washer = config.EnergyFlow.Placements.find(p => p.Label === 'Washer');
+if (!washer) fail('a washer could not be placed');
+if (Math.abs(washer.Width - 68.6) > 0.2 || Math.abs(washer.Depth - 76.2) > 0.2) fail(`the washer is not 27 by 30 inches: ${washer.Width} × ${washer.Depth}`);
+if (Math.abs(washer.X - (washer.Depth / 2 + 0.5)) > 0.2 || washer.Rotation !== 270) fail(`the washer does not stand with its back to the wall, facing the room: ${JSON.stringify(washer)}`);
+if (washer.Room !== 'kitchen') fail('the washer is not in the kitchen');
+const body = query(sec, 'g', true).find(g => g.classList.contains('fp-body') && g.dataset?.item === washer.Id);
+if (!body || Number(query(body, 'rect', false)?.getAttribute('width')) !== washer.Width) fail('the washer is not drawn at its size');
+// Its corner handle sizes it, and the knob turns it.
+toolBtn('Select').onclick();
+tap(body, washer.X, washer.Y);
+const rs = query(sec, 'rect', true).find(r => r.dataset?.resize === washer.Id);
+const knob = query(sec, 'circle', true).find(c => c.dataset?.rotate === washer.Id);
+if (!rs || !knob) fail('a selected appliance has no handles to size and turn it');
+const wBefore = washer.Width;
+const rx = Number(rs.getAttribute('x')) + Number(rs.getAttribute('width')) / 2, ry = Number(rs.getAttribute('y')) + Number(rs.getAttribute('height')) / 2;
+drag(rs, [rx, ry], [rx + 20, ry]);
+const w2 = config.EnergyFlow.Placements.find(p => p.Id === washer.Id);
+if (w2.Width === wBefore && w2.Depth === washer.Depth) fail('dragging the corner did not resize the washer');
+key('z', { ctrlKey: true });
+drag(query(sec, 'circle', true).find(c => c.dataset?.rotate === washer.Id), [Number(knob.getAttribute('cx')), Number(knob.getAttribute('cy'))], [washer.X, washer.Y - 200]);
+if (config.EnergyFlow.Placements.find(p => p.Id === washer.Id).Rotation !== 0) fail(`turning the washer to face down the plan did not: ${config.EnergyFlow.Placements.find(p => p.Id === washer.Id).Rotation}`);
+key('z', { ctrlKey: true });
+if (!/Size/.test(textOf(side())) || !button('Draw as an icon', side())) fail('the appliance panel does not offer its size');
+key('Escape');
+
+// Constraints can be hidden.
+toolBtn('Constrain').onclick();
+tap(svg, 200, 2);
+button('Fix length', sec).onclick();
+const consBox = query(sec, 'label', true).find(l => /^\s*Constraints/.test(textOf(l)));
+if (!consBox) fail('there is no checkbox to show or hide constraints');
+const cb = query(consBox, 'input', false);
+cb.checked = false; cb.onchange();
+if (query(sec, 'g', true).some(g => g.classList.contains('fp-cons'))) fail('hiding constraints left them drawn');
+cb.checked = true; cb.onchange();
+if (!query(sec, 'g', true).some(g => g.classList.contains('fp-cons'))) fail('showing constraints did not bring them back');
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();
 const plotW = query(sheet(), 'input', true).find(i => i.classList.contains('fp-len'));

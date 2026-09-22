@@ -1602,6 +1602,18 @@ spec:
                         Floor:
                           type: string
                           description: The id of the floor it is drawn on. Needed for anything outside every room.
+                        Width:
+                          type: number
+                          description: For an item drawn at its real size — a washer, a fridge, an AC condenser — its width, in drawing units. Blank draws it as an icon.
+                        Depth:
+                          type: number
+                          description: Its depth, front to back, in drawing units.
+                        Rotation:
+                          type: number
+                          description: How far it is turned, in degrees clockwise. Its front faces down the plan at 0.
+                        Round:
+                          type: boolean
+                          description: Drawn round rather than square, such as a water heater; Width is its diameter.
                         Gfci:
                           type: boolean
                           description: 'A GFCI outlet: everything wired downstream of it, from its load terminals, is protected by it.'
