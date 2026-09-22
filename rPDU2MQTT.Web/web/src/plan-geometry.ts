@@ -137,3 +137,35 @@ export function planBounds(poly: Pt[]): { x: number; y: number; w: number; h: nu
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
+
+/// Everything wired downstream of an item: the runs leaving it from its load side, and what they lead to, onward.
+export function planDownstream(runs: { Id: string; From?: string; To?: string }[], from: string): { items: Set<string>; runs: Set<string> } {
+  const items = new Set<string>(), seen = new Set<string>();
+  const queue = [from];
+  while (queue.length) {
+    const at = queue.shift()!;
+    runs.forEach(r => {
+      if (r.From !== at || seen.has(r.Id)) return;
+      seen.add(r.Id);
+      if (r.To && r.To !== from && !items.has(r.To)) { items.add(r.To); queue.push(r.To); }
+    });
+  }
+  return { items, runs: seen };
+}
+
+/// The nearest item upstream of this one that is a GFCI, following runs back toward the supply. Null when none is.
+export function planProtectedBy(runs: { From?: string; To?: string }[], isGfci: (id: string) => boolean, id: string): string | null {
+  const seen = new Set<string>([id]);
+  let frontier = [id];
+  while (frontier.length) {
+    const next: string[] = [];
+    for (const at of frontier) for (const r of runs) {
+      if (r.To !== at || !r.From || seen.has(r.From)) continue;
+      if (isGfci(r.From)) return r.From;
+      seen.add(r.From);
+      next.push(r.From);
+    }
+    frontier = next;
+  }
+  return null;
+}

@@ -180,6 +180,12 @@ if (!query(sec, '.fp-palette').hidden) fail('the drawing tools show while only v
 // A metered item shows its reading under it while viewing.
 if (!labels().some(t => t === '150 W')) fail(`the fridge's reading is not shown on the plan: ${JSON.stringify(labels())}`);
 
+// Tapping an outlet while viewing brings its whole circuit forward: its items, and the rooms it serves.
+tap(itemEl('fridge'), 100, 100);
+if (!itemEl('fridge').classList.contains('is-focus')) fail('tapping an item did not highlight its circuit');
+if (!polygonFor('kitchen').classList.contains('is-circuit')) fail('the room the circuit serves is not highlighted');
+key('Escape');
+
 // Tapping a room: its total, the circuits serving it and what is in it.
 tap(kitchen, 200, 150);
 if (!/Kitchen/.test(textOf(query(side(), 'h3')))) fail(`tapping the kitchen did not select it: ${textOf(side())}`);
@@ -326,11 +332,15 @@ if (!(floor().Width > 1090) || !(roomById('kitchen').Shape[0].X > 90)) fail(`dra
 key('z', { ctrlKey: true });
 if (floor().Width !== 1000 || roomById('kitchen').Shape[0].X !== 0) fail('undo did not put the plot back');
 
-// The wheel moves around the plan.
+// The wheel zooms about the pointer; with Shift it pans.
 key('0');
 const vbBefore = svg.getAttribute('viewBox');
-svg.dispatch('wheel', { deltaX: 0, deltaY: 120, deltaMode: 0, preventDefault() { }, clientX: 300, clientY: 300 });
-if (svg.getAttribute('viewBox') === vbBefore) fail('the wheel did not move around the plan');
+const vbWidth = () => Number(svg.getAttribute('viewBox').split(' ')[2]);
+svg.dispatch('wheel', { deltaX: 0, deltaY: -120, deltaMode: 0, preventDefault() { }, clientX: 300, clientY: 300 });
+if (!(vbWidth() < Number(vbBefore.split(' ')[2]))) fail('the wheel did not zoom in');
+key('0');
+svg.dispatch('wheel', { deltaX: 0, deltaY: 120, deltaMode: 0, shiftKey: true, preventDefault() { }, clientX: 300, clientY: 300 });
+if (svg.getAttribute('viewBox') === vbBefore || vbWidth() !== Number(vbBefore.split(' ')[2])) fail('Shift+wheel did not pan without zooming');
 key('0');
 if (svg.getAttribute('viewBox') !== vbBefore) fail('0 did not fit the floor back into view');
 
@@ -379,6 +389,36 @@ tap(itemEl('fridge'), 100, 100);
 query(side(), '.fp-list-row', true).find(b => /B06/.test(textOf(b))).onclick();
 if (!/Cable drawn\s*\d/.test(textOf(sheet()))) fail(`the circuit does not say how much cable is drawn for it: ${textOf(sheet())}`);
 shut();
+
+// A wire's bend lands on a wall corner when one is near, however the straight-line help would have placed it.
+toolBtn('Wire').onclick();
+tap(svg, 394, 6);
+tap(svg, 520, 12);
+button('Finish here', sec).onclick();
+const cornerRun = config.EnergyFlow.Runs[config.EnergyFlow.Runs.length - 1];
+if (cornerRun.Points[0].X !== 400 || cornerRun.Points[0].Y !== 0) fail(`a bend next to a wall corner did not land on it: ${JSON.stringify(cornerRun.Points)}`);
+key('z', { ctrlKey: true });
+
+// A GFCI: marked from the outlet's panel, wired to the wall outlet, and everything downstream of it lights up.
+toolBtn('Select').onclick();
+tap(itemEl(outletId), 600, 100);
+const gfciBox = query(side(), 'label', true).find(l => /GFCI outlet/.test(textOf(l)));
+if (!gfciBox) fail('an outlet cannot be marked as a GFCI');
+const gfciInput = query(gfciBox, 'input', false);
+gfciInput.checked = true; gfciInput.onchange();
+if (!placement('outlet').Gfci) fail('ticking GFCI did not mark the outlet');
+if (!query(itemEl(outletId), 'g', true).some(g => g.classList.contains('fp-gfci'))) fail('a GFCI outlet is not marked on the plan');
+toolBtn('Wire').onclick();
+tap(itemEl(outletId), 600, 100);
+tap(itemEl(wallOutlet.Id), 50, 290);
+toolBtn('Select').onclick();
+tap(itemEl(outletId), 600, 100);
+if (!/Protects/.test(textOf(side())) || !/1 downstream/.test(textOf(side()))) fail(`the GFCI does not list what it protects: ${textOf(side())}`);
+if (!itemEl(wallOutlet.Id).classList.contains('is-protected')) fail('what the GFCI protects is not shown on the plan');
+if (!itemEl(porch.Id).classList.contains('is-dim')) fail('what the GFCI does not protect is not faded');
+tap(itemEl(wallOutlet.Id), 50, 290);
+if (!/Protected by\s*GFCI/.test(textOf(side()))) fail(`a protected outlet does not say which GFCI protects it: ${textOf(side())}`);
+key('Escape');
 
 // Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
 toolBtn('Measure').onclick();
@@ -447,7 +487,7 @@ if (floor().Openings[0].Angle === moved.Angle && Math.abs(floor().Openings[0].An
 
 // The wire's panel gives its length on the plan and its circuit.
 tap(query(sec, 'polyline', true).find(p => p.dataset?.run), 300, 100);
-if (!/Length on the plan/.test(textOf(side())) || !/From\s*Fridge/.test(textOf(side()))) fail(`the wire's panel does not describe it: ${textOf(side())}`);
+if (!/Length on the plan/.test(textOf(side())) || !/Supply side\s*Fridge/.test(textOf(side()))) fail(`the wire's panel does not describe it: ${textOf(side())}`);
 
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();

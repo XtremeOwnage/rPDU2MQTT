@@ -1511,3 +1511,15 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .ss-label { min-width: 0; overflow-wrap: anywhere; }
 .ss-hint { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ss-none { padding: 10px 8px; color: var(--muted); font-size: 13px; }
+
+/* Floor Plans: a circuit brought forward, what a GFCI protects, and which way a wire runs. */
+.fp-item.is-focus .fp-item-disc { stroke-width: 3.5px; filter: drop-shadow(0 0 4px var(--accent)); }
+.fp-run.is-focus .fp-run-line { filter: drop-shadow(0 0 3px var(--accent)); }
+.fp-item.is-protected .fp-item-disc { stroke: var(--good) !important; filter: drop-shadow(0 0 5px var(--good)); }
+.fp-run.is-protected .fp-run-line { stroke: var(--good) !important; filter: drop-shadow(0 0 3px var(--good)); }
+.fp-run.is-protected .fp-run-arrow { stroke: var(--good) !important; }
+.fp-room.is-circuit { stroke-width: 5px; }
+.fp-run-arrow { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.fp-gfci circle { fill: var(--good); stroke: var(--panel); }
+.fp-gfci text { fill: var(--accent-fg); text-anchor: middle; dominant-baseline: middle; font-weight: 800; pointer-events: none; }
+.fp-protected-dot { fill: var(--good); stroke: var(--panel); pointer-events: none; }

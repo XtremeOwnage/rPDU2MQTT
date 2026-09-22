@@ -226,6 +226,10 @@ public class PlacementConfig
     [Description("The id of the floor it is drawn on. Needed for anything outside every room.")]
     public string Floor { get; set; } = "";
 
+    [DefaultValue(false)]
+    [Description("A GFCI outlet: everything wired downstream of it, from its load terminals, is protected by it.")]
+    public bool Gfci { get; set; }
+
     [Description("For an item mounted on a wall, the direction it faces into its room, in degrees clockwise from pointing right. Blank when it stands free.")]
     public double? Facing { get; set; }
 
@@ -283,7 +287,7 @@ public class RunConfig
     [Description("The circuit it carries, as the panel id and breaker number: 'main_panel/B06'. Blank when it is not known.")]
     public string Circuit { get; set; } = "";
 
-    [Description("The placed item it starts at. Blank when it starts at a bare point.")]
+    [Description("The placed item it starts at, on the supply side: runs are drawn from the panel outward, so what is downstream of an item is what its runs lead to. Blank when it starts at a bare point.")]
     public string From { get; set; } = "";
 
     [Description("The placed item it ends at. Blank when it ends at a bare point.")]

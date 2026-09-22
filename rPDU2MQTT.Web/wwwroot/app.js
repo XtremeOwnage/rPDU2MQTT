@@ -3083,6 +3083,38 @@ function planBounds(poly      )                                                 
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
+/// Everything wired downstream of an item: the runs leaving it from its load side, and what they lead to, onward.
+function planDownstream(runs                                              , from        )                                            {
+  const items = new Set        (), seen = new Set        ();
+  const queue = [from];
+  while (queue.length) {
+    const at = queue.shift() ;
+    runs.forEach(r => {
+      if (r.From !== at || seen.has(r.Id)) return;
+      seen.add(r.Id);
+      if (r.To && r.To !== from && !items.has(r.To)) { items.add(r.To); queue.push(r.To); }
+    });
+  }
+  return { items, runs: seen };
+}
+
+/// The nearest item upstream of this one that is a GFCI, following runs back toward the supply. Null when none is.
+function planProtectedBy(runs                                  , isGfci                         , id        )                {
+  const seen = new Set        ([id]);
+  let frontier = [id];
+  while (frontier.length) {
+    const next           = [];
+    for (const at of frontier) for (const r of runs) {
+      if (r.To !== at || !r.From || seen.has(r.From)) continue;
+      if (isGfci(r.From)) return r.From;
+      seen.add(r.From);
+      next.push(r.From);
+    }
+    frontier = next;
+  }
+  return null;
+}
+
 // ── plan-units.ts ───────────────────────────────────────────────
 // Real-world lengths on the floor plans (#463): feet and inches or metres and centimetres, as the GUI settings say.
 
@@ -10596,7 +10628,7 @@ const FP_TOOLS                                   = [
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
-  ['wire', 'Wire', 'L', 'Draw a cable run: tap where it starts, tap each bend, and tap the item it ends at.'],
+  ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
@@ -10674,6 +10706,7 @@ function addFloorPlanSection(nav     , sections     ) {
   let extra                           = [];
   let marquee                          = null;
   let spaceDown = false;
+  let gfciNext = remembered('gfci', '0') === '1';
   let selectedCorner = -1;
   let draft       = [];
   let rectStart            = null, rectEnd            = null;
@@ -10871,6 +10904,12 @@ function addFloorPlanSection(nav     , sections     ) {
     if (Math.abs(a - 90) < 6) return { X: prev.X, Y: q.Y };
     return q;
   };
+  /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
+  const drawSnap = (prev                       , p    , grid = true) => {
+    if (!snapOn) return clampPt(p);
+    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0);
+    return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
+  };
   /// The point a wire's next bend follows on from.
   const wireLast = () => wireDraft ? (wireDraft.pts[wireDraft.pts.length - 1] || (wireDraft.from ? itemPt(wireDraft.from) : null)) : null;
   const gridSnapped = (p    ) => { if (!snapOn) return clampPt(p); const g = snapStep(); return clampPt({ X: Math.round(p.X / g) * g, Y: Math.round(p.Y / g) * g }); };
@@ -11039,6 +11078,12 @@ function addFloorPlanSection(nav     , sections     ) {
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
     const focus = focusCircuit();
+    // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
+    const focusRooms = new Set        (focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i     ) => i.Circuit === focus).map((i     ) => i.Room).filter(Boolean)] : []);
+    // A selected GFCI shows what it protects: everything wired downstream of it, and the rest fades.
+    const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
+    const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
+    const isGfci = (id        ) => !!itemOf(id)?.Gfci;
     const label = (poly      , lines          , cls        ) => {
       const c = planCentroid(poly);
       const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * font * 0.6, class: cls, 'font-size': font });
@@ -11066,6 +11111,7 @@ function addFloorPlanSection(nav     , sections     ) {
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
       if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p .value, max);
       if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
+      if (focusRooms.has(room.Id)) { shape.classList.add('is-circuit'); shape.style.stroke = planCircuitColor(focus); }
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
       const lines = [room.Name || room.Id];
@@ -11096,9 +11142,10 @@ function addFloorPlanSection(nav     , sections     ) {
       const path = runPath(r);
       if (path.length < 2) return;
       const sel = isSel('run', r.Id);
-      const dim = focus && r.Circuit !== focus;
+      const dim = downstream ? !downstream.runs.has(r.Id) : !!focus && r.Circuit !== focus;
       const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${r.Circuit ? '' : ' is-unknown'}` });
+      const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
       g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
@@ -11107,6 +11154,15 @@ function addFloorPlanSection(nav     , sections     ) {
         const t = svgEl('text', { x: (mid.X + nxt.X) / 2, y: (mid.Y + nxt.Y) / 2 - 7 * u, class: 'fp-run-read' + (cp == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
         t.textContent = cp == null ? 'no data' : formatMeasure(Math.round(cp), 'W');
         g.appendChild(t);
+      }
+      // Which way it runs, supply to load: a chevron on its longest stretch.
+      let seg = 0, best = -1;
+      for (let i = 0; i + 1 < path.length; i++) { const L = Math.hypot(path[i + 1].X - path[i].X, path[i + 1].Y - path[i].Y); if (L > best) { best = L; seg = i; } }
+      if (best / u > 30) {
+        const a = path[seg], b = path[seg + 1];
+        const ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
+        const mx = (a.X + b.X) / 2, my = (a.Y + b.Y) / 2;
+        g.appendChild(svgEl('path', { d: `M ${-5 * u} ${-4.5 * u} L ${2 * u} 0 L ${-5 * u} ${4.5 * u}`, transform: `translate(${mx},${my}) rotate(${ang})`, class: 'fp-run-arrow', stroke: colour, 'stroke-width': 2 * u }));
       }
       const hit = svgEl('polyline', { points: points(path), class: 'fp-hit fp-run-hit', 'stroke-width': 14 * u });
       hit.dataset.run = r.Id;
@@ -11128,12 +11184,13 @@ function addFloorPlanSection(nav     , sections     ) {
       const sel = isSel('item', item.Id);
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
-      const dim = focus && item.Circuit !== focus;
+      const dim = downstream ? !(downstream.items.has(item.Id) || item.Id === gfci .Id) : !!focus && item.Circuit !== focus;
+      const lit = downstream ? downstream.items.has(item.Id) : !!focus && item.Circuit === focus;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
       const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
       if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
@@ -11141,6 +11198,15 @@ function addFloorPlanSection(nav     , sections     ) {
       const glyph = planGlyph(item.Kind || 'outlet', r);
       glyph.setAttribute('stroke-width', 1.4 * u);
       g.appendChild(glyph);
+      // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
+      if (item.Gfci) {
+        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.85},${-r * 0.8})` });
+        b.appendChild(svgEl('circle', { r: r * 0.45, 'stroke-width': u }));
+        const t = svgEl('text', { y: r * 0.03, 'font-size': r * 0.6 }); t.textContent = 'G'; b.appendChild(t);
+        g.appendChild(b);
+      } else if (showWiring && planProtectedBy(runsIn(), isGfci, item.Id)) {
+        g.appendChild(svgEl('circle', { cx: r * 0.8, cy: r * 0.75, r: r * 0.28, class: 'fp-protected-dot', 'stroke-width': u }));
+      }
       if (!known) {
         const badge = svgEl('text', { x: r * 0.85, y: -r * 0.6, class: 'fp-item-q', 'font-size': font * 0.9 });
         badge.textContent = '?';
@@ -11377,7 +11443,7 @@ function addFloorPlanSection(nav     , sections     ) {
   svg.addEventListener('pointermove', (e     ) => {
     if (!pointers.has(e.pointerId)) {
       // Hovering: the next corner, bend or measuring point follows the pointer.
-      if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? ortho(wireLast(), gridSnapped(toPlan(e))) : tool === 'measure' ? ortho(measure?.a, snapped(toPlan(e))) : ortho(draft[draft.length - 1], snapped(toPlan(e))); drawPlan(); }
+      if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? drawSnap(wireLast(), toPlan(e)) : tool === 'measure' ? drawSnap(measure?.a, toPlan(e)) : drawSnap(draft[draft.length - 1], toPlan(e)); drawPlan(); }
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -11477,9 +11543,9 @@ function addFloorPlanSection(nav     , sections     ) {
         if (k === 'runinsert') {
           // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
           const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
-          pts.splice(at, 0, gridSnapped(p));
+          pts.splice(at, 0, drawSnap(null, p));
           gesture.kind = 'runpt'; gesture.index = at;
-        } else pts[gesture.index] = gridSnapped(p);
+        } else pts[gesture.index] = drawSnap(null, p);
       }
     }
     drawPlan();
@@ -11542,14 +11608,18 @@ function addFloorPlanSection(nav     , sections     ) {
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
   svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
   svg.addEventListener('wheel', (e     ) => {
-    // The wheel and a trackpad's two fingers move around the plan; with Ctrl or ⌘ (or a pinch) they zoom.
+    // The wheel zooms about the pointer; with Shift it pans instead.
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) { zoomAt(toPlan(e), Math.exp(-(Number(e.deltaY) || 0) * 0.0025)); return; }
-    const r = svg.getBoundingClientRect();
-    const sc = Math.min(r.width / vb.w, r.height / vb.h) || 1;
-    const line = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? r.height : 1;
-    vb = { ...vb, x: vb.x + (Number(e.deltaX) || 0) * line / sc, y: vb.y + (Number(e.deltaY) || 0) * line / sc };
-    drawPlan();
+    const dy = (Number(e.deltaY) || 0) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    if (e.shiftKey) {
+      const r = svg.getBoundingClientRect();
+      const sc = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+      const dx = (Number(e.deltaX) || 0) || dy;
+      vb = { ...vb, x: vb.x + dx / sc, y: vb.y + (e.deltaX ? dy : 0) / sc };
+      drawPlan();
+      return;
+    }
+    zoomAt(toPlan(e), Math.exp(-dy * 0.0022));
   }, { passive: false });
 
   /// A tap, by tool.
@@ -11561,7 +11631,7 @@ function addFloorPlanSection(nav     , sections     ) {
       return;
     }
     if (tool === 'outline') {
-      const q = ortho(draft[draft.length - 1], snapped(p));
+      const q = drawSnap(draft[draft.length - 1], p);
       const first = draft[0];
       if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
       else { draft.push(q); render(); }
@@ -11575,6 +11645,7 @@ function addFloorPlanSection(nav     , sections     ) {
       const id = freshIn(itemsIn(), itemKind.replace(/-/g, '_'));
       act(() => {
         const it      = { Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow() .floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' };
+        if (itemKind === 'outlet' && gfciNext) it.Gfci = true;
         placeOnWall(it, q);
         itemsIn().push(it);
         selection = { type: 'item', id };
@@ -11596,19 +11667,19 @@ function addFloorPlanSection(nav     , sections     ) {
     }
     if (tool === 'wire') {
       if (!wireDraft) {
-        wireDraft = hit.item ? { from: hit.item, pts: [] } : { from: '', pts: [gridSnapped(p)] };
+        wireDraft = hit.item ? { from: hit.item, pts: [] } : { from: '', pts: [drawSnap(null, p)] };
         render();
         return;
       }
       if (hit.item && hit.item !== wireDraft.from) { finishWire(hit.item); return; }
-      wireDraft.pts.push(ortho(wireLast(), gridSnapped(p)));
+      wireDraft.pts.push(drawSnap(wireLast(), p));
       render();
       return;
     }
     if (tool === 'measure') {
       const q = snapped(p);
       if (!measure || measure.b) measure = { a: q, b: null };
-      else measure.b = ortho(measure.a, q);
+      else measure.b = drawSnap(measure.a, p);
       render();
     }
   };
@@ -11747,6 +11818,7 @@ function addFloorPlanSection(nav     , sections     ) {
         });
       });
       add(grid);
+      if (itemKind === 'outlet') add(check('GFCI', gfciNext, v => { gfciNext = v; remember('gfci', v ? '1' : '0'); }, 'Place GFCI outlets: whatever is wired from their load side is protected by them.'));
     } else if (tool === 'wire') {
       add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service']], wireKind, v => { wireKind = v; render(); },
         'A branch circuit, a feeder between panels, or the utility service from the pole.'));
@@ -12072,6 +12144,12 @@ function addFloorPlanSection(nav     , sections     ) {
         side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
           it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
       }
+      if (it.Kind === 'outlet') {
+        const g = el('input', { type: 'checkbox' })                    ;
+        g.checked = !!it.Gfci;
+        g.onchange = () => act(() => { if (g.checked) it.Gfci = true; else delete it.Gfci; });
+        side.appendChild(el('label', { class: 'ld-inst fp-check', title: 'Whatever is wired from its load side is protected by it.' }, g, ' GFCI outlet'));
+      }
       side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
         'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
     } else {
@@ -12085,6 +12163,33 @@ function addFloorPlanSection(nav     , sections     ) {
     const c = it.Circuit ? circuitOf(it.Circuit) : null;
     if (c) { side.appendChild(el('h4', { text: it.Kind === 'panel' ? 'Fed from' : 'Its circuit' })); side.appendChild(circuitRow(c)); }
     else if (it.Circuit) side.appendChild(el('div', { class: 'fp-note is-warn', text: `${it.Circuit} is not a breaker in any panel, so its circuit reads as unknown.` }));
+    if (c) {
+      const on = itemsIn().filter((x     ) => x.Circuit === c.ref);
+      const floors = new Set(on.map((x     ) => x.Floor).filter(Boolean));
+      side.appendChild(el('div', { class: 'desc', text: `${on.length} item${on.length === 1 ? '' : 's'} and ${runsIn().filter((r     ) => r.Circuit === c.ref).length} wire${runsIn().filter((r     ) => r.Circuit === c.ref).length === 1 ? '' : 's'} on this circuit${floors.size > 1 ? `, across ${floors.size} floors` : ''} — highlighted on the plan.` }));
+    }
+
+    // A GFCI protects what is wired from its load side; anything downstream of one says which.
+    if (it.Gfci) {
+      const ds = planDownstream(runsIn(), it.Id);
+      side.appendChild(el('h4', { text: 'Protects' }));
+      if (!ds.items.size) side.appendChild(el('div', { class: 'desc', text: 'Nothing is wired from its load side yet. Draw a wire from this outlet to the ones it feeds; everything they lead to is protected.' }));
+      else {
+        const pl = el('div', { class: 'fp-list' });
+        [...ds.items].map(id => itemOf(id)).filter(Boolean).forEach((x     ) => pl.appendChild(listRow(itemName(x), x.Room ? nameOfPlace(x.Room) : 'Outdoors',
+          () => { if (x.Floor && x.Floor !== floorNow()?.floor.Id) { floorId = x.Floor; viewFor = ''; } selection = { type: 'item', id: x.Id }; extra = []; render(); })));
+        side.appendChild(pl);
+        side.appendChild(el('div', { class: 'desc', text: `${ds.items.size} downstream, shown in green on the plan. Tripping this GFCI cuts them all.` }));
+      }
+    } else {
+      const by = planProtectedBy(runsIn(), (id        ) => !!itemOf(id)?.Gfci, it.Id);
+      if (by) {
+        const g = itemOf(by);
+        side.appendChild(el('h4', { text: 'Protected by' }));
+        side.appendChild(listRow(`GFCI ${itemName(g)}`, g.Room ? nameOfPlace(g.Room) : 'Outdoors', () => { if (g.Floor && g.Floor !== floorNow()?.floor.Id) { floorId = g.Floor; viewFor = ''; } selection = { type: 'item', id: g.Id }; extra = []; render(); }));
+        side.appendChild(el('div', { class: 'desc', text: 'If this outlet is dead, check that GFCI for a trip before the breaker.' }));
+      }
+    }
 
     if (it.Kind === 'panel' && it.Panel) {
       const open = btn('Open its panel schedule');
@@ -12152,8 +12257,8 @@ function addFloorPlanSection(nav     , sections     ) {
     if (!r) { selection = null; return drawSide(); }
     const from = r.From ? itemOf(r.From) : null, to = r.To ? itemOf(r.To) : null;
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run` }), el('span', { class: 'fp-pill', text: r.Kind })));
-    side.appendChild(row('From', from ? itemName(from) : 'a loose end'));
-    side.appendChild(row('To', to ? itemName(to) : 'a loose end'));
+    side.appendChild(row('Supply side', from ? itemName(from) : 'a loose end'));
+    side.appendChild(row('Load side', to ? itemName(to) : 'a loose end'));
     side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
     if (editing) {
       const note = el('input', { type: 'text', value: r.Label || '', placeholder: 'e.g. through the attic' })                    ;
@@ -12165,9 +12270,12 @@ function addFloorPlanSection(nav     , sections     ) {
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
         }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'),
         field('Note', note));
+      const flip = btn('Reverse direction');
+      flip.title = 'Swap which end is the supply side. What is downstream of a GFCI follows this.';
+      flip.onclick = () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); });
       const del = btn('Delete', 'danger');
       del.onclick = () => deleteSelection();
-      side.appendChild(actions(del));
+      side.appendChild(actions(flip, del));
       side.appendChild(el('div', { class: 'desc', text: 'Drag a bend to move it; drag a small dot to add a bend.' }));
     } else if (r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
     const c = r.Circuit ? circuitOf(r.Circuit) : null;

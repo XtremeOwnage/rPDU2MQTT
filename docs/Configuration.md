@@ -1172,10 +1172,10 @@ them. **View** shades each room by what it draws now, today, or this week. **Edi
 | Area | A | An area that may span rooms, such as upstairs or the server corner. |
 | Door / Window | D / W | Tap a wall; the opening snaps into it and lies along it. Doors can be single, double, sliding or garage. |
 | Item | I | Place an outlet, switch, light, fan, appliance, device, HVAC unit, junction box, EV charger, panel, utility meter, utility pole, transformer, solar array, battery, inverter or generator. |
-| Wire | L | Draw a cable run: tap the item it starts at, each bend, and the item it ends at. A branch circuit, a feeder, or the utility service from the pole. |
+| Wire | L | Draw a cable run from the supply side: tap the item feeding it, each bend, and the item it goes to. Bends snap to wall corners and edges. A branch circuit, a feeder, or the utility service from the pole. |
 | Measure | M | Tap two points to measure between them, and set the plan's scale from a distance you know. |
 
-The wheel or a trackpad moves around the plan and Ctrl+wheel (or a pinch) zooms; the middle button, or holding Space, pans while any tool is in hand. **Floor settings › Arrange** centres the drawing on its plot, or fits the plot to the drawing. Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
+The wheel zooms about the pointer and Shift+wheel pans; a pinch zooms on a tablet; the middle button, or holding Space, pans while any tool is in hand. **Floor settings › Arrange** centres the drawing on its plot, or fits the plot to the drawing. Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
 drawing. The page is built for a tablet carried round the house: pinch to zoom, drag to pan, and below a laptop's
 width the tools run across the top and the side panel drops below the plan.
 
@@ -1190,6 +1190,10 @@ floor then reads true.
 
 **Outdoors.** An item placed outside every room is outdoors on its floor — an exterior light, a yard outlet, the
 meter, the pole — and counts toward the floor's total. Outdoor zones are rooms marked `Outdoor`, and count like one.
+
+**Circuits at a glance.** Tapping an item or a wire, in View or Edit, brings its whole circuit forward — every item and wire on it, and the rooms it serves — and fades the rest.
+
+**GFCI outlets.** Tick *GFCI outlet* on an outlet (or keep *GFCI* on while placing them). Wires run from the supply side to the load side, shown by an arrow and reversible from the wire's panel, so what is downstream of a GFCI is everything its wires lead to. Selecting the GFCI lists and lights up everything it protects; a protected outlet says which GFCI protects it, and carries a green dot when the wiring is shown.
 
 **Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).
 

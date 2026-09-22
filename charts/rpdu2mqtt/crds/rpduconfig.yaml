@@ -1546,6 +1546,9 @@ spec:
                         Floor:
                           type: string
                           description: The id of the floor it is drawn on. Needed for anything outside every room.
+                        Gfci:
+                          type: boolean
+                          description: 'A GFCI outlet: everything wired downstream of it, from its load terminals, is protected by it.'
                         Facing:
                           type: number
                           description: For an item mounted on a wall, the direction it faces into its room, in degrees clockwise from pointing right. Blank when it stands free.
@@ -1590,7 +1593,7 @@ spec:
                           description: "The circuit it carries, as the panel id and breaker number: 'main_panel/B06'. Blank when it is not known."
                         From:
                           type: string
-                          description: The placed item it starts at. Blank when it starts at a bare point.
+                          description: 'The placed item it starts at, on the supply side: runs are drawn from the panel outward, so what is downstream of an item is what its runs lead to. Blank when it starts at a bare point.'
                         To:
                           type: string
                           description: The placed item it ends at. Blank when it ends at a bare point.
