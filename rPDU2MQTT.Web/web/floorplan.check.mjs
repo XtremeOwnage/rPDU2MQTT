@@ -399,6 +399,37 @@ const cornerRun = config.EnergyFlow.Runs[config.EnergyFlow.Runs.length - 1];
 if (cornerRun.Points[0].X !== 400 || cornerRun.Points[0].Y !== 0) fail(`a bend next to a wall corner did not land on it: ${JSON.stringify(cornerRun.Points)}`);
 key('z', { ctrlKey: true });
 
+// The middle button pans in Select, even starting over a room, and moves nothing.
+key('0');
+const vbStill = svg.getAttribute('viewBox');
+const kitchenBefore = JSON.stringify(roomById('kitchen').Shape);
+svg.dispatch('pointerdown', { ...at(200, 150), pointerId: 950, button: 1, target: polygonFor('kitchen'), preventDefault() { } });
+svg.dispatch('pointermove', { ...at(260, 190), pointerId: 950, target: polygonFor('kitchen') });
+svg.dispatch('pointerup', { ...at(260, 190), pointerId: 950, target: polygonFor('kitchen') });
+if (svg.getAttribute('viewBox') === vbStill) fail('a middle-button drag did not pan the plan');
+if (JSON.stringify(roomById('kitchen').Shape) !== kitchenBefore) fail('a middle-button drag moved the room under it');
+key('0');
+
+// A corner or a wire bend goes with a double-tap, or with Delete once it is picked.
+toolBtn('Select').onclick();
+const denId = floor().Rooms.find(r => r.Name === 'Den').Id;
+tap(polygonFor(denId), 500, 350);
+const cornerHandle = (i) => query(sec, 'circle', true).find(c => c.dataset?.corner === String(i));
+tap(cornerHandle(1), 0, 0); tap(cornerHandle(1), 0, 0);
+if (roomById(denId).Shape.length !== 3) fail(`double-tapping a corner did not remove it: ${roomById(denId).Shape.length} corners`);
+if (!query(side(), '.fp-name')) fail('tapping a corner deselected the room');
+key('z', { ctrlKey: true });
+tap(cornerHandle(2), 0, 0);
+key('Delete');
+if (roomById(denId).Shape.length !== 3 || !roomById(denId)) fail('Delete on a picked corner did not remove just that corner');
+key('z', { ctrlKey: true });
+tap(query(sec, 'polyline', true).find(p => p.dataset?.run === config.EnergyFlow.Runs[0].Id), 300, 100);
+const bendHandle = query(sec, 'circle', true).find(c => c.dataset?.runpt === '0');
+tap(bendHandle, 0, 0); tap(bendHandle, 0, 0);
+if (config.EnergyFlow.Runs[0].Points.length !== 0) fail(`double-tapping a wire bend did not remove it: ${JSON.stringify(config.EnergyFlow.Runs[0].Points)}`);
+key('z', { ctrlKey: true });
+key('Escape');
+
 // A GFCI: marked from the outlet's panel, wired to the wall outlet, and everything downstream of it lights up.
 toolBtn('Select').onclick();
 tap(itemEl(outletId), 600, 100);

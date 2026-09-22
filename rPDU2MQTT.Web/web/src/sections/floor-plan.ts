@@ -129,6 +129,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
   let spaceDown = false;
   let gfciNext = remembered('gfci', '0') === '1';
   let selectedCorner = -1;
+  let selectedBend = -1;
+  let lastTap: { key: string; at: number } | null = null;
   let draft: Pt[] = [];
   let rectStart: Pt | null = null, rectEnd: Pt | null = null;
   let wireDraft: { from: string; pts: Pt[] } | null = null;
@@ -590,7 +592,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       g.appendChild(hit);
       svg.appendChild(g);
       if (sel && mode === 'edit' && !extra.length) {
-        (r.Points || []).forEach((q: Pt, i: number) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        (r.Points || []).forEach((q: Pt, i: number) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' + (i === selectedBend ? ' is-selected' : '') }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
         for (let i = 0; i + 1 < path.length; i++) {
           const m = svgEl('circle', { cx: (path[i].X + path[i + 1].X) / 2, cy: (path[i].Y + path[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
           m.dataset.runmid = String(i);
@@ -797,7 +799,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const selectHit = (hit: any, additive = false) => {
     const next: Selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
-    selectedCorner = -1;
+    selectedCorner = -1; selectedBend = -1;
     if (!additive) { selection = next; extra = []; return; }
     if (!next) return;
     const all = selected();
@@ -841,7 +843,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const under = hitSel(hit);
       if (hit.corner != null && target) { gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner; }
       else if (hit.mid != null && target) { gesture.kind = 'insert'; gesture.index = hit.mid; }
-      else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; }
+      else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
       else if (under && additive) { gesture.kind = 'none'; }
       else if (under) {
@@ -1025,6 +1027,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (g.pushed) changed();
     render();
   };
+  // A middle-button drag pans; the browser's own middle-click autoscroll would fight it.
+  svg.addEventListener('mousedown', (e: any) => { if (e.button === 1) e.preventDefault(); });
+  svg.addEventListener('auxclick', (e: any) => { if (e.button === 1) e.preventDefault(); });
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e: any) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
@@ -1047,7 +1052,19 @@ export function addFloorPlanSection(nav: any, sections: any) {
   /// A tap, by tool.
   const tap = (g: any, p: Pt) => {
     const hit = g.hit;
+    // A corner or a wire bend: tapped once it is selected, tapped twice (or double-clicked) it is removed.
+    if (mode === 'edit' && tool === 'select' && (hit.corner != null || hit.runpt != null)) {
+      const key = `${selection?.type}:${selection?.id}:${hit.corner != null ? 'c' + hit.corner : 'b' + hit.runpt}`;
+      const now = Date.now();
+      const twice = !!lastTap && lastTap.key === key && now - lastTap.at < 450;
+      lastTap = twice ? null : { key, at: now };
+      if (hit.corner != null) { selectedCorner = hit.corner; if (twice) removeCorner(); }
+      else { selectedBend = hit.runpt; if (twice) removeBend(); }
+      render();
+      return;
+    }
     if (mode === 'view' || tool === 'select' || tool === 'pan') {
+      selectedBend = -1;
       if (tool !== 'pan') selectHit(hit, mode === 'edit' && !!g.additive);
       render();
       return;
@@ -1268,7 +1285,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
         add(el('span', { class: 'fp-measure-read', text: len(d) }), el('span', { class: 'fp-opts-note', text: 'It is really' }), real, set);
       } else add(el('span', { class: 'fp-opts-note', text: measure ? 'Tap the second point.' : 'Tap the first point.' }));
     } else if (tool === 'select') {
-      add(el('span', { class: 'fp-opts-note', text: 'Drag to move. Arrow keys nudge; Delete removes; Ctrl+Z undoes.' }));
+      add(el('span', { class: 'fp-opts-note', text: 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
     } else {
       add(el('span', { class: 'fp-opts-note', text: FP_TOOLS.find(t => t[0] === tool)?.[3] || '' }));
     }
@@ -1534,6 +1551,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       };
       const btns = [redraw];
       if (selectedCorner >= 0 && poly.length > 3) {
+        side.appendChild(el('div', { class: 'desc', text: 'Double-click a corner to remove it, or drag a small dot to add one.' }));
         const dropCorner = btn('Remove corner');
         dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
         btns.push(dropCorner);
@@ -1698,7 +1716,10 @@ export function addFloorPlanSection(nav: any, sections: any) {
       flip.onclick = () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); });
       const del = btn('Delete', 'danger');
       del.onclick = () => deleteSelection();
-      side.appendChild(actions(flip, del));
+      const btns2 = [flip];
+      if (selectedBend >= 0 && selectedBend < (r.Points || []).length) { const rb = btn('Remove bend'); rb.onclick = () => removeBend(); btns2.push(rb); }
+      side.appendChild(actions(...btns2, del));
+      side.appendChild(el('div', { class: 'desc', text: 'Double-click a bend to remove it.' }));
       side.appendChild(el('div', { class: 'desc', text: 'Drag a bend to move it; drag a small dot to add a bend.' }));
     } else if (r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
     const c = r.Circuit ? circuitOf(r.Circuit) : null;
@@ -1730,6 +1751,25 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const b = planBounds(r.Shape || []);
       act(() => { roomsNow().push({ ...JSON.parse(JSON.stringify(r)), Id: id, Name: nm, HaArea: '', Shape: planClamp(planMove(r.Shape, b.w, 0), floorSize().w, floorSize().h) }); selection = { type: 'room', id }; });
     }
+  };
+
+  /// Take out the selected corner of a room or area; an outline keeps at least three.
+  const removeCorner = () => {
+    const sh = extra.length ? null : shapeOf(selection);
+    if (!sh || selectedCorner < 0 || selectedCorner >= (sh.Shape || []).length) return false;
+    if (sh.Shape.length <= 3) { toast('An outline needs at least three corners.', false); return true; }
+    const at = selectedCorner;
+    act(() => { sh.Shape.splice(at, 1); selectedCorner = -1; });
+    return true;
+  };
+  /// Take out the selected bend of a wire; its path joins straight across.
+  const removeBend = () => {
+    const r = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+    if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
+    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast('A wire needs two ends.', false); return true; }
+    const at = selectedBend;
+    act(() => { r.Points.splice(at, 1); selectedBend = -1; });
+    return true;
   };
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
@@ -2325,7 +2365,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }
     if (k === '0') { fit(); drawPlan(); return; }
     if (mode !== 'edit') return;
-    if ((k === 'Delete' || k === 'Backspace') && selection) { e.preventDefault(); deleteSelection(); return; }
+    // Delete takes out a selected corner or bend first, and the whole thing only when none is picked.
+    if ((k === 'Delete' || k === 'Backspace') && selection) { e.preventDefault(); if (!removeCorner() && !removeBend()) deleteSelection(); return; }
     if (k.startsWith('Arrow') && selection) {
       e.preventDefault();
       const step = snapStep() * (e.shiftKey ? 10 : 1);
