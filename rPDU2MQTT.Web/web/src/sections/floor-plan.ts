@@ -134,6 +134,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
   let dragging = false;
   let hover: Pt | null = null;
   let focused = '';
+  let touch = false;
+  /// Handles a finger can hit: larger on a touch screen.
+  const hs = () => (touch ? 1.7 : 1);
   let showBelow = remembered('below', '1') === '1';
 
   const floorNow = () => floorById(floorId) || floorsAll()[0] || null;
@@ -301,6 +304,17 @@ export function addFloorPlanSection(nav: any, sections: any) {
     if (!snapOn) return clampPt(p);
     return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep()).pt);
   };
+  /// Within a few degrees of level or plumb from the last point, a line is made exactly so.
+  const ortho = (prev: Pt | null | undefined, q: Pt) => {
+    if (!prev || !snapOn) return q;
+    const dx = q.X - prev.X, dy = q.Y - prev.Y;
+    const a = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+    if (a < 6 || a > 174) return { X: q.X, Y: prev.Y };
+    if (Math.abs(a - 90) < 6) return { X: prev.X, Y: q.Y };
+    return q;
+  };
+  /// The point a wire's next bend follows on from.
+  const wireLast = () => wireDraft ? (wireDraft.pts[wireDraft.pts.length - 1] || (wireDraft.from ? itemPt(wireDraft.from) : null)) : null;
   const gridSnapped = (p: Pt) => { if (!snapOn) return clampPt(p); const g = snapStep(); return clampPt({ X: Math.round(p.X / g) * g, Y: Math.round(p.Y / g) * g }); };
   /// Where an item actually is: its own point.
   const itemPt = (id: string): Pt | null => { const it = itemOf(id); return it ? { X: Number(it.X) || 0, Y: Number(it.Y) || 0 } : null; };
@@ -474,9 +488,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
       g.appendChild(hit);
       svg.appendChild(g);
       if (sel && mode === 'edit') {
-        (r.Points || []).forEach((q: Pt, i: number) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-handle' }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        (r.Points || []).forEach((q: Pt, i: number) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
         for (let i = 0; i + 1 < path.length; i++) {
-          const m = svgEl('circle', { cx: (path[i].X + path[i + 1].X) / 2, cy: (path[i].Y + path[i + 1].Y) / 2, r: 5 * u, class: 'fp-mid' });
+          const m = svgEl('circle', { cx: (path[i].X + path[i + 1].X) / 2, cy: (path[i].Y + path[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
           m.dataset.runmid = String(i);
           svg.appendChild(m);
         }
@@ -547,12 +561,12 @@ export function addFloorPlanSection(nav: any, sections: any) {
       const poly: Pt[] = target.Shape;
       poly.forEach((a, i) => {
         const b = poly[(i + 1) % poly.length];
-        const mid = svgEl('circle', { cx: (a.X + b.X) / 2, cy: (a.Y + b.Y) / 2, r: 6 * u, class: 'fp-mid' });
+        const mid = svgEl('circle', { cx: (a.X + b.X) / 2, cy: (a.Y + b.Y) / 2, r: 6 * u * hs(), class: 'fp-mid' });
         mid.dataset.mid = String(i);
         svg.appendChild(mid);
       });
       poly.forEach((q, i) => {
-        const hnd = svgEl('circle', { cx: q.X, cy: q.Y, r: 9 * u, class: 'fp-handle' + (i === selectedCorner ? ' is-selected' : '') });
+        const hnd = svgEl('circle', { cx: q.X, cy: q.Y, r: 9 * u * hs(), class: 'fp-handle' + (i === selectedCorner ? ' is-selected' : '') });
         hnd.dataset.corner = String(i);
         svg.appendChild(hnd);
       });
@@ -656,6 +670,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
 
   svg.addEventListener('pointerdown', (e: any) => {
     if (e.button != null && e.button > 0) return;
+    if (e.pointerType) touch = e.pointerType === 'touch' || e.pointerType === 'pen';
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { svg.setPointerCapture?.(e.pointerId); } catch { /* capture is a nicety */ }
     if (pointers.size === 2) {
@@ -704,7 +719,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
   svg.addEventListener('pointermove', (e: any) => {
     if (!pointers.has(e.pointerId)) {
       // Hovering: the next corner, bend or measuring point follows the pointer.
-      if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? gridSnapped(toPlan(e)) : snapped(toPlan(e)); drawPlan(); }
+      if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? ortho(wireLast(), gridSnapped(toPlan(e))) : tool === 'measure' ? ortho(measure?.a, snapped(toPlan(e))) : ortho(draft[draft.length - 1], snapped(toPlan(e))); drawPlan(); }
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -840,7 +855,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
       return;
     }
     if (tool === 'outline') {
-      const q = snapped(p);
+      const q = ortho(draft[draft.length - 1], snapped(p));
       const first = draft[0];
       if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
       else { draft.push(q); render(); }
@@ -878,14 +893,14 @@ export function addFloorPlanSection(nav: any, sections: any) {
         return;
       }
       if (hit.item && hit.item !== wireDraft.from) { finishWire(hit.item); return; }
-      wireDraft.pts.push(gridSnapped(p));
+      wireDraft.pts.push(ortho(wireLast(), gridSnapped(p)));
       render();
       return;
     }
     if (tool === 'measure') {
       const q = snapped(p);
       if (!measure || measure.b) measure = { a: q, b: null };
-      else measure.b = q;
+      else measure.b = ortho(measure.a, q);
       render();
     }
   };

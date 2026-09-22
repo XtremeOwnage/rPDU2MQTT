@@ -232,6 +232,15 @@ if (!labels().some(t => /′/.test(t))) fail('the selected room shows no wall le
 key('z', { ctrlKey: true });
 if (Math.abs(widthOf(denNow()) - 381) > 0.2) fail(`undo did not put the width back: ${widthOf(denNow())}`);
 
+// An outline drawn corner by corner: a nearly level wall comes out exactly level.
+toolBtn('Outline').onclick();
+tap(svg, 820, 330); tap(svg, 960, 336); tap(svg, 960, 420);
+button('Finish outline', sec).onclick();
+const traced = floor().Rooms[floor().Rooms.length - 1];
+if (traced.Shape.length !== 3 || traced.Shape[1].Y !== traced.Shape[0].Y) fail(`a nearly level wall was not made level: ${JSON.stringify(traced.Shape)}`);
+if (traced.Shape[2].X !== traced.Shape[1].X) fail(`a nearly plumb wall was not made plumb: ${JSON.stringify(traced.Shape)}`);
+key('z', { ctrlKey: true });
+
 // Items: an outlet in the kitchen, a light outdoors that belongs to no room, and a utility pole.
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
