@@ -268,6 +268,11 @@ query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet'
 tap(svg, 50, 290);
 const wallOutlet = config.EnergyFlow.Placements[config.EnergyFlow.Placements.length - 1];
 if (wallOutlet.Kind !== 'outlet' || wallOutlet.Y !== 300 || wallOutlet.Room !== 'kitchen') fail(`an outlet dropped by the kitchen's wall did not sit on it: ${JSON.stringify(wallOutlet)}`);
+// …on the kitchen's side of it: it faces up into the kitchen, and is drawn beside the wall rather than across it.
+if (wallOutlet.Facing !== 270) fail(`the wall outlet does not face into the kitchen: ${wallOutlet.Facing}`);
+const drawnAt = (itemEl(wallOutlet.Id).getAttribute('transform') || '').match(/translate\(([-\d.]+),([-\d.]+)\)/);
+if (!drawnAt || !(Number(drawnAt[2]) < 300)) fail(`the wall outlet is drawn across its wall rather than beside it: ${itemEl(wallOutlet.Id).getAttribute('transform')}`);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-item-stub'))) fail('the wall outlet is not joined to its wall');
 const before = config.EnergyFlow.Placements.length;
 key('d', { ctrlKey: true });
 if (config.EnergyFlow.Placements.length !== before + 1) fail('Ctrl+D did not duplicate the selected outlet');
@@ -284,6 +289,69 @@ if (!query(sec, 'g', true).some(g => g.classList.contains('fp-op'))) fail('the d
 toolBtn('Window').onclick();
 tap(svg, 200, 4);
 if (floor().Openings.length !== 2 || floor().Openings[1].Kind !== 'window') fail('a window could not be put in the wall');
+
+// Several at once: a box dragged across empty plot selects everything wholly inside it.
+toolBtn('Select').onclick();
+key('Escape');
+drag(svg, [-20, -20], [405, 305]);
+if (!/\d+ selected/.test(textOf(side()))) fail(`a box drag did not select several things: ${textOf(side())}`);
+const boxed = Number(textOf(query(side(), 'h3')).match(/(\d+) selected/)[1]);
+if (boxed < 4) fail(`the box caught only ${boxed} things`);
+// Shift-click adds one more, and dragging any of them moves them all together.
+tap(polygonFor('office'), 600, 150);
+svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 900, button: 0, target: polygonFor('office'), shiftKey: true });
+svg.dispatch('pointerup', { ...at(600, 150), pointerId: 900, target: polygonFor('office'), shiftKey: true });
+drag(svg, [-20, -20], [405, 305]);
+svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 901, button: 0, target: polygonFor('office'), shiftKey: true });
+svg.dispatch('pointerup', { ...at(600, 150), pointerId: 901, target: polygonFor('office'), shiftKey: true });
+if (Number(textOf(query(side(), 'h3')).match(/(\d+) selected/)?.[1]) !== boxed + 1) fail(`Shift-click did not add the office to the selection: ${textOf(query(side(), 'h3'))}`);
+const fridgeY = config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y;
+drag(polygonFor('kitchen'), [200, 150], [200, 250]);
+const fridgeMoved = config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y - fridgeY;
+const officeMoved = roomById('office').Shape[0].Y;
+if (fridgeMoved < 90 || officeMoved < 90) fail(`dragging the kitchen did not move the rest of the selection with it: fridge ${fridgeMoved}, office ${officeMoved}`);
+key('z', { ctrlKey: true });
+if (roomById('office').Shape[0].Y !== 0 || config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
+key('a', { ctrlKey: true });
+if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
+key('Escape');
+
+// The plot's edges drag it bigger; the left edge grows it leftwards and carries the drawing so nothing moves on screen.
+const plotHandle = (side) => query(sec, 'rect', true).find(r => r.dataset?.plot === side);
+drag(plotHandle('r'), [1000, 350], [1100, 350]);
+if (!(floor().Width > 1090 && floor().Width < 1110)) fail(`dragging the right edge did not widen the plot: ${floor().Width}`);
+key('z', { ctrlKey: true });
+drag(plotHandle('l'), [0, 350], [-100, 350]);
+if (!(floor().Width > 1090) || !(roomById('kitchen').Shape[0].X > 90)) fail(`dragging the left edge did not grow the plot leftwards: ${floor().Width}, kitchen at ${roomById('kitchen').Shape[0].X}`);
+key('z', { ctrlKey: true });
+if (floor().Width !== 1000 || roomById('kitchen').Shape[0].X !== 0) fail('undo did not put the plot back');
+
+// The wheel moves around the plan.
+key('0');
+const vbBefore = svg.getAttribute('viewBox');
+svg.dispatch('wheel', { deltaX: 0, deltaY: 120, deltaMode: 0, preventDefault() { }, clientX: 300, clientY: 300 });
+if (svg.getAttribute('viewBox') === vbBefore) fail('the wheel did not move around the plan');
+key('0');
+if (svg.getAttribute('viewBox') !== vbBefore) fail('0 did not fit the floor back into view');
+
+// The circuit and meter pickers open with a search box, and list only what can be one.
+tap(itemEl(wallOutlet.Id), 50, 290);
+const pickers = query(side(), '.ss', true);
+if (pickers.length < 2) fail('the item panel has no searchable pickers');
+const [circuitPick, meterPick] = pickers;
+query(circuitPick, 'button', false).onclick();
+const search = query(circuitPick, 'input', false);
+if (!search || !search.classList.contains('ss-search')) fail('opening the circuit picker shows no search box');
+search.value = 'kitch'; search.oninput();
+const offered = query(circuitPick, '.ss-opt', true);
+if (offered.length !== 1 || !/B06/.test(textOf(offered[0]))) fail(`searching the circuits did not narrow them: ${offered.map(textOf).join(' | ')}`);
+offered[0].onclick();
+if (config.EnergyFlow.Placements.find(p => p.Id === wallOutlet.Id).Circuit !== 'main/B06') fail('picking from the searched list did not set the circuit');
+query(query(side(), '.ss', true)[1], 'button', false).onclick();
+const meters = query(query(side(), '.ss', true)[1], '.ss-opt', true).map(textOf);
+if (meters.some(t => /N30 1-5/.test(t))) fail(`a breaker's channel is offered as the meter for an outlet: ${meters.join(' | ')}`);
+if (!meters.some(t => /Fridge plug/.test(t))) fail(`a smart plug is not offered as a meter: ${meters.join(' | ')}`);
+key('Escape');
 
 // A wire from the fridge to the outlet: the outlet, on no circuit, takes the fridge's.
 toolBtn('Wire').onclick();

@@ -1164,7 +1164,7 @@ them. **View** shades each room by what it draws now, today, or this week. **Edi
 
 | Tool | Key | What it does |
 | --- | --- | --- |
-| Select | V | Select and drag anything: rooms and their corners, items, doors, windows, wire bends. Arrows nudge. |
+| Select | V | Select and drag anything: rooms and their corners, items, doors, windows, wire bends. Drag a box across empty plot to select everything in it; Shift, Ctrl or ⌘-click adds or removes one; Ctrl+A selects all. Dragging any selected thing moves them all; arrows nudge. The plot's edges and corners drag to resize it. |
 | Pan | H | Drag to move around. Two fingers or Ctrl+wheel also pan and zoom. |
 | Room | R | Drag out a rectangle, or **Add a room by size** from its inside measurements. |
 | Outline | P | Tap each corner of an odd-shaped room; tap the first again (or double-tap) to close it. |
@@ -1175,7 +1175,7 @@ them. **View** shades each room by what it draws now, today, or this week. **Edi
 | Wire | L | Draw a cable run: tap the item it starts at, each bend, and the item it ends at. A branch circuit, a feeder, or the utility service from the pole. |
 | Measure | M | Tap two points to measure between them, and set the plan's scale from a distance you know. |
 
-Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
+The wheel or a trackpad moves around the plan and Ctrl+wheel (or a pinch) zooms; the middle button, or holding Space, pans while any tool is in hand. **Floor settings › Arrange** centres the drawing on its plot, or fits the plot to the drawing. Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
 drawing. The page is built for a tablet carried round the house: pinch to zoom, drag to pan, and below a laptop's
 width the tools run across the top and the side panel drops below the plan.
 
@@ -1190,6 +1190,8 @@ floor then reads true.
 
 **Outdoors.** An item placed outside every room is outdoors on its floor — an exterior light, a yard outlet, the
 meter, the pole — and counts toward the floor's total. Outdoor zones are rooms marked `Outdoor`, and count like one.
+
+**Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).
 
 **Wiring.** A run between two items shows the path the cable takes, in its circuit's colour; selecting an item or a
 run brings its circuit forward and fades the rest. Wiring an item on no circuit to one on a known circuit puts it on

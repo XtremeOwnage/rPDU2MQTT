@@ -3331,6 +3331,72 @@ function planCircuitColor(ref        )         {
   return PLAN_CIRCUIT_COLOURS[h % PLAN_CIRCUIT_COLOURS.length];
 }
 
+// ── search-select.ts ────────────────────────────────────────────
+// A picker with a search box at the top of its list, for choices too many to scroll: circuits, meters, nodes.
+
+/// A button showing the current choice; opening it shows a search box and the choices matching what is typed.
+function searchSelect(choices          , value        , onPick                     , opts                                           = {})      {
+  const wrap = el('div', { class: 'ss' });
+  const current = () => choices.find(c => c.value === value) || choices[0];
+  const face = el('button', { class: 'ss-btn', type: 'button', title: opts.title || '' },
+    el('span', { class: 'ss-face', text: current()?.label || '' }), el('span', { class: 'ss-caret', text: '▾' }));
+  face.setAttribute('aria-haspopup', 'listbox');
+  face.setAttribute('aria-expanded', 'false');
+  wrap.appendChild(face);
+
+  let pop      = null;
+  let active = 0;
+  let shown           = [];
+  const outside = (e     ) => { if (pop && !wrap.contains(e.target)) close(); };
+  const close = () => {
+    if (!pop) return;
+    pop.remove(); pop = null;
+    face.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+  };
+  const pick = (c        ) => { value = c.value; face.children[0].textContent = c.label; close(); onPick(c.value); };
+
+  const open = () => {
+    if (pop) { close(); return; }
+    const search = el('input', { type: 'search', class: 'ss-search', placeholder: opts.placeholder || 'Search…' })                    ;
+    search.setAttribute('aria-label', opts.placeholder || 'Search');
+    const list = el('div', { class: 'ss-list', role: 'listbox' });
+    const draw = () => {
+      const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+      shown = choices.filter(c => words.every(w => `${c.label} ${c.hint || ''} ${c.value} ${c.group || ''}`.toLowerCase().includes(w)));
+      active = Math.max(0, Math.min(active, shown.length - 1));
+      list.innerHTML = '';
+      let group                    ;
+      shown.forEach((c, i) => {
+        if (c.group && c.group !== group) { group = c.group; list.appendChild(el('div', { class: 'ss-group', text: c.group })); }
+        const b = el('button', { class: 'ss-opt' + (c.value === value ? ' is-current' : '') + (i === active ? ' is-active' : ''), type: 'button' },
+          el('span', { class: 'ss-label', text: c.label }), ...(c.hint ? [el('span', { class: 'ss-hint', text: c.hint })] : []));
+        b.setAttribute('role', 'option');
+        b.setAttribute('aria-selected', String(c.value === value));
+        b.onclick = () => pick(c);
+        list.appendChild(b);
+      });
+      if (!shown.length) list.appendChild(el('div', { class: 'ss-none', text: 'Nothing matches.' }));
+    };
+    search.oninput = () => { active = 0; draw(); };
+    search.onkeydown = (e     ) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(shown.length - 1, active + 1); draw(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); draw(); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (shown[active]) pick(shown[active]); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation?.(); close(); face.focus?.(); }
+    };
+    active = Math.max(0, choices.findIndex(c => c.value === value));
+    pop = el('div', { class: 'ss-pop' }, search, list);
+    wrap.appendChild(pop);
+    face.setAttribute('aria-expanded', 'true');
+    draw();
+    document.addEventListener('pointerdown', outside, true);
+    setTimeout(() => search.focus?.(), 0);
+  };
+  face.onclick = () => open();
+  return wrap;
+}
+
 // ── location-options.ts ─────────────────────────────────────────
 // The places and circuits in the configuration, as picker options — for anything that says where a node is
 // or which circuit it is on (#461, #465).
@@ -3350,10 +3416,10 @@ function locationChoices()                     {
   return out;
 }
 
-/// Every breaker in every panel as ["panel/number", label].
+/// Every breaker in use in every panel as ["panel/number", label]; an unused slot is not a circuit anything is on.
 function circuitChoices()                     {
   const panels        = state.data?.EnergyFlow?.Panels || [];
-  return panels.flatMap(p => (p.Breakers || []).map((b     ) =>
+  return panels.flatMap(p => (p.Breakers || []).filter((b     ) => b.State !== 'unused').map((b     ) =>
     [`${p.Id}/${b.Number}`, `${p.Name || p.Id} · ${b.Number}${b.Description ? ' — ' + b.Description : ''}`]                    ));
 }
 
@@ -10604,6 +10670,10 @@ function addFloorPlanSection(nav     , sections     ) {
   let showSizes = remembered('sizes', '0') === '1';
   let period = remembered('period', 'now');
   let selection            = null;
+  /// Everything else selected with it: Shift, Ctrl or ⌘ adds to a selection, and a box drag selects all it holds.
+  let extra                           = [];
+  let marquee                          = null;
+  let spaceDown = false;
   let selectedCorner = -1;
   let draft       = [];
   let rectStart            = null, rectEnd            = null;
@@ -10678,7 +10748,13 @@ function addFloorPlanSection(nav     , sections     ) {
   const act = (fn            ) => { history.push(); fn(); changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
+  const exists = (x                        ) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id)
+    : x.type === 'opening' ? !!openingOf(x.id) : !!shapeOf(x);
+  /// Everything selected, the primary first.
+  const selected = ()                           => [...(selection ? [selection] : []), ...extra];
+  const isSel = (type         , id        ) => selected().some(x => x.type === type && x.id === id);
   const cleanSelection = () => {
+    extra = extra.filter(exists);
     if (!selection) return;
     const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id)
       : selection.type === 'opening' ? !openingOf(selection.id) : !shapeOf(selection);
@@ -10834,10 +10910,77 @@ function addFloorPlanSection(nav     , sections     ) {
   };
   /// Outlets and switches live on walls: near enough to one, they sit on it.
   const WALL_KINDS = ['outlet', 'switch'];
-  const onWall = (kind        , q    ) => {
-    if (!snapOn || !WALL_KINDS.includes(kind)) return q;
+  /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
+  const onWall = (kind        , q    , side     = q)                                 => {
+    if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
     const w = planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
-    return w && w.dist <= Math.max(0.3 * scale(), 10 * upp()) ? { X: planRound(w.pt.X), Y: planRound(w.pt.Y) } : q;
+    if (!w || w.dist > Math.max(0.3 * scale(), 10 * upp())) return { ...q, facing: null };
+    // The normal toward the pointer's side of the wall; the room it is in when the pointer is on the line itself.
+    let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
+    if (Math.hypot(toward.X, toward.Y) < 1e-6) { const rm = planShapeAt(roomsNow(), side); const c = rm ? planCentroid(rm.Shape) : side; toward = { X: c.X - w.pt.X, Y: c.Y - w.pt.Y }; }
+    const a = w.angle * Math.PI / 180;
+    const n = { X: -Math.sin(a), Y: Math.cos(a) };
+    const facing = (n.X * toward.X + n.Y * toward.Y >= 0 ? w.angle + 90 : w.angle - 90);
+    return { X: planRound(w.pt.X), Y: planRound(w.pt.Y), facing: Math.round((((facing % 360) + 360) % 360) * 10) / 10 };
+  };
+  const placeOnWall = (it     , q                                ) => {
+    it.X = q.X; it.Y = q.Y;
+    if (q.facing == null) delete it.Facing; else it.Facing = q.facing;
+  };
+
+  /// Everything drawn on this floor that can be selected.
+  const everything = ()                           => [
+    ...roomsNow().filter(r => (r.Shape || []).length >= 3).map(r => ({ type: 'room'           , id: r.Id })),
+    ...areasNow().filter(a => (a.Shape || []).length >= 3).map(a => ({ type: 'area'           , id: a.Id })),
+    ...openingsNow().map(o => ({ type: 'opening'           , id: o.Id })),
+    ...itemsNow().map((i     ) => ({ type: 'item'           , id: i.Id })),
+    ...runsNow().map(r => ({ type: 'run'           , id: r.Id })),
+  ];
+  /// Every point that moves when a set of things moves: outlines, items, doors and windows, wire bends.
+  /// A room carries what is in it, the doors and windows in its walls and the bends of wires to what it holds.
+  const movable = (sel                          ) => {
+    const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     ();
+    sel.forEach(x => {
+      if (x.type === 'room' || x.type === 'area') {
+        const s = shapeOf(x);
+        if (!s) return;
+        shapes.add(s);
+        if (x.type === 'room') {
+          itemsIn().forEach((it     ) => { if (it.Room === s.Id) items.add(it); });
+          const near = 0.2 * scale();
+          openingsNow().forEach(o => { const w = planNearestWall({ X: o.X, Y: o.Y }, [s.Shape]); if (w && w.dist <= near) openings.add(o); });
+        }
+      } else if (x.type === 'item') { const it = itemOf(x.id); if (it) items.add(it); }
+      else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openings.add(o); }
+      else if (x.type === 'run') { const r = runOf(x.id); if (r) runs.add(r); }
+    });
+    runsNow().forEach(r => { if ([r.From, r.To].some(id => [...items].some((it     ) => it.Id === id))) runs.add(r); });
+    return {
+      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q    ) => ({ ...q })) })),
+      items: [...items].map(it => ({ it, X: Number(it.X) || 0, Y: Number(it.Y) || 0 })),
+      openings: [...openings].map(o => ({ o, X: Number(o.X) || 0, Y: Number(o.Y) || 0 })),
+      runs: [...runs].map(r => ({ r, pts: (r.Points || []).map((q    ) => ({ ...q })) })),
+    };
+  };
+  const shift = (m                            , dx        , dy        ) => {
+    m.shapes.forEach(x => { x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    m.items.forEach(x => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
+    m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
+    m.runs.forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+  };
+  /// The box around a set of movable points, or null when there are none.
+  const boundsOf = (m                            ) => {
+    const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts)];
+    return pts.length ? planBounds(pts) : null;
+  };
+  /// Is a selectable thing wholly inside a box?
+  const insideBox = (x                        , b                                                ) => {
+    const inB = (q    ) => q.X >= b.x && q.X <= b.x + b.w && q.Y >= b.y && q.Y <= b.y + b.h;
+    if (x.type === 'room' || x.type === 'area') return (shapeOf(x)?.Shape || []).every(inB);
+    if (x.type === 'item') { const it = itemOf(x.id); return !!it && inB({ X: it.X, Y: it.Y }); }
+    if (x.type === 'opening') { const o = openingOf(x.id); return !!o && inB({ X: o.X, Y: o.Y }); }
+    const r = runOf(x.id);
+    return !!r && runPath(r).length > 0 && runPath(r).every(inB);
   };
 
   // --- Drawing -------------------------------------------------------------------------------------
@@ -10914,7 +11057,7 @@ function addFloorPlanSection(nav     , sections     ) {
       const poly       = room.Shape;
       const p = placeOf(room.Id);
       const st = p?.state || 'unmetered';
-      const sel = selection?.type === 'room' && selection.id === room.Id;
+      const sel = isSel('room', room.Id);
       const shape = svgEl('polygon', {
         points: points(poly),
         class: `fp-room ${room.Outdoor ? 'is-outdoor' : 'is-indoor'} is-${mode === 'view' ? st : 'edit'}${room.Surface ? ' has-surface' : ''}${sel ? ' is-selected' : ''}`,
@@ -10934,7 +11077,7 @@ function addFloorPlanSection(nav     , sections     ) {
     areasNow().forEach(area => {
       const poly       = area.Shape || [];
       if (poly.length < 3) return;
-      const sel = selection?.type === 'area' && selection.id === area.Id;
+      const sel = isSel('area', area.Id);
       const shape = svgEl('polygon', { points: points(poly), class: 'fp-area' + (sel ? ' is-selected' : ''), 'stroke-width': (sel ? 3 : 2) * u, 'stroke-dasharray': `${8 * u} ${5 * u}` });
       shape.dataset.area = area.Id;
       svg.appendChild(shape);
@@ -10944,7 +11087,7 @@ function addFloorPlanSection(nav     , sections     ) {
     // Doors and windows cut the walls they sit in.
     openingsNow().forEach(o => {
       const g = planOpening(o, u);
-      if (selection?.type === 'opening' && selection.id === o.Id) g.classList.add('is-selected');
+      if (isSel('opening', o.Id)) g.classList.add('is-selected');
       svg.appendChild(g);
     });
 
@@ -10952,7 +11095,7 @@ function addFloorPlanSection(nav     , sections     ) {
     if (showWiring || mode === 'edit') runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
-      const sel = selection?.type === 'run' && selection.id === r.Id;
+      const sel = isSel('run', r.Id);
       const dim = focus && r.Circuit !== focus;
       const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${r.Circuit ? '' : ' is-unknown'}` });
@@ -10969,7 +11112,7 @@ function addFloorPlanSection(nav     , sections     ) {
       hit.dataset.run = r.Id;
       g.appendChild(hit);
       svg.appendChild(g);
-      if (sel && mode === 'edit') {
+      if (sel && mode === 'edit' && !extra.length) {
         (r.Points || []).forEach((q    , i        ) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
         for (let i = 0; i + 1 < path.length; i++) {
           const m = svgEl('circle', { cx: (path[i].X + path[i + 1].X) / 2, cy: (path[i].Y + path[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
@@ -10982,11 +11125,15 @@ function addFloorPlanSection(nav     , sections     ) {
     // Placed items keep their size on screen at any zoom. An item on an unknown circuit is ringed and marked.
     const r = 12 * u;
     itemsNow().forEach((item     ) => {
-      const sel = selection?.type === 'item' && selection.id === item.Id;
+      const sel = isSel('item', item.Id);
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
       const dim = focus && item.Circuit !== focus;
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : ''), transform: `translate(${item.X},${item.Y})` });
+      // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
+      const facing = item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
+      const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
+      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
       if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
@@ -11038,7 +11185,7 @@ function addFloorPlanSection(nav     , sections     ) {
     });
 
     // Editing handles: each corner, and a midpoint on each edge that adds a corner when dragged.
-    const target = mode === 'edit' ? shapeOf(selection) : null;
+    const target = mode === 'edit' && !extra.length ? shapeOf(selection) : null;
     if (target && (target.Shape || []).length >= 3) {
       const poly       = target.Shape;
       poly.forEach((a, i) => {
@@ -11052,6 +11199,21 @@ function addFloorPlanSection(nav     , sections     ) {
         hnd.dataset.corner = String(i);
         svg.appendChild(hnd);
       });
+    }
+
+    // The plot's edges, to drag it bigger or smaller: every side, and the corners.
+    if (mode === 'edit' && tool === 'select') {
+      const hr = 8 * u * hs();
+      ([['l', 0, h / 2], ['r', w, h / 2], ['t', w / 2, 0], ['b', w / 2, h], ['rb', w, h], ['lt', 0, 0]]                              ).forEach(([side, x, y]) => {
+        const hd = svgEl('rect', { x: x - hr, y: y - hr, width: hr * 2, height: hr * 2, rx: 2 * u, class: 'fp-plot-handle is-' + side });
+        hd.dataset.plot = side;
+        const t = svgEl('title'); t.textContent = 'Drag to make the plot bigger or smaller'; hd.appendChild(t);
+        svg.appendChild(hd);
+      });
+    }
+    if (marquee) {
+      const b = planBounds([marquee.a, marquee.b]);
+      svg.appendChild(svgEl('rect', { x: b.x, y: b.y, width: b.w, height: b.h, class: 'fp-marquee', 'stroke-width': 1.5 * u }));
     }
 
     // What is being drawn right now, with its size.
@@ -11143,50 +11305,65 @@ function addFloorPlanSection(nav     , sections     ) {
     }
     return {}       ;
   };
-  const selectHit = (hit     ) => {
-    selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
+  /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
+  const selectHit = (hit     , additive = false) => {
+    const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
     selectedCorner = -1;
+    if (!additive) { selection = next; extra = []; return; }
+    if (!next) return;
+    const all = selected();
+    const at = all.findIndex(x => x.type === next.type && x.id === next.id);
+    if (at >= 0) all.splice(at, 1); else all.push(next);
+    selection = all[0] || null;
+    extra = all.slice(1);
   };
+  const hitSel = (hit     )                                => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
+    : hit.run ? { type: 'run', id: hit.run } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
   svg.addEventListener('pointerdown', (e     ) => {
-    if (e.button != null && e.button > 0) return;
+    // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
+    if (e.button != null && e.button > 1) return;
     if (e.pointerType) touch = e.pointerType === 'touch' || e.pointerType === 'pen';
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { svg.setPointerCapture?.(e.pointerId); } catch { /* capture is a nicety */ }
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mid: toPlan({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 }), vb: { ...vb } };
-      gesture = null;
+      gesture = null; marquee = null;
       rectStart = null; rectEnd = null;
       return;
     }
     const p = toPlan(e);
     const hit = hitOf(e);
-    gesture = { start: p, sx: e.clientX, sy: e.clientY, hit, moved: false, pushed: false, vb: { ...vb }, kind: 'pan' };
+    const additive = !!(e.shiftKey || e.ctrlKey || e.metaKey);
+    gesture = { start: p, sx: e.clientX, sy: e.clientY, hit, moved: false, pushed: false, vb: { ...vb }, kind: 'pan', additive };
+    if (e.button === 1 || spaceDown) { e.preventDefault?.(); gesture.kind = 'pan'; dragging = true; return; }
 
-    if (mode === 'edit' && tool === 'select') {
-      const target = shapeOf(selection);
-      const run = selection?.type === 'run' ? runOf(selection.id) : null;
+    const plotSide = (() => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.plot) return n.dataset.plot          ; return ''; })();
+    if (mode === 'edit' && tool === 'select' && plotSide) {
+      const f = floorNow() .floor;
+      gesture.kind = 'plot'; gesture.side = plotSide;
+      gesture.orig = { w: Number(f.Width) || 1000, h: Number(f.Height) || 700 };
+      gesture.all = movable(everything());
+      gesture.box = boundsOf(gesture.all);
+    } else if (mode === 'edit' && tool === 'select') {
+      const target = extra.length ? null : shapeOf(selection);
+      const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+      const under = hitSel(hit);
       if (hit.corner != null && target) { gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner; }
       else if (hit.mid != null && target) { gesture.kind = 'insert'; gesture.index = hit.mid; }
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
-      else if (hit.item) { selectHit(hit); gesture.kind = 'item'; const it = itemOf(hit.item); gesture.orig = { X: it.X, Y: it.Y }; }
-      else if (hit.opening) { selectHit(hit); gesture.kind = 'opening'; const o = openingOf(hit.opening); gesture.orig = { X: o.X, Y: o.Y, Angle: o.Angle }; }
-      else if (hit.run) { selectHit(hit); gesture.kind = 'none'; }
-      else if (hit.room || hit.area) {
-        selectHit(hit);
-        const s = shapeOf(selection);
-        gesture.kind = 'move';
-        gesture.orig = (s?.Shape || []).map((q    ) => ({ ...q }));
-        // A room carries what is in it and the doors and windows in its walls.
-        if (selection .type === 'room') {
-          gesture.items = itemsIn().filter((it     ) => it.Room === s.Id).map((it     ) => ({ it, X: it.X, Y: it.Y }));
-          const near = 0.2 * scale();
-          gesture.openings = openingsNow().filter(o => { const w = planNearestWall({ X: o.X, Y: o.Y }, [s.Shape]); return w && w.dist <= near; }).map(o => ({ o, X: o.X, Y: o.Y }));
-          gesture.runs = runsNow().filter(r => [r.From, r.To].some(id => gesture.items.some((x     ) => x.it.Id === id))).map(r => ({ r, pts: (r.Points || []).map((q    ) => ({ ...q })) }));
-        }
+      else if (under && additive) { gesture.kind = 'none'; }
+      else if (under) {
+        // Dragging anything already selected moves the whole selection; anything else is selected first.
+        if (!isSel(under.type, under.id)) selectHit(hit);
+        gesture.kind = 'group';
+        gesture.members = movable(selected());
+        gesture.single = selected().length === 1 ? selection : null;
+      } else {
+        gesture.kind = 'marquee';
       }
     } else if (mode === 'edit' && (tool === 'room' || tool === 'zone' || tool === 'area')) {
       gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
@@ -11229,6 +11406,57 @@ function addFloorPlanSection(nav     , sections     ) {
       const r = svg.getBoundingClientRect();
       const sc = Math.min(r.width / gesture.vb.w, r.height / gesture.vb.h) || 1;
       vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / sc, y: gesture.vb.y - (e.clientY - gesture.sy) / sc };
+    } else if (k === 'marquee') {
+      marquee = { a: gesture.start, b: p };
+    } else if (k === 'plot') {
+      begin();
+      // Growing to the left or top moves everything drawn along with the edge, so the drawing stays put on screen.
+      const f = floorNow() .floor;
+      const box = gesture.box;
+      const g2 = snapStep() || 1;
+      const side         = gesture.side;
+      // Measured from the screen, not the plan: the view moves with a left or top edge as it is dragged.
+      const rr = svg.getBoundingClientRect();
+      const sc = Math.min(rr.width / gesture.vb.w, rr.height / gesture.vb.h) || 1;
+      const d = { X: Math.round((e.clientX - gesture.sx) / sc / g2) * g2, Y: Math.round((e.clientY - gesture.sy) / sc / g2) * g2 };
+      let W = gesture.orig.w, H = gesture.orig.h, dx = 0, dy = 0;
+      if (side.includes('r')) W = Math.max(100, box ? box.x + box.w : 0, gesture.orig.w + d.X);
+      if (side.includes('b')) H = Math.max(100, box ? box.y + box.h : 0, gesture.orig.h + d.Y);
+      if (side.includes('l')) { dx = Math.max(-d.X, box ? -box.x : -Infinity, 100 - gesture.orig.w); W = gesture.orig.w + dx; }
+      if (side.includes('t')) { dy = Math.max(-d.Y, box ? -box.y : -Infinity, 100 - gesture.orig.h); H = gesture.orig.h + dy; }
+      f.Width = Math.round(W); f.Height = Math.round(H);
+      shift(gesture.all, dx, dy);
+      vb = { ...gesture.vb, x: gesture.vb.x + dx, y: gesture.vb.y + dy };
+    } else if (k === 'group') {
+      begin();
+      let dx = p.X - gesture.start.X, dy = p.Y - gesture.start.Y;
+      const one = gesture.single;
+      const m = gesture.members;
+      if (one?.type === 'item' && m.items.length === 1 && !m.shapes.length) {
+        // One item: it snaps to the grid, and an outlet or switch onto a wall.
+        const x = m.items[0];
+        const q = onWall(x.it.Kind, gridSnapped({ X: x.X + dx, Y: x.Y + dy }), p);
+        placeOnWall(x.it, q);
+      } else if (one?.type === 'opening' && m.openings.length === 1 && !m.shapes.length) {
+        const x = m.openings[0];
+        const want = { X: x.X + dx, Y: x.Y + dy };
+        const wall = wallAt(want);
+        const q = wall ? wall.pt : clampPt(want);
+        x.o.X = planRound(q.X); x.o.Y = planRound(q.Y);
+        if (wall) x.o.Angle = Math.round(wall.angle * 10) / 10;
+      } else {
+        // A room slides into place against its neighbour: its first corner snaps and everything follows.
+        const lead = m.shapes[0];
+        if (lead) {
+          const first = lead.pts[0];
+          const want = snapped({ X: first.X + dx, Y: first.Y + dy }, lead.sh);
+          dx = want.X - first.X; dy = want.Y - first.Y;
+        } else { const g2 = snapOn ? snapStep() : 0; if (g2) { dx = Math.round(dx / g2) * g2; dy = Math.round(dy / g2) * g2; } }
+        // Nothing leaves the plot: the move stops at its edge.
+        const box = boundsOf(m);
+        if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
+        shift(m, dx, dy);
+      }
     } else if (k === 'insert') {
       begin();
       const s = shapeOf(selection);
@@ -11239,32 +11467,8 @@ function addFloorPlanSection(nav     , sections     ) {
       begin();
       const s = shapeOf(selection);
       if (s) s.Shape[gesture.index] = snapped(p, s);
-    } else if (k === 'move') {
-      begin();
-      const s = shapeOf(selection);
-      if (s) {
-        let dx = p.X - gesture.start.X, dy = p.Y - gesture.start.Y;
-        // The first corner snaps and the rest follow, so a room slides into place against its neighbour.
-        const first = gesture.orig[0];
-        const want = snapped({ X: first.X + dx, Y: first.Y + dy }, s);
-        dx = want.X - first.X; dy = want.Y - first.Y;
-        s.Shape = planClamp(planMove(gesture.orig, dx, dy), w, h);
-        (gesture.items || []).forEach((x     ) => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
-        (gesture.openings || []).forEach((x     ) => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
-        (gesture.runs || []).forEach((x     ) => { x.r.Points = planMove(x.pts, dx, dy).map((q    ) => ({ X: planRound(q.X), Y: planRound(q.Y) })); });
-      }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
-    } else if (k === 'item') {
-      begin();
-      const it = itemOf(selection .id);
-      if (it) { const q = onWall(it.Kind, gridSnapped({ X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y })); it.X = q.X; it.Y = q.Y; }
-    } else if (k === 'opening') {
-      begin();
-      const o = openingOf(selection .id);
-      const want = { X: gesture.orig.X + p.X - gesture.start.X, Y: gesture.orig.Y + p.Y - gesture.start.Y };
-      const wall = wallAt(want);
-      if (o) { const q = wall ? wall.pt : clampPt(want); o.X = planRound(q.X); o.Y = planRound(q.Y); if (wall) o.Angle = Math.round(wall.angle * 10) / 10; }
     } else if (k === 'runpt' || k === 'runinsert') {
       begin();
       const r = runOf(selection .id);
@@ -11292,7 +11496,17 @@ function addFloorPlanSection(nav     , sections     ) {
     const { w, h } = floorSize();
 
     if (!g.moved) {
+      marquee = null;
       tap(g, p);
+      return;
+    }
+    if (g.kind === 'marquee') {
+      const b = planBounds([g.start, p]);
+      marquee = null;
+      const caught = everything().filter(x => insideBox(x, b));
+      const all = g.additive ? [...selected(), ...caught.filter(x => !isSel(x.type, x.id))] : caught;
+      selection = all[0] || null; extra = all.slice(1); selectedCorner = -1;
+      render();
       return;
     }
     if (g.kind === 'rect' && rectStart && rectEnd) {
@@ -11302,36 +11516,47 @@ function addFloorPlanSection(nav     , sections     ) {
       else render();
       return;
     }
-    if (g.kind === 'corner' || g.kind === 'move') {
+    if (g.kind === 'corner') {
       const s = shapeOf(selection);
       if (s) s.Shape = planClamp(s.Shape, w, h);
     }
-    if (g.kind === 'item') {
-      const it = itemOf(selection .id);
-      // Where it lands is where it is: a room, an outdoor zone, or outdoors on this floor.
-      const room = planShapeAt(roomsNow(), p) || planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
-      if ((room?.Id || '') !== (it.Room || '')) { it.Room = room?.Id || ''; toast(room ? `Moved into ${room.Name || room.Id}.` : 'Moved outside every room: it is outdoors on this floor.', true); }
-      it.Floor = floorNow()?.floor.Id || it.Floor;
+    if (g.kind === 'group') {
+      // Where an item lands is where it is: a room, an outdoor zone, or outdoors on this floor.
+      const moved        = g.members.items.map((x     ) => x.it);
+      const lone = moved.length === 1 && !g.members.shapes.length;
+      let said = '';
+      moved.forEach(it => {
+        if (g.members.shapes.some((x     ) => x.sh.Id === it.Room)) return;
+        const room = (lone ? planShapeAt(roomsNow(), p) : null) || planShapeAt(roomsNow(), { X: it.X, Y: it.Y });
+        if ((room?.Id || '') !== (it.Room || '')) { it.Room = room?.Id || ''; said = room ? `Moved into ${room.Name || room.Id}.` : 'Moved outside every room: outdoors on this floor.'; }
+        it.Floor = floorNow()?.floor.Id || it.Floor;
+      });
+      if (lone && said) toast(said, true);
     }
+    if (g.kind === 'plot') viewFor = floorNow()?.floor.Id || '';
     if (g.pushed) changed();
     render();
   };
   svg.addEventListener('pointerup', endPointer);
-  svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
+  svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
   svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
   svg.addEventListener('wheel', (e     ) => {
-    // Ctrl/⌘ + wheel zooms (a trackpad pinch arrives this way too); a plain wheel scrolls the page past the plan.
-    if (!e.ctrlKey && !e.metaKey) return;
+    // The wheel and a trackpad's two fingers move around the plan; with Ctrl or ⌘ (or a pinch) they zoom.
     e.preventDefault();
-    zoomAt(toPlan(e), e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    if (e.ctrlKey || e.metaKey) { zoomAt(toPlan(e), Math.exp(-(Number(e.deltaY) || 0) * 0.0025)); return; }
+    const r = svg.getBoundingClientRect();
+    const sc = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+    const line = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? r.height : 1;
+    vb = { ...vb, x: vb.x + (Number(e.deltaX) || 0) * line / sc, y: vb.y + (Number(e.deltaY) || 0) * line / sc };
+    drawPlan();
   }, { passive: false });
 
   /// A tap, by tool.
   const tap = (g     , p    ) => {
     const hit = g.hit;
     if (mode === 'view' || tool === 'select' || tool === 'pan') {
-      if (tool !== 'pan') selectHit(hit);
+      if (tool !== 'pan') selectHit(hit, mode === 'edit' && !!g.additive);
       render();
       return;
     }
@@ -11345,11 +11570,13 @@ function addFloorPlanSection(nav     , sections     ) {
     if (tool === 'room' || tool === 'zone' || tool === 'area') { rectStart = null; rectEnd = null; render(); return; }
     if (tool === 'item') {
       if (hit.item) { selectHit(hit); render(); return; }
-      const q = onWall(itemKind, gridSnapped(p));
+      const q = onWall(itemKind, gridSnapped(p), p);
       const room = planShapeAt(roomsNow(), p) || planShapeAt(roomsNow(), q);
       const id = freshIn(itemsIn(), itemKind.replace(/-/g, '_'));
       act(() => {
-        itemsIn().push({ Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow() .floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' });
+        const it      = { Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow() .floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' };
+        placeOnWall(it, q);
+        itemsIn().push(it);
         selection = { type: 'item', id };
       });
       if (!room && !PLAN_SUPPLY_KINDS.includes(itemKind)) toast('Placed outdoors — outside every room. That is fine for an exterior light or a yard outlet.', true);
@@ -11626,7 +11853,34 @@ function addFloorPlanSection(nav     , sections     ) {
     b.onclick = () => openCircuit(c);
     return b;
   };
-  const circuitChoices = ()                     => [['', '— not known yet —'], ...(live?.circuits || []).map(c => [c.ref, circuitLabel(c)]                    )];
+  /// The nodes that are panels or circuits — measuring a breaker, not a single thing plugged in.
+  const circuitNodes = () => new Set        ([
+    ...(live?.circuits || []).flatMap(c => [c.node, ...c.channels]).filter(Boolean)            ,
+    ...ensure(flowIn(), 'Panels', []).map((p     ) => p.Node).filter(Boolean),
+  ]);
+  /// Breakers to pick a circuit from, grouped by panel. A branch circuit is never an unused slot, nor a breaker feeding a
+  /// subpanel; those feeders are what a placed panel is fed from.
+  const circuitChoices = (feeders         , current = '')           => {
+    const panelNodes = new Set(ensure(flowIn(), 'Panels', []).map((p     ) => p.Node).filter(Boolean));
+    const list = (live?.circuits || []).filter(c => c.state !== 'unused' && (feeders || !(c.node && panelNodes.has(c.node))));
+    const out           = [{ value: '', label: '— not known yet —' }, ...list.map(c => ({
+      value: c.ref, group: c.panelName, label: `${c.number}${c.description ? ' — ' + c.description : ''}`,
+      hint: [c.amps ? `${c.amps} A` : '', c.power == null ? 'no data' : formatMeasure(Math.round(c.power), 'W')].filter(Boolean).join(' · '),
+    }))];
+    if (current && !out.some(c => c.value === current)) out.splice(1, 0, { value: current, label: `${current} (not a branch circuit in any panel)` });
+    return out;
+  };
+  /// What can meter a single item: a smart plug, a PDU outlet, a sensor — never a panel, a breaker's channel, or a supply.
+  const meterChoices = (current = '')           => {
+    const skip = circuitNodes();
+    const kinds                         = { outlet: 'PDU outlets', load: 'Loads', node: 'Other nodes', pdu: 'PDUs', device: 'Devices' };
+    const list = (live?.nodes || []).filter(n => !['panel', 'breaker', 'grid', 'solar', 'battery', 'inverter', 'unmeasured'].includes(n.kind) && !skip.has(n.id));
+    const out           = [{ value: '', label: '— not individually metered —' }, ...list.map(n => ({
+      value: n.id, label: n.label, group: kinds[n.kind] || n.kind, hint: `${n.id} · ${fmt(n.value)}`,
+    }))];
+    if (current && !out.some(c => c.value === current)) out.splice(1, 0, { value: current, label: `${nodeLabel(current)} (${current})` });
+    return out;
+  };
 
   const drawSide = () => {
     side.innerHTML = '';
@@ -11645,10 +11899,11 @@ function addFloorPlanSection(nav     , sections     ) {
     if (live?.message) side.appendChild(el('div', { class: 'fp-note', text: live.message }));
     if (selection) {
       const back = el('button', { class: 'fp-back', type: 'button', text: '‹ All rooms' });
-      back.onclick = () => { selection = null; selectedCorner = -1; render(); };
+      back.onclick = () => { selection = null; extra = []; selectedCorner = -1; render(); };
       side.appendChild(back);
     }
     const editing = mode === 'edit';
+    if (extra.length) return drawMany(editing);
     if (selection?.type === 'item') return drawItem(itemOf(selection.id), editing);
     if (selection?.type === 'opening') return drawOpening(openingOf(selection.id), editing);
     if (selection?.type === 'run') return drawRun(runOf(selection.id), editing);
@@ -11814,14 +12069,10 @@ function addFloorPlanSection(nav     , sections     ) {
         side.appendChild(field('Panel', select(panels, it.Panel || '', v => act(() => { it.Panel = v; })), 'The panel in the Panel Schedule this is. Wires drawn from it can carry its circuits.'));
       }
       if (!supply || it.Kind === 'panel') {
-        const circuits = circuitChoices();
-        if (it.Circuit && !circuits.some(([v]) => v === it.Circuit)) circuits.push([it.Circuit, `${it.Circuit} (not in any panel)`]);
-        side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', select(circuits, it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }),
+        side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
           it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
       }
-      const nodes                     = [['', '— not individually metered —'], ...(live?.nodes || []).map(n => [n.id, `${n.label} (${n.id})`]                    )];
-      if (it.Node && !nodes.some(([v]) => v === it.Node)) nodes.push([it.Node, it.Node]);
-      side.appendChild(field('Metered by', select(nodes, it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }),
+      side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
         'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
     } else {
       side.append(row('Where', where));
@@ -11908,11 +12159,11 @@ function addFloorPlanSection(nav     , sections     ) {
       const note = el('input', { type: 'text', value: r.Label || '', placeholder: 'e.g. through the attic' })                    ;
       note.onchange = () => act(() => { r.Label = note.value.trim(); });
       side.append(field('Kind', select([['circuit', 'Branch circuit'], ['feeder', 'Feeder'], ['service', 'Utility service']], r.Kind || 'circuit', v => act(() => { r.Kind = v; }))),
-        field('Circuit', select(circuitChoices(), r.Circuit || '', v => act(() => {
+        field('Circuit', searchSelect(circuitChoices(r.Kind === 'feeder', r.Circuit || ''), r.Circuit || '', v => act(() => {
           r.Circuit = v;
           // Both ends of a branch circuit are on it, unless one says otherwise already.
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
-        })), 'Setting it also puts either end with no circuit of its own on this one.'),
+        }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'),
         field('Note', note));
       const del = btn('Delete', 'danger');
       del.onclick = () => deleteSelection();
@@ -11950,33 +12201,62 @@ function addFloorPlanSection(nav     , sections     ) {
     }
   };
 
+  /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
   const deleteSelection = () => {
-    if (!selection) return;
-    const sel = selection;
-    if (sel.type === 'item') {
-      const it = itemOf(sel.id);
-      if (!it) return;
-      act(() => {
-        itemsIn().splice(itemsIn().indexOf(it), 1);
-        // Runs ending at it keep their path and become loose at that end.
-        runsIn().forEach((r     ) => { if (r.From === it.Id) { r.Points.unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { r.Points.push({ X: it.X, Y: it.Y }); r.To = ''; } });
-        selection = null;
+    const all = selected();
+    if (!all.length) return;
+    const rooms = all.filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
+    const inRooms = itemsIn().filter((it     ) => rooms.some((r     ) => r.Id === it.Room) && !all.some(x => x.type === 'item' && x.id === it.Id)).length;
+    if (inRooms && !confirm(`Delete ${all.length === 1 ? (rooms[0].Name || rooms[0].Id) : `${all.length} things`}? ${inRooms} item(s) in ${rooms.length > 1 ? 'those rooms' : 'it'} stay on the plan, outdoors.`)) return;
+    act(() => {
+      all.forEach(x => {
+        if (x.type === 'item') {
+          const it = itemOf(x.id);
+          if (!it) return;
+          itemsIn().splice(itemsIn().indexOf(it), 1);
+          runsIn().forEach((r     ) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
+        } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
+        else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
+        else {
+          const sh = shapeOf(x);
+          if (!sh) return;
+          const list = x.type === 'room' ? roomsNow() : areasNow();
+          list.splice(list.indexOf(sh), 1);
+          if (x.type === 'room') { itemsIn().forEach((it     ) => { if (it.Room === sh.Id) { it.Room = ''; it.Floor = floorNow() .floor.Id; } }); areasNow().forEach(ar => { ar.Rooms = (ar.Rooms || []).filter((id        ) => id !== sh.Id); }); }
+        }
       });
-    } else if (sel.type === 'opening') act(() => { openingsNow().splice(openingsNow().indexOf(openingOf(sel.id)), 1); selection = null; });
-    else if (sel.type === 'run') act(() => { runsIn().splice(runsIn().indexOf(runOf(sel.id)), 1); selection = null; });
-    else {
-      const s = shapeOf(sel);
-      if (!s) return;
-      const inIt = itemsIn().filter((it     ) => it.Room === s.Id).length;
-      if (inIt && !confirm(`Delete ${s.Name || s.Id}? ${inIt} item(s) in it stay on the plan, outdoors.`)) return;
-      act(() => {
-        const list = sel.type === 'room' ? roomsNow() : areasNow();
-        list.splice(list.indexOf(s), 1);
-        if (sel.type === 'room') { itemsIn().forEach((it     ) => { if (it.Room === s.Id) { it.Room = ''; it.Floor = floorNow() .floor.Id; } }); areasNow().forEach(a => { a.Rooms = (a.Rooms || []).filter((x        ) => x !== s.Id); }); }
-        selection = null;
-      });
-      toast(`Deleted. Ctrl+Z brings it back.`, true);
+      selection = null; extra = [];
+    });
+    if (all.length > 1 || rooms.length) toast(`Deleted${all.length > 1 ? ` ${all.length} things` : ''}. Ctrl+Z brings ${all.length > 1 ? 'them' : 'it'} back.`, true);
+  };
+
+  /// What a selection of several things says: how many of each, and what can be done to them all at once.
+  const drawMany = (editing         ) => {
+    const all = selected();
+    const count = (t         ) => all.filter(x => x.type === t).length;
+    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires']]                               )
+      .map(([t, one, many]) => { const n = count(t); return n ? `${n} ${n > 1 ? many : one}` : ''; }).filter(Boolean);
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: `${all.length} selected` })));
+    side.appendChild(el('div', { class: 'desc', text: words.join(', ') + '. Drag any of them to move them all; arrow keys nudge them; Shift-click adds or removes one.' }));
+    const items = all.filter(x => x.type === 'item').map(x => itemOf(x.id)).filter((it     ) => it && !PLAN_SUPPLY_KINDS.includes(it.Kind));
+    if (editing && items.length) {
+      const same = items.every((it     ) => (it.Circuit || '') === (items[0].Circuit || '')) ? items[0].Circuit || '' : '__mixed';
+      const choices = [...(same === '__mixed' ? [{ value: '__mixed', label: '— several circuits —' }] : []), ...circuitChoices(false)];
+      side.appendChild(field(`Circuit for the ${items.length} item${items.length > 1 ? 's' : ''}`, searchSelect(choices, same, v => {
+        if (v === '__mixed') return;
+        act(() => items.forEach((it     ) => { it.Circuit = v; }));
+      }, { placeholder: 'Search circuits…' }), 'Puts every selected outlet, light and device on one breaker.'));
     }
+    const btns        = [];
+    if (editing) {
+      const del = btn(`Delete ${all.length}`, 'danger');
+      del.onclick = () => deleteSelection();
+      btns.push(del);
+    }
+    const none = btn('Select none');
+    none.onclick = () => { selection = null; extra = []; render(); };
+    btns.push(none);
+    side.appendChild(actions(...btns));
   };
 
   /// A metered device on a known circuit belongs beneath that circuit in the energy flow; moving it is offered, never done quietly.
@@ -12171,6 +12451,11 @@ function addFloorPlanSection(nav     , sections     ) {
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
       field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      el('h4', { text: 'Arrange' }),
+      actions(
+        (() => { const b = btn('Centre the drawing'); b.title = 'Move everything drawn on this floor to the middle of the plot.'; b.onclick = () => { arrange('centre'); closeSheet(); }; return b; })(),
+        (() => { const b = btn('Fit the plot to the drawing'); b.title = 'Shrink or grow the plot to what is drawn, with a margin all round.'; b.onclick = () => { arrange('fit'); closeSheet(); }; return b; })()),
+      el('div', { class: 'desc', text: 'The plot\u2019s edges can also be dragged in Edit with the Select tool.' }),
       el('div', { class: 'fp-id', text: `id ${f.Id} · ${fl.site.Name || fl.site.Id} · ${Math.round(scale() * 100) / 100} drawing units per metre` }));
     const del = btn('Delete floor', 'danger');
     del.onclick = () => {
@@ -12189,6 +12474,23 @@ function addFloorPlanSection(nav     , sections     ) {
     openSheet({ title: 'Floor settings', body, footer: [del] });
   };
   floorBtn.onclick = floorSheet;
+
+  /// Put the drawing in the middle of its plot, or size the plot to the drawing with a margin.
+  const arrange = (how                  ) => {
+    const m = movable(everything());
+    const box = boundsOf(m);
+    const f = floorNow()?.floor;
+    if (!box || !f) { toast('Nothing is drawn on this floor yet.', false); return; }
+    act(() => {
+      if (how === 'fit') {
+        const margin = Math.round(1.5 * scale());
+        f.Width = Math.max(100, Math.round(box.w + margin * 2));
+        f.Height = Math.max(100, Math.round(box.h + margin * 2));
+        shift(m, margin - box.x, margin - box.y);
+      } else shift(m, (Number(f.Width) - box.w) / 2 - box.x, (Number(f.Height) - box.h) / 2 - box.y);
+      viewFor = '';
+    });
+  };
 
   /// Upload a plan image for the floor on screen. With nothing drawn yet, the plot takes the image's proportions.
   const uploadImage = async (file      , say                     ) => {
@@ -12447,7 +12749,8 @@ function addFloorPlanSection(nav     , sections     ) {
     floorSel.disabled = !floors.length;
     floorBtn.disabled = !fl;
     bgBtn.disabled = !fl;
-    const key = fl ? `${fl.floor.Id}|${fl.floor.Width}|${fl.floor.Height}` : '';
+    // Refit when the floor changes, or when something asks for it by clearing viewFor; never mid-edit.
+    const key = fl ? fl.floor.Id : '';
     if (fl && viewFor !== key) { fit(); viewFor = key; }
     if (fl) stage.style.aspectRatio = `${Number(fl.floor.Width) || 1000} / ${Number(fl.floor.Height) || 700}`;
     stage.classList.toggle('is-empty', !fl);
@@ -12465,10 +12768,18 @@ function addFloorPlanSection(nav     , sections     ) {
     if (ctrl && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && (k === 'y' || k === 'Y')) { e.preventDefault(); redo(); return; }
     if (ctrl && (k === 'd' || k === 'D') && mode === 'edit' && selection) { e.preventDefault(); duplicate(); return; }
+    if (ctrl && (k === 'a' || k === 'A') && mode === 'edit') {
+      e.preventDefault();
+      const all = everything();
+      selection = all[0] || null; extra = all.slice(1); selectedCorner = -1;
+      if (tool !== 'select') tool = 'select';
+      render();
+      return;
+    }
     if (ctrl || e.altKey) return;
     if (k === 'Escape') {
       if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
-      else if (selection) { selection = null; render(); }
+      else if (selection) { selection = null; extra = []; render(); }
       return;
     }
     if (k === 'Enter' && wireDraft) { finishWire(''); return; }
@@ -12481,18 +12792,25 @@ function addFloorPlanSection(nav     , sections     ) {
     if (k.startsWith('Arrow') && selection) {
       e.preventDefault();
       const step = snapStep() * (e.shiftKey ? 10 : 1);
-      const dx = k === 'ArrowLeft' ? -step : k === 'ArrowRight' ? step : 0, dy = k === 'ArrowUp' ? -step : k === 'ArrowDown' ? step : 0;
-      act(() => {
-        const s = shapeOf(selection);
-        if (s) s.Shape = planClamp(planMove(s.Shape, dx, dy), floorSize().w, floorSize().h);
-        const it = selection .type === 'item' ? itemOf(selection .id) : selection .type === 'opening' ? openingOf(selection .id) : null;
-        if (it) { it.X = planRound(it.X + dx); it.Y = planRound(it.Y + dy); }
-      });
+      let dx = k === 'ArrowLeft' ? -step : k === 'ArrowRight' ? step : 0, dy = k === 'ArrowUp' ? -step : k === 'ArrowDown' ? step : 0;
+      const m = movable(selected());
+      const box = boundsOf(m);
+      const { w, h } = floorSize();
+      if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
+      act(() => shift(m, dx, dy));
       return;
     }
     const byKey = FP_TOOLS.find(t => t[2].toLowerCase() === k.toLowerCase());
     if (byKey) { e.preventDefault(); pickTool(byKey[0]); }
   });
+
+  // Holding Space turns any drag into a pan, as drawing programs do.
+  window.addEventListener('keydown', (e     ) => {
+    if (e.key !== ' ' || !sec.classList.contains('active') || /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target?.tagName || '')) return;
+    e.preventDefault();
+    if (!spaceDown) { spaceDown = true; svg.classList.add('is-panning'); }
+  });
+  window.addEventListener('keyup', (e     ) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
   link.onclick = () => { activate(link, sec); render(); load(); };
   // The live view keeps up with the house while it is on screen.

@@ -42,6 +42,7 @@ const MODULES = [
   'plan-units.ts',
   'plan-history.ts',
   'plan-art.ts',
+  'search-select.ts',
   'location-options.ts',
   'panel-layout.ts',
   'sections/paths.ts',

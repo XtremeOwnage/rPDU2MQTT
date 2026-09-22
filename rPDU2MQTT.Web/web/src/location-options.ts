@@ -18,10 +18,10 @@ export function locationChoices(): [string, string][] {
   return out;
 }
 
-/// Every breaker in every panel as ["panel/number", label].
+/// Every breaker in use in every panel as ["panel/number", label]; an unused slot is not a circuit anything is on.
 export function circuitChoices(): [string, string][] {
   const panels: any[] = state.data?.EnergyFlow?.Panels || [];
-  return panels.flatMap(p => (p.Breakers || []).map((b: any) =>
+  return panels.flatMap(p => (p.Breakers || []).filter((b: any) => b.State !== 'unused').map((b: any) =>
     [`${p.Id}/${b.Number}`, `${p.Name || p.Id} · ${b.Number}${b.Description ? ' — ' + b.Description : ''}`] as [string, string]));
 }
 

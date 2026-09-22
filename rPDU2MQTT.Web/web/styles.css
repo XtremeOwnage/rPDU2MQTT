@@ -1475,3 +1475,39 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   paint-order: stroke; stroke: var(--panel); stroke-width: .32em; stroke-linejoin: round;
 }
 .fp-item-read.is-nodata, .fp-run-read.is-nodata { fill: var(--warn); font-weight: 600; }
+
+/* Floor Plans: box selection, the plot's edges, wall-mounted items, and the searchable picker. */
+.fp-marquee { fill: var(--accent-bg); stroke: var(--accent); stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.fp-plot-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; opacity: .85; }
+.fp-plot-handle.is-l, .fp-plot-handle.is-r { cursor: ew-resize; }
+.fp-plot-handle.is-t, .fp-plot-handle.is-b { cursor: ns-resize; }
+.fp-plot-handle.is-rb, .fp-plot-handle.is-lt { cursor: nwse-resize; }
+.fp-plot-handle:hover { fill: var(--accent); }
+.fp-item-stub { stroke: var(--fg); stroke-linecap: round; pointer-events: none; }
+.fp-svg.is-panning, .fp-svg.is-panning * { cursor: grab !important; }
+.ss { position: relative; min-width: 0; }
+.ss-btn {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 38px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel2); color: var(--fg); font: inherit; font-size: 14px;
+  text-align: left; cursor: pointer;
+}
+.ss-btn:hover { border-color: var(--muted); }
+.ss-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.ss-face { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-caret { color: var(--muted); font-size: 12px; }
+.ss-pop {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; min-width: 260px; padding: 6px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow-lg);
+}
+.ss-search { width: 100%; margin-bottom: 6px; }
+.ss-list { max-height: 320px; overflow: auto; display: grid; gap: 1px; }
+.ss-group { position: sticky; top: 0; padding: 6px 8px 3px; background: var(--panel); color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.ss-opt {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px; width: 100%; padding: 7px 8px; border: 0;
+  border-radius: var(--r-xs); background: none; color: var(--fg); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.ss-opt:hover, .ss-opt.is-active { background: var(--panel3); }
+.ss-opt.is-current { color: var(--accent); font-weight: 600; }
+.ss-label { min-width: 0; overflow-wrap: anywhere; }
+.ss-hint { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ss-none { padding: 10px 8px; color: var(--muted); font-size: 13px; }

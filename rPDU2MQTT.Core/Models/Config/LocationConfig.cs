@@ -226,6 +226,9 @@ public class PlacementConfig
     [Description("The id of the floor it is drawn on. Needed for anything outside every room.")]
     public string Floor { get; set; } = "";
 
+    [Description("For an item mounted on a wall, the direction it faces into its room, in degrees clockwise from pointing right. Blank when it stands free.")]
+    public double? Facing { get; set; }
+
     [Description("For an electrical panel placed on the plan, the id of the panel in the panel schedule.")]
     public string Panel { get; set; } = "";
 
