@@ -12798,6 +12798,14 @@ function addFloorPlanSection(nav     , sections     ) {
         side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
           it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
       }
+      if (it.Kind === 'outlet') {
+        const g = el('input', { type: 'checkbox' })                    ;
+        g.checked = !!it.Gfci;
+        g.onchange = () => act(() => { if (g.checked) it.Gfci = true; else delete it.Gfci; });
+        side.appendChild(el('label', { class: 'ld-inst fp-check', title: 'Whatever is wired from its load side is protected by it.' }, g, ' GFCI outlet'));
+      }
+      side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
+        'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
       // Its real size: width and depth, which way it is turned, and whether it is round.
       const inch = 0.0254 * scale();
       const looks = select([['', isSized(it) ? '— its own size —' : '— an icon —'], ...PLAN_FOOTPRINTS.map(f => [f[0], f[1]]                    )], '', v => {
@@ -12827,14 +12835,6 @@ function addFloorPlanSection(nav     , sections     ) {
         side.appendChild(field('Turned', el('div', { class: 'fp-colour-row' }, turn, el('span', { class: 'fp-opts-note', text: '°' }), r90), 'Its front faces the room when it is dropped by a wall. Drag the knob above it to turn it, or its corner to size it.'));
         side.appendChild(el('div', { class: 'fp-colour-row' }, el('label', { class: 'ld-inst fp-check' }, round, ' Round'), icon));
       }
-      if (it.Kind === 'outlet') {
-        const g = el('input', { type: 'checkbox' })                    ;
-        g.checked = !!it.Gfci;
-        g.onchange = () => act(() => { if (g.checked) it.Gfci = true; else delete it.Gfci; });
-        side.appendChild(el('label', { class: 'ld-inst fp-check', title: 'Whatever is wired from its load side is protected by it.' }, g, ' GFCI outlet'));
-      }
-      side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
-        'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
     } else {
       side.append(row('Where', where));
       if (!supply || it.Circuit) side.append(row('Circuit', it.Circuit ? refLabel(it.Circuit) : 'not known yet'));
