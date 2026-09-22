@@ -3199,7 +3199,7 @@ function planHistory(get           , set                  , limit = 200)        
 /// Surfaces a room, outdoor zone or the ground can have, with their names.
 const PLAN_SURFACES                     = [
   ['', 'Plain'], ['wood', 'Wood'], ['tile', 'Tile'], ['carpet', 'Carpet'], ['concrete', 'Concrete'], ['stone', 'Stone'],
-  ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'],
+  ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'], ['stairs', 'Stairs'],
 ];
 
 /// Grounds a floor can sit on.
@@ -3243,6 +3243,7 @@ function planTextures(s        )        {
   pat('deck', 1.5, 0.28, '#b17d50', line(0, 0.14, 1.5, 0.14, '#7c5535', 0.014), line(0, 0.28, 1.5, 0.28, '#7c5535', 0.014), line(0.6, 0, 0.6, 0.14, '#7c5535', 0.01), line(1.25, 0.14, 1.25, 0.28, '#7c5535', 0.01));
   pat('pavers', 0.4, 0.2, '#b9684c', path('M0 0 H0.4 M0 0.1 H0.4 M0.2 0 V0.1 M0 0.1 V0.2 M0.4 0.1 V0.2', '#8c4a33', 0.012));
   pat('water', 0.6, 0.3, '#76aad6', path('M0 0.15 q0.075 -0.06 0.15 0 t0.15 0 t0.15 0 t0.15 0', '#5b91c2', 0.014));
+  pat('stairs', 1.0, 0.28, '#d3cbbd', line(0, 0.27, 1.0, 0.27, '#8f8676', 0.018), line(0, 0.25, 1.0, 0.25, '#b7ae9e', 0.008));
   pat('snow', 0.4, 0.4, '#f2f5f9', dot(0.08, 0.1, 0.01, '#dde4ee'), dot(0.3, 0.25, 0.012, '#e3e9f1'), dot(0.2, 0.36, 0.008, '#d6dee9'));
   return out;
 }
@@ -12006,6 +12007,18 @@ function addFloorPlanSection(nav     , sections     ) {
       body.appendChild(row('Unmetered remainder', c.remainderState === 'known' ? formatMeasure(Math.round(c.remainder ), 'W') : 'unknown', c.remainderState === 'known' ? '' : 'is-nodata'));
       if (c.remainderState !== 'known') body.appendChild(el('div', { class: 'desc', text: c.power == null ? 'The circuit itself has no reading, so what is left over cannot be said.' : 'A device on it has no reading, so what is left over cannot be said.' }));
       if (c.exceeded) body.appendChild(el('div', { class: 'fp-note is-bad', text: 'What is metered on this circuit reads more than the circuit itself. A device is recorded against the wrong circuit, or the CT is on the wrong wire.' }));
+    }
+    // How much cable is drawn for it, floor by floor.
+    const drawnRuns = runsIn().filter((r     ) => r.Circuit === c.ref);
+    if (drawnRuns.length) {
+      const byFloor = new Map                ();
+      drawnRuns.forEach((r     ) => {
+        const f = floorById(r.Floor)?.floor;
+        const metres = planPathLength(runPath(r)) / Math.max(1, Number(f?.Scale) || 100);
+        byFloor.set(f?.Name || r.Floor, (byFloor.get(f?.Name || r.Floor) || 0) + metres);
+      });
+      const total = [...byFloor.values()].reduce((a, v) => a + v, 0);
+      body.appendChild(row('Cable drawn', `${planFmtLen(total, sys())} in ${drawnRuns.length} run${drawnRuns.length > 1 ? 's' : ''}` + (byFloor.size > 1 ? ` (${[...byFloor].map(([n, m]) => `${n} ${planFmtLen(m, sys())}`).join(', ')})` : '')));
     }
     // From a breaker, everything placed on its circuit, across rooms and floors.
     body.appendChild(el('h4', { text: 'Placed on it' }));

@@ -1196,7 +1196,7 @@ run brings its circuit forward and fades the rest. Wiring an item on no circuit 
 that circuit (said on screen, and undoable). A run's length on the plan is shown with it.
 
 **Textures.** Rooms and outdoor zones can have a surface — wood, tile, carpet, concrete, stone, grass, gravel, dirt,
-deck, pavers, water or snow — drawn at its real size, and each floor a ground around the rooms.
+deck, pavers, water, snow, or stairs for a stairwell — drawn at its real size, and each floor a ground around the rooms.
 
 ```yaml
 Gui:

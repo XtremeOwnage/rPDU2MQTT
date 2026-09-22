@@ -306,6 +306,12 @@ query(sec, '.fp-chip', true).find(b => /B06/.test(textOf(b))).onclick();
 if (itemEl(porch.Id).classList.contains('is-dim')) fail('picking the circuit again did not bring everything back');
 if (!button('Print', sec)) fail('there is no way to print the plan');
 
+// The circuit's sheet says how much cable is drawn for it.
+tap(itemEl('fridge'), 100, 100);
+query(side(), '.fp-list-row', true).find(b => /B06/.test(textOf(b))).onclick();
+if (!/Cable drawn\s*\d/.test(textOf(sheet()))) fail(`the circuit does not say how much cable is drawn for it: ${textOf(sheet())}`);
+shut();
+
 // Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
 toolBtn('Measure').onclick();
 tap(svg, 0, 0); tap(svg, 400, 0);

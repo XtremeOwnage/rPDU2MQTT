@@ -88,6 +88,7 @@ public static class Surfaces
     public const string Pavers = "pavers";
     public const string Water = "water";
     public const string Snow = "snow";
+    public const string Stairs = "stairs";
 }
 
 /// <summary>What an opening in a wall is (#463).</summary>
@@ -150,8 +151,8 @@ public class RoomConfig
     [Description("An outdoor zone rather than a room: a yard, porch, patio, driveway or deck. Drawn as ground, not walls.")]
     public bool Outdoor { get; set; }
 
-    [AllowedValues("", Surfaces.Wood, Surfaces.Tile, Surfaces.Carpet, Surfaces.Concrete, Surfaces.Stone, Surfaces.Grass, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Deck, Surfaces.Pavers, Surfaces.Water, Surfaces.Snow)]
-    [Description("The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water or snow. Blank is plain.")]
+    [AllowedValues("", Surfaces.Wood, Surfaces.Tile, Surfaces.Carpet, Surfaces.Concrete, Surfaces.Stone, Surfaces.Grass, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Deck, Surfaces.Pavers, Surfaces.Water, Surfaces.Snow, Surfaces.Stairs)]
+    [Description("The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water, snow, or stairs for a stairwell. Blank is plain.")]
     public string Surface { get; set; } = "";
 
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]

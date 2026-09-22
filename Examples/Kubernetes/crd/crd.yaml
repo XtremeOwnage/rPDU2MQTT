@@ -1426,7 +1426,8 @@ spec:
                                       - pavers
                                       - water
                                       - snow
-                                      description: 'The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water or snow. Blank is plain.'
+                                      - stairs
+                                      description: 'The floor or ground inside it: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck, pavers, water, snow, or stairs for a stairwell. Blank is plain.'
                                     HaArea:
                                       type: string
                                       description: The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.

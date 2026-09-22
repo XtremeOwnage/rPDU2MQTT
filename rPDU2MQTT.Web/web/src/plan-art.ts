@@ -5,7 +5,7 @@ import { svgEl } from './helpers.js';
 /// Surfaces a room, outdoor zone or the ground can have, with their names.
 export const PLAN_SURFACES: [string, string][] = [
   ['', 'Plain'], ['wood', 'Wood'], ['tile', 'Tile'], ['carpet', 'Carpet'], ['concrete', 'Concrete'], ['stone', 'Stone'],
-  ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'],
+  ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'], ['stairs', 'Stairs'],
 ];
 
 /// Grounds a floor can sit on.
@@ -49,6 +49,7 @@ export function planTextures(s: number): any[] {
   pat('deck', 1.5, 0.28, '#b17d50', line(0, 0.14, 1.5, 0.14, '#7c5535', 0.014), line(0, 0.28, 1.5, 0.28, '#7c5535', 0.014), line(0.6, 0, 0.6, 0.14, '#7c5535', 0.01), line(1.25, 0.14, 1.25, 0.28, '#7c5535', 0.01));
   pat('pavers', 0.4, 0.2, '#b9684c', path('M0 0 H0.4 M0 0.1 H0.4 M0.2 0 V0.1 M0 0.1 V0.2 M0.4 0.1 V0.2', '#8c4a33', 0.012));
   pat('water', 0.6, 0.3, '#76aad6', path('M0 0.15 q0.075 -0.06 0.15 0 t0.15 0 t0.15 0 t0.15 0', '#5b91c2', 0.014));
+  pat('stairs', 1.0, 0.28, '#d3cbbd', line(0, 0.27, 1.0, 0.27, '#8f8676', 0.018), line(0, 0.25, 1.0, 0.25, '#b7ae9e', 0.008));
   pat('snow', 0.4, 0.4, '#f2f5f9', dot(0.08, 0.1, 0.01, '#dde4ee'), dot(0.3, 0.25, 0.012, '#e3e9f1'), dot(0.2, 0.36, 0.008, '#d6dee9'));
   return out;
 }

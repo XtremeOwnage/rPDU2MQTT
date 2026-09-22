@@ -1529,6 +1529,18 @@ export function addFloorPlanSection(nav: any, sections: any) {
       if (c.remainderState !== 'known') body.appendChild(el('div', { class: 'desc', text: c.power == null ? 'The circuit itself has no reading, so what is left over cannot be said.' : 'A device on it has no reading, so what is left over cannot be said.' }));
       if (c.exceeded) body.appendChild(el('div', { class: 'fp-note is-bad', text: 'What is metered on this circuit reads more than the circuit itself. A device is recorded against the wrong circuit, or the CT is on the wrong wire.' }));
     }
+    // How much cable is drawn for it, floor by floor.
+    const drawnRuns = runsIn().filter((r: any) => r.Circuit === c.ref);
+    if (drawnRuns.length) {
+      const byFloor = new Map<string, number>();
+      drawnRuns.forEach((r: any) => {
+        const f = floorById(r.Floor)?.floor;
+        const metres = planPathLength(runPath(r)) / Math.max(1, Number(f?.Scale) || 100);
+        byFloor.set(f?.Name || r.Floor, (byFloor.get(f?.Name || r.Floor) || 0) + metres);
+      });
+      const total = [...byFloor.values()].reduce((a, v) => a + v, 0);
+      body.appendChild(row('Cable drawn', `${planFmtLen(total, sys())} in ${drawnRuns.length} run${drawnRuns.length > 1 ? 's' : ''}` + (byFloor.size > 1 ? ` (${[...byFloor].map(([n, m]) => `${n} ${planFmtLen(m, sys())}`).join(', ')})` : '')));
+    }
     // From a breaker, everything placed on its circuit, across rooms and floors.
     body.appendChild(el('h4', { text: 'Placed on it' }));
     const placed = itemsIn().filter((it: any) => it.Circuit === c.ref);
