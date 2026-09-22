@@ -25,6 +25,10 @@ public static class ConfigApply
         "HomeAssistant.EnergyDashboard",
         // Read on each provisioning pass.
         "EmonCMS.Feeds",
+        // The image store is rebuilt when its settings object changes.
+        "PlanStorage",
+        // Only the floor plan page reads it, from the saved document.
+        "Gui.DistanceUnits",
     ];
 
     /// <summary>Does a change to this setting take effect without a restart?</summary>

@@ -721,6 +721,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
                 // And the history backend: FlowHistoryRouter reads the provider and its settings per call.
                 config.History = reloaded.History;
+                // Plan storage is rebuilt on the next image request, and distance units are only read by the page.
+                config.PlanStorage = reloaded.PlanStorage;
+                config.Gui.DistanceUnits = reloaded.Gui.DistanceUnits;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config.
                 var instanceMessage = "";
