@@ -300,7 +300,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const hint = el('div', { class: 'fp-hint' });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
-  const stage = el('div', { class: 'fp-stage' }, svg, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
+  const menu = el('div', { class: 'fp-menu' });
+  menu.hidden = true;
+  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
   const body = el('div', { class: 'fp-body' }, palette, el('div', { class: 'fp-main' }, opts, stage, legend), side);
@@ -1284,6 +1286,119 @@ export function addFloorPlanSection(nav: any, sections: any) {
   svg.addEventListener('pointercancel', (e: any) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
   svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
+
+  // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
+  type Entry = { label: string; run?: () => void; danger?: boolean; disabled?: boolean; head?: boolean };
+  const closeMenu = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  const openMenu = (e: any, entries: Entry[]) => {
+    menu.innerHTML = '';
+    entries.filter(Boolean).forEach(x => {
+      if (x.head) { menu.appendChild(el('div', { class: 'fp-menu-head', text: x.label })); return; }
+      const b = el('button', { class: 'fp-menu-item' + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
+      b.disabled = !!x.disabled;
+      b.onclick = () => { closeMenu(); x.run?.(); };
+      menu.appendChild(b);
+    });
+    const r = stage.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
+    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
+    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - entries.length * 34)));
+    menu.style.left = `${Math.round(x)}px`;
+    menu.style.top = `${Math.round(y)}px`;
+    menu.hidden = false;
+  };
+  /// What a right-click offers, by what it landed on.
+  const menuFor = (hit: any, p: Pt): Entry[] => {
+    const editing = mode === 'edit';
+    const toEdit: Entry = { label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } };
+    const under = hitSel(hit);
+    if (under && !isSel(under.type, under.id)) selectHit(hit);
+    const many = selected().length > 1;
+    if (many) return [
+      { label: `${selected().length} selected`, head: true },
+      { label: 'Delete them', danger: true, disabled: !editing, run: () => deleteSelection() },
+      { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
+    ];
+    if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, disabled: !editing, run: () => { selectedCorner = hit.corner; removeCorner(); } }];
+    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, disabled: !editing, run: () => { selectedBend = hit.runpt; removeBend(); } }];
+    if (hit.mid != null) {
+      const sh = shapeOf(selection);
+      const locked = !!sh && ((sh.LockedWalls || []).includes(hit.mid) || sh.Locked);
+      return [
+        { label: `Wall ${hit.mid + 1}`, head: true },
+        { label: 'Add a corner here', disabled: !editing || locked, run: () => insertCorner(hit.mid) },
+        { label: locked ? 'Unlock this wall' : 'Lock this wall', disabled: !editing || !sh, run: () => act(() => { const list = ensure(sh, 'LockedWalls', []); const at = list.indexOf(hit.mid); if (at >= 0) list.splice(at, 1); else list.push(hit.mid); if (!list.length) delete sh.LockedWalls; }) },
+        { label: 'Hold its length', disabled: !editing || !sh, run: () => { const [i, j] = planEdgeCorners(sh, hit.mid); addConstraint('length', [{ Room: sh.Id, Edge: hit.mid }], Math.round(Math.hypot(sh.Shape[j].X - sh.Shape[i].X, sh.Shape[j].Y - sh.Shape[i].Y) * 10) / 10); } },
+      ];
+    }
+    if (hit.item) {
+      const it = itemOf(hit.item);
+      if (!it) return [];
+      const supply = PLAN_SUPPLY_KINDS.includes(it.Kind);
+      return [
+        { label: itemName(it), head: true },
+        ...(it.Circuit ? [{ label: 'Show its circuit', run: () => { focused = focused === it.Circuit ? '' : it.Circuit; drawPlan(); } } as Entry] : []),
+        ...(supply ? [] : [{ label: 'Trace its circuit', run: () => traceItem(it) } as Entry]),
+        { label: 'Wire from here', disabled: !editing, run: () => { mode = 'edit'; tool = 'wire'; wireDraft = { from: it.Id, pts: [] }; render(); } },
+        ...(isSized(it)
+          ? [{ label: 'Turn 90°', disabled: !editing, run: () => act(() => { it.Rotation = ((Number(it.Rotation) || 0) + 90) % 360; }) } as Entry,
+             { label: 'Draw as an icon', disabled: !editing, run: () => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; delete it.Footprint; }) } as Entry]
+          : [{ label: 'Give it a real size', disabled: !editing, run: () => act(() => { const side = planRound(0.76 * scale()); it.Width = side; it.Depth = side; it.Rotation = 0; }) } as Entry]),
+        ...(it.Kind === 'outlet' ? [{ label: it.Gfci ? 'Not a GFCI' : 'Mark as GFCI', disabled: !editing, run: () => act(() => { if (it.Gfci) delete it.Gfci; else it.Gfci = true; }) } as Entry] : []),
+        { label: 'Duplicate', disabled: !editing, run: () => duplicate() },
+        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+        ...(editing ? [] : [toEdit]),
+      ];
+    }
+    if (hit.opening) {
+      const o = openingOf(hit.opening);
+      return [
+        { label: PLAN_OPENINGS.find(x => x[0] === o?.Kind)?.[1] || 'Opening', head: true },
+        { label: 'Turn 90°', disabled: !editing, run: () => act(() => { o.Angle = ((Number(o.Angle) || 0) + 90) % 360; }) },
+        { label: 'Open the other way', disabled: !editing, run: () => act(() => { if (o.Flip) delete o.Flip; else o.Flip = true; }) },
+        { label: 'Hinges on the other side', disabled: !editing, run: () => act(() => { o.Swing = o.Swing === 'right' ? 'left' : 'right'; }) },
+        { label: 'Duplicate', disabled: !editing, run: () => duplicate() },
+        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+      ];
+    }
+    if (hit.run) {
+      const r = runOf(hit.run);
+      return [
+        { label: r?.Label || 'Wire', head: true },
+        { label: 'Reverse direction', disabled: !editing, run: () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); }) },
+        ...(r?.Circuit ? [{ label: 'Show its circuit', run: () => { focused = focused === r.Circuit ? '' : r.Circuit; drawPlan(); } } as Entry] : []),
+        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+      ];
+    }
+    if (hit.room || hit.area) {
+      const sh = shapeOf(selection);
+      if (!sh) return [];
+      return [
+        { label: sh.Name || sh.Id, head: true },
+        { label: sh.Locked ? 'Unlock it' : 'Lock it', disabled: !editing, run: () => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }) },
+        { label: 'Redraw its outline', disabled: !editing || !!sh.Locked, run: () => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); } },
+        { label: 'Duplicate', disabled: !editing || !!hit.area, run: () => duplicate() },
+        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+        ...(editing ? [] : [toEdit]),
+      ];
+    }
+    // Bare plot.
+    return [
+      { label: 'Here', head: true },
+      { label: 'Add a room here', disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'room'; render(); roomBySize(false); } },
+      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'item'; render(); tap({ hit: {}, additive: false }, p); } },
+      { label: 'Background image…', disabled: !floorNow(), run: () => backgroundSheet() },
+      { label: 'Fit the floor in view', run: () => { fit(); drawPlan(); } },
+      ...(editing ? [] : [toEdit]),
+    ];
+  };
+  svg.addEventListener('contextmenu', (e: any) => {
+    e.preventDefault?.();
+    const p = toPlan(e);
+    const entries = menuFor(hitOf(e), p);
+    render();
+    openMenu(e, entries);
+  });
+  stage.addEventListener('pointerdown', (e: any) => { if (!menu.hidden && !menu.contains?.(e.target)) closeMenu(); }, true);
   svg.addEventListener('wheel', (e: any) => {
     // The wheel zooms about the pointer; with Shift it pans instead.
     e.preventDefault();
@@ -2926,6 +3041,7 @@ export function addFloorPlanSection(nav: any, sections: any) {
     }
     if (ctrl || e.altKey) return;
     if (k === 'Escape') {
+      if (!menu.hidden) { closeMenu(); return; }
       if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
       else if (selection) { selection = null; extra = []; render(); }
       return;

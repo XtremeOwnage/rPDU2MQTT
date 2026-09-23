@@ -1210,6 +1210,8 @@ meter, the pole — and counts toward the floor's total. Outdoor zones are rooms
 
 **Appliances at their real size.** The Item tool's *At real size* group places a washer, dryer, fridge, chest freezer, range, dishwasher, water heater, furnace, AC condenser, server rack or hot tub at its usual size (`Width`, `Depth`, `Rotation`, `Round`), drawn as seen from above — a washer's round lid, a range's burners, a condenser's fan (`Footprint`). Dropped near a wall it stands with its back to the wall, facing the room. Selected, its corner handle sizes it and the knob above it turns it (in 15° steps; Shift for any angle), or its panel takes exact measurements. Any item can be given a real size, or drawn as an icon again.
 
+**Right-click** anything on the plan for a menu about it: an item's circuit, trace, wiring, size, GFCI, duplicate or delete; a room's lock, redraw, duplicate or delete; a wall's corner, lock or held length; a corner or wire bend's removal; a wire's direction; and, on bare plot, adding a room or item there, the background image, or fitting the floor in view. While viewing, the menu offers *Edit this floor* instead of editing outright.
+
 **Showing constraints.** The *Constraints* checkbox shows or hides the constraint markers.
 
 **Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).

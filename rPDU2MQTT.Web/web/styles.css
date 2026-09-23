@@ -1574,3 +1574,18 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-art .is-fill { fill: var(--muted); stroke: none; }
 .fp-body.has-art .fp-body-shape { fill: var(--panel3); }
 .fp-kind.is-size .fp-art rect, .fp-kind.is-size .fp-art circle, .fp-kind.is-size .fp-art line { stroke-width: .8px; }
+
+/* Floor Plans: the menu a right-click opens, over whatever it was aimed at. */
+.fp-menu {
+  position: absolute; z-index: 20; min-width: 210px; padding: 5px; border: 1px solid var(--line);
+  border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow-lg);
+}
+.fp-menu[hidden] { display: none; }
+.fp-menu-head { padding: 6px 10px 4px; color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-menu-item {
+  display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-xs); background: none;
+  color: var(--fg); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.fp-menu-item:hover:not(:disabled) { background: var(--panel3); }
+.fp-menu-item.is-danger { color: var(--bad); }
+.fp-menu-item:disabled { opacity: .45; cursor: default; }

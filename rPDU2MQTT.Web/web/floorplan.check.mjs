@@ -687,6 +687,38 @@ if (!query(sec, 'g', true).some(g => g.classList.contains('fp-cons'))) fail('sho
 key('z', { ctrlKey: true });
 toolBtn('Select').onclick();
 
+// Right-clicking opens a menu for whatever it was aimed at.
+toolBtn('Select').onclick();
+key('Escape');
+const menu = () => query(sec, '.fp-menu');
+const menuItem = (t) => query(menu(), 'button', true).find(b => (b.textContent || '').trim() === t);
+const rightClick = (target, x, y) => svg.dispatch('contextmenu', { ...at(x, y), target, preventDefault() { } });
+rightClick(itemEl('fridge'), 100, 100);
+if (menu().hidden) fail('right-clicking an item opened no menu');
+if (!/Fridge/.test(textOf(menu())) || !menuItem('Duplicate') || !menuItem('Wire from here')) fail(`the item menu is not about the item: ${textOf(menu())}`);
+const items0 = config.EnergyFlow.Placements.length;
+menuItem('Duplicate').onclick();
+if (config.EnergyFlow.Placements.length !== items0 + 1) fail('Duplicate from the menu did nothing');
+if (!menu().hidden) fail('the menu stayed open after a choice');
+key('z', { ctrlKey: true });
+rightClick(polygonFor('kitchen'), 200, 150);
+if (!/Kitchen/.test(textOf(menu())) || !menuItem('Lock it')) fail(`the room menu is not about the room: ${textOf(menu())}`);
+menuItem('Lock it').onclick();
+if (!roomById('kitchen').Locked) fail('locking from the menu did nothing');
+rightClick(polygonFor('kitchen'), 200, 150);
+menuItem('Unlock it').onclick();
+if (roomById('kitchen').Locked) fail('unlocking from the menu did nothing');
+rightClick(svg, 900, 600);
+if (!menuItem('Fit the floor in view') || !menuItem('Background image…')) fail(`the menu on bare plot offers nothing: ${textOf(menu())}`);
+key('Escape');
+if (!menu().hidden) fail('Escape did not close the menu');
+// …and in View it offers a way into Edit rather than editing outright.
+button('View', sec).onclick();
+rightClick(itemEl('fridge'), 100, 100);
+if (!menuItem('Edit this floor') || !menuItem('Duplicate').disabled) fail(`the menu while viewing offers editing: ${textOf(menu())}`);
+key('Escape');
+button('Edit', sec).onclick();
+
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();
 const plotW = query(sheet(), 'input', true).find(i => i.classList.contains('fp-len'));
