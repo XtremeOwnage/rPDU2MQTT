@@ -19,6 +19,8 @@ public static class PanelAudit
     public const string HalfClamped = "half-clamped";
     public const string OverRating = "over-rating";
     public const string ChannelIsATier = "channel-is-a-tier";
+    public const string PanelMultiFed = "panel-multi-fed";
+    public const string CircuitMultiFed = "circuit-multi-fed";
 
     /// <summary>Power below this, in watts, is noise rather than a circuit drawing something.</summary>
     public const double Floor = 5;
@@ -33,6 +35,29 @@ public static class PanelAudit
         var ids = StringComparer.OrdinalIgnoreCase;
         string Ref(BreakerChain c) => Circuits.RefOf(c);
         double? Read(string node, string m = "") => live is not null && live.TryGetValue(node, string.IsNullOrEmpty(m) ? metric : m, out var v) ? v : null;
+
+        // What feeds each node, as the config wires it by hand.
+        var feeders = new Dictionary<string, List<string>>(ids);
+        void Feeds(string? from, string? to)
+        {
+            if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to)) return;
+            if (!feeders.TryGetValue(to, out var list)) feeders[to] = list = new();
+            if (!list.Contains(from, ids)) list.Add(from);
+        }
+        foreach (var l in f.Links) Feeds(l.From, l.To);
+        foreach (var (child, parent) in f.Parents) Feeds(parent, child);
+        List<string> FedBy(string? node) => node is not null && feeders.TryGetValue(node, out var list) ? list : [];
+
+        // A panel is fed from one place. Two feeders split its power across both on the diagram, and the
+        // supply that is not really there is counted anyway.
+        foreach (var panel in f.Panels)
+        {
+            var fed = FedBy(panel.Node);
+            if (fed.Count > 1)
+                found.Add(new PanelFinding(PanelMultiFed, "bad",
+                    $"{(string.IsNullOrWhiteSpace(panel.Name) ? panel.Id : panel.Name)} is fed by {fed.Count} nodes: {string.Join(", ", fed)}. A panel is fed from one place — drop the ones that do not feed it.",
+                    [], [.. fed]));
+        }
 
         // One channel measuring two breakers: at most one of them is right, and both are reporting its power.
         var byChannel = new Dictionary<string, List<BreakerChain>>(ids);
@@ -78,6 +103,16 @@ public static class PanelAudit
                 found.Add(new PanelFinding(OverRating, "bad",
                     $"{Ref(chain)} reads {Math.Round(amps, 1)} A on a {b.Amps} A breaker. A breaker over its rating trips; check that the clamp is on the right wire and its rating is right.",
                     [Ref(chain)], [.. chans]));
+        }
+
+        // A circuit hanging off the graph twice: beneath its panel, and wired again from somewhere else.
+        foreach (var b in PanelNodes.For(f))
+        {
+            var extra = FedBy(b.Id).Where(x => !ids.Equals(x, b.PanelNode)).ToList();
+            if (extra.Count == 0) continue;
+            found.Add(new PanelFinding(CircuitMultiFed, "bad",
+                $"{Ref(b.Chain)} is {b.Id}, which is also fed by {string.Join(", ", extra)}. The circuit hangs off the graph twice, so its power is counted under both. Drop that link, or point the breaker at the node that really measures it.",
+                [Ref(b.Chain)], [.. extra]));
         }
 
         // A channel drawing power that no breaker claims: something is metered that the directory does not know about.

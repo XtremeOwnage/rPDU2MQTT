@@ -26,6 +26,8 @@ const CHECK_TITLES: Record<string, string> = {
   'half-clamped': 'Half a double-pole breaker',
   'over-rating': 'Over the breaker\u2019s rating',
   'channel-is-a-tier': 'Measured by a breaker, not a channel',
+  'panel-multi-fed': 'A panel fed from two places',
+  'circuit-multi-fed': 'A circuit fed from two places',
 };
 
 /// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.

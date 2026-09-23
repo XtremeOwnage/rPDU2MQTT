@@ -869,6 +869,10 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   const addLink = (from: string, to: string) => {
     if (from === to || links.some(l => l.From === from && l.To === to)) return;
     if (wouldLoop(links, from, to)) { toast('That would create a feeder loop.', false); return; }
+    // A panel is fed from one place. Two feeders split its power across both on the diagram and count a
+    // supply that is not there, so the second one is refused rather than quietly wired.
+    const already = (cand.get(to) || {}).kind === 'panel' ? links.find(l => l.To === to) : null;
+    if (already) { toast(`${nm(to)} is a panel, and a panel is fed from one place — it is already fed by ${nm(already.From)}. Drop that first.`, false); return; }
     links.push({ From: from, To: to });
   };
   const removeLink = (from: string, to: string) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };

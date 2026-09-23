@@ -210,6 +210,44 @@ public class PanelNodeTests
     }
 
     [Fact]
+    public void APanelFedFromTwoPlaces_IsReported()
+    {
+        var flow = Wiring();
+        flow.Nodes.Add(new() { Id = "generator", Kind = "generator" });
+        flow.Links.Add(new() { From = "generator", To = "main" });
+
+        var f = Assert.Single(PanelAudit.Check(flow, new Fixed(new()), null), x => x.Kind == PanelAudit.PanelMultiFed);
+        Assert.Equal("bad", f.Severity);
+        Assert.Contains("fed by 2 nodes: grid, generator", f.Message);
+        Assert.Contains("A panel is fed from one place", f.Message);
+    }
+
+    [Fact]
+    public void ACircuitWiredFromSomewhereElseAsWell_IsReported()
+    {
+        var flow = Wiring();
+        // The circuit is beneath its panel through the directory, and wired again from another node: on the
+        // graph it hangs off both, and its power is counted under each.
+        flow.Nodes.Add(new() { Id = "shed_feed", Kind = "breaker" });
+        flow.Links.Add(new() { From = "shed_feed", To = "ch5" });
+
+        var f = Assert.Single(PanelAudit.Check(flow, new Fixed(new()), null), x => x.Kind == PanelAudit.CircuitMultiFed);
+        Assert.Equal("bad", f.Severity);
+        Assert.Contains("main_panel/B06", f.Breakers);
+        Assert.Contains("shed_feed", f.Channels);
+    }
+
+    [Fact]
+    public void ACircuitFedByItsOwnPanel_IsNotReportedTwice()
+    {
+        var flow = Wiring();
+        // The link the schedule wrote before the breaker was a tier: the same feed, said twice.
+        flow.Links.Add(new() { From = "main", To = "ch5" });
+
+        Assert.DoesNotContain(PanelAudit.Check(flow, new Fixed(new()), null), x => x.Kind == PanelAudit.CircuitMultiFed);
+    }
+
+    [Fact]
     public void AMappingThatHoldsTogether_ReportsNothing()
         => Assert.Empty(PanelAudit.Check(Wiring(), new Fixed(new() { ["ch5|realpower"] = 240, ["ch5|current"] = 2, ["ch1|realpower"] = 1100, ["ch2|realpower"] = 1150 }), ["ch5", "ch1", "ch2"]));
 }

@@ -1194,7 +1194,14 @@ for you:
 - a breaker marked unused whose channel is drawing power,
 - a double-pole breaker with a clamp on one leg only,
 - a breaker reading more current than its rating,
-- a clamp pointed at a breaker's own tier rather than at something that reads.
+- a clamp pointed at a breaker's own tier rather than at something that reads,
+- a panel fed from more than one place,
+- a circuit fed from somewhere besides its panel, so it hangs off the graph twice.
+
+**A panel is fed from one place.** Two feeders split its power across both on the diagram and count a supply
+that is not there. The wiring editor refuses a second feeder into a panel — drop the one that is there first —
+and the panel's own **Fed by** on the Panel Schedule page takes one. Any that are already in a config are
+reported rather than silently dropped, since nothing here rewrites your wiring for you.
 
 **A directory you already keep can be pasted in.** **Import…** takes the panel directory as it is written —
 breaker number, wire label, monitor channel and what the breaker feeds, in whatever order the line carries
