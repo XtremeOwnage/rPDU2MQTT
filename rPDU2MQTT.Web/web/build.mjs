@@ -29,6 +29,8 @@ const MODULES = [
   'energy.ts',
   'history-control.ts',
   'charts.ts',
+  'context-menu.ts',
+  'history-sheet.ts',
   'energy-diagram.ts',
   'flow-banners.ts',
   'flow-focus.ts',

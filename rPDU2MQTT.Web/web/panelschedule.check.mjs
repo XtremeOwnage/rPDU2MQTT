@@ -435,6 +435,11 @@ const panelNodeSel = () => query(sec, '.ps-panel-node');
 const incomingText = () => query(sec, '.ps-incoming').textContent || '';
 if (!panelNodeSel()) fail('the panel cannot be told which node it is');
 if (!/No node is mapped/.test(incomingText())) fail(`a panel with no node claims an incoming figure: "${incomingText()}"`);
+// A panel is a panel: the channels and the grid are not offered as the node this panel is.
+const panelOptions = () => (panelNodeSel().children || []).map(o => o.value).filter(Boolean);
+if (!panelOptions().includes('main_panel')) fail(`the panel's own node is not offered: ${panelOptions().join(', ')}`);
+for (const notAPanel of ['grid', 'n30_1_5'])
+  if (panelOptions().includes(notAPanel)) fail(`${notAPanel} is offered as the node a panel is: ${panelOptions().join(', ')}`);
 panelNodeSel().value = 'main_panel';
 panelNodeSel().onchange({});
 await wait(100);
@@ -445,7 +450,7 @@ if (!/2,600 W/.test(incomingText())) fail(`the power coming into the panel is no
 if (!/241\.3 V/.test(incomingText())) fail(`the mains voltage is not shown: "${incomingText()}"`);
 
 // A panel whose node has no reading says so, rather than drawing a zero.
-panelNodeSel().value = 'grid';
+panelNodeSel().value = 'n30_3_4';
 panelNodeSel().onchange({});
 await wait(100);
 if (!/no data/.test(incomingText())) fail(`a panel node with no reading does not say so: "${incomingText()}"`);

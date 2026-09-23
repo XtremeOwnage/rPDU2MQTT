@@ -1840,6 +1840,126 @@ function rankChart(opts
   return { svg, gaps: 0 };
 }
 
+// ── context-menu.ts ─────────────────────────────────────────────
+// The little menu a right-click opens, positioned inside the box it was aimed at. The floor plan and the
+// flow diagram both use it; each keeps its own class so its own styling still applies.
+
+/// A menu element to append to `host` (which must be positioned), and the two calls that work it. The host
+/// may be given as a function, for a box built after the menu it holds.
+function makeMenu(host     , cls = 'ctx-menu') {
+  const menu = el('div', { class: cls });
+  menu.hidden = true;
+  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  const open = (e     , entries                                          ) => {
+    menu.innerHTML = '';
+    const rows = entries.filter(Boolean)               ;
+    rows.forEach(x => {
+      if (x.head) { menu.appendChild(el('div', { class: `${cls}-head`, text: x.label })); return; }
+      const b = el('button', { class: `${cls}-item` + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
+      b.disabled = !!x.disabled;
+      b.onclick = () => { close(); x.run?.(); };
+      menu.appendChild(b);
+    });
+    // Kept inside the box: a menu opened near an edge would otherwise hang off it.
+    const box = typeof host === 'function' ? host() : host;
+    const r = box?.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
+    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
+    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - rows.length * 34)));
+    menu.style.left = `${Math.round(x)}px`;
+    menu.style.top = `${Math.round(y)}px`;
+    menu.hidden = false;
+  };
+  return { el: menu, open, close };
+}
+
+// ── history-sheet.ts ────────────────────────────────────────────
+// What a node has been drawing, in a sheet: the panel schedule opens it for a breaker, the flow diagram for
+// whatever was right-clicked. One line, summed from the nodes asked for — a moment where any of them has no
+// reading is a gap in the line, never a partial sum.
+
+/// Windows worth asking about, and how finely each is sampled.
+const HISTORY_WINDOWS                     = [
+  ['minutes=360&step=60', 'Last 6 hours'],
+  ['minutes=1440&step=900', 'Last 24 hours'],
+  ['days=7&step=3600', 'Last 7 days'],
+];
+
+/// Open the history of one or more nodes, over a window picked in the sheet.
+function openHistorySheet(o                ) {
+  const nodes = o.nodes.filter(Boolean);
+  const labelOf = o.labelOf || ((id        ) => id);
+  const metric = o.metric || 'realpower';
+  const plot = el('div', { class: 'ps-chart' });
+  const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
+  const note = el('div', { class: 'desc' });
+  let window = HISTORY_WINDOWS[1][0];
+
+  const load = async () => {
+    if (!nodes.length) {
+      plot.innerHTML = '';
+      note.textContent = o.empty || 'Nothing is measuring this, so there is nothing to chart.';
+      return;
+    }
+    plot.innerHTML = '';
+    note.textContent = 'Reading…';
+    let r     ;
+    try { r = await api(`/api/flow/series?${window}&metric=${metric}`); }
+    catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+    const body = r?.body;
+    if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+    const series = (body.series || []).filter((s     ) => nodes.includes(s.node));
+    if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
+    // A node with no reading at some moment leaves the total unknown then, exactly as its power is.
+    const at           = body.at || [];
+    const values = at.map((_, i) => {
+      let total = 0;
+      for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
+      return total                 ;
+    });
+    const known = values.filter((v)              => v != null);
+    const units = body.units || 'W';
+    // What the line is, and what it is summed from.
+    legend.innerHTML = '';
+    legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+      el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }), o.lineLabel));
+    if (nodes.length > 1 || nodes[0] !== o.lineLabel)
+      nodes.forEach(id => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } }, `${labelOf(id)} (${id})`)));
+    plot.appendChild(sparkline({
+      values, color: 'var(--accent)', units, width: 560, height: 160, grid: true,
+      at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+    }));
+    note.textContent = known.length
+      ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} ${units} · `
+        + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} ${units} · from ${nodes.join(' + ')}`
+      : `No readings stored for ${nodes.join(', ')} in this window.`;
+  };
+
+  const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const buttons = HISTORY_WINDOWS.map(([q, label]) => {
+    const b = btn(label);
+    b.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b.classList.add('primary'); load(); };
+    picker.appendChild(b);
+    return b;
+  });
+  buttons[1].classList.add('primary');
+
+  // The node itself is a thing of its own — its bindings and its label live on the Nodes page.
+  const toNode = btn('Edit node');
+  toNode.hidden = !nodes.length || o.editNode === false;
+  toNode.title = nodes.length ? `Open ${labelOf(nodes[0])} (${nodes[0]}) in the node editor.` : '';
+  toNode.onclick = () => {
+    closeSheet();
+    editNodeOnNextOpen(nodes[0]);
+    (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+  };
+  openSheet({
+    title: o.title,
+    body: el('div', {}, picker, plot, legend, note),
+    footer: [toNode, ...(o.footer || [])],
+  });
+  load();
+}
+
 // ── energy-diagram.ts ───────────────────────────────────────────
 // The animated energy diagram: a hub with an arm per source, dots travelling the way the power is going.
 // Shared, because the home page and the Energy page must not draw the same system two different ways.
@@ -4920,8 +5040,42 @@ function addFlowSection(nav     , sections     ) {
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
     const tintOf = (id        ) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
-    svg.addEventListener('click', () => clearFocus(svg));
+    const menu = makeMenu(() => stage, 'ctx-menu');
+    svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
+
+    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
+    /// the node itself. A history is only worth offering for something the bridge actually reads.
+    const nodeMenu = (e     , n     ) => {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      const named = n.label || n.id;
+      menu.open(e, [
+        { label: named, head: true },
+        {
+          label: 'History…',
+          run: () => openHistorySheet({
+            title: named,
+            nodes: [n.id],
+            lineLabel: named,
+            labelOf: (id        ) => byId[id]?.label || id,
+            metric: metricSel.value === 'energy_d' ? 'energy' : metricSel.value,
+            empty: 'Nothing is measuring this node, so there is nothing to chart.',
+          }),
+        },
+        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
+        { label: 'Clear the trace', run: () => clearFocus(svg) },
+        {
+          label: 'Edit this node',
+          // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
+          disabled: !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === n.id),
+          run: () => {
+            editNodeOnNextOpen(n.id);
+            (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+          },
+        },
+      ]);
+    };
 
     /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
     ///
@@ -5140,6 +5294,7 @@ function addFlowSection(nav     , sections     ) {
         return rows;
       };
       [rect, lab].forEach((elm     ) => {
+        elm.addEventListener('contextmenu', (e     ) => nodeMenu(e, n));
         elm.addEventListener('mouseenter', (e     ) => showNodeCard(sec, e, card()));
         elm.addEventListener('mousemove', (e     ) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
@@ -5197,7 +5352,7 @@ function addFlowSection(nav     , sections     ) {
     // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
-    const stage = el('div', { class: 'flow-stage' }, scroll);
+    const stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
@@ -10893,83 +11048,18 @@ function addPanelScheduleSection(nav     , sections     ) {
     });
   };
 
-  /// Windows worth asking a breaker about, and how finely each is sampled.
-  const WINDOWS                     = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
-
   /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
   const history = (panel       , b         ) => {
-    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
-    const plot = el('div', { class: 'ps-chart' });
-    const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
-    const note = el('div', { class: 'desc' });
-    let window = WINDOWS[1][0];
-
-    const load = async () => {
-      if (!channels.length) {
-        plot.innerHTML = '';
-        note.textContent = GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.';
-        return;
-      }
-      plot.innerHTML = '';
-      note.textContent = 'Reading…';
-      let r     ;
-      try { r = await api(`/api/flow/series?${window}&metric=realpower`); }
-      catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
-      const body = r?.body;
-      if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
-      const series = (body.series || []).filter((s     ) => channels.includes(s.node));
-      if (!series.length) { note.textContent = `The history backend holds nothing for ${channels.join(', ')} in this window.`; return; }
-      // A leg with no reading at some moment leaves the breaker unknown then, exactly as its power is.
-      const at           = body.at || [];
-      const values = at.map((_, i) => {
-        let total = 0;
-        for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
-        return total                 ;
-      });
-      const known = values.filter((v)              => v != null);
-      // What the line is: the breaker, and the channels it is summed from.
-      legend.innerHTML = '';
-      legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }),
-        `${b.number}${b.description ? ' — ' + b.description : ''}`));
-      channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        `${labelOf(ch)} (${ch})`)));
-      plot.appendChild(sparkline({
-        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160, grid: true,
-        at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
-      }));
-      note.textContent = known.length
-        ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} W · `
-          + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} W · from ${channels.join(' + ')}`
-        : `No readings stored for ${channels.join(', ')} in this window.`;
-    };
-
-    const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-    const buttons = WINDOWS.map(([q, label]) => {
-      const b2 = btn(label);
-      b2.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b2.classList.add('primary'); load(); };
-      picker.appendChild(b2);
-      return b2;
-    });
-    buttons[1].classList.add('primary');
-
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
-    // The node measuring it is a thing of its own — its bindings and its label live on the Nodes page.
-    const toNode = btn('Edit node');
-    toNode.hidden = !channels.length;
-    toNode.title = channels.length ? `Open ${labelOf(channels[0])} (${channels[0]}) in the node editor.` : '';
-    toNode.onclick = () => {
-      closeSheet();
-      editNodeOnNextOpen(channels[0]);
-      (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
-    };
-    openSheet({
+    openHistorySheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      body: el('div', {}, picker, plot, legend, note),
-      footer: [toNode, toEditor],
+      nodes: b.legs.map(l => l.channel).filter(Boolean)            ,
+      lineLabel: `${b.number}${b.description ? ' — ' + b.description : ''}`,
+      labelOf,
+      empty: GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.',
+      footer: [toEditor],
     });
-    load();
   };
 
   const powerText = (b         ) => unitSel.value === 'A'
@@ -11171,7 +11261,16 @@ function addPanelScheduleSection(nav     , sections     ) {
     const panelNode = cfg?.Node ?? drawn.node ?? '';
     nodeSel.innerHTML = '';
     nodeSel.appendChild(el('option', { value: '', text: '— not mapped —' }));
-    nodes.forEach(n => nodeSel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    // A panel is a panel: only a node of that kind, and not one another panel in the directory already is.
+    const claimed = new Set(panelsIn().filter((p     ) => p.Id !== drawn.id).map((p     ) => p.Node).filter(Boolean));
+    const panelChoices = nodes.filter(n => n.kind === 'panel' && !claimed.has(n.id));
+    // What is already recorded stays in the list, even where it is not a panel: opening the page must never
+    // quietly re-point the panel at something else.
+    if (panelNode && !panelChoices.some(n => n.id === panelNode))
+      panelChoices.push(nodes.find(n => n.id === panelNode) || { id: panelNode, label: panelNode, kind: 'node' });
+    panelChoices.forEach(n => nodeSel.appendChild(el('option', {
+      value: n.id, text: `${n.label} (${n.id})${n.kind === 'panel' ? '' : ' — not a panel'}`,
+    })));
     nodeSel.value = panelNode;
     feeders.innerHTML = '';
     const fedBy = panelNode ? parentsOf(panelNode) : [];
@@ -11564,8 +11663,8 @@ function addFloorPlanSection(nav     , sections     ) {
   const hint = el('div', { class: 'fp-hint' });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
-  const menu = el('div', { class: 'fp-menu' });
-  menu.hidden = true;
+  const fpMenu = makeMenu(() => stage, 'fp-menu');
+  const menu = fpMenu.el;
   const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
@@ -12552,23 +12651,8 @@ function addFloorPlanSection(nav     , sections     ) {
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
 
-  const closeMenu = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
-  const openMenu = (e     , entries         ) => {
-    menu.innerHTML = '';
-    entries.filter(Boolean).forEach(x => {
-      if (x.head) { menu.appendChild(el('div', { class: 'fp-menu-head', text: x.label })); return; }
-      const b = el('button', { class: 'fp-menu-item' + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
-      b.disabled = !!x.disabled;
-      b.onclick = () => { closeMenu(); x.run?.(); };
-      menu.appendChild(b);
-    });
-    const r = stage.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
-    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
-    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - entries.length * 34)));
-    menu.style.left = `${Math.round(x)}px`;
-    menu.style.top = `${Math.round(y)}px`;
-    menu.hidden = false;
-  };
+  const closeMenu = () => fpMenu.close();
+  const openMenu = (e     , entries         ) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
   const onEdit = (fn            ) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };

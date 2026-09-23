@@ -11,6 +11,7 @@ import { type Pt, planDownstream, planProtectedBy, planRect, planArea, planCentr
 import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, planSnapStep, planScaleBar, planDefaultPlot } from '../plan-units.js';
 import { planHistory } from '../plan-history.js';
 import { searchSelect, type Choice } from '../search-select.js';
+import { makeMenu } from '../context-menu.js';
 import { planSolve, planSharedCorners, planCornerAngle, planEdgeCorners, planRefsAfterInsert, planRefsAfterRemove, planRefsWithout, type PlanRef, type PlanConstraint } from '../plan-constraints.js';
 import { PLAN_FOOTPRINTS, planFootprintArt, planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
@@ -300,8 +301,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
   const hint = el('div', { class: 'fp-hint' });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
-  const menu = el('div', { class: 'fp-menu' });
-  menu.hidden = true;
+  const fpMenu = makeMenu(() => stage, 'fp-menu');
+  const menu = fpMenu.el;
   const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
@@ -1289,23 +1290,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
   type Entry = { label: string; run?: () => void; danger?: boolean; disabled?: boolean; head?: boolean };
-  const closeMenu = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
-  const openMenu = (e: any, entries: Entry[]) => {
-    menu.innerHTML = '';
-    entries.filter(Boolean).forEach(x => {
-      if (x.head) { menu.appendChild(el('div', { class: 'fp-menu-head', text: x.label })); return; }
-      const b = el('button', { class: 'fp-menu-item' + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
-      b.disabled = !!x.disabled;
-      b.onclick = () => { closeMenu(); x.run?.(); };
-      menu.appendChild(b);
-    });
-    const r = stage.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
-    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
-    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - entries.length * 34)));
-    menu.style.left = `${Math.round(x)}px`;
-    menu.style.top = `${Math.round(y)}px`;
-    menu.hidden = false;
-  };
+  const closeMenu = () => fpMenu.close();
+  const openMenu = (e: any, entries: Entry[]) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
   const onEdit = (fn: () => void) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };

@@ -9,8 +9,10 @@ import { historyControl, historyQuery, historyNote, periodRow, periodWindow, typ
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
 import { applyHideEmptyPref, applyHideNoDataPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
-import { flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
+import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
+import { makeMenu } from '../context-menu.js';
+import { openHistorySheet } from '../history-sheet.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 
@@ -533,8 +535,42 @@ export function addFlowSection(nav: any, sections: any) {
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
     const tintOf = (id: string) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
-    svg.addEventListener('click', () => clearFocus(svg));
+    const menu = makeMenu(() => stage, 'ctx-menu');
+    svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
+
+    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
+    /// the node itself. A history is only worth offering for something the bridge actually reads.
+    const nodeMenu = (e: any, n: any) => {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      const named = n.label || n.id;
+      menu.open(e, [
+        { label: named, head: true },
+        {
+          label: 'History…',
+          run: () => openHistorySheet({
+            title: named,
+            nodes: [n.id],
+            lineLabel: named,
+            labelOf: (id: string) => byId[id]?.label || id,
+            metric: metricSel.value === 'energy_d' ? 'energy' : metricSel.value,
+            empty: 'Nothing is measuring this node, so there is nothing to chart.',
+          }),
+        },
+        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
+        { label: 'Clear the trace', run: () => clearFocus(svg) },
+        {
+          label: 'Edit this node',
+          // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
+          disabled: !(state.data?.EnergyFlow?.Nodes || []).some((x: any) => x.Id === n.id),
+          run: () => {
+            editNodeOnNextOpen(n.id);
+            (Array.from(document.querySelectorAll('nav a')) as any[]).find(a => a.dataset.label === 'Nodes')?.click();
+          },
+        },
+      ]);
+    };
 
     /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
     ///
@@ -753,6 +789,7 @@ export function addFlowSection(nav: any, sections: any) {
         return rows;
       };
       [rect, lab].forEach((elm: any) => {
+        elm.addEventListener('contextmenu', (e: any) => nodeMenu(e, n));
         elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, card()));
         elm.addEventListener('mousemove', (e: any) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
@@ -810,7 +847,7 @@ export function addFlowSection(nav: any, sections: any) {
     // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
-    const stage = el('div', { class: 'flow-stage' }, scroll);
+    const stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
