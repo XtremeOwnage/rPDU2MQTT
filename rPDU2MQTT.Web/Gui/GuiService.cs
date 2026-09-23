@@ -926,6 +926,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             // The process list (the registry, replacing the MQTT heartbeat).
             var processList = processes?.Active() ?? [];
 
+            // What the panel mapping contradicts, or the live readings do (#457).
+            var panelFindings = Core.Flow.PanelAudit.Check(config.EnergyFlow, live,
+                config.EnergyFlow.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id)).Select(n => n.Id))
+                .Select(f => new { kind = f.Kind, severity = f.Severity, message = f.Message, breakers = f.Breakers, channels = f.Channels })
+                .ToArray();
+
             // EmonCMS export health. The exporter runs only on the worker.
             object? emonStatus = null;
             if (config.EmonCMS.Enabled)
@@ -990,6 +996,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         };
                     })
                     .ToArray(),
+                // What the panel mapping contradicts (#457).
+                panelFindings,
                 // Other role processes in the cluster (split deployments). Empty for a single-node "all".
                 processes = processList
                     .OrderBy(p => string.Join(',', p.Roles)).ThenBy(p => p.Host)
@@ -1049,6 +1057,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         object PanelsPayload(Models.Config.EnergyFlowConfig flow, string metric)
         {
             var map = Core.Flow.PanelMap.For(flow);
+            // Every node the bridge reads, so a channel drawing power that no breaker claims can be named (#457).
+            var channels = flow.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id)).Select(n => n.Id).ToList();
+            var findings = Core.Flow.PanelAudit.Check(flow, live, channels, metric);
+            var nodes = Core.Flow.PanelNodes.For(flow).ToDictionary(b => Core.Flow.Circuits.RefOf(b.Chain), b => b, StringComparer.OrdinalIgnoreCase);
             var panels = flow.Panels.Select(panel => new
             {
                 id = panel.Id,
@@ -1078,6 +1090,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         conductor = chain.Breaker.Conductor,
                         description = chain.Breaker.Description,
                         state = Models.Config.BreakerState.Of(chain.Breaker.State),
+                        // The breaker as a tier of the energy flow (#458): its own node, or the one it names.
+                        node = nodes.TryGetValue(Core.Flow.Circuits.RefOf(chain), out var bn) ? bn.Id : null,
+                        derived = nodes.TryGetValue(Core.Flow.Circuits.RefOf(chain), out var dn) && dn.Derived,
                         // Null power is a gap, never a zero: `gap` says which link of the chain is missing.
                         power,
                         // What it is drawing in amps, so the panel can show that instead and say how close to
@@ -1096,7 +1111,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     };
                 }).ToArray(),
             }).ToArray();
-            return new { ok = true, metric, panels };
+            return new
+            {
+                ok = true, metric, panels,
+                findings = findings.Select(f => new { kind = f.Kind, severity = f.Severity, message = f.Message, breakers = f.Breakers, channels = f.Channels }).ToArray(),
+            };
         }
 
         string PanelMetric(HttpContext ctx) => string.IsNullOrWhiteSpace(ctx.Request.Query["metric"])

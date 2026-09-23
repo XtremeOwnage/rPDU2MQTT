@@ -200,6 +200,35 @@ public static class FlowGraphBuilder
                 if (AddEdgeSafe(parent, child)) wiredEdges.Add(EdgeKey(parent, child));
         bool Wired(string from, string to) => wiredEdges.Contains(EdgeKey(from, to));
 
+        // Each mapped breaker is a tier of its own (#458): beneath its panel, above the channels measuring it,
+        // so per-breaker power and energy reach the diagram and the exports without being wired again by hand.
+        // A breaker whose legs are not all reading is left unknown rather than summed from the legs that are —
+        // half of a 240 V circuit is not the circuit.
+        var breakerUnknown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var b in PanelNodes.For(flow))
+        {
+            if (b.Derived && !label.ContainsKey(b.Id))
+            {
+                label[b.Id] = b.Label;
+                kind[b.Id] = "breaker";
+                var breakerTags = AutoTags.For(flow.AutoTags, b.Id);
+                if (breakerTags.Count > 0) tags[b.Id] = breakerTags.ToList();
+            }
+            if (!label.ContainsKey(b.Id)) continue;
+            var power = PanelMap.Power(b.Chain, live, metric, out var gap);
+            if (power is { } p && gap == PowerGap.None) leaf[b.Id] = Math.Max(0, p);
+            else if (b.Channels.Count > 0) breakerUnknown.Add(b.Id);
+            foreach (var ch in b.Channels)
+            {
+                if (!label.ContainsKey(ch) || string.Equals(ch, b.Id, StringComparison.OrdinalIgnoreCase)) continue;
+                // The breaker carries its channels; a link straight from the panel to one would count it twice.
+                if (!string.IsNullOrEmpty(b.PanelNode) && outgoing.TryGetValue(b.PanelNode, out var direct))
+                    direct.RemoveAll(x => string.Equals(x, ch, StringComparison.OrdinalIgnoreCase));
+                AddEdgeSafe(b.Id, ch);
+            }
+            if (!string.IsNullOrEmpty(b.PanelNode) && label.ContainsKey(b.PanelNode)) AddEdgeSafe(b.PanelNode, b.Id);
+        }
+
         // Which feeders point into each node.
         var incoming = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
@@ -259,6 +288,9 @@ public static class FlowGraphBuilder
                     FlowMetricKey.ForAccumulation(src.Metric ?? "", src.Accumulation), metric, StringComparison.OrdinalIgnoreCase)))
                 expectsReading.Add(n.Id);
         }
+        // A breaker missing a leg's reading is in the same position as a node whose source has stopped: its
+        // children's sum is not a stand-in for it.
+        foreach (var id in breakerUnknown) expectsReading.Add(id);
         bool Unavailable(string id) => expectsReading.Contains(id);
 
         // Every node that ended up carrying a conservation back-fill.

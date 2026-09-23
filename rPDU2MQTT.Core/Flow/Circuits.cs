@@ -59,11 +59,8 @@ public static class Circuits
     public static string? NodeOf(BreakerChain chain)
     {
         if (!string.IsNullOrWhiteSpace(chain.Breaker.Node)) return chain.Breaker.Node.Trim();
-        var legs = chain.Legs.Any(l => l.Clamp?.Whole == true) ? chain.Legs.Where(l => l.Clamp?.Whole == true).ToList() : chain.Legs;
-        var channels = legs.Select(l => l.Channel).ToList();
-        if (channels.Count == 0 || channels.Any(c => c is null)) return null;
-        var distinct = channels.Distinct(Ids).ToList();
-        return distinct.Count == 1 ? distinct[0] : null;
+        // The breaker is a node of the flow in its own right (#458), whether one channel measures it or two.
+        return PanelNodes.Channels(chain).Count > 0 ? PanelNodes.IdFor(chain.Panel.Id, chain.Breaker.Number) : null;
     }
 
     /// <summary>

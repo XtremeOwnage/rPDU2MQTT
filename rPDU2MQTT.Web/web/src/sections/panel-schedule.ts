@@ -13,9 +13,19 @@ type Leg = { leg: number; wire: string; clamp: string | null; channel: string | 
 type Breaker = {
   slot: number; number: string; poles: number; half: number | null; amps: number | null;
   wire: string; gauge: string; conductor: string; description: string; state: string;
-  power: number | null; current: number | null; gap: string; legs: Leg[];
+  power: number | null; current: number | null; gap: string; legs: Leg[]; node?: string | null; derived?: boolean;
 };
+type Finding = { kind: string; severity: string; message: string; breakers: string[]; channels: string[] };
 type Panel = { id: string; name: string; slots: number; rows: number; node: string; incoming: number | null; volts: number | null; breakers: Breaker[] };
+
+/// What a finding is about, in the words the page uses.
+const CHECK_TITLES: Record<string, string> = {
+  'channel-shared': 'One channel, two breakers',
+  'channel-unmapped': 'A channel nobody mapped',
+  'unused-live': 'An unused breaker drawing power',
+  'half-clamped': 'Half a double-pole breaker',
+  'over-rating': 'Over the breaker\u2019s rating',
+};
 
 /// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
 const GAPS: Record<string, string> = {
@@ -72,11 +82,16 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
 
+  // What the mapping contradicts, or the readings do (#457). A report: nothing here changes the directory.
+  const checks = el('div', { class: 'ps-checks' });
+  sec.appendChild(checks);
+
   const grid = el('div', { class: 'ps-grid' });
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
 
   let panels: Panel[] = [];
+  let findings: Finding[] = [];
   let nodes: { id: string; label: string; kind: string }[] = [];
 
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
@@ -87,12 +102,6 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const labelOf = (id: string) => nodes.find(n => n.id === id)?.label || id;
   /// What feeds a node today, according to the flow links.
   const parentsOf = (node: string) => linksIn().filter((l: any) => l.To === node).map((l: any) => String(l.From));
-  /// A breaker's circuit hangs beneath the panel: whatever fed it before is replaced, never left beside it.
-  const reparent = (node: string, parent: string) => {
-    const links = linksIn();
-    for (let i = links.length - 1; i >= 0; i--) if (links[i].To === node) links.splice(i, 1);
-    links.push({ From: parent, To: node });
-  };
   /// The config entry behind the drawn panel: edits land there, and it is what the drawing follows.
   const configPanel = (id: string) => panelsIn().find((p: any) => p.Id === id);
 
@@ -109,6 +118,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     if (!r.body?.ok) { status.textContent = r.body?.message || 'Could not read the panels.'; panels = []; render(); return; }
     panels = r.body.panels || [];
+    findings = r.body.findings || [];
     const keep = panelSel.value;
     panelSel.innerHTML = '';
     panels.forEach(p => panelSel.appendChild(el('option', { value: p.id, text: p.name || p.id })));
@@ -300,22 +310,6 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
     const save = btn('Apply', 'primary');
     save.onclick = () => {
-      const panelNode = configPanel(panel.id)?.Node || '';
-      const picked = pickers.map(s => s.value).filter(Boolean);
-      // A circuit belongs beneath the panel feeding it. One that hangs somewhere else today is not moved
-      // quietly: what it is fed by now, and what that becomes, is said before anything is written.
-      const moving = panelNode
-        ? picked.map(ch => ({ ch, from: parentsOf(ch).filter(f => f !== panelNode) })).filter(x => x.from.length)
-        : [];
-      if (moving.length) {
-        const where = nameIn.value.trim() || panel.name || panel.id;
-        const lines = moving.map(m => `• ${labelOf(m.ch)} is fed by ${m.from.map(labelOf).join(', ')}`);
-        const ok = confirm(`${lines.join('\n')}\n\nMapping ${moving.length > 1 ? 'them' : 'it'} to breaker `
-          + `${number.value.trim() || slot} places ${moving.length > 1 ? 'them' : 'it'} beneath ${where} instead, `
-          + `and the old feeder link${moving.reduce((n, m) => n + m.from.length, 0) > 1 ? 's are' : ' is'} removed.`
-          + `\n\nOK to move, Cancel to leave it as it is.`);
-        if (!ok) return;
-      }
       const target = entry || { Slot: slot };
       const newNumber = number.value.trim() || String(slot);
       target.Slot = slot;
@@ -343,8 +337,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
       // One CT for the whole circuit leaves no second leg to record.
       if (whole || target.Poles === 1) mapLeg(panel.id, newNumber, 2, '', '');
-      // The panel is now what feeds these circuits, in the flow graph as well as on paper.
-      if (panelNode) picked.forEach(ch => reparent(ch, panelNode));
+      // The breaker is a node of the flow in its own right (#458), beneath its panel and above its channels,
+      // so nothing has to be wired by hand here.
       refreshDirty();
       closeSheet();
       toast('Breaker updated. Press Save to keep it.', true);
@@ -369,7 +363,13 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
         field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows, servesField, placedField),
+        field('State', stateSel), pickerRows, servesField, placedField,
+        ...(b?.node ? [field('On the energy flow', el('div', {
+          class: 'desc',
+          style: { margin: '0' },
+          text: `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
+            + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}. It reaches Home Assistant, EmonCMS and Prometheus like any other node.`,
+        }))] : [])),
       footer: [save, remove],
     });
   };
@@ -472,6 +472,27 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     return !!number && digits(number) !== digits(slotLabel);
   };
 
+  const drawChecks = (drawn: Panel | null) => {
+    checks.innerHTML = '';
+    const mine = findings.filter(f => !f.breakers.length || f.breakers.some(b => b.split('/')[0] === drawn?.id));
+    if (!mine.length) return;
+    checks.appendChild(el('h3', { class: 'ps-checks-head', text: `${mine.length} thing${mine.length > 1 ? 's' : ''} to look at` }));
+    mine.forEach(f => {
+      const row = el('div', { class: 'ps-check is-' + f.severity }, el('span', { class: 'ps-check-kind', text: CHECK_TITLES[f.kind] || f.kind }), el('span', { class: 'ps-check-msg', text: f.message }));
+      // Straight to the breaker it names, so it can be put right.
+      f.breakers.forEach(ref => {
+        const [panelId, number] = [ref.slice(0, ref.indexOf('/')), ref.slice(ref.indexOf('/') + 1)];
+        const b = panels.find(p => p.id === panelId)?.breakers.find(x => x.number === number);
+        if (!b) return;
+        const go = btn(number);
+        go.title = `Open breaker ${number}`;
+        go.onclick = () => { if (panelSel.value !== panelId) { panelSel.value = panelId; render(); } edit(panels.find(p => p.id === panelId)!, b, b.slot); };
+        row.appendChild(go);
+      });
+      checks.appendChild(row);
+    });
+  };
+
   const render = () => {
     grid.innerHTML = '';
     const drawn = shown();
@@ -528,6 +549,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       : drawn.incoming == null
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
+    drawChecks(drawn);
     // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
     // the two rows it spans had nothing else in them and split its height between them instead.
     grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;

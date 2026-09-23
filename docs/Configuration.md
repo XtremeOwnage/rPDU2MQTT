@@ -1156,6 +1156,30 @@ Notes:
   says how much more leaves it than arrives. On lifetime energy that is expected; on `Energy today` it means
   a feeder is missing or not reporting.
 
+### Panels and breakers
+
+The **Panel Schedule** page holds the panel directory: each breaker's number, rating, wire, what it feeds, and
+the CT clamp and monitor channel measuring it. Two things follow from that mapping on their own.
+
+**Every mapped breaker is a tier of the energy flow.** A breaker with a channel appears as a node beneath its
+panel and above the channels measuring it, so per-breaker power and energy reach the diagram, Home Assistant,
+EmonCMS and Prometheus without being wired by hand. Its id is `breaker:<panel>:<number>` unless the breaker
+names a node of its own (`Node`), and its label is what the directory says it feeds, so renaming the breaker
+renames the tier. A double-pole breaker is one tier worth both its legs — and one whose legs are not all
+reading is **unknown**, never half of itself. An identified breaker nobody measures appears with no value
+rather than a zero. Where the schedule used to wire the panel straight to a channel, that link is dropped, so
+nothing is counted twice.
+
+**The mapping is checked against itself and against the readings**, on the page and in Diagnostics
+(`panelFindings`). Each finding names the breakers and channels involved and leads to them; nothing is changed
+for you:
+
+- a channel mapped to more than one breaker,
+- a channel drawing power that no breaker is mapped to,
+- a breaker marked unused whose channel is drawing power,
+- a double-pole breaker with a clamp on one leg only,
+- a breaker reading more current than its rating.
+
 ### Floor plans
 
 The **Floor Plans** page (under Energy Flow) draws each floor at real size: rooms and outdoor zones, doors and

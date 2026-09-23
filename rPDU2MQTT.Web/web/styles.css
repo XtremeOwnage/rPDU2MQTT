@@ -1589,3 +1589,14 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-menu-item:hover:not(:disabled) { background: var(--panel3); }
 .fp-menu-item.is-danger { color: var(--bad); }
 .fp-menu-item:disabled { opacity: .45; cursor: default; }
+
+/* Panel schedule: what the mapping contradicts, or the readings do (#457). */
+.ps-checks { display: grid; gap: 6px; margin: 0 0 var(--sp-3); }
+.ps-checks-head { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+.ps-check {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 8px 10px;
+  border: 1px solid var(--warn); border-radius: var(--r-sm); background: var(--warn-bg); font-size: 13.5px;
+}
+.ps-check.is-bad { border-color: var(--bad); background: var(--bad-bg); }
+.ps-check-kind { font-weight: 700; }
+.ps-check-msg { flex: 1; min-width: 12em; color: var(--fg); }

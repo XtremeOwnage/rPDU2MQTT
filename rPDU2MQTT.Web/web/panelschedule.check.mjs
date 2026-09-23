@@ -63,6 +63,11 @@ const nodes = [
 /// link of it is there. GET answers from the saved directory; POST from whatever the page is holding.
 const resolve = (flow) => ({
   ok: true, metric: 'realpower',
+  // What the bridge's own check says about the mapping (#457): here, a channel claimed by two breakers.
+  findings: Object.entries((flow.Clamps || []).reduce((acc, c) => { (acc[c.Channel] ||= []).push(`${c.Panel}/${c.Breaker}`); return acc; }, {}))
+    .filter(([, on]) => on.length > 1)
+    .map(([ch, on]) => ({ kind: 'channel-shared', severity: 'bad', channels: [ch], breakers: on,
+      message: `${ch} is mapped to ${on.length} breakers: ${on.join(', ')}. Only one of them is measured by it.` })),
   panels: flow.Panels.map(p => ({
     id: p.Id, name: p.Name, slots: p.Slots, rows: Math.ceil(p.Slots / 2),
     node: p.Node || '',
@@ -91,6 +96,9 @@ const resolve = (flow) => ({
         wire: b.Wire || '', gauge: b.Gauge || '', conductor: b.Conductor || '',
         description: b.Description || '', state: b.State || 'unknown',
         power: gap === 'none' ? sum : null, current: gap === 'none' ? current : null, gap, legs,
+        // The breaker as a tier of the flow (#458): its own node unless it names one.
+        node: b.Node || (counted.some(l => l.channel) ? `breaker:${p.Id}:${b.Number}` : null),
+        derived: !b.Node,
       };
     }),
   })),
@@ -427,38 +435,33 @@ feedAdd().value = 'grid';
 feedAdd().onchange({});
 await wait(60);
 
-// A circuit mapped to a breaker is placed beneath the panel — and one that hangs elsewhere today is not
-// moved without saying what it is fed by now and what that becomes.
-let asked = [];
-sandbox.confirm = (m) => { asked.push(m); return false; };
+// A breaker mapped to a channel records the clamp; the breaker is a tier of the flow in its own right (#458),
+// so nothing is wired from the panel to the channel by hand.
 halves(9)[0].onclick();
 await wait(100);
 nodeSel().value = 'n30_1_1';
 await apply();
-if (!asked.length) fail('a circuit fed by something else was moved without a word');
-if (!/Grid/.test(asked[0])) fail(`the warning does not say what feeds it today: ${asked[0]}`);
-if (!/Main Panel/.test(asked[0])) fail(`the warning does not say where it is going: ${asked[0]}`);
-if (!/Cancel/.test(asked[0])) fail(`the warning does not offer to leave it alone: ${asked[0]}`);
-// Cancel leaves the directory exactly as it was.
-if (links().some(l => l.To === 'n30_1_1' && l.From === 'main_panel')) fail('Cancel moved the circuit anyway');
-if (!links().some(l => l.To === 'n30_1_1' && l.From === 'grid')) fail('Cancel dropped the feeder it was warning about');
-if (clampFor('B09')) fail('Cancel still recorded what measures the breaker');
+if (clampFor('B09')?.Channel !== 'n30_1_1') fail('mapping the breaker did not record what measures it');
+if (links().some(l => l.From === 'main_panel' && l.To === 'n30_1_1')) fail('mapping a breaker still wires the panel straight to the channel');
+if (!links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('mapping a breaker rewrote the links the operator had');
 
-// OK moves it, and what fed it before is replaced rather than left beside the new link.
-sandbox.confirm = (m) => { asked.push(m); return true; };
-await apply();
-if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_1')) fail('the circuit was not placed beneath the panel');
-if (links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('the old feeder was left beside the new one');
-if (clampFor('B09')?.Channel !== 'n30_1_1') fail('the clamp was not recorded with the move');
-
-// A circuit that hangs nowhere is mapped without asking about replacing anything.
-asked = [];
-halves(8)[0].onclick();
+// …and the breaker's editor says which node it is on the flow.
+halves(9)[0].onclick();
 await wait(100);
-nodeSel().value = 'n30_1_2';
-await apply();
-if (asked.length) fail(`mapping a circuit with no feeder still asked about replacing one: ${asked[0]}`);
-if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_2')) fail('a circuit with no feeder was not placed beneath the panel');
+if (!/breaker:main_panel:B09/.test(textOf(sheet()))) fail(`the breaker does not say which node it is: ${textOf(sheet())}`);
+if (!/beneath Main Panel/.test(textOf(sheet()))) fail('the breaker does not say where it sits on the flow');
+shut();
+
+// What the mapping contradicts is reported on the page, each finding leading to the breaker it names (#457).
+const checks = () => query(sec, '.ps-check', true);
+if (!checks().length) fail('the checks on the mapping are not shown');
+const shared = checks().find(c => /two breakers/.test(textOf(c)));
+if (!shared) fail(`the channel mapped to two breakers is not reported: ${checks().map(textOf).join(' | ')}`);
+if (!shared.classList.contains('is-bad')) fail('a contradiction is not marked as one');
+query(shared, 'button', true)[0].onclick();
+await wait(60);
+if (!/B06|B09/.test(textOf(sheet()))) fail('a finding does not lead to the breaker it names');
+shut();
 
 // A breaker is edited in place, and the edit lands on the config entry rather than the drawn copy.
 halves(6)[0].onclick();
@@ -613,7 +616,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
