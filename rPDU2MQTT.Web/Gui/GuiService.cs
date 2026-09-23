@@ -31,7 +31,7 @@ namespace rPDU2MQTT.Services.Gui;
 /// Optional embedded web GUI for viewing, editing and testing the configuration.
 /// Hosts a small Kestrel app (Basic-auth protected) only when Gui.Enabled is set.
 /// </summary>
-public sealed class GuiService : IHostedService, IAsyncDisposable
+public sealed partial class GuiService : IHostedService, IAsyncDisposable
 {
     private readonly Config config;
     private readonly IHiveMQClient mqtt;
@@ -75,7 +75,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
     // What each Modbus device last did, for the diagnostics page.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -103,6 +103,7 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
+        this.cachePlans = cachePlans;
         this.haEnergy = haEnergy;
     }
 
@@ -377,7 +378,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
         var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
         // The same rule the exporter applies.
-        var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native);
+        var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native)
+            .Concat(Core.Flow.LocationExport.DeviceIds(config.EnergyFlow)).ToList();
 
         var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
 
@@ -719,6 +721,9 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
                 // And the history backend: FlowHistoryRouter reads the provider and its settings per call.
                 config.History = reloaded.History;
+                // Plan storage is rebuilt on the next image request, and distance units are only read by the page.
+                config.PlanStorage = reloaded.PlanStorage;
+                config.Gui.DistanceUnits = reloaded.Gui.DistanceUnits;
 
                 // Apply PDU instance add/remove live: refresh the instance set from the saved config.
                 var instanceMessage = "";
@@ -1116,6 +1121,8 @@ public sealed class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
+
+        MapLocationEndpoints(app);
 
         // Restart a tier — or everything.
         app.MapPost("/api/restart", async (HttpContext ctx) =>

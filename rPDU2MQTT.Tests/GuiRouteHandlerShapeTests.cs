@@ -27,7 +27,7 @@ public class GuiRouteHandlerShapeTests
     [Fact]
     public void RouteHandlersReturnTheirResults()
     {
-        var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "rPDU2MQTT.Web", "Gui", "GuiService.cs"));
+        var source = string.Concat(Directory.GetFiles(Path.Combine(FindRepoRoot(), "rPDU2MQTT.Web", "Gui"), "GuiService*.cs").Select(File.ReadAllText));
 
         // Map*("<route>", [async] (HttpContext …) => …   — capture the route and what follows the arrow.
         var handlers = Regex.Matches(source,

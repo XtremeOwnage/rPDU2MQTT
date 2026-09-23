@@ -197,7 +197,7 @@ public static class FlowExport
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
         string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
-        bool includeEnergyDaily = false)
+        bool includeEnergyDaily = false, string? area = null)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -209,6 +209,9 @@ public static class FlowExport
         };
         if (!string.IsNullOrEmpty(primaryParentId))
             device["via_device"] = DeviceId(primaryParentId);
+        // The room it is in: Home Assistant files a new device in the area of that name (#467).
+        if (!string.IsNullOrWhiteSpace(area))
+            device["suggested_area"] = area;
 
         static JsonObject Sensor(string uniqueId, string name, string deviceClass, string stateClass, string units, string template) => new()
         {

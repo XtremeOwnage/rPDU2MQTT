@@ -451,6 +451,7 @@ public static class ConfigSchema
         // into the CR spec on every save, and into the manifest the Export page offers for GitOps.
         clone.HASS.EnergyDashboard.Token = null;
         clone.Cache.Password = null;
+        clone.PlanStorage.ObjectStore.SecretAccessKey = null;
         return clone;
     }
 

@@ -44,6 +44,9 @@ public class PanelConfig
     [Description("The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.")]
     public string Node { get; set; } = "";
 
+    [Description("The id of the room, area or floor the panel is mounted in.")]
+    public string Location { get; set; } = "";
+
     [Description("The breakers in this panel's slots.")]
     public List<BreakerConfig> Breakers { get; set; } = new();
 
@@ -104,6 +107,12 @@ public class BreakerConfig
     [AllowedValues("copper", "aluminium")]
     [Description("What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.")]
     public string Conductor { get; set; } = "";
+
+    [Description("The ids of the rooms and areas this breaker's circuit serves. A circuit serving several rooms lists each; its power then counts toward the smallest place holding all of them.")]
+    public List<string> Rooms { get; set; } = new();
+
+    [Description("The energy-flow node that is this circuit. Blank uses the channel measuring it, when a single channel does.")]
+    public string Node { get; set; } = "";
 
     /// <summary>Identified, not yet identified, or an empty slot. New breakers start unknown: a blank row claims nothing.</summary>
     [AllowedValues(BreakerState.Identified, BreakerState.Unknown, BreakerState.Unused)]

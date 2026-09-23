@@ -16,6 +16,8 @@
 {{- $roles = append $roles (dict "suffix" "-operator" "role" "operator" "component" "operator" "replicas" 1 "strategy" "Recreate") }}
 {{- end }}
 {{- range $r := $roles }}
+{{- /* Plan images are served by whichever process runs the GUI. */}}
+{{- $plans := and $.Values.floorPlans.persistence.enabled (or (eq $r.component "") (eq $r.component "ui")) }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -88,6 +90,11 @@ spec:
                   fieldPath: status.podIP
             - name: RPDU2MQTT_IMAGE
               value: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+            {{- if $plans }}
+            # Floor plan images live here, outside the configuration.
+            - name: RPDU2MQTT_PLANS_DIRECTORY
+              value: {{ $.Values.floorPlans.mountPath | quote }}
+            {{- end }}
             {{- if $.Values.kubernetesConfigSource.enabled }}
             - name: RPDU2MQTT_CONFIG_SOURCE
               value: k8s
@@ -145,7 +152,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled }}
+          {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled $plans }}
           volumeMounts:
             {{- if not $.Values.kubernetesConfigSource.enabled }}
             - name: config
@@ -159,6 +166,10 @@ spec:
               mountPath: /app/plugins
               readOnly: true
             {{- end }}
+            {{- if $plans }}
+            - name: plans
+              mountPath: {{ $.Values.floorPlans.mountPath }}
+            {{- end }}
           {{- end }}
           {{- $res := $.Values.resources }}
           {{- if $r.component }}{{ $res = (index $.Values.split $r.component).resources | default $.Values.resources }}{{ end }}
@@ -166,7 +177,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled }}
+      {{- if or (not $.Values.kubernetesConfigSource.enabled) $.Values.plugins.enabled $plans }}
       volumes:
         {{- if not $.Values.kubernetesConfigSource.enabled }}
         - name: config
@@ -176,6 +187,11 @@ spec:
         {{- if $.Values.plugins.enabled }}
         - name: plugins
           {{- toYaml $.Values.plugins.volume | nindent 10 }}
+        {{- end }}
+        {{- if $plans }}
+        - name: plans
+          persistentVolumeClaim:
+            claimName: {{ $.Values.floorPlans.persistence.existingClaim | default (printf "%s-plans" (include "rpdu2mqtt.fullname" $)) }}
         {{- end }}
       {{- end }}
       {{- with $.Values.nodeSelector }}

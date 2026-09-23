@@ -61,6 +61,7 @@ export function makeEl(tag = 'div') {
       add(...c) { c.forEach(x => x && this._s.add(x)); },
       remove(...c) { c.forEach(x => this._s.delete(x)); },
       contains(c) { return this._s.has(c); },
+      toggle(c, force) { const on = force === undefined ? !this._s.has(c) : !!force; if (on) this._s.add(c); else this._s.delete(c); return on; },
       has(c) { return this._s.has(c); },
     },
     get className() { return [...this.classList._s].join(' '); },
@@ -100,7 +101,8 @@ export function makeEl(tag = 'div') {
     insertBefore(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
     // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
     contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
-    setAttribute(k, v) { this.attrs[k] = String(v); },
+    // `class` set as an attribute is the class list, as it is on an SVG element built with setAttribute.
+    setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'class') this.className = v; },
     getAttribute(k) { return this.attrs[k] ?? null; },
     removeAttribute(k) { delete this.attrs[k]; },
     // Listeners are recorded, not discarded, so a test can fire one — the hover card and the focus

@@ -78,6 +78,22 @@ public class EnergyFlowConfig
     [Description("CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards.")]
     public List<CtClampConfig> Clamps { get; set; } = new();
 
+    /// <summary>Sites, their floors, and the rooms and areas on them (#461).</summary>
+    [Description("Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.")]
+    public List<SiteConfig> Sites { get; set; } = new();
+
+    /// <summary>Outlets, switches, fixtures and devices placed on the floor plans (#464).</summary>
+    [Description("Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.")]
+    public List<PlacementConfig> Placements { get; set; } = new();
+
+    /// <summary>Cable runs drawn on the floor plans (#464).</summary>
+    [Description("Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.")]
+    public List<RunConfig> Runs { get; set; } = new();
+
+    /// <summary>Locations for derived nodes, which have no entry of their own to carry one (#461).</summary>
+    [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
+    public List<AutoLocationRule> AutoLocations { get; set; } = new();
+
     /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
     /// load (each entry behaves like a link parent → child) so older configs keep working.
@@ -226,6 +242,12 @@ public class EnergyFlowNode
     /// </summary>
     [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
     public List<string> Tags { get; set; } = new();
+
+    [Description("The id of the room, area, floor or site this node is in. Its own consumption counts toward that place.")]
+    public string Location { get; set; } = "";
+
+    [Description("The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered.")]
+    public string Circuit { get; set; } = "";
 
     [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]

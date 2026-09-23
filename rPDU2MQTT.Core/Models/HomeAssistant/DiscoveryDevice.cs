@@ -39,6 +39,11 @@ public record DiscoveryDevice
     [JsonPropertyName("connections")]
     public List<string[]>? Connections { get; set; }
 
+    /// <summary>The room this device is in; Home Assistant files a new device in the area of that name (#467).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("suggested_area")]
+    public string? SuggestedArea { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull | JsonIgnoreCondition.WhenWritingDefault)]
     [JsonPropertyName("via_device")]
     [JsonConverter(typeof(DeviceToUniqueIdentifierConverter))]
@@ -58,7 +63,8 @@ public record DiscoveryDevice
             ? $"{Name} {entity.Entity_DisplayName}"
             : entity.Entity_DisplayName;
 
-        var child = this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = name };
+        // A child is not in its parent's room just for being its child: an outlet's room is its own.
+        var child = this with { UniqueIdentifier = entity.Entity_Identifier, ParentDevice = this, Name = name, SuggestedArea = null };
 
         // Only the physical PDU device carries the MAC/IP connections; outlets/groups must not.
         if (!inheritConnections)

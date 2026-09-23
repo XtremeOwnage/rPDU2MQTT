@@ -44,6 +44,7 @@ public sealed class KubernetesConfigSource : IConfigSource
         // were kept anywhere, and the first save after that destroyed the token.
         ("RPDU2MQTT_HASS_TOKEN", c => c.HASS.EnergyDashboard.Token, (c, v) => c.HASS.EnergyDashboard.Token = v),
         ("RPDU2MQTT_CACHE_PASSWORD", c => c.Cache.Password, (c, v) => c.Cache.Password = v),
+        ("RPDU2MQTT_PLANS_SECRET_KEY", c => c.PlanStorage.ObjectStore.SecretAccessKey, (c, v) => c.PlanStorage.ObjectStore.SecretAccessKey = v),
     };
 
     public KubernetesConfigSource()

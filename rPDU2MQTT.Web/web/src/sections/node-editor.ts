@@ -5,6 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
+import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
   NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes,
@@ -466,6 +467,14 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
   }), 'Labels for filtering the Energy page, highlighting the diagram and deciding what each destination '
     + 'exports. Type to add one — existing tags complete as you type. A tag never changes a reading.'));
+
+  // Where it is and which circuit it is plugged into (#461, #465).
+  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
+  locSel.onchange = () => { node.Location = locSel.value || undefined; };
+  grid.appendChild(field('Location', locSel, 'The room, area, floor or site it is in. Its consumption counts there on the Floor Plans page.'));
+  const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
+  circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
+  grid.appendChild(field('Circuit', circSel, 'The breaker it is plugged into. The circuit then counts it among its metered devices and reports what is left unmetered.'));
 
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
