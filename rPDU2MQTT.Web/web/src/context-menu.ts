@@ -10,6 +10,8 @@ export function makeMenu(host: any, cls = 'ctx-menu') {
   const menu = el('div', { class: cls });
   menu.hidden = true;
   const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
+  document.addEventListener('keydown', (e: any) => { if (e.key === 'Escape' && !menu.hidden) close(); });
   const open = (e: any, entries: (MenuEntry | null | false | undefined)[]) => {
     menu.innerHTML = '';
     const rows = entries.filter(Boolean) as MenuEntry[];

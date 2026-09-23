@@ -32,8 +32,15 @@ const series = (url) => {
   return {
     ok: true, metric: 'realpower', units: 'W',
     at: Array.from({ length: SAMPLES }, (_, i) => new Date(Date.UTC(2026, 8, 22, 4 + i)).toISOString()),
-    series: [{ node: 'n30_1_5', label: 'Kitchen lights', kind: 'breaker',
-      values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 100 + i * 10)) }],
+    series: [
+      { node: 'main_panel', label: 'Main Panel', kind: 'panel',
+        values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 480 + i * 10)) },
+      { node: 'n30_1_5', label: 'Kitchen lights', kind: 'breaker',
+        values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 100 + i * 10)) },
+      // The busier of the two children, so the order of the breakdown says something.
+      { node: 'outlet:rack_pdu:1', label: 'Dell r730XD', kind: 'outlet',
+        values: Array.from({ length: SAMPLES }, () => 300) },
+    ],
   };
 };
 
@@ -87,6 +94,8 @@ rightClick('n30_1_5');
 itemSaying('History…').onclick();
 await wait(120);
 const sheet = () => query(getEl('overlay'), '.sheet');
+// Clicking the backdrop is how a sheet is dismissed.
+const shut = () => { const o = getEl('overlay'); o.onclick({ target: o }); };
 if (!sheet()) fail('History opened no sheet');
 if (menu() && !menu().hidden) fail('the menu stayed open behind the sheet');
 if (!/Kitchen lights/.test(sheet().textContent || '')) fail('the history sheet does not name the node');
@@ -102,11 +111,48 @@ query(sheet(), 'button', true).find(b => b.textContent === 'Last 7 days').onclic
 await wait(120);
 if (!asked.some(u => /days=7&step=3600/.test(u))) fail(`picking a longer window asked for nothing: ${asked.join(' | ')}`);
 
+// A tier's sheet breaks the total down into what it feeds, each on a strip of its own, busiest first.
+shut();
+rightClick('main_panel');
+itemSaying('History…').onclick();
+await wait(120);
+const parts = () => query(sheet(), '.hs-part', true);
+if (parts().length !== 2) fail(`the breakdown shows ${parts().length} of the 2 nodes the panel feeds`);
+if (parts()[0].dataset.node !== 'outlet:rack_pdu:1')
+  fail(`the breakdown is not ordered by what each drew: ${parts().map(p => p.dataset.node).join(', ')}`);
+if (!/300 W/.test(parts()[0].textContent || '')) fail(`a part does not say what it is drawing: "${parts()[0].textContent}"`);
+if (!query(parts()[0], 'svg')) fail('a part was listed without its own strip');
+// The same reading in another measurement is one pick away, and it asks again for that one.
+const metricSel = query(sheet(), '.hs-metric');
+if (!metricSel) fail('the history cannot be asked for in another measurement');
+metricSel.value = 'current';
+metricSel.onchange();
+await wait(120);
+if (!asked.some(u => /metric=current/.test(u))) fail(`picking amps asked for nothing: ${asked.join(' | ')}`);
+// The window picked last time is the one the next sheet opens on.
+query(sheet(), 'button', true).find(b => b.textContent === 'Last hour').onclick();
+await wait(120);
+shut();
+asked.length = 0;
+rightClick('n30_1_5');
+itemSaying('History…').onclick();
+await wait(120);
+if (!asked.every(u => /minutes=60&step=30/.test(u))) fail(`the window picked last time was not kept: ${asked.join(' | ')}`);
+const marked = query(sheet(), 'button', true).filter(b => b.classList.contains('primary')).map(b => b.textContent);
+if (marked.join() !== 'Last hour') fail(`the sheet does not show which window it is on: ${marked.join(', ')}`);
+shut();
+
+// Escape closes the menu, as it closes everything else.
+rightClick('n30_1_5');
+sandbox.document._on?.keydown?.forEach(fn => fn({ key: 'Escape' }));
+if (!menu().hidden) fail('Escape left the menu open');
+
 // The menu is drawn over the diagram, inside the box it was aimed at.
 if (!/\.ctx-menu\s*\{[^}]*position:\s*absolute/.test(await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8')))
   fail('the menu is not positioned over the diagram');
 
 console.log('flow menu: a right-click on a node of the diagram offers its history, a trace of its supply and its editor — '
-  + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, '
-  + 'a gap where the node has no reading');
+  + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, a gap '
+  + 'where the node has no reading, what the tier feeds broken out beneath it busiest first, the measurement pickable '
+  + 'there, and the window kept for the next one; Escape closes the menu');
 process.exit(0);

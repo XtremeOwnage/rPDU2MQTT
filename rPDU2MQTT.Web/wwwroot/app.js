@@ -1850,6 +1850,8 @@ function makeMenu(host     , cls = 'ctx-menu') {
   const menu = el('div', { class: cls });
   menu.hidden = true;
   const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
+  document.addEventListener('keydown', (e     ) => { if (e.key === 'Escape' && !menu.hidden) close(); });
   const open = (e     , entries                                          ) => {
     menu.innerHTML = '';
     const rows = entries.filter(Boolean)               ;
@@ -1879,10 +1881,29 @@ function makeMenu(host     , cls = 'ctx-menu') {
 
 /// Windows worth asking about, and how finely each is sampled.
 const HISTORY_WINDOWS                     = [
+  ['minutes=60&step=30', 'Last hour'],
   ['minutes=360&step=60', 'Last 6 hours'],
   ['minutes=1440&step=900', 'Last 24 hours'],
   ['days=7&step=3600', 'Last 7 days'],
+  ['days=30&step=21600', 'Last 30 days'],
 ];
+/// The window a sheet opens on when nobody has picked one yet.
+const HISTORY_DEFAULT = 'minutes=1440&step=900';
+/// The measurements a reading can be asked for in, and what each is called.
+const HISTORY_METRICS                     = [
+  ['realpower', 'Power (W)'],
+  ['current', 'Current (A)'],
+  ['apparentpower', 'Apparent (VA)'],
+  ['energy_d', 'Energy today (kWh)'],
+];
+/// The last window picked, kept per browser: the same question tends to be asked over the same span.
+const WINDOW_KEY = 'rpdu2mqtt.history.window';
+const rememberedWindow = () => {
+  try { const v = localStorage.getItem(WINDOW_KEY); return HISTORY_WINDOWS.some(([q]) => q === v) ? v  : HISTORY_DEFAULT; }
+  catch { return HISTORY_DEFAULT; }
+};
+
+                                                                           
 
 /// Open the history of one or more nodes, over a window picked in the sheet.
 function openHistorySheet(o                ) {
@@ -1892,7 +1913,11 @@ function openHistorySheet(o                ) {
   const plot = el('div', { class: 'ps-chart' });
   const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
   const note = el('div', { class: 'desc' });
-  let window = HISTORY_WINDOWS[1][0];
+  const breakdown = el('div', { class: 'hs-parts' });
+  // A part that is the whole is not a breakdown; two legs summed into one line are.
+  const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
+  let window = rememberedWindow();
+  let metricNow = metric;
 
   const load = async () => {
     if (!nodes.length) {
@@ -1903,11 +1928,12 @@ function openHistorySheet(o                ) {
     plot.innerHTML = '';
     note.textContent = 'Reading…';
     let r     ;
-    try { r = await api(`/api/flow/series?${window}&metric=${metric}`); }
+    try { r = await api(`/api/flow/series?${window}&metric=${metricNow}`); }
     catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     const body = r?.body;
     if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
-    const series = (body.series || []).filter((s     ) => nodes.includes(s.node));
+    const all = body.series || [];
+    const series = all.filter((s     ) => nodes.includes(s.node));
     if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
     // A node with no reading at some moment leaves the total unknown then, exactly as its power is.
     const at           = body.at || [];
@@ -1928,20 +1954,63 @@ function openHistorySheet(o                ) {
       values, color: 'var(--accent)', units, width: 560, height: 160, grid: true,
       at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
     }));
+    const when = (i        ) => (at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+    const peak = known.length ? Math.max(...known) : null;
+    const peakAt = peak == null ? '' : when(values.findIndex(v => v === peak));
+    const last = [...values].reverse().find(v => v != null);
     note.textContent = known.length
-      ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} ${units} · `
-        + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} ${units} · from ${nodes.join(' + ')}`
+      ? `${known.length} of ${values.length} readings · peak ${Math.round(peak ).toLocaleString('en-US')} ${units}`
+        + `${peakAt ? ` at ${peakAt}` : ''} · average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} ${units}`
+        + `${last == null ? '' : ` · latest ${Math.round(last).toLocaleString('en-US')} ${units}`} · from ${nodes.join(' + ')}`
       : `No readings stored for ${nodes.join(', ')} in this window.`;
+
+    // What the total is made of, each on a strip of its own over the same window and the same reading.
+    breakdown.innerHTML = '';
+    if (!parts.length) return;
+    const held = parts.map(id => ({ id, s: all.find((x     ) => x.node === id) })).filter(x => x.s);
+    if (!held.length) {
+      breakdown.appendChild(el('div', { class: 'desc', text: `Nothing is stored for what ${o.lineLabel} is made of in this window.` }));
+      return;
+    }
+    breakdown.appendChild(el('div', { class: 'hs-parts-head', text: o.partsLabel || 'What it is made of' }));
+    // Ordered by what each drew, so the biggest part of the total is first.
+    held.map(({ id, s }) => {
+      const vs                    = (s.values || []).map((v     ) => (typeof v === 'number' ? v : null));
+      const seen = vs.filter((v)              => v != null);
+      return { id, label: s.label || labelOf(id), vs, latest: [...vs].reverse().find(v => v != null) ?? null, avg: seen.length ? seen.reduce((a, v) => a + v, 0) / seen.length : null };
+    }).sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1)).forEach(part => {
+      const row = el('div', { class: 'hs-part' });
+      row.dataset.node = part.id;
+      row.appendChild(el('span', { class: 'hs-part-name', text: part.label, title: part.id }));
+      row.appendChild(sparkline({ values: part.vs, color: 'var(--accent)', units, width: 132, height: 34 }));
+      // A part with no reading says so: it is not nothing, it is unknown.
+      row.appendChild(el('span', { class: 'hs-part-num', text: part.latest == null ? 'no data' : `${Math.round(part.latest).toLocaleString('en-US')} ${units}` }));
+      breakdown.appendChild(row);
+    });
   };
 
   const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
   const buttons = HISTORY_WINDOWS.map(([q, label]) => {
     const b = btn(label);
-    b.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b.classList.add('primary'); load(); };
+    b.onclick = () => {
+      window = q;
+      try { localStorage.setItem(WINDOW_KEY, q); } catch { /* a browser that keeps nothing still charts */ }
+      buttons.forEach(x => x.classList.remove('primary'));
+      b.classList.add('primary');
+      load();
+    };
     picker.appendChild(b);
     return b;
   });
-  buttons[1].classList.add('primary');
+  const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
+  markWindow();
+  // The same reading, asked for in another measurement: watts, amps, or the energy behind them.
+  const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' })                     ;
+  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
+  metricSel.value = metricNow;
+  metricSel.onchange = () => { metricNow = metricSel.value; load(); };
+  picker.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel));
 
   // The node itself is a thing of its own — its bindings and its label live on the Nodes page.
   const toNode = btn('Edit node');
@@ -1954,7 +2023,7 @@ function openHistorySheet(o                ) {
   };
   openSheet({
     title: o.title,
-    body: el('div', {}, picker, plot, legend, note),
+    body: el('div', {}, picker, plot, legend, note, breakdown),
     footer: [toNode, ...(o.footer || [])],
   });
   load();
@@ -5059,8 +5128,11 @@ function addFlowSection(nav     , sections     ) {
             nodes: [n.id],
             lineLabel: named,
             labelOf: (id        ) => byId[id]?.label || id,
-            metric: metricSel.value === 'energy_d' ? 'energy' : metricSel.value,
+            metric: metricSel.value,
             empty: 'Nothing is measuring this node, so there is nothing to chart.',
+            // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
+            parts: (outgoing[n.id] || []).map((l     ) => l.target),
+            partsLabel: 'What it feeds',
           }),
         },
         { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
@@ -11052,12 +11124,16 @@ function addPanelScheduleSection(nav     , sections     ) {
   const history = (panel       , b         ) => {
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
+    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
     openHistorySheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      nodes: b.legs.map(l => l.channel).filter(Boolean)            ,
+      nodes: channels,
       lineLabel: `${b.number}${b.description ? ' — ' + b.description : ''}`,
       labelOf,
       empty: GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.',
+      // A 240 V circuit is the sum of its legs, and each leg is worth seeing on its own.
+      parts: channels.length > 1 ? channels : [],
+      partsLabel: 'Its legs',
       footer: [toEditor],
     });
   };

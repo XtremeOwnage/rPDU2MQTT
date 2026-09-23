@@ -554,8 +554,11 @@ export function addFlowSection(nav: any, sections: any) {
             nodes: [n.id],
             lineLabel: named,
             labelOf: (id: string) => byId[id]?.label || id,
-            metric: metricSel.value === 'energy_d' ? 'energy' : metricSel.value,
+            metric: metricSel.value,
             empty: 'Nothing is measuring this node, so there is nothing to chart.',
+            // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
+            parts: (outgoing[n.id] || []).map((l: any) => l.target),
+            partsLabel: 'What it feeds',
           }),
         },
         { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },

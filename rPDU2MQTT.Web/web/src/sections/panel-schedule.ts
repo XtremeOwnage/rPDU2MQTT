@@ -565,12 +565,16 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const history = (panel: Panel, b: Breaker) => {
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
+    const channels = b.legs.map(l => l.channel).filter(Boolean) as string[];
     openHistorySheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      nodes: b.legs.map(l => l.channel).filter(Boolean) as string[],
+      nodes: channels,
       lineLabel: `${b.number}${b.description ? ' — ' + b.description : ''}`,
       labelOf,
       empty: GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.',
+      // A 240 V circuit is the sum of its legs, and each leg is worth seeing on its own.
+      parts: channels.length > 1 ? channels : [],
+      partsLabel: 'Its legs',
       footer: [toEditor],
     });
   };

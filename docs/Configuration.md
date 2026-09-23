@@ -801,10 +801,18 @@ you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Tot
 rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
 discovery is enabled — appears in Home Assistant as its own device.
 
-**Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing over
-the last 6 hours, 24 hours or 7 days, with a gap wherever it had no reading rather than a zero; **Trace its
-supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on the Nodes
-page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
+**Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
+**Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
+the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
+Escape closes the menu.
+
+The history sheet covers the last hour, 6 hours, 24 hours, 7 days or 30 days, in whichever measurement is
+picked there — watts, amps, VA or today's energy — and says how much of the window is known, the peak and
+when it happened, the average and the latest reading. A moment with no reading is a gap in the line, never a
+zero or a partial sum. Beneath it, **what the tier feeds** is broken out, busiest first, each on a strip of
+its own from the same reading, so where a total went can be read off without asking again — and on the Panel
+Schedule, a double-pole breaker's chart breaks out its two legs the same way. The window you pick is kept for
+the next sheet you open.
 
 ### Live sources from MQTT
 
