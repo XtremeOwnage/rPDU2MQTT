@@ -66,10 +66,27 @@ for (const ok of ['main_panel', 'b06'])
 const feeds = valuesOf(pickerFor('Feeds'));
 if (!feeds.includes('fridge')) fail(`Feeds no longer offers a load: ${feeds.join(', ')}`);
 
+// A panel is fed from one place: a second feeder is refused rather than quietly wired. (A toast cannot be
+// read here — the stub's timers fire at once, so it is gone before the check looks — the wiring is the proof.)
+const wire = pickerFor('Feeds');
+config.EnergyFlow.Links.push({ From: 'b06', To: 'main_panel' });
+wire.value = 'main_panel';
+wire.onchange();
+await wait(80);
+const toMain = config.EnergyFlow.Links.filter(l => l.To === 'main_panel');
+if (toMain.length !== 1) fail(`a panel was wired a second feeder: ${toMain.map(l => l.From).join(', ')}`);
+// …and a node that is not a panel still takes more than one: the refusal is about panels, not about wiring.
+config.EnergyFlow.Links.push({ From: 'main_panel', To: 'fridge' });
+wire.value = 'fridge';
+wire.onchange();
+await wait(80);
+if (!config.EnergyFlow.Links.some(l => l.From === 'rack_pdu' && l.To === 'fridge'))
+  fail('a second feeder into an ordinary node was refused as well');
+
 // Breaker is a kind a node can be.
 const kindSel = query(body, 'select', true).find(s => valuesOf(s).includes('panel') && valuesOf(s).includes('load'));
 if (!kindSel || !valuesOf(kindSel).includes('breaker')) fail(`Breaker is not offered as a kind: ${kindSel ? valuesOf(kindSel).join(', ') : 'no kind picker'}`);
 
 console.log('feeders: neither the node editor nor the Nodes table offers a load as a feeder, a breaker and a panel are offered, '
-  + 'a load can still be fed, and Breaker is a kind');
+  + 'a load can still be fed, a panel is refused a second feeder while an ordinary node takes one, and Breaker is a kind');
 process.exit(0);

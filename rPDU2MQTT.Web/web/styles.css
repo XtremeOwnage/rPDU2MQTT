@@ -1589,3 +1589,62 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-menu-item:hover:not(:disabled) { background: var(--panel3); }
 .fp-menu-item.is-danger { color: var(--bad); }
 .fp-menu-item:disabled { opacity: .45; cursor: default; }
+
+/* Panel schedule: what the mapping contradicts, or the readings do (#457). */
+.ps-checks { display: grid; gap: 6px; margin: 0 0 var(--sp-3); }
+.ps-checks-head { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+.ps-check {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 8px 10px;
+  border: 1px solid var(--warn); border-radius: var(--r-sm); background: var(--warn-bg); font-size: 13.5px;
+}
+.ps-check.is-bad { border-color: var(--bad); background: var(--bad-bg); }
+.ps-check-kind { font-weight: 700; }
+.ps-check-msg { flex: 1; min-width: 12em; color: var(--fg); }
+
+/* Panel schedule: a pasted directory, and what each line reads as (#455). */
+.ps-import { display: grid; gap: var(--sp-2); }
+.ps-paste { width: 100%; min-height: 9em; font: 12.5px var(--mono); }
+.ps-file { display: none; }
+.ps-rows { display: grid; gap: 2px; max-height: 42vh; overflow: auto; }
+.ps-row { display: grid; grid-template-columns: minmax(10em, 1fr) minmax(10em, 1.4fr) 7em; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: var(--r-xs); font-size: 13px; }
+.ps-row.is-add { background: var(--good-bg); }
+.ps-row.is-update { background: var(--accent-bg); }
+.ps-row.is-clash { background: var(--warn-bg); }
+.ps-row.is-bad { background: var(--bad-bg); }
+.ps-row-line { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.ps-row-read.is-warn { color: var(--warn); }
+.ps-row-note { color: var(--bad); grid-column: 2 / span 2; }
+.ps-row-effect { color: var(--muted); text-align: right; }
+@media (max-width: 560px) { .ps-row { grid-template-columns: 1fr; } .ps-row-note { grid-column: 1; } }
+.ps-row-fix { font-family: var(--mono); font-size: 12px; width: 100%; }
+
+/* The panel directory as it is printed for the inside of the panel door (#460). */
+.ps-print { display: none; }
+.ps-print-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ps-print-head h3 { margin: 0; }
+.ps-print-when { color: var(--muted); font-size: 11pt; }
+.ps-print-grid { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
+.ps-print-grid th, .ps-print-grid td { border: 1px solid #999; padding: 2px 4px; font-size: 9pt; line-height: 1.15; overflow: hidden; }
+.ps-print-grid th { background: #eee; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
+.ps-print-grid col, .ps-print-desc { width: auto; }
+.ps-print-wire, .ps-print-amps { width: 8%; text-align: center; font-variant-numeric: tabular-nums; }
+.ps-print-slot { width: 6%; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; background: #f3f3f3; }
+.ps-print-desc.is-empty, .ps-print-desc.is-unknown { color: #555; font-style: italic; }
+@media print {
+  body:has(.section.ps.active) nav, body:has(.section.ps.active) .appbar, body:has(.section.ps.active) #savebar,
+  body:has(.section.ps.active) .nav-toggle, body:has(.section.ps.active) .project-link,
+  .section.ps.active > *:not(.ps-print) { display: none !important; }
+  .section.ps.active .ps-print { display: block; color: #000; }
+  /* A 42-slot directory is 21 rows: it fits one page either way up, so it is never split across two. */
+  .ps-print-grid tr { break-inside: avoid; }
+  @page { margin: 10mm; }
+}
+
+/* Tracing a breaker: the baseline, and the channel that went dark with it (#456). */
+.ps-trace { display: grid; gap: var(--sp-2); }
+.ps-trace-out { display: grid; gap: 6px; }
+.ps-trace-note { padding: 8px 10px; border-radius: var(--r-xs); background: var(--warn-bg); color: var(--fg); font-size: 13px; }
+.ps-trace-hit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r-xs); background: var(--good-bg); }
+.ps-trace-name { font-weight: 600; }
+.ps-trace-fall { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ps-trace-held { color: var(--warn); font-size: 12px; }

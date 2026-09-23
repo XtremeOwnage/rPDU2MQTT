@@ -91,7 +91,7 @@ public class LocationModelTests
         Assert.Equal("garage", index.LocationOf("outlet:rack:3"));     // exact id beats the pattern above it
         Assert.Equal("bedroom", index.LocationOf("outlet:rack:4"));    // a placement beats a pattern
         Assert.Equal("office", index.LocationOf("outlet:rack:1"));
-        Assert.Equal("ground", index.LocationOf("ch5"));
+        Assert.Equal("ground", index.LocationOf("breaker:main:B06"));  // the breaker is the circuit, and it serves two rooms
         Assert.Equal("ground", index.LocationOf("porch_light"));       // outdoors, outside every room: on its floor               // a circuit serving two rooms is in their floor
         Assert.Null(index.LocationOf("elsewhere"));
     }
@@ -211,7 +211,7 @@ public class LocationModelTests
     {
         var r = Report(fridge: 150, kettle: 1200, channel: 1500);
 
-        Assert.Equal("ch5", r.Node);
+        Assert.Equal("breaker:main:B06", r.Node);   // a mapped breaker is a node of the flow (#458)
         Assert.Equal(RemainderState.Known, r.State);
         Assert.Equal(150, r.Remainder);
         Assert.False(r.Exceeded);

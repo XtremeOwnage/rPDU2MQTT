@@ -141,9 +141,10 @@ public sealed class LocationIndex
 
         // A circuit's node is where the rooms it serves are.
         var map = PanelMap.For(flow);
+        var known = PanelNodes.NodeIds(flow);
         foreach (var chain in map.Chains)
         {
-            var node = Circuits.NodeOf(chain);
+            var node = Circuits.NodeOf(chain, known);
             if (node is null) continue;
             var served = Common(chain.Breaker.Rooms ?? new());
             if (served is not null && !circuitLocation.ContainsKey(node)) circuitLocation[node] = served;

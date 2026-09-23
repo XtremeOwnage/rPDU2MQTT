@@ -18,7 +18,8 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const config = {
   History: { Enabled: false },
   EnergyFlow: {
-    Nodes: [],
+    // The channels the bridge reads, so an imported line naming one can be told from one naming nothing.
+    Nodes: [{ Id: 'n30_1_7', Label: 'N30 1-7', Kind: 'breaker' }],
     // The circuit on n30_1_1 hangs off the grid today, so mapping it to a breaker has something to replace.
     Links: [{ From: 'grid', To: 'n30_1_1' }],
     Panels: [{
@@ -42,6 +43,8 @@ const config = {
   },
 };
 
+// What a channel reads once a breaker has been switched off, for a trace (#456).
+const fell = {};
 // What each monitor channel reads.
 const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, n30_1_9: 150, main_panel: 2600 };
 // What each channel reads in amps: the kitchen circuit is working hard against its 20 A breaker.
@@ -55,6 +58,9 @@ const nodes = [
   { id: 'n30_1_8', label: 'N30 1-8', kind: 'breaker', value: 100 },
   { id: 'n30_1_9', label: 'N30 1-9', kind: 'breaker', value: 150 },
   { id: 'main_panel', label: 'Main Panel', kind: 'panel', value: 2600 },
+  // A subpanel the bridge reads: not one of the directory's own panels, so a breaker feeding it can be
+  // measured by the CT on its feed.
+  { id: 'n30_3_4', label: 'AC Subpanel', kind: 'panel', value: 900 },
   { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 },
   { id: 'main_panel#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 60 },
 ];
@@ -63,6 +69,11 @@ const nodes = [
 /// link of it is there. GET answers from the saved directory; POST from whatever the page is holding.
 const resolve = (flow) => ({
   ok: true, metric: 'realpower',
+  // What the bridge's own check says about the mapping (#457): here, a channel claimed by two breakers.
+  findings: Object.entries((flow.Clamps || []).reduce((acc, c) => { (acc[c.Channel] ||= []).push(`${c.Panel}/${c.Breaker}`); return acc; }, {}))
+    .filter(([, on]) => on.length > 1)
+    .map(([ch, on]) => ({ kind: 'channel-shared', severity: 'bad', channels: [ch], breakers: on,
+      message: `${ch} is mapped to ${on.length} breakers: ${on.join(', ')}. Only one of them is measured by it.` })),
   panels: flow.Panels.map(p => ({
     id: p.Id, name: p.Name, slots: p.Slots, rows: Math.ceil(p.Slots / 2),
     node: p.Node || '',
@@ -76,6 +87,7 @@ const resolve = (flow) => ({
       }
       // One CT measuring the whole circuit is the breaker's power; the other leg is then not expected.
       const counted = legs.some(l => l.whole) ? legs.filter(l => l.whole) : legs;
+      const mine = [...new Set(counted.map(l => l.channel).filter(Boolean))];
       let sum = 0, gap = 'none', current = null;
       for (const l of counted) {
         if (!l.clamp) { gap = 'noclamp'; break; }
@@ -91,6 +103,11 @@ const resolve = (flow) => ({
         wire: b.Wire || '', gauge: b.Gauge || '', conductor: b.Conductor || '',
         description: b.Description || '', state: b.State || 'unknown',
         power: gap === 'none' ? sum : null, current: gap === 'none' ? current : null, gap, legs,
+        // The breaker as a tier of the flow (#458): the one channel measuring it where that is a node of its
+        // own, else a tier of its own — which is what a double-pole on two channels needs.
+        node: b.Node || (mine.length === 1 && nodes.some(n => n.id === mine[0]) ? mine[0]
+          : counted.some(l => l.channel) ? `breaker:${p.Id}:${b.Number}` : null),
+        derived: !b.Node && !(mine.length === 1 && nodes.some(n => n.id === mine[0])) && counted.some(l => l.channel),
       };
     }),
   })),
@@ -118,14 +135,40 @@ const CHART_W = 560, PAD_L = 44, PAD_R = 3;
 const stepX = (CHART_W - PAD_L - PAD_R) / (SAMPLES - 1);
 const atX = (i) => PAD_L + i * stepX;
 
+/// The bridge's reading of a pasted directory (#455), standing in for the parser: what each line says, and
+/// what writing it would do to the panel the page is holding.
+const importOf = (payload) => {
+  const flow = payload.config?.EnergyFlow || saved.EnergyFlow;
+  const panel = (flow.Panels || []).find(p => p.Id === payload.panel) || { Breakers: [] };
+  const known = new Set((flow.Nodes || []).map(n => n.Id));
+  const rows = String(payload.text || '').split('\n').map(l => l.trim()).filter(l => l.length).map(line => {
+    const m = /^(\d+,\d+|B?\d+(?:\.\d)?)\s*[,:]\s*(.*)$/i.exec(line);
+    if (!m) return { line, note: `“${line.split(/[,:]/)[0]}” does not read as a breaker number.` };
+    const [number, rest] = [m[1], m[2]];
+    const wire = ((/\bW\d+\b/i.exec(rest) || [''])[0]).toUpperCase();
+    const channel = (/\bn30_\d+_\d+\b/i.exec(rest) || [''])[0];
+    const description = (rest.includes(':') ? rest.split(':').pop() : rest.replace(wire, '').replace(channel, '')).replace(/^[,\s]+|[,\s]+$/g, '');
+    const slot = Number(number.replace(/^B/i, '').split(/[,.]/)[0]);
+    const held = panel.Breakers || [];
+    const effect = held.some(b => b.Number === number) ? 'update'
+      : held.some(b => ((b.Poles || 1) === 2 ? [b.Slot, b.Slot + 2] : [b.Slot]).includes(slot)) ? 'clash' : 'add';
+    return {
+      line, number, slot, poles: /,/.test(number) ? 2 : 1, half: null, wire, amps: null, channel,
+      description, state: 'identified', note: null, effect, channelKnown: !channel || known.has(channel),
+    };
+  });
+  return { ok: true, rows };
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => url.includes('/api/flow/series') ? (series.push(url), seriesBody())
+    : url.includes('/api/panels/import') ? importOf(JSON.parse(opts.body))
     : url.includes('/api/panels/resolve') ? resolve(JSON.parse(opts.body).EnergyFlow)
     : url.includes('/api/panels') ? resolve(saved.EnergyFlow)
     : url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
         : url.includes('/api/config') ? config
-          : url.includes('/api/flow') ? { ok: true, nodes, links: [] }
+          : url.includes('/api/flow') ? { ok: true, nodes: nodes.map(n => (n.id in fell ? { ...n, value: fell[n.id] } : n)), links: [] }
             : { ok: true },
 });
 vm.createContext(sandbox);
@@ -309,18 +352,22 @@ if (!nodeSel()) fail('the editor offers no node to measure the breaker');
 const offered = (nodeSel().children || []).map(o => o.value);
 if (!offered.includes('n30_1_8')) fail(`the circuit nodes are not offered: ${offered.join(', ')}`);
 if (offered.includes('main_panel')) fail('the panel carrying the breaker is offered as the thing measuring it');
+// …but a subpanel the bridge reads is a channel like any other: a breaker feeding one is measured by its feed.
+if (!offered.includes('n30_3_4')) fail(`a subpanel the bridge reads is not offered as what measures a breaker: ${offered.join(', ')}`);
+// A breaker's own tier reads nothing, so it is never offered as the thing measuring it.
+if (offered.some(o => o.startsWith('breaker:'))) fail(`a breaker's own tier is offered as a channel: ${offered.join(', ')}`);
 if (offered.includes('main_panel#unmeasured')) fail('an unmetered remainder is offered as a circuit');
 // A house has more channels than anyone wants to scroll, so the list is typed down.
 const hunt = () => query(sheet(), '.ps-hunt');
 const shownCount = () => (query(sheet(), 'span', true).map(s => s.textContent).find(t => /channels$/.test(t || '')) || '');
 const optionsOf = () => (nodeSel().children || []).map(o => o.value).filter(Boolean);
 if (!hunt()) fail('the channel picker cannot be searched');
-if (!/5 of 5 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
+if (!/6 of 6 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
 hunt().value = '1_8';
 hunt().oninput({});
 await wait(30);
 if (JSON.stringify(optionsOf()) !== JSON.stringify(['n30_1_8'])) fail(`typing did not narrow the list: ${optionsOf().join(', ')}`);
-if (!/1 of 5 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
+if (!/1 of 6 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
 // A filter that matches nothing must not quietly unpick what is already chosen.
 nodeSel().value = 'n30_1_8';
 hunt().value = 'zzz';
@@ -332,7 +379,7 @@ if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out 
 hunt().value = '';
 hunt().oninput({});
 await wait(30);
-if (optionsOf().length !== 5) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
+if (optionsOf().length !== 6) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
 
 nodeSel().value = 'n30_1_8';
 await apply();
@@ -427,38 +474,35 @@ feedAdd().value = 'grid';
 feedAdd().onchange({});
 await wait(60);
 
-// A circuit mapped to a breaker is placed beneath the panel — and one that hangs elsewhere today is not
-// moved without saying what it is fed by now and what that becomes.
-let asked = [];
-sandbox.confirm = (m) => { asked.push(m); return false; };
+// A breaker mapped to a channel records the clamp; the breaker is a tier of the flow in its own right (#458),
+// so nothing is wired from the panel to the channel by hand.
 halves(9)[0].onclick();
 await wait(100);
 nodeSel().value = 'n30_1_1';
 await apply();
-if (!asked.length) fail('a circuit fed by something else was moved without a word');
-if (!/Grid/.test(asked[0])) fail(`the warning does not say what feeds it today: ${asked[0]}`);
-if (!/Main Panel/.test(asked[0])) fail(`the warning does not say where it is going: ${asked[0]}`);
-if (!/Cancel/.test(asked[0])) fail(`the warning does not offer to leave it alone: ${asked[0]}`);
-// Cancel leaves the directory exactly as it was.
-if (links().some(l => l.To === 'n30_1_1' && l.From === 'main_panel')) fail('Cancel moved the circuit anyway');
-if (!links().some(l => l.To === 'n30_1_1' && l.From === 'grid')) fail('Cancel dropped the feeder it was warning about');
-if (clampFor('B09')) fail('Cancel still recorded what measures the breaker');
+if (clampFor('B09')?.Channel !== 'n30_1_1') fail('mapping the breaker did not record what measures it');
+if (links().some(l => l.From === 'main_panel' && l.To === 'n30_1_1')) fail('mapping a breaker still wires the panel straight to the channel');
+if (!links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('mapping a breaker rewrote the links the operator had');
 
-// OK moves it, and what fed it before is replaced rather than left beside the new link.
-sandbox.confirm = (m) => { asked.push(m); return true; };
-await apply();
-if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_1')) fail('the circuit was not placed beneath the panel');
-if (links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('the old feeder was left beside the new one');
-if (clampFor('B09')?.Channel !== 'n30_1_1') fail('the clamp was not recorded with the move');
-
-// A circuit that hangs nowhere is mapped without asking about replacing anything.
-asked = [];
-halves(8)[0].onclick();
+// …and the breaker's editor says which node it is on the flow.
+halves(9)[0].onclick();
 await wait(100);
-nodeSel().value = 'n30_1_2';
-await apply();
-if (asked.length) fail(`mapping a circuit with no feeder still asked about replacing one: ${asked[0]}`);
-if (!links().some(l => l.From === 'main_panel' && l.To === 'n30_1_2')) fail('a circuit with no feeder was not placed beneath the panel');
+// Measured by one channel, the breaker is that channel — not a second node carrying the same reading.
+if (!/It is the channel measuring it, n30_1_1/.test(textOf(sheet()))) fail(`the breaker does not say which node it is: ${textOf(sheet())}`);
+if (/breaker:main_panel:B09/.test(textOf(sheet()))) fail('a breaker measured by one channel still claims a tier of its own');
+if (!/beneath Main Panel/.test(textOf(sheet()))) fail('the breaker does not say where it sits on the flow');
+shut();
+
+// What the mapping contradicts is reported on the page, each finding leading to the breaker it names (#457).
+const checks = () => query(sec, '.ps-check', true);
+if (!checks().length) fail('the checks on the mapping are not shown');
+const shared = checks().find(c => /two breakers/.test(textOf(c)));
+if (!shared) fail(`the channel mapped to two breakers is not reported: ${checks().map(textOf).join(' | ')}`);
+if (!shared.classList.contains('is-bad')) fail('a contradiction is not marked as one');
+query(shared, 'button', true)[0].onclick();
+await wait(60);
+if (!/B06|B09/.test(textOf(sheet()))) fail('a finding does not lead to the breaker it names');
+shut();
 
 // A breaker is edited in place, and the edit lands on the config entry rather than the drawn copy.
 halves(6)[0].onclick();
@@ -604,6 +648,161 @@ if (!/measuring this breaker/i.test(sheet().textContent || ''))
   fail(`an unmeasured breaker does not say what is missing: "${(sheet().textContent || '').slice(0, 120)}"`);
 shut();
 
+// A directory someone already keeps can be pasted in, and what each line reads as is shown before anything is
+// written (#455): one line that is not a breaker at all, one new, one landing on a slot already held, and one
+// naming a channel the bridge does not read.
+const importBtn = query(sec, 'button', true).find(b => b.textContent === 'Import…');
+if (!importBtn) fail('the panel schedule offers no way to import a directory');
+importBtn.onclick();
+await wait(60);
+const paste = query(sheet(), 'textarea')
+  || fail('the import sheet has nowhere to paste a directory');
+const previewRows = () => query(sheet(), '.ps-row', true);
+const rowSaying = (t) => previewRows().find(r => (r.textContent || '').includes(t));
+paste.value = [
+  'Iotawatt: 1',
+  'B07, W21, n30_1_7: Office lights',
+  'B03: Dryer',
+  'B11, n30_9_9: Shed',
+  'B06: Kitchen lights rewritten',
+].join('\n');
+paste.oninput();
+await wait(400);
+if (previewRows().length !== 5) fail(`the preview shows ${previewRows().length} lines, not the 5 pasted`);
+if (!rowSaying('does not read as a breaker number')) fail('a line that is not a breaker is dropped silently');
+if (!rowSaying('Office lights').classList.contains('is-add')) fail('a breaker not in the panel is not shown as new');
+if (!rowSaying('Dryer').classList.contains('is-clash')) fail('a line landing on a slot already held is not flagged');
+if (!rowSaying('Kitchen lights rewritten').classList.contains('is-update')) fail('a line for a breaker already there is not shown as an update');
+// A channel nothing reads is said to be unknown rather than quietly mapped.
+if (!/n30_9_9 . no node with that id/.test(rowSaying('Shed').textContent || '')) fail(`a channel the bridge does not read is not flagged: "${rowSaying('Shed').textContent}"`);
+if (/no node with that id/.test(rowSaying('Office lights').textContent || '')) fail('a channel the bridge does read is flagged as unknown');
+// Nothing is written by looking at it.
+if (breakerIn('B07')) fail('the preview wrote a breaker into the config before it was applied');
+
+// A line that could not be read is the field itself, so it can be put right here.
+const fix = query(rowSaying('does not read as a breaker number'), 'input');
+if (!fix || fix.value !== 'Iotawatt: 1') fail('a line that could not be read is not offered for correction');
+fix.value = 'B08: Porch light';
+fix.onchange();
+await wait(400);
+if (previewRows().some(r => r.classList.contains('is-bad'))) fail('correcting the line left it unread');
+if (!rowSaying('Porch light')) fail('the corrected line was not read again');
+if (!/B08: Porch light/.test(paste.value)) fail('the correction did not go back into the pasted text');
+
+// Applying writes the lines that can be written, leaves the clash alone, and maps the channel that is known.
+query(sheet(), 'button', true).find(b => b.textContent === 'Apply to the panel').onclick();
+await wait(150);
+if (breakerIn('B07')?.Description !== 'Office lights') fail('applying did not add the new breaker');
+if (breakerIn('B08')?.Description !== 'Porch light') fail('applying did not add the corrected line');
+if (breakerIn('B06')?.Description !== 'Kitchen lights rewritten') fail('applying did not update the breaker already there');
+if (config.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B03'))
+  fail('a line landing on a slot already held was written anyway, over the breaker there');
+if (clampFor('B07')?.Channel !== 'n30_1_7') fail('a breaker whose line named a channel was not mapped to it');
+if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not read');
+// …and the panel is drawn with them, without anything being saved.
+if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
+if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
+
+// A pick the list no longer holds is kept rather than cleared by the next Apply — a mapping must not vanish
+// because the node behind it stopped being read.
+clampFor('B10').Channel = 'retired_channel';
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(150);
+halves(10)[0].onclick();
+await wait(100);
+const kept = (query(sheet(), '.ps-node', true)[0].children || []).map(o => o.value);
+if (!kept.includes('retired_channel')) fail(`a pick the list no longer holds was dropped from the picker: ${kept.join(', ')}`);
+if (query(sheet(), '.ps-node', true)[0].value !== 'retired_channel') fail('the picker did not open on the channel already recorded');
+await apply();
+if (clampFor('B10')?.Channel !== 'retired_channel') fail('applying cleared a mapping the picker could not list');
+clampFor('B10').Channel = 'n30_1_8';
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(150);
+
+// An unknown breaker is identified by switching it off and reading which channel went dark (#456).
+query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
+await wait(80);
+const traceStep = () => (query(sheet(), '.ps-trace-step')?.textContent || '');
+const hits = () => query(sheet(), '.ps-trace-hit', true);
+const traceNote = () => (query(sheet(), '.ps-trace-note')?.textContent || '');
+const pressTrace = async (label) => { query(sheet(), 'button', true).find(b => b.textContent === label).onclick(); await wait(120); };
+// It starts on a breaker nothing is measuring — that is the one worth tracing.
+const traceOn = query(sheet(), '.ps-trace-pick');
+if (clampFor(traceOn.value.split('|')[1])) fail(`tracing started on a breaker that is already measured: ${traceOn.value}`);
+// Trace the bathroom lights, which nobody has identified.
+traceOn.value = '9|B09';
+traceOn.onchange();
+await pressTrace('Take the baseline');
+// Six channels, all drawing: the panel carrying the breakers and the grid are not channels and are not counted.
+if (!/6 of 6 channels are drawing power/.test(traceStep())) fail(`the baseline does not say what is drawing: "${traceStep()}"`);
+// Nothing has been switched off yet, so nothing went dark.
+await pressTrace('Read again');
+if (!/none of them went dark/.test(traceNote())) fail(`with the breaker still on, the trace claimed something: "${traceNote()}"`);
+// Switch it off: the channel it feeds falls to nothing, and that is the one offered.
+fell.n30_1_8 = 0;
+await pressTrace('Read again');
+if (hits().length !== 1) fail(`${hits().length} channels were said to have gone dark, not the one that did`);
+if (hits()[0].dataset.node !== 'n30_1_8') fail(`the wrong channel was named: ${hits()[0].dataset.node}`);
+if (!/100 W . 0 W/.test(hits()[0].textContent || '')) fail(`the drop is not shown before and after: "${hits()[0].textContent}"`);
+// …and it says the channel is already recorded against another breaker, rather than quietly taking it.
+if (!/already measuring main_panel\/B10/.test(hits()[0].textContent || '')) fail(`a channel already mapped elsewhere is not flagged: "${hits()[0].textContent}"`);
+// A channel that stopped reporting altogether is not a channel that went dark.
+fell.n30_1_5 = null;
+await pressTrace('Read again');
+if (hits().some(h => h.dataset.node === 'n30_1_5')) fail('a channel that stopped reporting was offered as the answer');
+delete fell.n30_1_5;
+// Taking the answer maps the breaker to it and marks it identified. Nothing is saved.
+await pressTrace('This is it');
+if (clampFor('B09')?.Channel !== 'n30_1_8') fail('taking the traced channel did not map the breaker to it');
+if (breakerIn('B09').State !== 'identified') fail('a breaker identified by tracing is still unknown');
+if (saved.EnergyFlow.Clamps.some(c => c.Breaker === 'B09')) fail('tracing saved to disk on its own');
+
+// A circuit drawing nothing cannot be told apart, and the page says so rather than guessing.
+Object.assign(fell, { n30_1_1: 0, n30_1_2: 0, n30_1_5: 0, n30_1_8: 0, n30_1_9: 0, n30_3_4: 0 });
+query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
+await wait(80);
+await pressTrace('Take the baseline');
+await pressTrace('Read again');
+if (!/Nothing was drawing when the baseline was taken/.test(traceNote()))
+  fail(`with nothing drawing, the trace did not say a load is needed: "${traceNote()}"`);
+if (hits().length) fail('a channel was named as the answer although nothing was drawing');
+shut();
+for (const k of Object.keys(fell)) delete fell[k];
+
+// The directory prints for the inside of the panel door (#460): every slot in order, nothing that is only
+// screen furniture, and a slot nobody has written down printed as unknown rather than left blank.
+// Each printed row holds a pair of slots: the odd one on the left, the even one mirrored on the right.
+const printRow = (slot) => query(sec, '.ps-print-grid tr', true).find(r => r.dataset?.slot === String(slot % 2 ? slot : slot - 1));
+const printCells = (slot) => query(printRow(slot), 'td', true).map(c => (c.textContent || '').trim());
+if (!query(sec, '.ps-print')) fail('there is no printable directory');
+if (!/\.ps-print\s*\{[^}]*display:\s*none/.test(css)) fail('the printable directory is drawn on screen as well');
+// Twelve slots are six rows, two slots to a row: the panel as it is, not a list.
+if (query(sec, '.ps-print-grid tbody tr', true).length !== 6)
+  fail(`the printed directory has ${query(sec, '.ps-print-grid tbody tr', true).length} rows for 12 slots, not 6`);
+// Odd down the left, even down the right, with the slot numbers up the middle as a panel door label is.
+const first = printCells(1);
+if (first[0] !== 'AC Heat Strips' || first[2] !== '60' || first[3] !== '1')
+  fail(`the first slot does not print what it feeds, its rating and its number: ${JSON.stringify(first)}`);
+if (first[4] !== '2' || first[7] !== 'Empty')
+  fail(`the even column is not mirrored with its number to the middle, or an empty slot is left blank: ${JSON.stringify(first)}`);
+// The second slot of a double-pole says what holds it rather than repeating the circuit.
+if (!/other half of the breaker above/.test(printCells(3)[0])) fail(`slot 3 does not say the breaker above holds it: ${JSON.stringify(printCells(3))}`);
+// A circuit nobody has identified prints as unknown — the gaps are the reason for printing it.
+if (!/Fridge \?\?\?\?/.test(printCells(5)[0])) fail(`an unidentified breaker does not print its mark: ${JSON.stringify(printCells(5))}`);
+if (!query(printRow(5), 'td').classList.contains('is-unknown')) fail('an unidentified circuit is not marked on the printout');
+// Both halves of a tandem are printed, not just the one on top.
+if (!/Kitchen lights rewritten \/ Freezer/.test(printCells(6)[7])) fail(`a tandem prints only one of its halves: ${JSON.stringify(printCells(6))}`);
+// Printing takes the page chrome off and leaves the directory.
+const printRules = (/@media print\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g);
+const printCss = [...css.matchAll(printRules)].map(m => m[1]).join('\n');
+if (!/\.section\.ps\.active\s*>\s*\*:not\(\.ps-print\)[^}]*display:\s*none/.test(printCss))
+  fail('printing the panel schedule prints the editor as well as the directory');
+if (!/body:has\(\.section\.ps\.active\)\s+nav[^}]*display:\s*none/.test(printCss)) fail('printing keeps the navigation on the page');
+let printed = 0;
+sandbox.window.print = () => printed++;
+query(sec, 'button', true).find(b => b.textContent === 'Print\u2026').onclick();
+if (printed !== 1) fail('the Print button did not print');
+
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
 // One column of breakers on a phone, with the numbers still stamped beside them.
@@ -613,7 +812,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a circuit mapped to a breaker is placed beneath the panel, and one already fed by something else is not moved until the warning naming both is accepted; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: an unknown breaker is identified by switching it off \u2014 the channel that went dark is named with what it fell from, one already measuring another breaker is flagged, and a circuit drawing nothing says so rather than guessing; the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
