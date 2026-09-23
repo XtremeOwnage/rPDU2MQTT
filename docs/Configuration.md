@@ -1188,6 +1188,14 @@ slot already held, which is left alone. A line that could not be read is shown a
 and a channel no node answers to is flagged rather than mapped. Applying writes into the directory the page is
 holding; nothing is kept until **Save**.
 
+**An unknown breaker can be traced.** **Trace…** records what every channel is drawing, waits while you switch
+the breaker off, and names the channel that went dark, with what it fell from and to. Taking the answer maps
+the breaker to it and marks it identified; a channel already recorded against another breaker is flagged
+rather than quietly taken, and a 240 V circuit drops both legs at once, so both can be taken together. A
+circuit drawing nothing when the baseline was taken cannot be told apart from one that is off, and the page
+says so instead of guessing — switch its load on and trace again. A channel that stopped reporting altogether
+is not a channel that went dark, so it is never offered as the answer.
+
 **It prints for the inside of the panel door.** **Print…** lays the directory out as the panel is — odd slots
 down the left, even down the right, numbers up the middle — with each breaker's wire, rating and what it
 feeds. A slot nobody has identified prints as unknown rather than blank, and the second slot of a double-pole

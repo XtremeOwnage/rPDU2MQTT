@@ -52,6 +52,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const refresh = btn('Refresh');
   const addPanel = btn('Add panel');
   const importBtn = btn('Import…');
+  const traceStart = btn('Trace…');
+  traceStart.title = 'Identify an unknown breaker: take a baseline, switch it off, and see which channel went dark.';
   const printBtn = btn('Print…');
   printBtn.title = 'Print this directory for the inside of the panel door.';
   importBtn.title = 'Paste a directory you already keep — breaker numbers, wires, channels and what each feeds — and see what it reads as before anything is written.';
@@ -62,7 +64,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, printBtn, status));
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, traceStart, printBtn, status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
@@ -97,6 +99,11 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   // The same directory laid out for the inside of the panel door (#460): shown only on paper.
   const printable = el('div', { class: 'ps-print' });
   sec.appendChild(printable);
+  traceStart.onclick = () => {
+    const p = shown();
+    if (!p) { toast('Add a panel first.', false); return; }
+    trace(p, null);
+  };
   printBtn.onclick = () => {
     const w: any = window;
     if (typeof w.print === 'function') w.print();
@@ -219,6 +226,149 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const other = clampsIn().find((c: any) => c.Channel === channel
       && !(c.Panel === panelId && c.Breaker === number && (c.Leg || 1) === leg));
     return other ? `${other.Panel}/${other.Breaker}` : '';
+  };
+
+  /// Power below this, in watts, is noise rather than a circuit drawing something — the same floor the bridge's own check uses.
+  const TRACE_FLOOR = 5;
+
+  /// Every node that could be the channel measuring a circuit: not a panel, and not a synthetic tier.
+  const traceCandidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind)
+    && !panelsIn().some((p: any) => p.Node === n.id)
+    && !n.id.startsWith('breaker:'));
+
+  /// What every node is reading right now, for the before and after of a trace.
+  const readAll = async (): Promise<Record<string, number | null>> => {
+    const out: Record<string, number | null> = {};
+    try {
+      const f: any = await api('/api/flow');
+      if (f?.body?.ok) (f.body.nodes || []).forEach((n: any) => { out[n.id] = typeof n.value === 'number' ? n.value : null; });
+    } catch { /* nothing read is nothing to compare */ }
+    return out;
+  };
+
+  /// Identify a breaker by switching it off and reading which channel went dark (#456).
+  const trace = (panel: Panel, start: Breaker | null) => {
+    const live = panel.breakers.filter(b => b.state !== 'unused');
+    const pick = el('select', { class: 'ps-trace-pick' }) as HTMLSelectElement;
+    live.forEach(b => pick.appendChild(el('option', {
+      value: `${b.slot}|${b.number}`,
+      text: `${b.number} — ${b.description || 'not identified'}${b.legs.some(l => l.channel) ? ' (already mapped)' : ''}`,
+    })));
+    const chosen = start || live.find(b => !b.legs.some(l => l.channel)) || live[0];
+    if (chosen) pick.value = `${chosen.slot}|${chosen.number}`;
+    const breakerNow = () => live.find(b => `${b.slot}|${b.number}` === pick.value) || chosen;
+
+    const step = el('div', { class: 'desc ps-trace-step' });
+    const result = el('div', { class: 'ps-trace-out' });
+    const take = btn('Take the baseline', 'primary');
+    const again = btn('Read again');
+    again.hidden = true;
+    let before: Record<string, number | null> | null = null;
+    let watching: any = null;
+
+    const stop = () => { if (watching) { clearInterval(watching); watching = null; } };
+
+    const compare = async () => {
+      if (!before) return;
+      const b = breakerNow();
+      const after = await readAll();
+      const cand = traceCandidates();
+      const was = (id: string) => before![id];
+      const drawing = cand.filter(n => typeof was(n.id) === 'number' && (was(n.id) as number) > TRACE_FLOOR);
+      // A channel that went dark: it was drawing, and now it is not. One that stopped reporting altogether is
+      // not a channel that went dark, so it is not offered as the answer.
+      const dropped = drawing.filter(n => typeof after[n.id] === 'number'
+        && (after[n.id] as number) <= Math.max(TRACE_FLOOR, (was(n.id) as number) * 0.15));
+      result.innerHTML = '';
+      if (!drawing.length) {
+        // Nothing was drawing to begin with, so switching anything off changes nothing anyone can read.
+        result.appendChild(el('div', { class: 'ps-trace-note is-warn' },
+          'Nothing was drawing when the baseline was taken, so a breaker going off changes nothing that can be read. '
+          + 'Switch something on the circuit on — a lamp, a heater, the appliance itself — then take the baseline again.'));
+        return;
+      }
+      if (!dropped.length) {
+        result.appendChild(el('div', { class: 'ps-trace-note is-warn' },
+          `${drawing.length} channel(s) are drawing power and none of them went dark. Either the breaker is still on, or `
+          + 'nothing measures what it feeds — a circuit with no CT on it cannot be traced this way.'));
+        return;
+      }
+      result.appendChild(el('div', { class: 'desc', text: dropped.length === 1
+        ? 'One channel went dark while the breaker was off:'
+        : `${dropped.length} channels went dark while the breaker was off — a 240 V circuit drops both its legs at once:` }));
+      dropped.forEach((n, i) => {
+        const row = el('div', { class: 'ps-trace-hit' });
+        row.dataset.node = n.id;
+        row.appendChild(el('span', { class: 'ps-trace-name', text: `${n.label} (${n.id})` }));
+        row.appendChild(el('span', { class: 'ps-trace-fall',
+          text: `${Math.round(was(n.id) as number).toLocaleString('en-US')} W → ${Math.round(after[n.id] as number).toLocaleString('en-US')} W` }));
+        // A channel already recorded against another breaker: one of the two records is wrong, so it is said here.
+        const held = takenBy(n.id, panel.id, b.number, 1);
+        if (held) row.appendChild(el('span', { class: 'ps-trace-held', text: `already measuring ${held}` }));
+        const map = (leg: number) => {
+          const cfg = configBreaker(panel.id, b);
+          mapLeg(panel.id, b.number, leg, n.id, cfg?.Wire || '');
+          if (cfg) cfg.State = 'identified';
+          refreshDirty();
+          stop();
+          closeSheet();
+          toast(`${b.number} is measured by ${n.label}. Press Save to keep it.`, true);
+          load();
+        };
+        if (b.poles === 2) {
+          const one = btn('It is leg 1'), two = btn('It is leg 2');
+          one.onclick = () => map(1);
+          two.onclick = () => map(2);
+          row.append(one, two);
+        } else {
+          const it = btn('This is it', 'primary');
+          it.onclick = () => map(1);
+          row.appendChild(it);
+        }
+        if (i === 0 && b.poles === 2 && dropped.length === 2) {
+          const both = btn('Both legs are this breaker', 'primary');
+          both.onclick = () => {
+            const cfg = configBreaker(panel.id, b);
+            dropped.slice(0, 2).forEach((d, leg) => mapLeg(panel.id, b.number, leg + 1, d.id, cfg?.Wire || ''));
+            if (cfg) cfg.State = 'identified';
+            refreshDirty();
+            stop();
+            closeSheet();
+            toast(`${b.number} is measured by ${dropped[0].id} and ${dropped[1].id}. Press Save to keep it.`, true);
+            load();
+          };
+          result.appendChild(both);
+        }
+        result.appendChild(row);
+      });
+    };
+
+    take.onclick = async () => {
+      before = await readAll();
+      const drawing = traceCandidates().filter(n => typeof before![n.id] === 'number' && (before![n.id] as number) > TRACE_FLOOR).length;
+      step.textContent = `Baseline taken: ${drawing} of ${traceCandidates().length} channels are drawing power. `
+        + `Now switch ${breakerNow()?.number || 'the breaker'} off. The reading is checked every few seconds — or press Read again.`;
+      again.hidden = false;
+      take.textContent = 'Take the baseline again';
+      result.innerHTML = '';
+      stop();
+      watching = setInterval(() => compare(), 4000);
+    };
+    again.onclick = () => compare();
+    pick.onchange = () => { result.innerHTML = ''; };
+    step.textContent = 'Take a baseline of what every channel is drawing, then switch the breaker off.';
+
+    openSheet({
+      title: 'Trace a breaker',
+      wide: true,
+      onClose: stop,
+      body: el('div', { class: 'ps-trace' },
+        el('div', { class: 'desc' }, 'Switching a breaker off and reading which channel went dark identifies it without guessing. '
+          + 'The circuit has to be drawing something for the drop to be visible.'),
+        el('label', { class: 'ld-inst' }, 'Breaker ', pick),
+        step, result),
+      footer: [take, again],
+    });
   };
 
   const edit = (panel: Panel, b: Breaker | null, slot: number, presetHalf?: number) => {
@@ -357,6 +507,11 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       toast('Breaker updated. Press Save to keep it.', true);
       load();
     };
+    const traceBtn = btn('Trace it…');
+    traceBtn.title = 'Identify this breaker by switching it off and reading which channel went dark.';
+    traceBtn.onclick = () => { if (b) trace(panel, b); };
+    traceBtn.hidden = !b;
+
     const remove = btn('Remove', 'danger');
     remove.hidden = !entry;
     remove.onclick = () => {
@@ -383,7 +538,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
           text: `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
             + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}. It reaches Home Assistant, EmonCMS and Prometheus like any other node.`,
         }))] : [])),
-      footer: [save, remove],
+      footer: [save, traceBtn, remove],
     });
   };
 

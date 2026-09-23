@@ -43,6 +43,8 @@ const config = {
   },
 };
 
+// What a channel reads once a breaker has been switched off, for a trace (#456).
+const fell = {};
 // What each monitor channel reads.
 const reading = { n30_1_1: 1100, n30_1_2: 1150, n30_1_5: 240, n30_1_8: 100, n30_1_9: 150, main_panel: 2600 };
 // What each channel reads in amps: the kitchen circuit is working hard against its 20 A breaker.
@@ -160,7 +162,7 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
         : url.includes('/api/config') ? config
-          : url.includes('/api/flow') ? { ok: true, nodes, links: [] }
+          : url.includes('/api/flow') ? { ok: true, nodes: nodes.map(n => (n.id in fell ? { ...n, value: fell[n.id] } : n)), links: [] }
             : { ok: true },
 });
 vm.createContext(sandbox);
@@ -689,6 +691,56 @@ if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not
 if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
 if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
 
+// An unknown breaker is identified by switching it off and reading which channel went dark (#456).
+query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
+await wait(80);
+const traceStep = () => (query(sheet(), '.ps-trace-step')?.textContent || '');
+const hits = () => query(sheet(), '.ps-trace-hit', true);
+const traceNote = () => (query(sheet(), '.ps-trace-note')?.textContent || '');
+const pressTrace = async (label) => { query(sheet(), 'button', true).find(b => b.textContent === label).onclick(); await wait(120); };
+// It starts on a breaker nothing is measuring — that is the one worth tracing.
+const traceOn = query(sheet(), '.ps-trace-pick');
+if (clampFor(traceOn.value.split('|')[1])) fail(`tracing started on a breaker that is already measured: ${traceOn.value}`);
+// Trace the bathroom lights, which nobody has identified.
+traceOn.value = '9|B09';
+traceOn.onchange();
+await pressTrace('Take the baseline');
+// Five channels, all drawing: the panel and the grid are not channels and are not counted.
+if (!/5 of 5 channels are drawing power/.test(traceStep())) fail(`the baseline does not say what is drawing: "${traceStep()}"`);
+// Nothing has been switched off yet, so nothing went dark.
+await pressTrace('Read again');
+if (!/none of them went dark/.test(traceNote())) fail(`with the breaker still on, the trace claimed something: "${traceNote()}"`);
+// Switch it off: the channel it feeds falls to nothing, and that is the one offered.
+fell.n30_1_8 = 0;
+await pressTrace('Read again');
+if (hits().length !== 1) fail(`${hits().length} channels were said to have gone dark, not the one that did`);
+if (hits()[0].dataset.node !== 'n30_1_8') fail(`the wrong channel was named: ${hits()[0].dataset.node}`);
+if (!/100 W . 0 W/.test(hits()[0].textContent || '')) fail(`the drop is not shown before and after: "${hits()[0].textContent}"`);
+// …and it says the channel is already recorded against another breaker, rather than quietly taking it.
+if (!/already measuring main_panel\/B10/.test(hits()[0].textContent || '')) fail(`a channel already mapped elsewhere is not flagged: "${hits()[0].textContent}"`);
+// A channel that stopped reporting altogether is not a channel that went dark.
+fell.n30_1_5 = null;
+await pressTrace('Read again');
+if (hits().some(h => h.dataset.node === 'n30_1_5')) fail('a channel that stopped reporting was offered as the answer');
+delete fell.n30_1_5;
+// Taking the answer maps the breaker to it and marks it identified. Nothing is saved.
+await pressTrace('This is it');
+if (clampFor('B09')?.Channel !== 'n30_1_8') fail('taking the traced channel did not map the breaker to it');
+if (breakerIn('B09').State !== 'identified') fail('a breaker identified by tracing is still unknown');
+if (saved.EnergyFlow.Clamps.some(c => c.Breaker === 'B09')) fail('tracing saved to disk on its own');
+
+// A circuit drawing nothing cannot be told apart, and the page says so rather than guessing.
+Object.assign(fell, { n30_1_1: 0, n30_1_2: 0, n30_1_5: 0, n30_1_8: 0, n30_1_9: 0 });
+query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
+await wait(80);
+await pressTrace('Take the baseline');
+await pressTrace('Read again');
+if (!/Nothing was drawing when the baseline was taken/.test(traceNote()))
+  fail(`with nothing drawing, the trace did not say a load is needed: "${traceNote()}"`);
+if (hits().length) fail('a channel was named as the answer although nothing was drawing');
+shut();
+for (const k of Object.keys(fell)) delete fell[k];
+
 // The directory prints for the inside of the panel door (#460): every slot in order, nothing that is only
 // screen furniture, and a slot nobody has written down printed as unknown rather than left blank.
 // Each printed row holds a pair of slots: the odd one on the left, the even one mirrored on the right.
@@ -708,8 +760,8 @@ if (first[4] !== '2' || first[7] !== 'Empty')
 // The second slot of a double-pole says what holds it rather than repeating the circuit.
 if (!/other half of the breaker above/.test(printCells(3)[0])) fail(`slot 3 does not say the breaker above holds it: ${JSON.stringify(printCells(3))}`);
 // A circuit nobody has identified prints as unknown — the gaps are the reason for printing it.
-if (!/Bathroom Lights \?\?\?\?/.test(printCells(9)[0])) fail(`an unidentified breaker does not print its mark: ${JSON.stringify(printCells(9))}`);
-if (!query(printRow(9), 'td').classList.contains('is-unknown')) fail('an unidentified circuit is not marked on the printout');
+if (!/Fridge \?\?\?\?/.test(printCells(5)[0])) fail(`an unidentified breaker does not print its mark: ${JSON.stringify(printCells(5))}`);
+if (!query(printRow(5), 'td').classList.contains('is-unknown')) fail('an unidentified circuit is not marked on the printout');
 // Both halves of a tandem are printed, not just the one on top.
 if (!/Kitchen lights rewritten \/ Freezer/.test(printCells(6)[7])) fail(`a tandem prints only one of its halves: ${JSON.stringify(printCells(6))}`);
 // Printing takes the page chrome off and leaves the directory.
@@ -732,7 +784,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: an unknown breaker is identified by switching it off \u2014 the channel that went dark is named with what it fell from, one already measuring another breaker is flagged, and a circuit drawing nothing says so rather than guessing; the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
