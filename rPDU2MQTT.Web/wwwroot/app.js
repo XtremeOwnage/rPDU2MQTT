@@ -1846,10 +1846,10 @@ function rankChart(opts
 
 /// A menu element to append to `host` (which must be positioned), and the two calls that work it. The host
 /// may be given as a function, for a box built after the menu it holds.
-function makeMenu(host     , cls = 'ctx-menu') {
+function makeMenu(host     , cls = 'ctx-menu', onClose             ) {
   const menu = el('div', { class: cls });
   menu.hidden = true;
-  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; onClose?.(); } };
   // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
   document.addEventListener('keydown', (e     ) => { if (e.key === 'Escape' && !menu.hidden) close(); });
   const open = (e     , entries                                          ) => {
@@ -1871,7 +1871,7 @@ function makeMenu(host     , cls = 'ctx-menu') {
     menu.style.top = `${Math.round(y)}px`;
     menu.hidden = false;
   };
-  return { el: menu, open, close };
+  return { el: menu, open, close, isOpen: () => !menu.hidden };
 }
 
 // ── history-sheet.ts ────────────────────────────────────────────
@@ -4790,6 +4790,17 @@ function addFlowSection(nav     , sections     ) {
   };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
+  // The menu is the section's, not the drawing's: a redraw that rebuilt it took it out from under the pointer.
+  // A live reading arriving while it is open is held, and drawn when it closes — the diagram holds still while
+  // someone is reading a menu over it.
+  let stage      = null;
+  let heldGraph      = null;
+  const menu = makeMenu(() => stage, 'ctx-menu', () => {
+    const held = heldGraph;
+    heldGraph = null;
+    if (held) { lastGraph = held; draw(held); }
+  });
+
   const draw = (graph     ) => {
     // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
     // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
@@ -5109,7 +5120,6 @@ function addFlowSection(nav     , sections     ) {
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
     const tintOf = (id        ) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
-    const menu = makeMenu(() => stage, 'ctx-menu');
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
 
@@ -5424,7 +5434,7 @@ function addFlowSection(nav     , sections     ) {
     // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
-    const stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
+    stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
@@ -5850,7 +5860,13 @@ function addFlowSection(nav     , sections     ) {
   // The Sankey follows the readings while the tab is open (#281).
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body     ) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });
+    (body     ) => {
+      if (hist.day() || !body || !body.ok) return;
+      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes.
+      if (menu.isOpen()) { heldGraph = body; return; }
+      lastGraph = body;
+      draw(body);
+    });
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };

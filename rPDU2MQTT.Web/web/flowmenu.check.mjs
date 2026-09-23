@@ -85,6 +85,14 @@ for (const entry of ['History…', 'Trace its supply', 'Edit this node'])
   if (!itemSaying(entry)) fail(`the menu does not offer "${entry}": ${items().map(b => b.textContent).join(', ')}`);
 if (itemSaying('Edit this node').disabled) fail('a node of the config cannot be edited from the diagram');
 
+// A redraw does not take the menu out from under the pointer: it is the page's, not the drawing's.
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(200);
+if (!menu() || menu().hidden) fail('a redraw closed the menu that was open over it');
+if (!itemSaying('History…')) fail('the menu survived a redraw with nothing in it');
+if (!query(sec, '.flow-stage')?.children?.some?.(c => c === menu()))
+  fail('the menu was left behind by the redraw rather than moved into the new diagram');
+
 // A node the bridge derives has no config entry, so its editor entry is dead rather than misleading.
 rightClick('outlet:rack_pdu:1');
 if (!itemSaying('Edit this node')?.disabled) fail('a derived node offers an editor it does not have');

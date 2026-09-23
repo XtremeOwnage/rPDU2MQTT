@@ -6,10 +6,10 @@ export type MenuEntry = { label: string; run?: () => void; danger?: boolean; dis
 
 /// A menu element to append to `host` (which must be positioned), and the two calls that work it. The host
 /// may be given as a function, for a box built after the menu it holds.
-export function makeMenu(host: any, cls = 'ctx-menu') {
+export function makeMenu(host: any, cls = 'ctx-menu', onClose?: () => void) {
   const menu = el('div', { class: cls });
   menu.hidden = true;
-  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
+  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; onClose?.(); } };
   // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
   document.addEventListener('keydown', (e: any) => { if (e.key === 'Escape' && !menu.hidden) close(); });
   const open = (e: any, entries: (MenuEntry | null | false | undefined)[]) => {
@@ -31,5 +31,5 @@ export function makeMenu(host: any, cls = 'ctx-menu') {
     menu.style.top = `${Math.round(y)}px`;
     menu.hidden = false;
   };
-  return { el: menu, open, close };
+  return { el: menu, open, close, isOpen: () => !menu.hidden };
 }
