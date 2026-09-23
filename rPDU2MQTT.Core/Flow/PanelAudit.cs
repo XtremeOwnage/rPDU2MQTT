@@ -18,6 +18,7 @@ public static class PanelAudit
     public const string UnusedLive = "unused-live";
     public const string HalfClamped = "half-clamped";
     public const string OverRating = "over-rating";
+    public const string ChannelIsATier = "channel-is-a-tier";
 
     /// <summary>Power below this, in watts, is noise rather than a circuit drawing something.</summary>
     public const double Floor = 5;
@@ -51,6 +52,12 @@ public static class PanelAudit
             var b = chain.Breaker;
             var state = BreakerState.Of(b.State);
             var chans = PanelNodes.Channels(chain);
+
+            // A clamp pointed at a breaker's own tier: nothing reads that, so the breaker measures itself.
+            foreach (var ch in chans.Where(c => c.StartsWith("breaker:", StringComparison.OrdinalIgnoreCase)))
+                found.Add(new PanelFinding(ChannelIsATier, "bad",
+                    $"{Ref(chain)} is mapped to {ch}, which is a breaker's own tier rather than something that reads. Pick the monitor channel measuring the circuit; until then the breaker has no power.",
+                    [Ref(chain)], [ch]));
 
             // A breaker written off as unused, with its channel drawing power.
             if (state == BreakerState.Unused)

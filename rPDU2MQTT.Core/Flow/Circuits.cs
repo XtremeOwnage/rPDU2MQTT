@@ -55,12 +55,12 @@ public static class Circuits
 
     public static string RefOf(BreakerChain chain) => Ref(chain.Panel.Id, chain.Breaker.Number);
 
-    /// <summary>The node that is this circuit: the breaker's own, else the one channel measuring it. Null when two legs are on two channels.</summary>
-    public static string? NodeOf(BreakerChain chain)
+    /// <summary>The node that is this circuit: the breaker's own, the one channel measuring it, or the breaker's own tier.</summary>
+    public static string? NodeOf(BreakerChain chain, ISet<string>? known = null)
     {
         if (!string.IsNullOrWhiteSpace(chain.Breaker.Node)) return chain.Breaker.Node.Trim();
-        // The breaker is a node of the flow in its own right (#458), whether one channel measures it or two.
-        return PanelNodes.Channels(chain).Count > 0 ? PanelNodes.IdFor(chain.Panel.Id, chain.Breaker.Number) : null;
+        // The breaker is a node of the flow in its own right (#458) — the channel itself where one measures it.
+        return PanelNodes.Channels(chain).Count > 0 ? PanelNodes.NodeIdFor(chain, known) : null;
     }
 
     /// <summary>
@@ -71,6 +71,7 @@ public static class Circuits
         FlowTopology? topology = null, string metric = FlowGraphBuilder.DefaultMetric)
     {
         var map = PanelMap.For(flow);
+        var nodeIds = PanelNodes.NodeIds(flow);
         var placements = flow.Placements ?? new();
         var reports = new List<CircuitReport>();
         foreach (var chain in map.Chains)
@@ -78,7 +79,7 @@ public static class Circuits
             var reference = RefOf(chain);
             bool Mine(string? c) => Parse(c) is { } p && Ids.Equals(p.Panel, chain.Panel.Id) && Ids.Equals(p.Breaker, chain.Breaker.Number);
 
-            var node = NodeOf(chain);
+            var node = NodeOf(chain, nodeIds);
             var power = PanelMap.Power(chain, live, metric, out var gap);
             if (power is null && node is not null && valueOf(node) is { } nodeValue) { power = nodeValue; gap = PowerGap.None; }
 

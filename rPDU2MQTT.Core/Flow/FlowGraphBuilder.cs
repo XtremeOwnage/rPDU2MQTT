@@ -74,6 +74,8 @@ public static class FlowGraphBuilder
         void AddEdge(string from, string to)
         {
             if (!outgoing.TryGetValue(from, out var list)) outgoing[from] = list = new();
+            // The same edge twice is one edge: wired by hand and derived from the directory is still one feed.
+            if (list.Any(x => string.Equals(x, to, StringComparison.OrdinalIgnoreCase))) return;
             list.Add(to);
         }
 
@@ -205,7 +207,7 @@ public static class FlowGraphBuilder
         // A breaker whose legs are not all reading is left unknown rather than summed from the legs that are —
         // half of a 240 V circuit is not the circuit.
         var breakerUnknown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var b in PanelNodes.For(flow))
+        foreach (var b in PanelNodes.For(flow, new HashSet<string>(label.Keys, StringComparer.OrdinalIgnoreCase)))
         {
             if (b.Derived && !label.ContainsKey(b.Id))
             {
@@ -214,6 +216,11 @@ public static class FlowGraphBuilder
                 var breakerTags = AutoTags.For(flow.AutoTags, b.Id);
                 if (breakerTags.Count > 0) tags[b.Id] = breakerTags.ToList();
             }
+            // A channel named after itself takes the name of the breaker measuring it: "n30_1_5" is an input
+            // number, not a circuit. A name someone has given it is left alone.
+            if (!b.Derived && !string.IsNullOrWhiteSpace(b.Chain.Breaker.Description)
+                && label.TryGetValue(b.Id, out var own) && (string.IsNullOrWhiteSpace(own) || string.Equals(own, b.Id, StringComparison.OrdinalIgnoreCase)))
+                label[b.Id] = b.Label;
             if (!label.ContainsKey(b.Id)) continue;
             var power = PanelMap.Power(b.Chain, live, metric, out var gap);
             if (power is { } p && gap == PowerGap.None) leaf[b.Id] = Math.Max(0, p);

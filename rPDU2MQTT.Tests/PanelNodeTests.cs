@@ -52,21 +52,44 @@ public class PanelNodeTests
     private static FlowNode? Node(FlowGraph g, string id) => g.Nodes.FirstOrDefault(n => n.Id == id);
 
     [Fact]
-    public void AMappedBreakerIsANodeBeneathItsPanel_ValuedFromItsChannels()
+    public void ABreakerMeasuredByOneChannel_IsThatChannel_NotASecondNodeRepeatingIt()
     {
         var g = Build(Wiring(), new() { ["ch5|realpower"] = 240, ["ch1|realpower"] = 1100, ["ch2|realpower"] = 1150 });
 
-        var lights = Node(g, "breaker:main_panel:B06")!;
-        Assert.Equal("Kitchen lights", lights.Label);      // the directory's own words name the tier
-        Assert.Equal("breaker", lights.Kind);
-        Assert.Equal(240, lights.Value);
-        // A double-pole breaker is one tier, worth both its legs.
-        Assert.Equal(2250, Node(g, "breaker:main_panel:1,3")!.Value);
-        // Beneath the panel, above the channels measuring it.
-        Assert.Contains(g.Links, l => l.Source == "main" && l.Target == "breaker:main_panel:B06");
-        Assert.Contains(g.Links, l => l.Source == "breaker:main_panel:1,3" && l.Target == "ch1");
-        // An unused slot is not a tier.
+        // The channel already is the circuit: a tier above it would carry the same 240 W under a second name.
+        Assert.Null(Node(g, "breaker:main_panel:B06"));
+        Assert.Equal(240, Node(g, "ch5")!.Value);
+        var fed = Assert.Single(g.Links, l => l.Source == "main" && l.Target == "ch5");
+        Assert.Equal(240, fed.Value);
+        // An unused slot is not a tier either.
         Assert.Null(Node(g, "breaker:main_panel:B09"));
+    }
+
+    [Fact]
+    public void ADoublePoleOnTwoChannels_IsATierOfItsOwn_AboveBothLegs()
+    {
+        var g = Build(Wiring(), new() { ["ch5|realpower"] = 240, ["ch1|realpower"] = 1100, ["ch2|realpower"] = 1150 });
+
+        var range = Node(g, "breaker:main_panel:1,3")!;
+        Assert.Equal("Range", range.Label);                // the directory's own words name the tier
+        Assert.Equal("breaker", range.Kind);
+        Assert.Equal(2250, range.Value);                   // one tier, worth both its legs
+        Assert.Contains(g.Links, l => l.Source == "main" && l.Target == "breaker:main_panel:1,3");
+        Assert.Contains(g.Links, l => l.Source == "breaker:main_panel:1,3" && l.Target == "ch1");
+    }
+
+    [Fact]
+    public void AChannelNamedAfterItself_TakesTheNameOfTheBreakerMeasuringIt()
+    {
+        var flow = Wiring();
+        flow.Nodes.Single(n => n.Id == "ch5").Label = "ch5";      // an input number, not a circuit
+        flow.Nodes.Single(n => n.Id == "ch1").Label = "Range leg A";
+
+        var g = Build(flow, new() { ["ch5|realpower"] = 240, ["ch1|realpower"] = 1100, ["ch2|realpower"] = 1150 });
+
+        Assert.Equal("Kitchen lights", Node(g, "ch5")!.Label);
+        // A name someone has given the channel is left alone.
+        Assert.Equal("Range leg A", Node(g, "ch1")!.Label);
     }
 
     [Fact]
@@ -75,10 +98,14 @@ public class PanelNodeTests
         var flow = Wiring();
         // How the schedule used to wire a mapped circuit: straight from the panel to the channel.
         flow.Links.Add(new EnergyFlowLink { From = "main", To = "ch5" });
+        flow.Links.Add(new EnergyFlowLink { From = "main", To = "ch1" });
 
         var g = Build(flow, new() { ["ch5|realpower"] = 240, ["ch1|realpower"] = 1100, ["ch2|realpower"] = 1150 });
 
-        Assert.DoesNotContain(g.Links, l => l.Source == "main" && l.Target == "ch5");
+        // The single-channel breaker is that channel, so the panel feeds it once — not twice over two names.
+        Assert.Single(g.Links, l => l.Source == "main" && l.Target == "ch5");
+        // A leg of a double-pole hangs under the breaker, so the link straight from the panel is dropped.
+        Assert.DoesNotContain(g.Links, l => l.Source == "main" && l.Target == "ch1");
         Assert.Equal(2490, Node(g, "main")!.Value);
     }
 
@@ -103,6 +130,20 @@ public class PanelNodeTests
         var bath = Node(g, "breaker:main_panel:B08")!;
         Assert.Equal("Bathroom", bath.Label);
         Assert.Null(bath.Value);
+    }
+
+    [Fact]
+    public void ABreakerWhoseChannelIsNotANode_KeepsATierOfItsOwn_RatherThanVanishing()
+    {
+        var flow = Wiring();
+        // A clamp pointing at something the config does not have: the breaker is still in the directory.
+        flow.Clamps.Single(c => c.Channel == "ch5").Channel = "nothing_reads_this";
+
+        var g = Build(flow, new() { ["ch5|realpower"] = 240 });
+
+        var lights = Node(g, "breaker:main_panel:B06")!;
+        Assert.Equal("Kitchen lights", lights.Label);
+        Assert.Null(lights.Value);
     }
 
     [Fact]
@@ -144,6 +185,18 @@ public class PanelNodeTests
         Assert.Contains(found, x => x.Kind == PanelAudit.HalfClamped && x.Breakers.Contains("main_panel/1,3"));
         // A channel barely reading is noise, not a circuit nobody mapped.
         Assert.DoesNotContain(found, x => x.Kind == PanelAudit.ChannelUnmapped && x.Channels.Contains("ch5"));
+    }
+
+    [Fact]
+    public void AClampPointedAtABreakersOwnTier_IsReported()
+    {
+        var flow = Wiring();
+        // What picking a breaker tier in the channel list leaves behind: a breaker measured by itself.
+        flow.Clamps.Single(c => c.Channel == "ch5").Channel = "breaker:main_panel:B06";
+
+        var f = Assert.Single(PanelAudit.Check(flow, new Fixed(new()), null), x => x.Kind == PanelAudit.ChannelIsATier);
+        Assert.Equal("bad", f.Severity);
+        Assert.Contains("main_panel/B06", f.Breakers);
     }
 
     [Fact]

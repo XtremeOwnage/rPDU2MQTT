@@ -58,6 +58,9 @@ const nodes = [
   { id: 'n30_1_8', label: 'N30 1-8', kind: 'breaker', value: 100 },
   { id: 'n30_1_9', label: 'N30 1-9', kind: 'breaker', value: 150 },
   { id: 'main_panel', label: 'Main Panel', kind: 'panel', value: 2600 },
+  // A subpanel the bridge reads: not one of the directory's own panels, so a breaker feeding it can be
+  // measured by the CT on its feed.
+  { id: 'n30_3_4', label: 'AC Subpanel', kind: 'panel', value: 900 },
   { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 },
   { id: 'main_panel#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 60 },
 ];
@@ -84,6 +87,7 @@ const resolve = (flow) => ({
       }
       // One CT measuring the whole circuit is the breaker's power; the other leg is then not expected.
       const counted = legs.some(l => l.whole) ? legs.filter(l => l.whole) : legs;
+      const mine = [...new Set(counted.map(l => l.channel).filter(Boolean))];
       let sum = 0, gap = 'none', current = null;
       for (const l of counted) {
         if (!l.clamp) { gap = 'noclamp'; break; }
@@ -99,9 +103,11 @@ const resolve = (flow) => ({
         wire: b.Wire || '', gauge: b.Gauge || '', conductor: b.Conductor || '',
         description: b.Description || '', state: b.State || 'unknown',
         power: gap === 'none' ? sum : null, current: gap === 'none' ? current : null, gap, legs,
-        // The breaker as a tier of the flow (#458): its own node unless it names one.
-        node: b.Node || (counted.some(l => l.channel) ? `breaker:${p.Id}:${b.Number}` : null),
-        derived: !b.Node,
+        // The breaker as a tier of the flow (#458): the one channel measuring it where that is a node of its
+        // own, else a tier of its own — which is what a double-pole on two channels needs.
+        node: b.Node || (mine.length === 1 && nodes.some(n => n.id === mine[0]) ? mine[0]
+          : counted.some(l => l.channel) ? `breaker:${p.Id}:${b.Number}` : null),
+        derived: !b.Node && !(mine.length === 1 && nodes.some(n => n.id === mine[0])) && counted.some(l => l.channel),
       };
     }),
   })),
@@ -346,18 +352,22 @@ if (!nodeSel()) fail('the editor offers no node to measure the breaker');
 const offered = (nodeSel().children || []).map(o => o.value);
 if (!offered.includes('n30_1_8')) fail(`the circuit nodes are not offered: ${offered.join(', ')}`);
 if (offered.includes('main_panel')) fail('the panel carrying the breaker is offered as the thing measuring it');
+// …but a subpanel the bridge reads is a channel like any other: a breaker feeding one is measured by its feed.
+if (!offered.includes('n30_3_4')) fail(`a subpanel the bridge reads is not offered as what measures a breaker: ${offered.join(', ')}`);
+// A breaker's own tier reads nothing, so it is never offered as the thing measuring it.
+if (offered.some(o => o.startsWith('breaker:'))) fail(`a breaker's own tier is offered as a channel: ${offered.join(', ')}`);
 if (offered.includes('main_panel#unmeasured')) fail('an unmetered remainder is offered as a circuit');
 // A house has more channels than anyone wants to scroll, so the list is typed down.
 const hunt = () => query(sheet(), '.ps-hunt');
 const shownCount = () => (query(sheet(), 'span', true).map(s => s.textContent).find(t => /channels$/.test(t || '')) || '');
 const optionsOf = () => (nodeSel().children || []).map(o => o.value).filter(Boolean);
 if (!hunt()) fail('the channel picker cannot be searched');
-if (!/5 of 5 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
+if (!/6 of 6 channels/.test(shownCount())) fail(`the picker does not say what it is showing: "${shownCount()}"`);
 hunt().value = '1_8';
 hunt().oninput({});
 await wait(30);
 if (JSON.stringify(optionsOf()) !== JSON.stringify(['n30_1_8'])) fail(`typing did not narrow the list: ${optionsOf().join(', ')}`);
-if (!/1 of 5 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
+if (!/1 of 6 channels/.test(shownCount())) fail(`the count does not follow the filter: "${shownCount()}"`);
 // A filter that matches nothing must not quietly unpick what is already chosen.
 nodeSel().value = 'n30_1_8';
 hunt().value = 'zzz';
@@ -369,7 +379,7 @@ if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out 
 hunt().value = '';
 hunt().oninput({});
 await wait(30);
-if (optionsOf().length !== 5) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
+if (optionsOf().length !== 6) fail(`clearing the filter did not bring the channels back: ${optionsOf().join(', ')}`);
 
 nodeSel().value = 'n30_1_8';
 await apply();
@@ -477,7 +487,9 @@ if (!links().some(l => l.From === 'grid' && l.To === 'n30_1_1')) fail('mapping a
 // …and the breaker's editor says which node it is on the flow.
 halves(9)[0].onclick();
 await wait(100);
-if (!/breaker:main_panel:B09/.test(textOf(sheet()))) fail(`the breaker does not say which node it is: ${textOf(sheet())}`);
+// Measured by one channel, the breaker is that channel — not a second node carrying the same reading.
+if (!/It is the channel measuring it, n30_1_1/.test(textOf(sheet()))) fail(`the breaker does not say which node it is: ${textOf(sheet())}`);
+if (/breaker:main_panel:B09/.test(textOf(sheet()))) fail('a breaker measured by one channel still claims a tier of its own');
 if (!/beneath Main Panel/.test(textOf(sheet()))) fail('the breaker does not say where it sits on the flow');
 shut();
 
@@ -691,6 +703,22 @@ if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not
 if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
 if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
 
+// A pick the list no longer holds is kept rather than cleared by the next Apply — a mapping must not vanish
+// because the node behind it stopped being read.
+clampFor('B10').Channel = 'retired_channel';
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(150);
+halves(10)[0].onclick();
+await wait(100);
+const kept = (query(sheet(), '.ps-node', true)[0].children || []).map(o => o.value);
+if (!kept.includes('retired_channel')) fail(`a pick the list no longer holds was dropped from the picker: ${kept.join(', ')}`);
+if (query(sheet(), '.ps-node', true)[0].value !== 'retired_channel') fail('the picker did not open on the channel already recorded');
+await apply();
+if (clampFor('B10')?.Channel !== 'retired_channel') fail('applying cleared a mapping the picker could not list');
+clampFor('B10').Channel = 'n30_1_8';
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(150);
+
 // An unknown breaker is identified by switching it off and reading which channel went dark (#456).
 query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
 await wait(80);
@@ -705,8 +733,8 @@ if (clampFor(traceOn.value.split('|')[1])) fail(`tracing started on a breaker th
 traceOn.value = '9|B09';
 traceOn.onchange();
 await pressTrace('Take the baseline');
-// Five channels, all drawing: the panel and the grid are not channels and are not counted.
-if (!/5 of 5 channels are drawing power/.test(traceStep())) fail(`the baseline does not say what is drawing: "${traceStep()}"`);
+// Six channels, all drawing: the panel carrying the breakers and the grid are not channels and are not counted.
+if (!/6 of 6 channels are drawing power/.test(traceStep())) fail(`the baseline does not say what is drawing: "${traceStep()}"`);
 // Nothing has been switched off yet, so nothing went dark.
 await pressTrace('Read again');
 if (!/none of them went dark/.test(traceNote())) fail(`with the breaker still on, the trace claimed something: "${traceNote()}"`);
@@ -730,7 +758,7 @@ if (breakerIn('B09').State !== 'identified') fail('a breaker identified by traci
 if (saved.EnergyFlow.Clamps.some(c => c.Breaker === 'B09')) fail('tracing saved to disk on its own');
 
 // A circuit drawing nothing cannot be told apart, and the page says so rather than guessing.
-Object.assign(fell, { n30_1_1: 0, n30_1_2: 0, n30_1_5: 0, n30_1_8: 0, n30_1_9: 0 });
+Object.assign(fell, { n30_1_1: 0, n30_1_2: 0, n30_1_5: 0, n30_1_8: 0, n30_1_9: 0, n30_3_4: 0 });
 query(sec, 'button', true).find(b => b.textContent === 'Trace\u2026').onclick();
 await wait(80);
 await pressTrace('Take the baseline');

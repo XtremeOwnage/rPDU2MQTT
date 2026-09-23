@@ -16,13 +16,36 @@ public static class PanelNodes
     public static string IdFor(string panelId, string number) => $"breaker:{panelId}:{number}";
 
     /// <summary>
+    /// The node that <em>is</em> this breaker: the one it names, else the single channel measuring it — a tier
+    /// above one channel would carry that channel's reading twice, under two names — else a node of its own,
+    /// which is what a double-pole breaker on two channels, and a breaker nothing measures, need.
+    /// </summary>
+    /// <param name="known">The node ids the config has, so a channel nothing answers to is not adopted as the breaker.</param>
+    public static string NodeIdFor(BreakerChain chain, ISet<string>? known = null)
+    {
+        if (!string.IsNullOrWhiteSpace(chain.Breaker.Node)) return chain.Breaker.Node.Trim();
+        var channels = Channels(chain);
+        if (channels.Count == 1 && (known is null || known.Contains(channels[0]))) return channels[0];
+        return IdFor(chain.Panel.Id, chain.Breaker.Number);
+    }
+
+    /// <summary>The node ids a config holds, for deciding whether a breaker's channel is one of them.</summary>
+    public static HashSet<string> NodeIds(EnergyFlowConfig? flow) =>
+        new((flow?.Nodes ?? []).Select(n => n.Id).Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Every breaker that belongs on the graph: one that something measures, and one someone has identified,
     /// which appears with no value rather than a zero. An unused slot is not a tier.
     /// </summary>
-    public static IReadOnlyList<BreakerNode> For(EnergyFlowConfig? flow)
+    /// <param name="known">
+    /// Every node the graph has, so a breaker measured by one of them is that node rather than a tier above it.
+    /// The config's own nodes are used when the caller does not say.
+    /// </param>
+    public static IReadOnlyList<BreakerNode> For(EnergyFlowConfig? flow, ISet<string>? known = null)
     {
         var f = flow ?? new EnergyFlowConfig();
         var map = PanelMap.For(f);
+        known ??= NodeIds(f);
         var out_ = new List<BreakerNode>();
         foreach (var chain in map.Chains)
         {
@@ -32,11 +55,14 @@ public static class PanelNodes
             var channels = Channels(chain);
             if (channels.Count == 0 && BreakerState.Of(b.State) != BreakerState.Identified) continue;
 
-            var named = !string.IsNullOrWhiteSpace(b.Node);
-            var id = named ? b.Node.Trim() : IdFor(chain.Panel.Id, b.Number);
+            var id = NodeIdFor(chain, known);
+            // Derived only when the node is the breaker itself: a breaker that names a node, or that is the one
+            // channel measuring it, is a node the config already has.
+            var derived = string.Equals(id, IdFor(chain.Panel.Id, b.Number), StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(b.Node);
             var label = !string.IsNullOrWhiteSpace(b.Description) ? b.Description.Trim()
                 : $"{(string.IsNullOrWhiteSpace(chain.Panel.Name) ? chain.Panel.Id : chain.Panel.Name)} {b.Number}";
-            out_.Add(new BreakerNode(id, label, chain.Panel.Node ?? "", channels, chain, !named));
+            out_.Add(new BreakerNode(id, label, chain.Panel.Node ?? "", channels, chain, derived));
         }
         return out_;
     }

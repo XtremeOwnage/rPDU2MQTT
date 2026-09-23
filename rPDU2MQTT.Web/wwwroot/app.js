@@ -10353,6 +10353,7 @@ const CHECK_TITLES                         = {
   'unused-live': 'An unused breaker drawing power',
   'half-clamped': 'Half a double-pole breaker',
   'over-rating': 'Over the breaker\u2019s rating',
+  'channel-is-a-tier': 'Measured by a breaker, not a channel',
 };
 
 /// Why a breaker's power is not shown. Never a zero: a gap in the chain is a gap.
@@ -10362,8 +10363,9 @@ const GAPS                         = {
   noreading: 'Its channel has no current reading.',
 };
 
-/// The kinds of node a breaker's circuit can be. A panel or the grid carries the breaker, it is not the breaker.
-const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node'];
+/// The kinds of node a breaker's circuit can be. A subpanel counts: a breaker feeding one is measured by the
+/// CT on its feed. What carries the breaker — its own panel, and whatever feeds that — is ruled out separately.
+const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 function addPanelScheduleSection(nav     , sections     ) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
@@ -10561,7 +10563,7 @@ function addPanelScheduleSection(nav     , sections     ) {
 
   /// Every node that could be the channel measuring a circuit: not a panel, and not a synthetic tier.
   const traceCandidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind)
-    && !panelsIn().some((p     ) => p.Node === n.id)
+    && !panelsIn().some((p     ) => p.Node === n.id || p.Id === n.id)
     && !n.id.startsWith('breaker:'));
 
   /// What every node is reading right now, for the before and after of a trace.
@@ -10739,12 +10741,23 @@ function addPanelScheduleSection(nav     , sections     ) {
     // A house has more channels than anyone wants to scroll: type to narrow them.
     const hunt = el('input', { type: 'search', class: 'ps-hunt', placeholder: 'filter channels by name or id…' })                    ;
     const huntCount = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
-    const candidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind));
+    // What carries this breaker: any panel in the directory, and whatever feeds this one, up the chain. A
+    // breaker cannot be measured by something it hangs beneath.
+    const above = new Set        ();
+    panelsIn().forEach((p     ) => { if (p.Id) above.add(p.Id); if (p.Node) above.add(p.Node); });
+    const walkUp = (id        ) => { if (!id || above.has(id)) return; above.add(id); parentsOf(id).forEach(walkUp); };
+    walkUp(configPanel(panel.id)?.Node || panel.node || '');
+    // A breaker's own tier is not a channel either: nothing measures it, so nothing can be measured by it.
+    const candidates = () => nodes.filter(n => PANEL_CIRCUIT_KINDS.includes(n.kind) && !n.id.startsWith('breaker:') && !above.has(n.id));
     /// The channels worth showing: those matching what was typed, and whatever is already picked, which must
-    /// never be filtered out from under the person looking at it.
+    /// never be filtered out from under the person looking at it — a pick the list has lost would be cleared
+    /// by the next Apply.
     const matching = (chosen        ) => {
       const q = hunt.value.trim().toLowerCase();
-      return candidates().filter(n => !q || n.id.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || n.id === chosen);
+      const list = candidates();
+      if (chosen && !list.some(n => n.id === chosen))
+        list.push(nodes.find(n => n.id === chosen) || { id: chosen, label: `${chosen} — nothing reads it`, kind: 'node' });
+      return list.filter(n => !q || n.id.toLowerCase().includes(q) || (n.label || '').toLowerCase().includes(q) || n.id === chosen);
     };
     const drawPickers = () => {
       pickerRows.innerHTML = '';
@@ -10863,8 +10876,12 @@ function addPanelScheduleSection(nav     , sections     ) {
         ...(b?.node ? [field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
-          text: `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
-            + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}. It reaches Home Assistant, EmonCMS and Prometheus like any other node.`,
+          // A breaker measured by one channel is that channel: a tier above it would carry the same reading twice.
+          text: (b.legs.some(l => l.channel === b.node)
+            ? `It is the channel measuring it, ${b.node} — beneath ${panel.name || panel.id}. The circuit and the channel are one node, not two.`
+            : `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
+              + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}.`)
+            + ' It reaches Home Assistant, EmonCMS and Prometheus like any other node.',
         }))] : [])),
       footer: [save, traceBtn, remove],
     });
