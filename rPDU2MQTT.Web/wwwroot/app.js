@@ -12222,6 +12222,8 @@ function addFloorPlanSection(nav     , sections     ) {
     menu.hidden = false;
   };
   /// What a right-click offers, by what it landed on.
+  /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
+  const onEdit = (fn            ) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };
   const menuFor = (hit     , p    )          => {
     const editing = mode === 'edit';
     const toEdit        = { label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } };
@@ -12230,19 +12232,19 @@ function addFloorPlanSection(nav     , sections     ) {
     const many = selected().length > 1;
     if (many) return [
       { label: `${selected().length} selected`, head: true },
-      { label: 'Delete them', danger: true, disabled: !editing, run: () => deleteSelection() },
+      { label: 'Delete them', danger: true, run: onEdit(() => deleteSelection())},
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
-    if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, disabled: !editing, run: () => { selectedCorner = hit.corner; removeCorner(); } }];
-    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, disabled: !editing, run: () => { selectedBend = hit.runpt; removeBend(); } }];
+    if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, run: onEdit(() => { selectedCorner = hit.corner; removeCorner(); })}];
+    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
     if (hit.mid != null) {
       const sh = shapeOf(selection);
       const locked = !!sh && ((sh.LockedWalls || []).includes(hit.mid) || sh.Locked);
       return [
         { label: `Wall ${hit.mid + 1}`, head: true },
-        { label: 'Add a corner here', disabled: !editing || locked, run: () => insertCorner(hit.mid) },
-        { label: locked ? 'Unlock this wall' : 'Lock this wall', disabled: !editing || !sh, run: () => act(() => { const list = ensure(sh, 'LockedWalls', []); const at = list.indexOf(hit.mid); if (at >= 0) list.splice(at, 1); else list.push(hit.mid); if (!list.length) delete sh.LockedWalls; }) },
-        { label: 'Hold its length', disabled: !editing || !sh, run: () => { const [i, j] = planEdgeCorners(sh, hit.mid); addConstraint('length', [{ Room: sh.Id, Edge: hit.mid }], Math.round(Math.hypot(sh.Shape[j].X - sh.Shape[i].X, sh.Shape[j].Y - sh.Shape[i].Y) * 10) / 10); } },
+        { label: 'Add a corner here', disabled: locked, run: onEdit(() => insertCorner(hit.mid))},
+        { label: locked ? 'Unlock this wall' : 'Lock this wall', disabled: !sh, run: onEdit(() => act(() => { const list = ensure(sh, 'LockedWalls', []); const at = list.indexOf(hit.mid); if (at >= 0) list.splice(at, 1); else list.push(hit.mid); if (!list.length) delete sh.LockedWalls; }))},
+        { label: 'Hold its length', disabled: !sh, run: onEdit(() => { const [i, j] = planEdgeCorners(sh, hit.mid); addConstraint('length', [{ Room: sh.Id, Edge: hit.mid }], Math.round(Math.hypot(sh.Shape[j].X - sh.Shape[i].X, sh.Shape[j].Y - sh.Shape[i].Y) * 10) / 10); })},
       ];
     }
     if (hit.item) {
@@ -12253,14 +12255,14 @@ function addFloorPlanSection(nav     , sections     ) {
         { label: itemName(it), head: true },
         ...(it.Circuit ? [{ label: 'Show its circuit', run: () => { focused = focused === it.Circuit ? '' : it.Circuit; drawPlan(); } }         ] : []),
         ...(supply ? [] : [{ label: 'Trace its circuit', run: () => traceItem(it) }         ]),
-        { label: 'Wire from here', disabled: !editing, run: () => { mode = 'edit'; tool = 'wire'; wireDraft = { from: it.Id, pts: [] }; render(); } },
+        { label: 'Wire from here', run: onEdit(() => { mode = 'edit'; tool = 'wire'; wireDraft = { from: it.Id, pts: [] }; render(); })},
         ...(isSized(it)
-          ? [{ label: 'Turn 90°', disabled: !editing, run: () => act(() => { it.Rotation = ((Number(it.Rotation) || 0) + 90) % 360; }) }         ,
-             { label: 'Draw as an icon', disabled: !editing, run: () => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; delete it.Footprint; }) }         ]
-          : [{ label: 'Give it a real size', disabled: !editing, run: () => act(() => { const side = planRound(0.76 * scale()); it.Width = side; it.Depth = side; it.Rotation = 0; }) }         ]),
-        ...(it.Kind === 'outlet' ? [{ label: it.Gfci ? 'Not a GFCI' : 'Mark as GFCI', disabled: !editing, run: () => act(() => { if (it.Gfci) delete it.Gfci; else it.Gfci = true; }) }         ] : []),
-        { label: 'Duplicate', disabled: !editing, run: () => duplicate() },
-        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+          ? [{ label: 'Turn 90°', run: onEdit(() => act(() => { it.Rotation = ((Number(it.Rotation) || 0) + 90) % 360; }))}         ,
+             { label: 'Draw as an icon', run: onEdit(() => act(() => { delete it.Width; delete it.Depth; delete it.Rotation; delete it.Round; delete it.Footprint; }))}         ]
+          : [{ label: 'Give it a real size', run: onEdit(() => act(() => { const side = planRound(0.76 * scale()); it.Width = side; it.Depth = side; it.Rotation = 0; }))}         ]),
+        ...(it.Kind === 'outlet' ? [{ label: it.Gfci ? 'Not a GFCI' : 'Mark as GFCI', run: onEdit(() => act(() => { if (it.Gfci) delete it.Gfci; else it.Gfci = true; }))}         ] : []),
+        { label: 'Duplicate', run: onEdit(() => duplicate())},
+        { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
         ...(editing ? [] : [toEdit]),
       ];
     }
@@ -12268,20 +12270,20 @@ function addFloorPlanSection(nav     , sections     ) {
       const o = openingOf(hit.opening);
       return [
         { label: PLAN_OPENINGS.find(x => x[0] === o?.Kind)?.[1] || 'Opening', head: true },
-        { label: 'Turn 90°', disabled: !editing, run: () => act(() => { o.Angle = ((Number(o.Angle) || 0) + 90) % 360; }) },
-        { label: 'Open the other way', disabled: !editing, run: () => act(() => { if (o.Flip) delete o.Flip; else o.Flip = true; }) },
-        { label: 'Hinges on the other side', disabled: !editing, run: () => act(() => { o.Swing = o.Swing === 'right' ? 'left' : 'right'; }) },
-        { label: 'Duplicate', disabled: !editing, run: () => duplicate() },
-        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+        { label: 'Turn 90°', run: onEdit(() => act(() => { o.Angle = ((Number(o.Angle) || 0) + 90) % 360; }))},
+        { label: 'Open the other way', run: onEdit(() => act(() => { if (o.Flip) delete o.Flip; else o.Flip = true; }))},
+        { label: 'Hinges on the other side', run: onEdit(() => act(() => { o.Swing = o.Swing === 'right' ? 'left' : 'right'; }))},
+        { label: 'Duplicate', run: onEdit(() => duplicate())},
+        { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
     if (hit.run) {
       const r = runOf(hit.run);
       return [
         { label: r?.Label || 'Wire', head: true },
-        { label: 'Reverse direction', disabled: !editing, run: () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); }) },
+        { label: 'Reverse direction', run: onEdit(() => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); }))},
         ...(r?.Circuit ? [{ label: 'Show its circuit', run: () => { focused = focused === r.Circuit ? '' : r.Circuit; drawPlan(); } }         ] : []),
-        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+        { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
     if (hit.room || hit.area) {
@@ -12289,10 +12291,10 @@ function addFloorPlanSection(nav     , sections     ) {
       if (!sh) return [];
       return [
         { label: sh.Name || sh.Id, head: true },
-        { label: sh.Locked ? 'Unlock it' : 'Lock it', disabled: !editing, run: () => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }) },
-        { label: 'Redraw its outline', disabled: !editing || !!sh.Locked, run: () => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); } },
-        { label: 'Duplicate', disabled: !editing || !!hit.area, run: () => duplicate() },
-        { label: 'Delete', danger: true, disabled: !editing, run: () => deleteSelection() },
+        { label: sh.Locked ? 'Unlock it' : 'Lock it', run: onEdit(() => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }))},
+        { label: 'Redraw its outline', disabled: !!sh.Locked, run: onEdit(() => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); })},
+        { label: 'Duplicate', disabled: !!hit.area, run: onEdit(() => duplicate())},
+        { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
         ...(editing ? [] : [toEdit]),
       ];
     }

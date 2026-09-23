@@ -712,12 +712,15 @@ rightClick(svg, 900, 600);
 if (!menuItem('Fit the floor in view') || !menuItem('Background image…')) fail(`the menu on bare plot offers nothing: ${textOf(menu())}`);
 key('Escape');
 if (!menu().hidden) fail('Escape did not close the menu');
-// …and in View it offers a way into Edit rather than editing outright.
+// …and while viewing, a choice that edits turns Edit on and does it, rather than sitting there greyed out.
 button('View', sec).onclick();
 rightClick(itemEl('fridge'), 100, 100);
-if (!menuItem('Edit this floor') || !menuItem('Duplicate').disabled) fail(`the menu while viewing offers editing: ${textOf(menu())}`);
-key('Escape');
-button('Edit', sec).onclick();
+if (menuItem('Duplicate').disabled) fail('the menu greys out editing while viewing instead of switching to Edit');
+const countBefore = config.EnergyFlow.Placements.length;
+menuItem('Duplicate').onclick();
+if (config.EnergyFlow.Placements.length !== countBefore + 1) fail('duplicating from the menu while viewing did nothing');
+if (!button('Edit', sec).classList.contains('is-on')) fail('it did not switch to Edit');
+key('z', { ctrlKey: true });
 
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();
