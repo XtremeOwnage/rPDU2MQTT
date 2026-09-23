@@ -40,7 +40,7 @@ const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node'];
 export function addPanelScheduleSection(nav: any, sections: any) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
   link.dataset.section = 'EnergyFlow';
-  const sec = el('div', { class: 'section' });
+  const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Panel Schedule' }));
   sec.appendChild(el('div', { class: 'desc' },
@@ -52,6 +52,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const refresh = btn('Refresh');
   const addPanel = btn('Add panel');
   const importBtn = btn('Import…');
+  const printBtn = btn('Print…');
+  printBtn.title = 'Print this directory for the inside of the panel door.';
   importBtn.title = 'Paste a directory you already keep — breaker numbers, wires, channels and what each feeds — and see what it reads as before anything is written.';
   // Watts or amps: the same reading, in the unit the question is being asked in.
   const unitSel = el('select', { class: 'ps-unit' }) as HTMLSelectElement;
@@ -60,7 +62,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, status));
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, printBtn, status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
@@ -91,6 +93,15 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const grid = el('div', { class: 'ps-grid' });
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
+
+  // The same directory laid out for the inside of the panel door (#460): shown only on paper.
+  const printable = el('div', { class: 'ps-print' });
+  sec.appendChild(printable);
+  printBtn.onclick = () => {
+    const w: any = window;
+    if (typeof w.print === 'function') w.print();
+    else toast('This browser cannot print from here.', false);
+  };
 
   let panels: Panel[] = [];
   let findings: Finding[] = [];
@@ -586,6 +597,50 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   };
   importBtn.onclick = () => importSheet();
 
+  /// What a breaker reads as on paper: what it feeds, or that nobody has identified it. Never blank —
+  /// a slot nobody has written down is the point of printing it.
+  const printWords = (b: Breaker) =>
+    b.state === 'unused' ? 'Unused'
+      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : 'Unknown — not identified')
+        : b.description || 'Unknown — not identified';
+
+  /// The directory laid out as the panel is, for the door: odd slots down the left, even down the right.
+  const drawPrint = (p: Panel, slots: number) => {
+    printable.innerHTML = '';
+    const when = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    printable.appendChild(el('div', { class: 'ps-print-head' },
+      el('h3', { text: p.name || p.id }),
+      el('span', { class: 'ps-print-when', text: `${slots} slots · ${when}` })));
+    const table = el('table', { class: 'ps-print-grid' });
+    const head = el('tr');
+    ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'].forEach(h => head.appendChild(el('th', { text: h })));
+    table.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    const holding = (slot: number) => p.breakers.filter(b => (b.poles === 2 ? [b.slot, b.slot + 2] : [b.slot]).includes(slot));
+    const side = (slot: number, tr: any, mirrored: boolean) => {
+      const on = holding(slot);
+      const words = on.length
+        ? on.map(b => b.slot === slot ? printWords(b) : `${b.number} — the other half of the breaker above`).join(' / ')
+        : 'Empty';
+      const cells = [
+        el('td', { class: 'ps-print-desc' + (on.some(b => b.state === 'unknown') ? ' is-unknown' : on.length ? '' : ' is-empty'), text: words }),
+        el('td', { class: 'ps-print-wire', text: on.map(b => b.wire).filter(Boolean).join(' / ') }),
+        el('td', { class: 'ps-print-amps', text: on.map(b => b.amps ? String(b.amps) : '').filter(Boolean).join(' / ') }),
+        el('td', { class: 'ps-print-slot', text: String(slot) }),
+      ];
+      (mirrored ? [...cells].reverse() : cells).forEach(c => tr.appendChild(c));
+    };
+    for (let slot = 1; slot <= slots; slot += 2) {
+      const tr = el('tr');
+      tr.dataset.slot = String(slot);
+      side(slot, tr, false);
+      if (slot + 1 <= slots) side(slot + 1, tr, true);
+      body.appendChild(tr);
+    }
+    table.appendChild(body);
+    printable.appendChild(table);
+  };
+
   const render = () => {
     grid.innerHTML = '';
     const drawn = shown();
@@ -643,6 +698,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
     drawChecks(drawn);
+    drawPrint(drawn, slots);
     // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
     // the two rows it spans had nothing else in them and split its height between them instead.
     grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;

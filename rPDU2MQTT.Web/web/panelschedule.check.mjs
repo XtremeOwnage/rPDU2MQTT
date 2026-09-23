@@ -689,6 +689,40 @@ if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not
 if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
 if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
 
+// The directory prints for the inside of the panel door (#460): every slot in order, nothing that is only
+// screen furniture, and a slot nobody has written down printed as unknown rather than left blank.
+// Each printed row holds a pair of slots: the odd one on the left, the even one mirrored on the right.
+const printRow = (slot) => query(sec, '.ps-print-grid tr', true).find(r => r.dataset?.slot === String(slot % 2 ? slot : slot - 1));
+const printCells = (slot) => query(printRow(slot), 'td', true).map(c => (c.textContent || '').trim());
+if (!query(sec, '.ps-print')) fail('there is no printable directory');
+if (!/\.ps-print\s*\{[^}]*display:\s*none/.test(css)) fail('the printable directory is drawn on screen as well');
+// Twelve slots are six rows, two slots to a row: the panel as it is, not a list.
+if (query(sec, '.ps-print-grid tbody tr', true).length !== 6)
+  fail(`the printed directory has ${query(sec, '.ps-print-grid tbody tr', true).length} rows for 12 slots, not 6`);
+// Odd down the left, even down the right, with the slot numbers up the middle as a panel door label is.
+const first = printCells(1);
+if (first[0] !== 'AC Heat Strips' || first[2] !== '60' || first[3] !== '1')
+  fail(`the first slot does not print what it feeds, its rating and its number: ${JSON.stringify(first)}`);
+if (first[4] !== '2' || first[7] !== 'Empty')
+  fail(`the even column is not mirrored with its number to the middle, or an empty slot is left blank: ${JSON.stringify(first)}`);
+// The second slot of a double-pole says what holds it rather than repeating the circuit.
+if (!/other half of the breaker above/.test(printCells(3)[0])) fail(`slot 3 does not say the breaker above holds it: ${JSON.stringify(printCells(3))}`);
+// A circuit nobody has identified prints as unknown — the gaps are the reason for printing it.
+if (!/Bathroom Lights \?\?\?\?/.test(printCells(9)[0])) fail(`an unidentified breaker does not print its mark: ${JSON.stringify(printCells(9))}`);
+if (!query(printRow(9), 'td').classList.contains('is-unknown')) fail('an unidentified circuit is not marked on the printout');
+// Both halves of a tandem are printed, not just the one on top.
+if (!/Kitchen lights rewritten \/ Freezer/.test(printCells(6)[7])) fail(`a tandem prints only one of its halves: ${JSON.stringify(printCells(6))}`);
+// Printing takes the page chrome off and leaves the directory.
+const printRules = (/@media print\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g);
+const printCss = [...css.matchAll(printRules)].map(m => m[1]).join('\n');
+if (!/\.section\.ps\.active\s*>\s*\*:not\(\.ps-print\)[^}]*display:\s*none/.test(printCss))
+  fail('printing the panel schedule prints the editor as well as the directory');
+if (!/body:has\(\.section\.ps\.active\)\s+nav[^}]*display:\s*none/.test(printCss)) fail('printing keeps the navigation on the page');
+let printed = 0;
+sandbox.window.print = () => printed++;
+query(sec, 'button', true).find(b => b.textContent === 'Print\u2026').onclick();
+if (printed !== 1) fail('the Print button did not print');
+
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
 // One column of breakers on a phone, with the numbers still stamped beside them.
@@ -698,7 +732,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '

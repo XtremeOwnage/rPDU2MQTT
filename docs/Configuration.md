@@ -1188,6 +1188,11 @@ slot already held, which is left alone. A line that could not be read is shown a
 and a channel no node answers to is flagged rather than mapped. Applying writes into the directory the page is
 holding; nothing is kept until **Save**.
 
+**It prints for the inside of the panel door.** **Print…** lays the directory out as the panel is — odd slots
+down the left, even down the right, numbers up the middle — with each breaker's wire, rating and what it
+feeds. A slot nobody has identified prints as unknown rather than blank, and the second slot of a double-pole
+says which breaker holds it. A 42-slot panel fits one letter or A4 page.
+
 ### Floor plans
 
 The **Floor Plans** page (under Energy Flow) draws each floor at real size: rooms and outdoor zones, doors and
