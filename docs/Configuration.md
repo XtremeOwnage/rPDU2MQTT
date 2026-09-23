@@ -1180,6 +1180,14 @@ for you:
 - a double-pole breaker with a clamp on one leg only,
 - a breaker reading more current than its rating.
 
+**A directory you already keep can be pasted in.** **Import…** takes the panel directory as it is written —
+breaker number, wire label, monitor channel and what the breaker feeds, in whatever order the line carries
+them, with `????` for a circuit nobody has identified and `Unused` for an empty slot — and shows what every
+line was read as before anything is written: new, an update to the breaker already there, or a clash with a
+slot already held, which is left alone. A line that could not be read is shown and can be corrected in place,
+and a channel no node answers to is flagged rather than mapped. Applying writes into the directory the page is
+holding; nothing is kept until **Save**.
+
 ### Floor plans
 
 The **Floor Plans** page (under Energy Flow) draws each floor at real size: rooms and outdoor zones, doors and

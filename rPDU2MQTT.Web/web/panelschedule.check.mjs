@@ -18,7 +18,8 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const config = {
   History: { Enabled: false },
   EnergyFlow: {
-    Nodes: [],
+    // The channels the bridge reads, so an imported line naming one can be told from one naming nothing.
+    Nodes: [{ Id: 'n30_1_7', Label: 'N30 1-7', Kind: 'breaker' }],
     // The circuit on n30_1_1 hangs off the grid today, so mapping it to a breaker has something to replace.
     Links: [{ From: 'grid', To: 'n30_1_1' }],
     Panels: [{
@@ -126,8 +127,34 @@ const CHART_W = 560, PAD_L = 44, PAD_R = 3;
 const stepX = (CHART_W - PAD_L - PAD_R) / (SAMPLES - 1);
 const atX = (i) => PAD_L + i * stepX;
 
+/// The bridge's reading of a pasted directory (#455), standing in for the parser: what each line says, and
+/// what writing it would do to the panel the page is holding.
+const importOf = (payload) => {
+  const flow = payload.config?.EnergyFlow || saved.EnergyFlow;
+  const panel = (flow.Panels || []).find(p => p.Id === payload.panel) || { Breakers: [] };
+  const known = new Set((flow.Nodes || []).map(n => n.Id));
+  const rows = String(payload.text || '').split('\n').map(l => l.trim()).filter(l => l.length).map(line => {
+    const m = /^(\d+,\d+|B?\d+(?:\.\d)?)\s*[,:]\s*(.*)$/i.exec(line);
+    if (!m) return { line, note: `“${line.split(/[,:]/)[0]}” does not read as a breaker number.` };
+    const [number, rest] = [m[1], m[2]];
+    const wire = ((/\bW\d+\b/i.exec(rest) || [''])[0]).toUpperCase();
+    const channel = (/\bn30_\d+_\d+\b/i.exec(rest) || [''])[0];
+    const description = (rest.includes(':') ? rest.split(':').pop() : rest.replace(wire, '').replace(channel, '')).replace(/^[,\s]+|[,\s]+$/g, '');
+    const slot = Number(number.replace(/^B/i, '').split(/[,.]/)[0]);
+    const held = panel.Breakers || [];
+    const effect = held.some(b => b.Number === number) ? 'update'
+      : held.some(b => ((b.Poles || 1) === 2 ? [b.Slot, b.Slot + 2] : [b.Slot]).includes(slot)) ? 'clash' : 'add';
+    return {
+      line, number, slot, poles: /,/.test(number) ? 2 : 1, half: null, wire, amps: null, channel,
+      description, state: 'identified', note: null, effect, channelKnown: !channel || known.has(channel),
+    };
+  });
+  return { ok: true, rows };
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => url.includes('/api/flow/series') ? (series.push(url), seriesBody())
+    : url.includes('/api/panels/import') ? importOf(JSON.parse(opts.body))
     : url.includes('/api/panels/resolve') ? resolve(JSON.parse(opts.body).EnergyFlow)
     : url.includes('/api/panels') ? resolve(saved.EnergyFlow)
     : url.includes('/api/schema') ? schema
@@ -607,6 +634,61 @@ if (!/measuring this breaker/i.test(sheet().textContent || ''))
   fail(`an unmeasured breaker does not say what is missing: "${(sheet().textContent || '').slice(0, 120)}"`);
 shut();
 
+// A directory someone already keeps can be pasted in, and what each line reads as is shown before anything is
+// written (#455): one line that is not a breaker at all, one new, one landing on a slot already held, and one
+// naming a channel the bridge does not read.
+const importBtn = query(sec, 'button', true).find(b => b.textContent === 'Import…');
+if (!importBtn) fail('the panel schedule offers no way to import a directory');
+importBtn.onclick();
+await wait(60);
+const paste = query(sheet(), 'textarea')
+  || fail('the import sheet has nowhere to paste a directory');
+const previewRows = () => query(sheet(), '.ps-row', true);
+const rowSaying = (t) => previewRows().find(r => (r.textContent || '').includes(t));
+paste.value = [
+  'Iotawatt: 1',
+  'B07, W21, n30_1_7: Office lights',
+  'B03: Dryer',
+  'B11, n30_9_9: Shed',
+  'B06: Kitchen lights rewritten',
+].join('\n');
+paste.oninput();
+await wait(400);
+if (previewRows().length !== 5) fail(`the preview shows ${previewRows().length} lines, not the 5 pasted`);
+if (!rowSaying('does not read as a breaker number')) fail('a line that is not a breaker is dropped silently');
+if (!rowSaying('Office lights').classList.contains('is-add')) fail('a breaker not in the panel is not shown as new');
+if (!rowSaying('Dryer').classList.contains('is-clash')) fail('a line landing on a slot already held is not flagged');
+if (!rowSaying('Kitchen lights rewritten').classList.contains('is-update')) fail('a line for a breaker already there is not shown as an update');
+// A channel nothing reads is said to be unknown rather than quietly mapped.
+if (!/n30_9_9 . no node with that id/.test(rowSaying('Shed').textContent || '')) fail(`a channel the bridge does not read is not flagged: "${rowSaying('Shed').textContent}"`);
+if (/no node with that id/.test(rowSaying('Office lights').textContent || '')) fail('a channel the bridge does read is flagged as unknown');
+// Nothing is written by looking at it.
+if (breakerIn('B07')) fail('the preview wrote a breaker into the config before it was applied');
+
+// A line that could not be read is the field itself, so it can be put right here.
+const fix = query(rowSaying('does not read as a breaker number'), 'input');
+if (!fix || fix.value !== 'Iotawatt: 1') fail('a line that could not be read is not offered for correction');
+fix.value = 'B08: Porch light';
+fix.onchange();
+await wait(400);
+if (previewRows().some(r => r.classList.contains('is-bad'))) fail('correcting the line left it unread');
+if (!rowSaying('Porch light')) fail('the corrected line was not read again');
+if (!/B08: Porch light/.test(paste.value)) fail('the correction did not go back into the pasted text');
+
+// Applying writes the lines that can be written, leaves the clash alone, and maps the channel that is known.
+query(sheet(), 'button', true).find(b => b.textContent === 'Apply to the panel').onclick();
+await wait(150);
+if (breakerIn('B07')?.Description !== 'Office lights') fail('applying did not add the new breaker');
+if (breakerIn('B08')?.Description !== 'Porch light') fail('applying did not add the corrected line');
+if (breakerIn('B06')?.Description !== 'Kitchen lights rewritten') fail('applying did not update the breaker already there');
+if (config.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B03'))
+  fail('a line landing on a slot already held was written anyway, over the breaker there');
+if (clampFor('B07')?.Channel !== 'n30_1_7') fail('a breaker whose line named a channel was not mapped to it');
+if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not read');
+// …and the panel is drawn with them, without anything being saved.
+if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
+if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
+
 // A phone holds one column, and that has to outrank the placement written on each cell.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
 // One column of breakers on a phone, with the numbers still stamped beside them.
@@ -616,7 +698,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '

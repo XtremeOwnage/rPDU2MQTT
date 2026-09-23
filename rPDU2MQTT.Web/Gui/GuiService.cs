@@ -1143,6 +1143,33 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         MapLocationEndpoints(app);
 
+        // A pasted panel directory, read as far as it can be (#455). Reading only: the page shows the preview,
+        // and nothing is written until the operator applies it and saves.
+        app.MapPost("/api/panels/import", async (HttpContext ctx) =>
+        {
+            try
+            {
+                var body = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ctx.RequestAborted);
+                var text = body.RootElement.TryGetProperty("text", out var t) ? t.GetString() ?? "" : "";
+                var panelId = body.RootElement.TryGetProperty("panel", out var pid) ? pid.GetString() ?? "" : "";
+                var flow = body.RootElement.TryGetProperty("config", out var c)
+                    ? ConfigSchema.FromJson(c.GetRawText()).EnergyFlow ?? config.EnergyFlow
+                    : config.EnergyFlow;
+                var panel = flow.Panels.FirstOrDefault(p => string.Equals(p.Id, panelId, StringComparison.OrdinalIgnoreCase)) ?? new Models.Config.PanelConfig();
+                var known = new HashSet<string>(flow.Nodes.Select(n => n.Id).Where(x => !string.IsNullOrWhiteSpace(x)), StringComparer.OrdinalIgnoreCase);
+                var rows = Core.Flow.PanelDirectoryImport.Parse(text).Select(r => new
+                {
+                    line = r.Line, number = r.Number, slot = r.Slot, poles = r.Poles, half = r.Half, wire = r.Wire,
+                    amps = r.Amps, channel = r.Channel, description = r.Description, state = r.State, note = r.Note,
+                    effect = Core.Flow.PanelDirectoryImport.Effect(panel, r),
+                    // A channel the line names that the bridge does not read is kept, and said to be unknown.
+                    channelKnown = r.Channel.Length == 0 || known.Contains(r.Channel),
+                }).ToArray();
+                return Results.Json(new { ok = true, rows }, ConfigSchema.Json);
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
+        });
+
         // Restart a tier — or everything.
         app.MapPost("/api/restart", async (HttpContext ctx) =>
         {

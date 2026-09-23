@@ -10379,6 +10379,8 @@ function addPanelScheduleSection(nav     , sections     ) {
   const panelSel = el('select', { title: 'Which panel to show.' })                     ;
   const refresh = btn('Refresh');
   const addPanel = btn('Add panel');
+  const importBtn = btn('Import…');
+  importBtn.title = 'Paste a directory you already keep — breaker numbers, wires, channels and what each feeds — and see what it reads as before anything is written.';
   // Watts or amps: the same reading, in the unit the question is being asked in.
   const unitSel = el('select', { class: 'ps-unit' })                     ;
   [['W', 'watts'], ['A', 'amps']].forEach(([v, t]) => unitSel.appendChild(el('option', { value: v, text: t })));
@@ -10386,7 +10388,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, status));
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' })                    ;
@@ -10820,6 +10822,97 @@ function addPanelScheduleSection(nav     , sections     ) {
       checks.appendChild(row);
     });
   };
+
+  /// Paste a directory, see what each line reads as, then write it into the panel (#455).
+  const importSheet = () => {
+    const panel = shown();
+    if (!panel) { toast('Add a panel first.', false); return; }
+    const body = el('div', { class: 'ps-import' });
+    const text = el('textarea', { class: 'ps-paste', rows: '10', spellcheck: 'false',
+      placeholder: 'B06,W11,N30,1,5: Lights, Garage, Kitchen\nB07: Bathroom????\n1,3: AC Heat Strips\nB26.1: W21: Servers' })                       ;
+    const file = el('input', { type: 'file', accept: '.csv,.txt,text/plain,text/csv', class: 'ps-file' })                    ;
+    file.onchange = async () => { const picked = file.files?.[0]; if (picked) { text.value = await picked.text(); read(); } };
+    const pick = btn('Open a file…');
+    pick.onclick = () => file.click();
+    const out = el('div', { class: 'ps-rows' });
+    const summary = el('div', { class: 'desc' });
+    let rows        = [];
+
+    const read = async () => {
+      out.innerHTML = '';
+      summary.textContent = 'Reading…';
+      let r     ;
+      try { r = await api('/api/panels/import', { method: 'POST', body: JSON.stringify({ text: text.value, panel: panel.id, config: { EnergyFlow: flowIn() } }) }); }
+      catch (e     ) { r = { body: { ok: false, message: e?.message } }; }
+      if (!r.body?.ok) { summary.textContent = r.body?.message || 'Could not read it.'; return; }
+      rows = r.body.rows || [];
+      // Which line of the box each row came from, so one that could not be read can be corrected in place.
+      const raw = text.value.replace(/\r\n?/g, '\n').split('\n');
+      let at = -1;
+      rows.forEach((x     ) => {
+        at = raw.findIndex((l, i) => i > at && l.trim().length > 0 && !l.trim().startsWith('#') && !l.trim().startsWith('//'));
+        x.at = at;
+      });
+      const ok = rows.filter((x     ) => !x.note);
+      summary.textContent = rows.length
+        ? `${ok.length} of ${rows.length} line(s) read: ${ok.filter((x     ) => x.effect === 'add').length} new, `
+          + `${ok.filter((x     ) => x.effect === 'update').length} updated, ${ok.filter((x     ) => x.effect === 'clash').length} clashing with a slot already taken. `
+          + 'Nothing is written until you apply it, and nothing is kept until you press Save.'
+        : 'Nothing to read yet.';
+      rows.forEach((x     ) => {
+        const row = el('div', { class: 'ps-row is-' + (x.note ? 'bad' : x.effect) });
+        if (x.note) {
+          // Not read: the line itself is the field, so it can be put right without hunting for it above.
+          const fix = el('input', { class: 'ps-row-fix', value: x.line, spellcheck: 'false' })                    ;
+          fix.onchange = () => {
+            const lines = text.value.replace(/\r\n?/g, '\n').split('\n');
+            if (x.at >= 0 && x.at < lines.length) { lines[x.at] = fix.value; text.value = lines.join('\n'); read(); }
+          };
+          row.appendChild(fix);
+          row.appendChild(el('span', { class: 'ps-row-note', text: x.note }));
+        }
+        else {
+          row.appendChild(el('span', { class: 'ps-row-line', text: x.line }));
+          const bits = [x.number, x.poles === 2 ? 'double-pole' : x.half ? `tandem half ${x.half}` : '', x.wire, x.amps ? `${x.amps} A` : '',
+            x.channel ? (x.channelKnown ? x.channel : `${x.channel} — no node with that id`) : '',
+            x.description || (x.state === 'unused' ? 'unused' : 'not identified')];
+          row.appendChild(el('span', { class: 'ps-row-read' + (x.channel && !x.channelKnown ? ' is-warn' : ''), text: bits.filter(Boolean).join(' · ') }));
+          row.appendChild(el('span', { class: 'ps-row-effect', text: x.effect === 'add' ? 'new' : x.effect === 'update' ? 'updates it' : 'slot taken' }));
+        }
+        out.appendChild(row);
+      });
+    };
+    text.oninput = () => { clearTimeout((text       )._t); (text       )._t = setTimeout(read, 250); };
+
+    const apply = btn('Apply to the panel', 'primary');
+    apply.onclick = () => {
+      const cfg = configPanel(panel.id);
+      if (!cfg) return;
+      const list = ensure(cfg, 'Breakers', []);
+      let added = 0, updated = 0, clashes = 0, mapped = 0;
+      rows.filter((x     ) => !x.note).forEach((x     ) => {
+        if (x.effect === 'clash') { clashes++; return; }
+        let target = list.find((b     ) => String(b.Number || '').toLowerCase() === String(x.number).toLowerCase());
+        if (target) updated++; else { target = { Slot: x.slot }; list.push(target); added++; }
+        Object.assign(target, {
+          Slot: x.slot, Number: x.number, Poles: x.poles, Half: x.half ?? null, Wire: x.wire || target.Wire || '',
+          Description: x.description, State: x.state,
+        });
+        if (x.amps) target.Amps = x.amps;
+        // A channel the line named, recorded as the clamp that measures the breaker.
+        if (x.channel && x.channelKnown) { mapLeg(panel.id, x.number, 1, x.channel, x.wire || ''); mapped++; }
+      });
+      refreshDirty();
+      closeSheet();
+      toast(`${added} breaker(s) added, ${updated} updated${mapped ? `, ${mapped} mapped to a channel` : ''}`
+        + `${clashes ? `, ${clashes} left alone because their slot is taken` : ''}. Press Save to keep it.`, true);
+      load();
+    };
+    body.append(el('div', { class: 'desc', text: 'Paste the directory you already keep. Each line can carry the breaker number, the wire label, the monitor channel and what it feeds, in any order; “????” marks one nobody has identified and “Unused” an empty slot.' }),
+      text, el('div', { class: 'ld-toolbar', style: { gap: '8px' } }, pick, file), summary, out);
+    openSheet({ title: `Import into ${panel.name || panel.id}`, body, wide: true, footer: [apply] });
+  };
+  importBtn.onclick = () => importSheet();
 
   const render = () => {
     grid.innerHTML = '';
