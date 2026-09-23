@@ -2,7 +2,7 @@
 // each breaker's number, wire, rating, what it feeds and the live power of the channel measuring it (#454).
 // Slots, breakers, tandem halves and the node measuring each leg are all edited here.
 import { activate, api, btn, closeSheet, el, ensure, navLink, openSheet, toast } from '../helpers.js';
-import { sparkline } from '../charts.js';
+import { openHistorySheet } from '../history-sheet.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { column, rowOf } from '../panel-layout.js';
@@ -561,83 +561,22 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     });
   };
 
-  /// Windows worth asking a breaker about, and how finely each is sampled.
-  const WINDOWS: [string, string][] = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
-
   /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
   const history = (panel: Panel, b: Breaker) => {
-    const channels = b.legs.map(l => l.channel).filter(Boolean) as string[];
-    const plot = el('div', { class: 'ps-chart' });
-    const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
-    const note = el('div', { class: 'desc' });
-    let window = WINDOWS[1][0];
-
-    const load = async () => {
-      if (!channels.length) {
-        plot.innerHTML = '';
-        note.textContent = GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.';
-        return;
-      }
-      plot.innerHTML = '';
-      note.textContent = 'Reading…';
-      let r: any;
-      try { r = await api(`/api/flow/series?${window}&metric=realpower`); }
-      catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
-      const body = r?.body;
-      if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
-      const series = (body.series || []).filter((s: any) => channels.includes(s.node));
-      if (!series.length) { note.textContent = `The history backend holds nothing for ${channels.join(', ')} in this window.`; return; }
-      // A leg with no reading at some moment leaves the breaker unknown then, exactly as its power is.
-      const at: string[] = body.at || [];
-      const values = at.map((_, i) => {
-        let total = 0;
-        for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
-        return total as number | null;
-      });
-      const known = values.filter((v): v is number => v != null);
-      // What the line is: the breaker, and the channels it is summed from.
-      legend.innerHTML = '';
-      legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }),
-        `${b.number}${b.description ? ' — ' + b.description : ''}`));
-      channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        `${labelOf(ch)} (${ch})`)));
-      plot.appendChild(sparkline({
-        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160, grid: true,
-        at: (i: number) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
-      }));
-      note.textContent = known.length
-        ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} W · `
-          + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} W · from ${channels.join(' + ')}`
-        : `No readings stored for ${channels.join(', ')} in this window.`;
-    };
-
-    const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-    const buttons = WINDOWS.map(([q, label]) => {
-      const b2 = btn(label);
-      b2.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b2.classList.add('primary'); load(); };
-      picker.appendChild(b2);
-      return b2;
-    });
-    buttons[1].classList.add('primary');
-
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
-    // The node measuring it is a thing of its own — its bindings and its label live on the Nodes page.
-    const toNode = btn('Edit node');
-    toNode.hidden = !channels.length;
-    toNode.title = channels.length ? `Open ${labelOf(channels[0])} (${channels[0]}) in the node editor.` : '';
-    toNode.onclick = () => {
-      closeSheet();
-      editNodeOnNextOpen(channels[0]);
-      (Array.from(document.querySelectorAll('nav a')) as any[]).find(a => a.dataset.label === 'Nodes')?.click();
-    };
-    openSheet({
+    const channels = b.legs.map(l => l.channel).filter(Boolean) as string[];
+    openHistorySheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      body: el('div', {}, picker, plot, legend, note),
-      footer: [toNode, toEditor],
+      nodes: channels,
+      lineLabel: `${b.number}${b.description ? ' — ' + b.description : ''}`,
+      labelOf,
+      empty: GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.',
+      // A 240 V circuit is the sum of its legs, and each leg is worth seeing on its own.
+      parts: channels.length > 1 ? channels : [],
+      partsLabel: 'Its legs',
+      footer: [toEditor],
     });
-    load();
   };
 
   const powerText = (b: Breaker) => unitSel.value === 'A'
@@ -839,7 +778,16 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const panelNode = cfg?.Node ?? drawn.node ?? '';
     nodeSel.innerHTML = '';
     nodeSel.appendChild(el('option', { value: '', text: '— not mapped —' }));
-    nodes.forEach(n => nodeSel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    // A panel is a panel: only a node of that kind, and not one another panel in the directory already is.
+    const claimed = new Set(panelsIn().filter((p: any) => p.Id !== drawn.id).map((p: any) => p.Node).filter(Boolean));
+    const panelChoices = nodes.filter(n => n.kind === 'panel' && !claimed.has(n.id));
+    // What is already recorded stays in the list, even where it is not a panel: opening the page must never
+    // quietly re-point the panel at something else.
+    if (panelNode && !panelChoices.some(n => n.id === panelNode))
+      panelChoices.push(nodes.find(n => n.id === panelNode) || { id: panelNode, label: panelNode, kind: 'node' });
+    panelChoices.forEach(n => nodeSel.appendChild(el('option', {
+      value: n.id, text: `${n.label} (${n.id})${n.kind === 'panel' ? '' : ' — not a panel'}`,
+    })));
     nodeSel.value = panelNode;
     feeders.innerHTML = '';
     const fedBy = panelNode ? parentsOf(panelNode) : [];

@@ -125,10 +125,13 @@ const SAMPLES = 21, GAP_AT = 7;
 const seriesBody = () => ({
   ok: true, metric: 'realpower', units: 'W',
   at: Array.from({ length: SAMPLES }, (_, i) => when(i)),
-  series: [{
-    node: 'n30_1_5', label: 'N30 1-5', kind: 'breaker',
-    values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 100 + i * 4)),
-  }],
+  series: [
+    { node: 'n30_1_5', label: 'N30 1-5', kind: 'breaker',
+      values: Array.from({ length: SAMPLES }, (_, i) => (i === GAP_AT ? null : 100 + i * 4)) },
+    // The two legs of the double-pole, for the breakdown beneath its chart.
+    { node: 'n30_1_1', label: 'N30 1-1', kind: 'breaker', values: Array.from({ length: SAMPLES }, () => 1100) },
+    { node: 'n30_1_2', label: 'N30 1-2', kind: 'breaker', values: Array.from({ length: SAMPLES }, () => 1150) },
+  ],
 });
 // The chart's own coordinates: a gutter down the left for the scale, then the plot.
 const CHART_W = 560, PAD_L = 44, PAD_R = 3;
@@ -435,6 +438,11 @@ const panelNodeSel = () => query(sec, '.ps-panel-node');
 const incomingText = () => query(sec, '.ps-incoming').textContent || '';
 if (!panelNodeSel()) fail('the panel cannot be told which node it is');
 if (!/No node is mapped/.test(incomingText())) fail(`a panel with no node claims an incoming figure: "${incomingText()}"`);
+// A panel is a panel: the channels and the grid are not offered as the node this panel is.
+const panelOptions = () => (panelNodeSel().children || []).map(o => o.value).filter(Boolean);
+if (!panelOptions().includes('main_panel')) fail(`the panel's own node is not offered: ${panelOptions().join(', ')}`);
+for (const notAPanel of ['grid', 'n30_1_5'])
+  if (panelOptions().includes(notAPanel)) fail(`${notAPanel} is offered as the node a panel is: ${panelOptions().join(', ')}`);
 panelNodeSel().value = 'main_panel';
 panelNodeSel().onchange({});
 await wait(100);
@@ -445,7 +453,7 @@ if (!/2,600 W/.test(incomingText())) fail(`the power coming into the panel is no
 if (!/241\.3 V/.test(incomingText())) fail(`the mains voltage is not shown: "${incomingText()}"`);
 
 // A panel whose node has no reading says so, rather than drawing a zero.
-panelNodeSel().value = 'grid';
+panelNodeSel().value = 'n30_3_4';
 panelNodeSel().onchange({});
 await wait(100);
 if (!/no data/.test(incomingText())) fail(`a panel node with no reading does not say so: "${incomingText()}"`);
@@ -703,6 +711,24 @@ if (clampFor('B11')) fail('a breaker was mapped to a channel the bridge does not
 if (!/Office lights/.test(textOf(cellAt(7)))) fail('the imported breaker is not drawn on the panel');
 if (saved.EnergyFlow.Panels[0].Breakers.some(b => b.Number === 'B07')) fail('importing saved to disk on its own');
 
+// A double-pole's chart is the sum of its legs, with each leg on a strip of its own beneath it: half a 240 V
+// circuit is not the circuit, but it is worth seeing.
+// Both legs are clamped again: the editor's own tests left this breaker on one CT.
+config.EnergyFlow.Clamps = config.EnergyFlow.Clamps.filter(c => c.Breaker !== '1,3');
+config.EnergyFlow.Clamps.push(
+  { Label: 'C2', Panel: 'main_panel', Breaker: '1,3', Leg: 1, Wire: 'W01', Channel: 'n30_1_1' },
+  { Label: 'C3', Panel: 'main_panel', Breaker: '1,3', Leg: 2, Wire: 'W02', Channel: 'n30_1_2' });
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(150);
+readings(1)[0].onclick();
+await wait(150);
+const legRows = () => query(sheet(), '.hs-part', true);
+if (legRows().length !== 2) fail(`a double-pole's chart shows ${legRows().length} of its 2 legs`);
+if (!/2,250 W/.test(sheet().textContent || '')) fail('the line over the legs is not their sum');
+if (legRows()[0].dataset.node !== 'n30_1_2') fail(`the legs are not ordered by what each drew: ${legRows().map(r => r.dataset.node).join(', ')}`);
+if (!/1,150 W/.test(legRows()[0].textContent || '')) fail(`a leg does not say what it is drawing: "${legRows()[0].textContent}"`);
+shut();
+
 // A pick the list no longer holds is kept rather than cleared by the next Apply — a mapping must not vanish
 // because the node behind it stopped being read.
 clampFor('B10').Channel = 'retired_channel';
@@ -812,7 +838,7 @@ if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
 if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
   fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
 
-console.log('panel schedule: an unknown breaker is identified by switching it off \u2014 the channel that went dark is named with what it fell from, one already measuring another breaker is flagged, and a circuit drawing nothing says so rather than guessing; the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
+console.log('panel schedule: a double-pole\u2019s chart is the sum of its legs with each leg on a strip of its own; an unknown breaker is identified by switching it off \u2014 the channel that went dark is named with what it fell from, one already measuring another breaker is flagged, and a circuit drawing nothing says so rather than guessing; the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '

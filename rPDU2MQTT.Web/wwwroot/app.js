@@ -1840,6 +1840,195 @@ function rankChart(opts
   return { svg, gaps: 0 };
 }
 
+// ── context-menu.ts ─────────────────────────────────────────────
+// The little menu a right-click opens, positioned inside the box it was aimed at. The floor plan and the
+// flow diagram both use it; each keeps its own class so its own styling still applies.
+
+/// A menu element to append to `host` (which must be positioned), and the two calls that work it. The host
+/// may be given as a function, for a box built after the menu it holds.
+function makeMenu(host     , cls = 'ctx-menu', onClose             ) {
+  const menu = el('div', { class: cls });
+  menu.hidden = true;
+  const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; onClose?.(); } };
+  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
+  document.addEventListener('keydown', (e     ) => { if (e.key === 'Escape' && !menu.hidden) close(); });
+  const open = (e     , entries                                          ) => {
+    menu.innerHTML = '';
+    const rows = entries.filter(Boolean)               ;
+    rows.forEach(x => {
+      if (x.head) { menu.appendChild(el('div', { class: `${cls}-head`, text: x.label })); return; }
+      const b = el('button', { class: `${cls}-item` + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
+      b.disabled = !!x.disabled;
+      b.onclick = () => { close(); x.run?.(); };
+      menu.appendChild(b);
+    });
+    // Kept inside the box: a menu opened near an edge would otherwise hang off it.
+    const box = typeof host === 'function' ? host() : host;
+    const r = box?.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
+    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
+    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - rows.length * 34)));
+    menu.style.left = `${Math.round(x)}px`;
+    menu.style.top = `${Math.round(y)}px`;
+    menu.hidden = false;
+  };
+  return { el: menu, open, close, isOpen: () => !menu.hidden };
+}
+
+// ── history-sheet.ts ────────────────────────────────────────────
+// What a node has been drawing, in a sheet: the panel schedule opens it for a breaker, the flow diagram for
+// whatever was right-clicked. One line, summed from the nodes asked for — a moment where any of them has no
+// reading is a gap in the line, never a partial sum.
+
+/// Windows worth asking about, and how finely each is sampled.
+const HISTORY_WINDOWS                     = [
+  ['minutes=60&step=30', 'Last hour'],
+  ['minutes=360&step=60', 'Last 6 hours'],
+  ['minutes=1440&step=900', 'Last 24 hours'],
+  ['days=7&step=3600', 'Last 7 days'],
+  ['days=30&step=21600', 'Last 30 days'],
+];
+/// The window a sheet opens on when nobody has picked one yet.
+const HISTORY_DEFAULT = 'minutes=1440&step=900';
+/// The measurements a reading can be asked for in, and what each is called.
+const HISTORY_METRICS                     = [
+  ['realpower', 'Power (W)'],
+  ['current', 'Current (A)'],
+  ['apparentpower', 'Apparent (VA)'],
+  ['energy_d', 'Energy today (kWh)'],
+];
+/// The last window picked, kept per browser: the same question tends to be asked over the same span.
+const WINDOW_KEY = 'rpdu2mqtt.history.window';
+const rememberedWindow = () => {
+  try { const v = localStorage.getItem(WINDOW_KEY); return HISTORY_WINDOWS.some(([q]) => q === v) ? v  : HISTORY_DEFAULT; }
+  catch { return HISTORY_DEFAULT; }
+};
+
+                                                                           
+
+/// Open the history of one or more nodes, over a window picked in the sheet.
+function openHistorySheet(o                ) {
+  const nodes = o.nodes.filter(Boolean);
+  const labelOf = o.labelOf || ((id        ) => id);
+  const metric = o.metric || 'realpower';
+  const plot = el('div', { class: 'ps-chart' });
+  const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
+  const note = el('div', { class: 'desc' });
+  const breakdown = el('div', { class: 'hs-parts' });
+  // A part that is the whole is not a breakdown; two legs summed into one line are.
+  const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
+  let window = rememberedWindow();
+  let metricNow = metric;
+
+  const load = async () => {
+    if (!nodes.length) {
+      plot.innerHTML = '';
+      note.textContent = o.empty || 'Nothing is measuring this, so there is nothing to chart.';
+      return;
+    }
+    plot.innerHTML = '';
+    note.textContent = 'Reading…';
+    let r     ;
+    try { r = await api(`/api/flow/series?${window}&metric=${metricNow}`); }
+    catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
+    const body = r?.body;
+    if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+    const all = body.series || [];
+    const series = all.filter((s     ) => nodes.includes(s.node));
+    if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
+    // A node with no reading at some moment leaves the total unknown then, exactly as its power is.
+    const at           = body.at || [];
+    const values = at.map((_, i) => {
+      let total = 0;
+      for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
+      return total                 ;
+    });
+    const known = values.filter((v)              => v != null);
+    const units = body.units || 'W';
+    // What the line is, and what it is summed from.
+    legend.innerHTML = '';
+    legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
+      el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }), o.lineLabel));
+    if (nodes.length > 1 || nodes[0] !== o.lineLabel)
+      nodes.forEach(id => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } }, `${labelOf(id)} (${id})`)));
+    plot.appendChild(sparkline({
+      values, color: 'var(--accent)', units, width: 560, height: 160, grid: true,
+      at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+    }));
+    const when = (i        ) => (at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+    const peak = known.length ? Math.max(...known) : null;
+    const peakAt = peak == null ? '' : when(values.findIndex(v => v === peak));
+    const last = [...values].reverse().find(v => v != null);
+    note.textContent = known.length
+      ? `${known.length} of ${values.length} readings · peak ${Math.round(peak ).toLocaleString('en-US')} ${units}`
+        + `${peakAt ? ` at ${peakAt}` : ''} · average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} ${units}`
+        + `${last == null ? '' : ` · latest ${Math.round(last).toLocaleString('en-US')} ${units}`} · from ${nodes.join(' + ')}`
+      : `No readings stored for ${nodes.join(', ')} in this window.`;
+
+    // What the total is made of, each on a strip of its own over the same window and the same reading.
+    breakdown.innerHTML = '';
+    if (!parts.length) return;
+    const held = parts.map(id => ({ id, s: all.find((x     ) => x.node === id) })).filter(x => x.s);
+    if (!held.length) {
+      breakdown.appendChild(el('div', { class: 'desc', text: `Nothing is stored for what ${o.lineLabel} is made of in this window.` }));
+      return;
+    }
+    breakdown.appendChild(el('div', { class: 'hs-parts-head', text: o.partsLabel || 'What it is made of' }));
+    // Ordered by what each drew, so the biggest part of the total is first.
+    held.map(({ id, s }) => {
+      const vs                    = (s.values || []).map((v     ) => (typeof v === 'number' ? v : null));
+      const seen = vs.filter((v)              => v != null);
+      return { id, label: s.label || labelOf(id), vs, latest: [...vs].reverse().find(v => v != null) ?? null, avg: seen.length ? seen.reduce((a, v) => a + v, 0) / seen.length : null };
+    }).sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1)).forEach(part => {
+      const row = el('div', { class: 'hs-part' });
+      row.dataset.node = part.id;
+      row.appendChild(el('span', { class: 'hs-part-name', text: part.label, title: part.id }));
+      row.appendChild(sparkline({ values: part.vs, color: 'var(--accent)', units, width: 132, height: 34 }));
+      // A part with no reading says so: it is not nothing, it is unknown.
+      row.appendChild(el('span', { class: 'hs-part-num', text: part.latest == null ? 'no data' : `${Math.round(part.latest).toLocaleString('en-US')} ${units}` }));
+      breakdown.appendChild(row);
+    });
+  };
+
+  const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  const buttons = HISTORY_WINDOWS.map(([q, label]) => {
+    const b = btn(label);
+    b.onclick = () => {
+      window = q;
+      try { localStorage.setItem(WINDOW_KEY, q); } catch { /* a browser that keeps nothing still charts */ }
+      buttons.forEach(x => x.classList.remove('primary'));
+      b.classList.add('primary');
+      load();
+    };
+    picker.appendChild(b);
+    return b;
+  });
+  const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
+  markWindow();
+  // The same reading, asked for in another measurement: watts, amps, or the energy behind them.
+  const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' })                     ;
+  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
+  metricSel.value = metricNow;
+  metricSel.onchange = () => { metricNow = metricSel.value; load(); };
+  picker.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel));
+
+  // The node itself is a thing of its own — its bindings and its label live on the Nodes page.
+  const toNode = btn('Edit node');
+  toNode.hidden = !nodes.length || o.editNode === false;
+  toNode.title = nodes.length ? `Open ${labelOf(nodes[0])} (${nodes[0]}) in the node editor.` : '';
+  toNode.onclick = () => {
+    closeSheet();
+    editNodeOnNextOpen(nodes[0]);
+    (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+  };
+  openSheet({
+    title: o.title,
+    body: el('div', {}, picker, plot, legend, note, breakdown),
+    footer: [toNode, ...(o.footer || [])],
+  });
+  load();
+}
+
 // ── energy-diagram.ts ───────────────────────────────────────────
 // The animated energy diagram: a hub with an arm per source, dots travelling the way the power is going.
 // Shared, because the home page and the Energy page must not draw the same system two different ways.
@@ -4601,6 +4790,17 @@ function addFlowSection(nav     , sections     ) {
   };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
+  // The menu is the section's, not the drawing's: a redraw that rebuilt it took it out from under the pointer.
+  // A live reading arriving while it is open is held, and drawn when it closes — the diagram holds still while
+  // someone is reading a menu over it.
+  let stage      = null;
+  let heldGraph      = null;
+  const menu = makeMenu(() => stage, 'ctx-menu', () => {
+    const held = heldGraph;
+    heldGraph = null;
+    if (held) { lastGraph = held; draw(held); }
+  });
+
   const draw = (graph     ) => {
     // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
     // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
@@ -4920,8 +5120,44 @@ function addFlowSection(nav     , sections     ) {
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
     const tintOf = (id        ) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
-    svg.addEventListener('click', () => clearFocus(svg));
+    svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
+
+    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
+    /// the node itself. A history is only worth offering for something the bridge actually reads.
+    const nodeMenu = (e     , n     ) => {
+      e.preventDefault?.();
+      e.stopPropagation?.();
+      const named = n.label || n.id;
+      menu.open(e, [
+        { label: named, head: true },
+        {
+          label: 'History…',
+          run: () => openHistorySheet({
+            title: named,
+            nodes: [n.id],
+            lineLabel: named,
+            labelOf: (id        ) => byId[id]?.label || id,
+            metric: metricSel.value,
+            empty: 'Nothing is measuring this node, so there is nothing to chart.',
+            // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
+            parts: (outgoing[n.id] || []).map((l     ) => l.target),
+            partsLabel: 'What it feeds',
+          }),
+        },
+        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
+        { label: 'Clear the trace', run: () => clearFocus(svg) },
+        {
+          label: 'Edit this node',
+          // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
+          disabled: !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === n.id),
+          run: () => {
+            editNodeOnNextOpen(n.id);
+            (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+          },
+        },
+      ]);
+    };
 
     /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
     ///
@@ -5140,6 +5376,7 @@ function addFlowSection(nav     , sections     ) {
         return rows;
       };
       [rect, lab].forEach((elm     ) => {
+        elm.addEventListener('contextmenu', (e     ) => nodeMenu(e, n));
         elm.addEventListener('mouseenter', (e     ) => showNodeCard(sec, e, card()));
         elm.addEventListener('mousemove', (e     ) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
@@ -5197,7 +5434,7 @@ function addFlowSection(nav     , sections     ) {
     // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
-    const stage = el('div', { class: 'flow-stage' }, scroll);
+    stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
     const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
@@ -5623,7 +5860,13 @@ function addFlowSection(nav     , sections     ) {
   // The Sankey follows the readings while the tab is open (#281).
   const syncLive = liveWhileActive(sec,
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body     ) => { if (hist.day() || !body || !body.ok) return; lastGraph = body; draw(body); });
+    (body     ) => {
+      if (hist.day() || !body || !body.ok) return;
+      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes.
+      if (menu.isOpen()) { heldGraph = body; return; }
+      lastGraph = body;
+      draw(body);
+    });
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
@@ -10893,83 +11136,22 @@ function addPanelScheduleSection(nav     , sections     ) {
     });
   };
 
-  /// Windows worth asking a breaker about, and how finely each is sampled.
-  const WINDOWS                     = [['minutes=360&step=60', 'Last 6 hours'], ['minutes=1440&step=900', 'Last 24 hours'], ['days=7&step=3600', 'Last 7 days']];
-
   /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
   const history = (panel       , b         ) => {
-    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
-    const plot = el('div', { class: 'ps-chart' });
-    const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
-    const note = el('div', { class: 'desc' });
-    let window = WINDOWS[1][0];
-
-    const load = async () => {
-      if (!channels.length) {
-        plot.innerHTML = '';
-        note.textContent = GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.';
-        return;
-      }
-      plot.innerHTML = '';
-      note.textContent = 'Reading…';
-      let r     ;
-      try { r = await api(`/api/flow/series?${window}&metric=realpower`); }
-      catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
-      const body = r?.body;
-      if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
-      const series = (body.series || []).filter((s     ) => channels.includes(s.node));
-      if (!series.length) { note.textContent = `The history backend holds nothing for ${channels.join(', ')} in this window.`; return; }
-      // A leg with no reading at some moment leaves the breaker unknown then, exactly as its power is.
-      const at           = body.at || [];
-      const values = at.map((_, i) => {
-        let total = 0;
-        for (const s of series) { const v = s.values?.[i]; if (v == null) return null; total += v; }
-        return total                 ;
-      });
-      const known = values.filter((v)              => v != null);
-      // What the line is: the breaker, and the channels it is summed from.
-      legend.innerHTML = '';
-      legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }),
-        `${b.number}${b.description ? ' — ' + b.description : ''}`));
-      channels.forEach(ch => legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
-        `${labelOf(ch)} (${ch})`)));
-      plot.appendChild(sparkline({
-        values, color: 'var(--accent)', units: body.units || 'W', width: 560, height: 160, grid: true,
-        at: (i        ) => at[i] ? new Date(at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
-      }));
-      note.textContent = known.length
-        ? `${known.length} of ${values.length} readings · peak ${Math.round(Math.max(...known)).toLocaleString('en-US')} W · `
-          + `average ${Math.round(known.reduce((a, v) => a + v, 0) / known.length).toLocaleString('en-US')} W · from ${channels.join(' + ')}`
-        : `No readings stored for ${channels.join(', ')} in this window.`;
-    };
-
-    const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-    const buttons = WINDOWS.map(([q, label]) => {
-      const b2 = btn(label);
-      b2.onclick = () => { window = q; buttons.forEach(x => x.classList.remove('primary')); b2.classList.add('primary'); load(); };
-      picker.appendChild(b2);
-      return b2;
-    });
-    buttons[1].classList.add('primary');
-
     const toEditor = btn('Edit breaker');
     toEditor.onclick = () => edit(panel, b, b.slot);
-    // The node measuring it is a thing of its own — its bindings and its label live on the Nodes page.
-    const toNode = btn('Edit node');
-    toNode.hidden = !channels.length;
-    toNode.title = channels.length ? `Open ${labelOf(channels[0])} (${channels[0]}) in the node editor.` : '';
-    toNode.onclick = () => {
-      closeSheet();
-      editNodeOnNextOpen(channels[0]);
-      (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
-    };
-    openSheet({
+    const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
+    openHistorySheet({
       title: `${b.number}${b.description ? ' — ' + b.description : ''}${b.amps ? ` (${b.amps} A)` : ''}`,
-      body: el('div', {}, picker, plot, legend, note),
-      footer: [toNode, toEditor],
+      nodes: channels,
+      lineLabel: `${b.number}${b.description ? ' — ' + b.description : ''}`,
+      labelOf,
+      empty: GAPS[b.gap] || 'Nothing is measuring this breaker, so there is nothing to chart.',
+      // A 240 V circuit is the sum of its legs, and each leg is worth seeing on its own.
+      parts: channels.length > 1 ? channels : [],
+      partsLabel: 'Its legs',
+      footer: [toEditor],
     });
-    load();
   };
 
   const powerText = (b         ) => unitSel.value === 'A'
@@ -11171,7 +11353,16 @@ function addPanelScheduleSection(nav     , sections     ) {
     const panelNode = cfg?.Node ?? drawn.node ?? '';
     nodeSel.innerHTML = '';
     nodeSel.appendChild(el('option', { value: '', text: '— not mapped —' }));
-    nodes.forEach(n => nodeSel.appendChild(el('option', { value: n.id, text: `${n.label} (${n.id})` })));
+    // A panel is a panel: only a node of that kind, and not one another panel in the directory already is.
+    const claimed = new Set(panelsIn().filter((p     ) => p.Id !== drawn.id).map((p     ) => p.Node).filter(Boolean));
+    const panelChoices = nodes.filter(n => n.kind === 'panel' && !claimed.has(n.id));
+    // What is already recorded stays in the list, even where it is not a panel: opening the page must never
+    // quietly re-point the panel at something else.
+    if (panelNode && !panelChoices.some(n => n.id === panelNode))
+      panelChoices.push(nodes.find(n => n.id === panelNode) || { id: panelNode, label: panelNode, kind: 'node' });
+    panelChoices.forEach(n => nodeSel.appendChild(el('option', {
+      value: n.id, text: `${n.label} (${n.id})${n.kind === 'panel' ? '' : ' — not a panel'}`,
+    })));
     nodeSel.value = panelNode;
     feeders.innerHTML = '';
     const fedBy = panelNode ? parentsOf(panelNode) : [];
@@ -11564,8 +11755,8 @@ function addFloorPlanSection(nav     , sections     ) {
   const hint = el('div', { class: 'fp-hint' });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
-  const menu = el('div', { class: 'fp-menu' });
-  menu.hidden = true;
+  const fpMenu = makeMenu(() => stage, 'fp-menu');
+  const menu = fpMenu.el;
   const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
@@ -12552,23 +12743,8 @@ function addFloorPlanSection(nav     , sections     ) {
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
 
-  const closeMenu = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; } };
-  const openMenu = (e     , entries         ) => {
-    menu.innerHTML = '';
-    entries.filter(Boolean).forEach(x => {
-      if (x.head) { menu.appendChild(el('div', { class: 'fp-menu-head', text: x.label })); return; }
-      const b = el('button', { class: 'fp-menu-item' + (x.danger ? ' is-danger' : ''), type: 'button', text: x.label });
-      b.disabled = !!x.disabled;
-      b.onclick = () => { closeMenu(); x.run?.(); };
-      menu.appendChild(b);
-    });
-    const r = stage.getBoundingClientRect?.() || { left: 0, top: 0, width: 800, height: 600 };
-    const x = Math.max(4, Math.min((e.clientX ?? 0) - r.left, r.width - 230));
-    const y = Math.max(4, Math.min((e.clientY ?? 0) - r.top, Math.max(4, r.height - 40 - entries.length * 34)));
-    menu.style.left = `${Math.round(x)}px`;
-    menu.style.top = `${Math.round(y)}px`;
-    menu.hidden = false;
-  };
+  const closeMenu = () => fpMenu.close();
+  const openMenu = (e     , entries         ) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
   const onEdit = (fn            ) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };

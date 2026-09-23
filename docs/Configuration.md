@@ -801,6 +801,20 @@ you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Tot
 rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
 discovery is enabled — appears in Home Assistant as its own device.
 
+**Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
+**Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
+the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
+Escape closes the menu, and a live reading arriving while it is open is held until it closes, so the diagram
+does not redraw out from under it.
+
+The history sheet covers the last hour, 6 hours, 24 hours, 7 days or 30 days, in whichever measurement is
+picked there — watts, amps, VA or today's energy — and says how much of the window is known, the peak and
+when it happened, the average and the latest reading. A moment with no reading is a gap in the line, never a
+zero or a partial sum. Beneath it, **what the tier feeds** is broken out, busiest first, each on a strip of
+its own from the same reading, so where a total went can be read off without asking again — and on the Panel
+Schedule, a double-pole breaker's chart breaks out its two legs the same way. The window you pick is kept for
+the next sheet you open.
+
 ### Live sources from MQTT
 
 A node doesn't have to be a fixed number. Bind it to a topic that's already on your broker and it becomes a
@@ -1178,6 +1192,10 @@ Its label is what the directory says it feeds, so renaming the breaker renames t
 ordinary nodes, per-breaker power and energy reach the diagram, Home Assistant, EmonCMS and Prometheus without
 being wired by hand. Where the schedule used to wire the panel straight to a channel, that link is dropped when
 a breaker sits in between, so nothing is counted twice.
+
+**Which node a panel is.** The *This panel is* picker offers nodes of kind **panel** only — a channel or a
+breaker is not a panel — and not one another panel in the directory already is. A node already recorded stays
+in the list, marked, so opening the page never re-points a panel on its own.
 
 **What can measure a breaker.** The channel picker offers every node the bridge reads, including a subpanel —
 a breaker feeding one is measured by the CT on its feed. It does not offer the panels of the directory, the
