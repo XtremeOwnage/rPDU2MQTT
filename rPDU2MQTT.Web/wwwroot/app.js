@@ -1850,8 +1850,12 @@ function makeMenu(host     , cls = 'ctx-menu', onClose             ) {
   const menu = el('div', { class: cls });
   menu.hidden = true;
   const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; onClose?.(); } };
-  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
+  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too, and a click
+  // anywhere but inside it is the other way out — including on the page around the box it was opened over.
   document.addEventListener('keydown', (e     ) => { if (e.key === 'Escape' && !menu.hidden) close(); });
+  document.addEventListener('mousedown', (e     ) => {
+    if (!menu.hidden && !(menu.contains?.(e?.target) ?? false)) close();
+  });
   const open = (e     , entries                                          ) => {
     menu.innerHTML = '';
     const rows = entries.filter(Boolean)               ;
@@ -5122,6 +5126,17 @@ function addFlowSection(nav     , sections     ) {
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
+
+    /// What a right-click on bare canvas offers: the whole diagram rather than one node.
+    svg.addEventListener('contextmenu', (e     ) => {
+      e.preventDefault?.();
+      menu.open(e, [
+        { label: 'The diagram', head: true },
+        { label: 'Clear the trace', disabled: !focusedNode, run: () => clearFocus(svg) },
+        { label: 'Fit it to the page', run: () => (zoom       )?.fit?.() },
+        { label: 'Read it again now', run: () => load() },
+      ]);
+    });
 
     /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
     /// the node itself. A history is only worth offering for something the bridge actually reads.

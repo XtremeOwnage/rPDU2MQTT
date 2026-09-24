@@ -7,7 +7,7 @@ import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
-import { focusPath, clearFocus, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
+import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
 import { applyHideEmptyPref, applyHideNoDataPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
@@ -548,6 +548,17 @@ export function addFlowSection(nav: any, sections: any) {
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     focusedNode = null;
+
+    /// What a right-click on bare canvas offers: the whole diagram rather than one node.
+    svg.addEventListener('contextmenu', (e: any) => {
+      e.preventDefault?.();
+      menu.open(e, [
+        { label: 'The diagram', head: true },
+        { label: 'Clear the trace', disabled: !focusedNode, run: () => clearFocus(svg) },
+        { label: 'Fit it to the page', run: () => (zoom as any)?.fit?.() },
+        { label: 'Read it again now', run: () => load() },
+      ]);
+    });
 
     /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
     /// the node itself. A history is only worth offering for something the bridge actually reads.

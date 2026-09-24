@@ -10,8 +10,12 @@ export function makeMenu(host: any, cls = 'ctx-menu', onClose?: () => void) {
   const menu = el('div', { class: cls });
   menu.hidden = true;
   const close = () => { if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; onClose?.(); } };
-  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too.
+  // Escape is how a menu is dismissed everywhere else, so it is how this one is dismissed too, and a click
+  // anywhere but inside it is the other way out — including on the page around the box it was opened over.
   document.addEventListener('keydown', (e: any) => { if (e.key === 'Escape' && !menu.hidden) close(); });
+  document.addEventListener('mousedown', (e: any) => {
+    if (!menu.hidden && !(menu.contains?.(e?.target) ?? false)) close();
+  });
   const open = (e: any, entries: (MenuEntry | null | false | undefined)[]) => {
     menu.innerHTML = '';
     const rows = entries.filter(Boolean) as MenuEntry[];
