@@ -818,6 +818,17 @@ home, solar, battery charged and discharged, grid used and exported, and the net
 exported). A day nothing reported is empty rather than zero — and a day whose export was not read has no net,
 since the import alone is not one. A column's total says when it is the sum of the days that are known.
 
+**The view is the reader's.** A live reading redraws the diagram without touching the zoom or where the pane
+is scrolled to — only **Fit** puts it back to the whole diagram. **Showing** draws one node and everything
+beneath it and nothing else, which is how a phone reads a panel's circuits: what carries something is offered
+(panels, breakers, inverters, PDUs), an end load is not, and the choice holds across a redraw.
+
+**A live reading waits while a control is in use.** Redrawing a page rebuilds its controls, which closes a
+dropdown someone has just opened and loses what they were typing. An update that arrives while a select, an
+input or a text box on that page has focus is held and drawn as soon as it is let go — the newest of them,
+not every one that queued. A control left focused does not freeze the page: after a minute the update goes
+through.
+
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
 **Drill into this** draws it and what is beneath it alone, with **Out one level** and **Show the whole
 diagram** to come back; **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
