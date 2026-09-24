@@ -1,6 +1,6 @@
 // The Sankey: the energy hierarchy drawn as ribbons for one metric at one moment.
 import { activate, api, attachZoom, btn, el, ensure, formatMeasure, formatNum, instanceSelector, navLink, svgEl, toast, withInstance } from '../helpers.js';
-import { liveWhileActive, realtimeLive } from '../realtime.js';
+import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
@@ -266,6 +266,15 @@ export function addFlowSection(nav: any, sections: any) {
     refit = true;
     redrawBoth();
   };
+
+  // Letting go of a control draws whatever arrived while it was in use.
+  sec.addEventListener('focusout', () => setTimeout(() => {
+    if (!heldGraph || menu.isOpen() || busyInSection(sec)) return;
+    const held = heldGraph;
+    heldGraph = null;
+    lastGraph = held;
+    draw(held);
+  }, 0));
 
   const draw = (graph: any) => {
     // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
@@ -1371,8 +1380,9 @@ export function addFlowSection(nav: any, sections: any) {
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
     (body: any) => {
       if (hist.day() || !body || !body.ok) return;
-      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes.
-      if (menu.isOpen()) { heldGraph = body; return; }
+      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
+      // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
+      if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
       lastGraph = body;
       draw(body);
     });
