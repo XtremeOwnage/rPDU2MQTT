@@ -801,6 +801,23 @@ you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Tot
 rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
 discovery is enabled — appears in Home Assistant as its own device.
 
+**A total by kind counts each node once.** Where one node already holds another — the MPPT strings a PV total
+is grouped from, a sub-panel beneath its panel — adding both would be the same energy twice. Every node and
+every series says what already counts it (`within`), and the Trends page, the Energy board's tiles and the
+Home Assistant Energy Dashboard sync leave those out of a per-kind total while still charting them on their
+own. Grouping the strings under the PV node is what says they are the same energy.
+
+**A counter that was re-based is counted from zero.** Some counters re-base — weekly, on a device restart, or
+when a feed is recreated — and a reading lower than the one before it means the count started again. That
+reading is what has run since, so it is counted as the period's figure rather than dropped, and marked: the
+page says how many readings came from a reset, and the table underlines those cells, because whatever ran
+before the reset is gone and the real figure may be higher.
+
+**The Trends page also gives the figures as a table** under the charts — a row per day, newest first, with the
+home, solar, battery charged and discharged, grid used and exported, and the net of the meter (used less
+exported). A day nothing reported is empty rather than zero — and a day whose export was not read has no net,
+since the import alone is not one. A column's total says when it is the sum of the days that are known.
+
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
 **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
 the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.

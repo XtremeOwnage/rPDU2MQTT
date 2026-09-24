@@ -498,7 +498,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             // One request where the backend can answer a range.
             var perDay = await history.SeriesAsync(lanes.Select(l => l.Id).ToList(), metric, when, cts.Token);
 
-            var series = lanes
+            var drawn = lanes
                 .Select(n => new
                 {
                     node = n.Id,
@@ -509,6 +509,27 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 })
                 // A node with nothing across the whole window is not a line on a chart.
                 .Where(s => s.values.Any(v => v is not null))
+                .ToList();
+
+            // Which of these a page may add together: a node another one already holds — a group's member, a
+            // node beneath another — would be counted twice in a per-kind total (#491).
+            var topology = FlowTopology.For(data, config.EnergyFlow);
+            // A return lane (…#in) belongs to the same node its own lane does, so it is judged by that node
+            // and answers with the holder's matching lane.
+            static (string Id, string Suffix) Lane(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal)
+                ? (id[..^FlowMetricKey.InSuffix.Length], FlowMetricKey.InSuffix) : (id, "");
+            var ids = drawn.Select(s => Lane(s.node).Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var series = drawn
+                .Select(s =>
+                {
+                    var (baseId, suffix) = Lane(s.node);
+                    var holder = CountOnce.CountedBy(config.EnergyFlow, baseId, ids, topology);
+                    return new
+                    {
+                        s.node, s.label, s.kind, s.tags, s.values,
+                        within = holder is null ? null : holder + suffix,
+                    };
+                })
                 .ToList();
 
             if (series.Count == 0)

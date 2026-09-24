@@ -256,18 +256,28 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
   rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
-  // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
+  // A counter's readings are not a per-bar quantity; the differences between them are.
+  //
+  // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
+  // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
+  // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
   const toDeltas = (b: any) => {
+    let resets = 0;
     (b.series || []).forEach((s: any) => {
       const raw = s.values as (number | null)[];
+      s.reset = raw.map(() => false);
       s.values = raw.map((v, i) => {
         if (i === 0 || v == null) return null;
         const prev = raw[i - 1];
         if (prev == null) return null;
-        return v - prev < 0 ? null : v - prev;
+        if (v >= prev) return v - prev;
+        s.reset[i] = true;
+        resets++;
+        return v;
       });
     });
     b.deltas = true;
+    b.resets = resets;
   };
 
   const perDay = () => !!body?.days;
@@ -341,6 +351,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     return `${days().length} ${perDay() ? 'day(s)' : 'sample(s)'} from ${body.source}`
       + windowNote(body.at)
       + (gaps ? ` · ${gaps} with no reading` : '')
+      + (body.resets ? ` · ${body.resets} counted from a counter reset` : '')
       + (body.partial ? ` · ${body.partial} still in progress` : '')
       + widened + capped;
   };
@@ -412,7 +423,11 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
-      (body.series || []).forEach((x: any) => { x.values = x.values.slice(1); });
+      // The marks are per reading, so they lose the lead day with the readings they belong to.
+      (body.series || []).forEach((x: any) => {
+        x.values = x.values.slice(1);
+        if (x.reset) x.reset = x.reset.slice(1);
+      });
     }
     if (!body?.ok) {
       whole = null;

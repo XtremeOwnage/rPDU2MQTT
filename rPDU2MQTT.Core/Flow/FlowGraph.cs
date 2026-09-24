@@ -36,8 +36,12 @@ public static class FlowDerivation
 public sealed record FlowNode(
     string Id, string Label, string Kind, double? Value = null, double? Imbalance = null,
     string Derivation = FlowDerivation.Unknown, IReadOnlyList<string>? Tags = null, double? Throughput = null,
-    bool Unreported = false)
+    bool Unreported = false, string? Within = null)
 {
+    /// <summary>The node that already counts this one — a group holding it, or a node above it — so a total
+    /// by kind adds it once. Null when nothing else here holds it.</summary>
+    public string? Within { get; init; } = Within;
+
     /// <summary>A node the builder invented: a return lane (<c>…#in</c>) or unmetered remainder (<c>…#unmeasured</c>).</summary>
     public bool Synthetic => Id.Contains('#');
 

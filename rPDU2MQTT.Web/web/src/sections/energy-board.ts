@@ -265,12 +265,16 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n: any) => !String(n.id || '').includes('#'));
 
+    // A tile sums every node of its kind, so a node another one here already counts — a group's member
+    // beside the group's own total — must be left out of it, or the same energy is counted twice (#491).
+    const ofKind = (kind: string) => nodes
+      .filter((n: any) => n.kind === kind && !(n.within && nodes.some((o: any) => o.id === n.within)))
+      .map((n: any) => n.id);
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
-    const battIds = nodes.filter((n: any) => n.kind === 'battery').map((n: any) => n.id);
-    const gridIds = nodes.filter((n: any) => n.kind === 'grid').map((n: any) => n.id);
-    // The other two kinds, for the gauges: a tile sums every node of its kind, so its ceiling sums too.
-    const solarIds = nodes.filter((n: any) => n.kind === 'solar').map((n: any) => n.id);
-    const loadIds = nodes.filter((n: any) => n.kind === 'load').map((n: any) => n.id);
+    const battIds = ofKind('battery');
+    const gridIds = ofKind('grid');
+    const solarIds = ofKind('solar');
+    const loadIds = ofKind('load');
     const liveBy: Record<string, number> = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo: Record<string, any> = {};

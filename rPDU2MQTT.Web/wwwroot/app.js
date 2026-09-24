@@ -8058,12 +8058,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
+    // A tile sums every node of its kind, so a node another one here already counts — a group's member
+    // beside the group's own total — must be left out of it, or the same energy is counted twice (#491).
+    const ofKind = (kind        ) => nodes
+      .filter((n     ) => n.kind === kind && !(n.within && nodes.some((o     ) => o.id === n.within)))
+      .map((n     ) => n.id);
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
-    const battIds = nodes.filter((n     ) => n.kind === 'battery').map((n     ) => n.id);
-    const gridIds = nodes.filter((n     ) => n.kind === 'grid').map((n     ) => n.id);
-    // The other two kinds, for the gauges: a tile sums every node of its kind, so its ceiling sums too.
-    const solarIds = nodes.filter((n     ) => n.kind === 'solar').map((n     ) => n.id);
-    const loadIds = nodes.filter((n     ) => n.kind === 'load').map((n     ) => n.id);
+    const battIds = ofKind('battery');
+    const gridIds = ofKind('grid');
+    const solarIds = ofKind('solar');
+    const loadIds = ofKind('load');
     const liveBy                         = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo                      = {};
@@ -9713,18 +9717,28 @@ function trendsPage(nav     , sections     , spec            ) {
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
   rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
-  // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
+  // A counter's readings are not a per-bar quantity; the differences between them are.
+  //
+  // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
+  // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
+  // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
   const toDeltas = (b     ) => {
+    let resets = 0;
     (b.series || []).forEach((s     ) => {
       const raw = s.values                     ;
+      s.reset = raw.map(() => false);
       s.values = raw.map((v, i) => {
         if (i === 0 || v == null) return null;
         const prev = raw[i - 1];
         if (prev == null) return null;
-        return v - prev < 0 ? null : v - prev;
+        if (v >= prev) return v - prev;
+        s.reset[i] = true;
+        resets++;
+        return v;
       });
     });
     b.deltas = true;
+    b.resets = resets;
   };
 
   const perDay = () => !!body?.days;
@@ -9798,6 +9812,7 @@ function trendsPage(nav     , sections     , spec            ) {
     return `${days().length} ${perDay() ? 'day(s)' : 'sample(s)'} from ${body.source}`
       + windowNote(body.at)
       + (gaps ? ` · ${gaps} with no reading` : '')
+      + (body.resets ? ` · ${body.resets} counted from a counter reset` : '')
       + (body.partial ? ` · ${body.partial} still in progress` : '')
       + widened + capped;
   };
@@ -9869,7 +9884,11 @@ function trendsPage(nav     , sections     , spec            ) {
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
-      (body.series || []).forEach((x     ) => { x.values = x.values.slice(1); });
+      // The marks are per reading, so they lose the lead day with the readings they belong to.
+      (body.series || []).forEach((x     ) => {
+        x.values = x.values.slice(1);
+        if (x.reset) x.reset = x.reset.slice(1);
+      });
     }
     if (!body?.ok) {
       whole = null;
@@ -9929,10 +9948,13 @@ function trendsPage(nav     , sections     , spec            ) {
 // Trends: the whole system over the chosen window — the grid, self-sufficiency, and where the energy came from.
 
 function addTrendsSection(nav     , sections     ) {
+  // The same figures as a table, under the charts: a number is easier to read off than a bar.
+  const tableBox = el('div', { class: 'trend-table-wrap' });
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
     stackable: false,
+    below: () => [tableBox],
     render: (p) => {
       const body = p.body();
       if (!body?.ok) return;
@@ -9942,15 +9964,20 @@ function addTrendsSection(nav     , sections     ) {
       const partial                = body.partial || null;
       const all        = body.series || [];
       const sumOf = (list       ) => days.map((_, d) => sumKnown(list.map((s     ) => signed(s)[d])));
+      // What may be added together: a node another one here already counts — a group's member beside the
+      // group's own total, a sub-panel beneath its panel — would be the same energy twice (#491).
+      const countable = (list       ) => list.filter((s     ) => !s.within || !all.some((o     ) => o.node === s.within));
+      const ofKind = (kind        , want                      ) =>
+        countable(all.filter((s     ) => s.kind === kind && (!want || want(s))));
       const byKind = (kind        ) => {
-        const members = all.filter((s     ) => s.kind === kind);
+        const members = ofKind(kind);
         return members.length ? sumOf(members) : null;
       };
       let drawn = 0;
 
       // --- Grid ------------------------------------------------------------------------------------
-      const gridSupply = all.filter((s     ) => s.kind === 'grid' && !isReturn(s));
-      const gridReturn = all.filter((s     ) => s.kind === 'grid' && isReturn(s));
+      const gridSupply = ofKind('grid', (s     ) => !isReturn(s));
+      const gridReturn = ofKind('grid', (s     ) => isReturn(s));
       const gridIn = byKind('grid');
       if (gridSupply.length) {
         const exports_ = gridReturn.length ? sumOf(gridReturn) : null;
@@ -9989,12 +10016,12 @@ function addTrendsSection(nav     , sections     ) {
       const supplyLines         = [];
       ([['solar', 'Solar'], ['battery', 'Battery out'], ['grid', 'Grid import']]                      )
         .forEach(([k, label]) => {
-          const v = sumOf(all.filter((s     ) => s.kind === k && !isReturn(s)));
+          const v = sumOf(ofKind(k, (s     ) => !isReturn(s)));
           if (v.some(x => x != null)) supplyLines.push({ label, color: KIND_COLOR[k], values: v });
         });
       ([['battery', 'Battery in', '#2f8f52'], ['grid', 'Grid export', '#6fb0e0']]                              )
         .forEach(([k, label, colour]) => {
-          const list = all.filter((s     ) => s.kind === k && isReturn(s));
+          const list = ofKind(k, (s     ) => isReturn(s));
           if (!list.length) return;
           const v = sumOf(list);
           if (v.some(x => x != null)) supplyLines.push({ label, color: colour, values: v });
@@ -10005,6 +10032,87 @@ function addTrendsSection(nav     , sections     ) {
           + 'so the same energy is not counted as produced and then again as returned.',
           barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
+      }
+
+      // --- The same thing as a table ---------------------------------------------------------------
+      tableBox.innerHTML = '';
+      const positive = (list       ) => sumOf(list).map(v => (v == null ? null : Math.abs(v)));
+      // A day counted from a counter that had been re-based is what is known to have run since, which may be
+      // short of the whole day. The figure is shown, and marked as the floor it is.
+      const resetOn = (list       ) => days.map((_, d) => list.some((x     ) => x.reset?.[d]));
+      const resets                            = {
+        Solar: resetOn(ofKind('solar')),
+        'Battery charged': resetOn(ofKind('battery', (x     ) => isReturn(x))),
+        'Battery discharged': resetOn(ofKind('battery', (x     ) => !isReturn(x))),
+        'Grid used': resetOn(ofKind('grid', (x     ) => !isReturn(x))),
+        'Grid exported': resetOn(ofKind('grid', (x     ) => isReturn(x))),
+      };
+      resets['Net grid'] = days.map((_, d) => resets['Grid used'][d] || resets['Grid exported'][d]);
+      resets.Load = days.map((_, d) => Object.entries(resets).some(([k, on]) => k !== 'Load' && on[d]));
+      const gridBack = ofKind('grid', (x     ) => isReturn(x));
+      const used = sumOf(ofKind('grid', (x     ) => !isReturn(x))), sent = positive(gridBack);
+      // What the meter nets out to: import less export. With nothing exporting at all, the import is the net;
+      // with an export series that has no reading for a day, that day's net is unknown rather than the import.
+      const netGrid = days.map((_, d) => used[d] == null ? null
+        : !gridBack.length ? used[d]
+          : sent[d] == null ? null : used[d]  - sent[d] );
+      const columns                                       = [
+        ['Load', null], ['Solar', byKind('solar')],
+        ['Battery charged', positive(ofKind('battery', (x     ) => isReturn(x)))],
+        ['Battery discharged', sumOf(ofKind('battery', (x     ) => !isReturn(x)))],
+        ['Grid used', used],
+        ['Grid exported', sent],
+        ['Net grid', netGrid],
+      ];
+      // The home: what it was measured as, else what the measured sources leave for it.
+      const loadKind = byKind('load');
+      columns[0][1] = days.map((_, d) => homeEnergy({
+        ...(loadKind ? { load: loadKind[d] } : {}),
+        ...(loadKind ? {} : {
+          ...(solar ? { solar: solar[d] } : {}),
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+        }),
+      }));
+      const shown = columns.filter(([, v]) => v && v.some(x => x != null))                                 ;
+      if (p.summable() && shown.length) {
+        const num = (v               ) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
+        const table = el('table', { class: 'trend-table' });
+        const why                         = {
+          Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',
+          'Net grid': 'Grid used less grid exported — what the meter nets out to. A day missing either figure is left empty.',
+        };
+        table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: p.perDay() ? 'Day' : 'At' }),
+          ...shown.map(([label]) => el('th', { text: `${label} (${units})`, title: why[label] || '' })))));
+        const rows = el('tbody');
+        // Newest first: the day being asked about is nearly always the last one.
+        days.map((day, d) => ({ day, d })).reverse().forEach(({ day, d }) => {
+          const tr = el('tr', { class: day === partial ? 'is-partial' : '' });
+          tr.dataset.day = day;
+          tr.appendChild(el('th', { text: day + (day === partial ? ' · so far' : '') }));
+          shown.forEach(([label, values]) => tr.appendChild(el('td', {
+            text: num(values[d]),
+            class: values[d] != null && resets[label]?.[d] ? 'is-reset' : '',
+            title: values[d] != null && resets[label]?.[d]
+              ? 'The counter behind this was re-based during the day, so this is what is known to have run since — the day may have been more.' : '',
+          })));
+          rows.appendChild(tr);
+        });
+        table.appendChild(rows);
+        // A column's total is only a total when every day of it is known: one missing day makes it unknown.
+        const foot = el('tr', { class: 'is-total' });
+        foot.appendChild(el('th', { text: 'Total' }));
+        shown.forEach(([, values]) => {
+          const known = values.filter((v)              => v != null);
+          foot.appendChild(el('td', {
+            text: known.length ? num(known.reduce((a, v) => a + v, 0)) : '—',
+            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing, so this is the sum of what is known.`,
+            class: known.length === values.length ? '' : 'is-partial',
+          }));
+        });
+        table.appendChild(el('tfoot', {}, foot));
+        tableBox.appendChild(el('h3', { text: p.perDay() ? 'Day by day' : 'Reading by reading' }));
+        tableBox.appendChild(table);
       }
 
       if (!drawn)

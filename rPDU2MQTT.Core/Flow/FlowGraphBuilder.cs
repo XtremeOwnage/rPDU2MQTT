@@ -581,12 +581,14 @@ public static class FlowGraphBuilder
         }
 
         // Every node the user declared, plus every auto (pdu/outlet) node that reported a measurement —
-        var nodes = label.Keys
-            .Where(id => wired.Contains(id) || leaf.ContainsKey(id))
+        var shown = label.Keys.Where(id => wired.Contains(id) || leaf.ContainsKey(id)).ToList();
+        // What already counts each of them, so a total by kind adds the same energy once (#491).
+        var topology = FlowTopology.For(data, flow);
+        var nodes = shown
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
                                        ValueOf(id), ImbalanceOf(id), DerivationOf(id),
                                        tags.TryGetValue(id, out var t) ? t : null, ThroughputOf(id),
-                                       Unavailable(id)))
+                                       Unavailable(id), CountOnce.CountedBy(flow, id, shown, topology)))
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
