@@ -808,8 +808,9 @@ Home Assistant Energy Dashboard sync leave those out of a per-kind total while s
 own. Grouping the strings under the PV node is what says they are the same energy.
 
 **The Trends page also gives the figures as a table** under the charts — a row per day, newest first, with the
-home, solar, battery charged and discharged, and grid used and exported. A day nothing reported is empty
-rather than zero, and a column's total says when it is the sum of the days that are known.
+home, solar, battery charged and discharged, grid used and exported, and the net of the meter (used less
+exported). A day nothing reported is empty rather than zero — and a day whose export was not read has no net,
+since the import alone is not one. A column's total says when it is the sum of the days that are known.
 
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
 **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on

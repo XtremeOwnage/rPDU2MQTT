@@ -22,7 +22,8 @@ const series = {
     { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
     { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
     { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
-    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, 15] },
+    // Nothing read from the export meter at the end of the last day: the import is known, the net is not.
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, null] },
   ],
 };
 
@@ -102,14 +103,19 @@ if (query(sec, 'tbody tr', true).map(rowHead).some(h => /Solar|Grid|Battery|MPPT
 const table = query(sec, '.trend-table');
 if (!table) fail('the charts are not also given as a table');
 const heads = query(query(table, 'thead'), 'th', true).map(h => h.textContent);
-for (const want of ['Day', 'Load (kWh)', 'Solar (kWh)', 'Battery charged (kWh)', 'Battery discharged (kWh)', 'Grid used (kWh)', 'Grid exported (kWh)'])
+for (const want of ['Day', 'Load (kWh)', 'Solar (kWh)', 'Battery charged (kWh)', 'Battery discharged (kWh)', 'Grid used (kWh)', 'Grid exported (kWh)', 'Net grid (kWh)'])
   if (!heads.includes(want)) fail(`the table has no "${want}" column: ${heads.join(' | ')}`);
 const bodyRows = query(query(table, 'tbody'), 'tr', true);
 // Newest first: the day being asked about is nearly always the last one.
 if (bodyRows[0]?.dataset?.day !== '2026-08-07') fail(`the table does not start at the newest day: ${bodyRows[0]?.dataset?.day}`);
 const cellsOn = (day) => query(bodyRows.find(r => r.dataset.day === day), 'td', true).map(td => td.textContent);
 // 2026-08-05: solar 28, battery 7 out and 9 in, grid 9 in and 4 out, leaving the home 31.
-if (cellsOn('2026-08-05').join('|') !== '31|28|9|7|9|4') fail(`the day's row does not match what was charted: ${cellsOn('2026-08-05').join('|')}`);
+// …and the net of the meter: 9 used less 4 exported.
+if (cellsOn('2026-08-05').join('|') !== '31|28|9|7|9|4|5') fail(`the day's row does not match what was charted: ${cellsOn('2026-08-05').join('|')}`);
+// A day the export meter was not read is a day the net cannot be said, even though the import is known.
+if (cellsOn('2026-08-07')[4] !== '3') fail(`the import for the last day is wrong: ${cellsOn('2026-08-07').join('|')}`);
+if (cellsOn('2026-08-07')[6] !== '—') fail(`a net was given for a day with no export reading: ${cellsOn('2026-08-07').join('|')}`);
+
 // A day nothing reported is empty, not zero.
 if (cellsOn('2026-08-03').some(c => c !== '—')) fail(`a day with no readings was given numbers: ${cellsOn('2026-08-03').join('|')}`);
 // The strings the PV total is made of are not added to it here either.
@@ -177,5 +183,6 @@ if (!['polyline', 'circle'].flatMap(t => query(gridSvg, t, true)).some(e => e.at
 
 console.log('trends: the whole system over the chosen window — grid, self-sufficiency and where the energy came from, '
   + 'signed and netted, a node another one already counts left out of its kind\u2019s total, and the same figures '
-  + 'as a table, newest day first, with an empty day empty and a total that says when it is summed over gaps; '
+  + 'as a table, newest day first, with the net of the meter, an empty day empty and a total that says when it '
+  + 'is summed over gaps; '
   + 'no per-node selection on the page; empty days counted; the interval applies here too');

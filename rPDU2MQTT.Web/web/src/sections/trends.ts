@@ -93,12 +93,21 @@ export function addTrendsSection(nav: any, sections: any) {
 
       // --- The same thing as a table ---------------------------------------------------------------
       tableBox.innerHTML = '';
+      const positive = (list: any[]) => sumOf(list).map(v => (v == null ? null : Math.abs(v)));
+      const gridBack = ofKind('grid', (x: any) => isReturn(x));
+      const used = sumOf(ofKind('grid', (x: any) => !isReturn(x))), sent = positive(gridBack);
+      // What the meter nets out to: import less export. With nothing exporting at all, the import is the net;
+      // with an export series that has no reading for a day, that day's net is unknown rather than the import.
+      const netGrid = days.map((_, d) => used[d] == null ? null
+        : !gridBack.length ? used[d]
+          : sent[d] == null ? null : used[d]! - sent[d]!);
       const columns: [string, (number | null)[] | null][] = [
         ['Load', null], ['Solar', byKind('solar')],
-        ['Battery charged', sumOf(ofKind('battery', (x: any) => isReturn(x))).map(v => (v == null ? null : Math.abs(v)))],
+        ['Battery charged', positive(ofKind('battery', (x: any) => isReturn(x)))],
         ['Battery discharged', sumOf(ofKind('battery', (x: any) => !isReturn(x)))],
-        ['Grid used', sumOf(ofKind('grid', (x: any) => !isReturn(x)))],
-        ['Grid exported', sumOf(ofKind('grid', (x: any) => isReturn(x))).map(v => (v == null ? null : Math.abs(v)))],
+        ['Grid used', used],
+        ['Grid exported', sent],
+        ['Net grid', netGrid],
       ];
       // The home: what it was measured as, else what the measured sources leave for it.
       const loadKind = byKind('load');
@@ -114,8 +123,12 @@ export function addTrendsSection(nav: any, sections: any) {
       if (p.summable() && shown.length) {
         const num = (v: number | null) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
+        const why: Record<string, string> = {
+          Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',
+          'Net grid': 'Grid used less grid exported — what the meter nets out to. A day missing either figure is left empty.',
+        };
         table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: p.perDay() ? 'Day' : 'At' }),
-          ...shown.map(([label]) => el('th', { text: `${label} (${units})` })))));
+          ...shown.map(([label]) => el('th', { text: `${label} (${units})`, title: why[label] || '' })))));
         const rows = el('tbody');
         // Newest first: the day being asked about is nearly always the last one.
         days.map((day, d) => ({ day, d })).reverse().forEach(({ day, d }) => {
