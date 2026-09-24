@@ -343,6 +343,27 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
 
   const detach = () => cleanups.forEach(f => f());
   (detach as any).fit = () => { chosen = false; fit(); };
+  /// The view as it stands, for a redraw to pick up again: the zoom, and where the pane is scrolled to as
+  /// fractions of it, so a diagram that came back a little taller lands in the same place rather than at the
+  /// same pixel. `chosen` carries whether the reader set this zoom themselves.
+  const span = () => ({
+    x: Math.max(0, (scroll.scrollWidth || 0) - (scroll.clientWidth || 0)),
+    y: Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0)),
+  });
+  (detach as any).view = () => {
+    const { x, y } = span();
+    return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
+  };
+  /// Put a view back after a redraw. Nothing is re-fitted under it: the reader is where they left off.
+  (detach as any).setView = (v: any) => {
+    if (!v || !(v.z > 0)) return;
+    z = Math.min(max, Math.max(min, v.z));
+    chosen = !!v.chosen;
+    apply();
+    const { x, y } = span();
+    scroll.scrollLeft = (v.left || 0) * x;
+    scroll.scrollTop = (v.top || 0) * y;
+  };
   /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
   /// at the pane is looking at.
   (detach as any).zoomBy = (factor: number) => {

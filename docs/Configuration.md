@@ -819,7 +819,8 @@ exported). A day nothing reported is empty rather than zero — and a day whose 
 since the import alone is not one. A column's total says when it is the sum of the days that are known.
 
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
-**Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
+**Drill into this** draws it and what is beneath it alone, with **Out one level** and **Show the whole
+diagram** to come back; **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
 the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
 Escape, or a click anywhere else, closes the menu, and a live reading arriving while it is open is held until
 it closes, so the diagram does not redraw out from under it. A right-click on bare canvas is about the diagram

@@ -375,6 +375,27 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   const detach = () => cleanups.forEach(f => f());
   (detach       ).fit = () => { chosen = false; fit(); };
+  /// The view as it stands, for a redraw to pick up again: the zoom, and where the pane is scrolled to as
+  /// fractions of it, so a diagram that came back a little taller lands in the same place rather than at the
+  /// same pixel. `chosen` carries whether the reader set this zoom themselves.
+  const span = () => ({
+    x: Math.max(0, (scroll.scrollWidth || 0) - (scroll.clientWidth || 0)),
+    y: Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0)),
+  });
+  (detach       ).view = () => {
+    const { x, y } = span();
+    return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
+  };
+  /// Put a view back after a redraw. Nothing is re-fitted under it: the reader is where they left off.
+  (detach       ).setView = (v     ) => {
+    if (!v || !(v.z > 0)) return;
+    z = Math.min(max, Math.max(min, v.z));
+    chosen = !!v.chosen;
+    apply();
+    const { x, y } = span();
+    scroll.scrollLeft = (v.left || 0) * x;
+    scroll.scrollTop = (v.top || 0) * y;
+  };
   /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
   /// at the pane is looking at.
   (detach       ).zoomBy = (factor        ) => {
@@ -4799,11 +4820,52 @@ function addFlowSection(nav     , sections     ) {
   // someone is reading a menu over it.
   let stage      = null;
   let heldGraph      = null;
+  // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
+  // arriving must not throw away the view they are reading from (#492).
+  let zoom      = null;
+  // Drawing one node and what is beneath it, and nothing else (#493). Held across redraws, like the view.
+  let drillTo                = null;
+  let refit = false;
   const menu = makeMenu(() => stage, 'ctx-menu', () => {
     const held = heldGraph;
     heldGraph = null;
     if (held) { lastGraph = held; draw(held); }
   });
+
+  /// The kinds worth drilling into: something carries other things. An end load has nothing beneath it.
+  const DRILLABLE = ['panel', 'breaker', 'inverter', 'pdu', 'node'];
+
+  /// One node and everything beneath it. Not a highlight: the rest is not drawn at all.
+  const drilled = (graph     , id               ) => {
+    if (!id || !(graph.nodes || []).some((n     ) => n.id === id)) return graph;
+    const kept = new Set        ([id]);
+    const stack = [id];
+    while (stack.length) {
+      const at = stack.pop() ;
+      (graph.links || []).forEach((l     ) => {
+        if (l.source === at && !kept.has(l.target)) { kept.add(l.target); stack.push(l.target); }
+      });
+    }
+    return {
+      ...graph,
+      nodes: (graph.nodes || []).filter((n     ) => kept.has(n.id)),
+      links: (graph.links || []).filter((l     ) => kept.has(l.source) && kept.has(l.target)),
+    };
+  };
+
+  /// What can be drilled into: a node of a carrying kind that actually carries something.
+  const drillable = (graph     ) => (graph?.nodes || [])
+    .filter((n     ) => !String(n.id).includes('#')
+      && DRILLABLE.includes(n.kind || 'node')
+      && (graph.links || []).some((l     ) => l.source === n.id))
+    .sort((a     , b     ) => String(a.label || a.id).localeCompare(String(b.label || b.id)));
+
+  /// Draw one node and its children, or everything again. The view is refitted: it is a different diagram.
+  const drill = (id               ) => {
+    drillTo = id || null;
+    refit = true;
+    redrawBoth();
+  };
 
   const draw = (graph     ) => {
     // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
@@ -4812,10 +4874,16 @@ function addFlowSection(nav     , sections     ) {
     // Holding the height across the rebuild means the page never shrinks and nothing is clamped.
     const held = (wrap       ).offsetHeight || 0;
     if (held) wrap.style.minHeight = held + 'px';
+    // Read off the pane that is about to be replaced: once it is detached it measures nothing.
+    const keptView = zoom?.view?.();
     // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
     const paneW = Math.round(Number((sec       ).clientWidth) || Number((wrap       ).clientWidth) || 0);
     wrap.innerHTML = '';
     ensureGroupState();
+    // One node and what hangs off it, before anything is laid out, so the labels have the room (#493).
+    const whole = graph;
+    if (drillTo && !(graph.nodes || []).some((n     ) => n.id === drillTo)) drillTo = null;
+    graph = drilled(graph, drillTo);
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
     // ...then substitute the members for the anchor on any group left expanded.
@@ -4828,6 +4896,17 @@ function addFlowSection(nav     , sections     ) {
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
     wrap.appendChild(controls);
+    // Which part of the hierarchy is drawn: everything, or one node and what is beneath it.
+    const drillSel = el('select', { class: 'flow-drill', title: 'Draw one node and everything beneath it.' })                     ;
+    drillSel.appendChild(el('option', { value: '', text: 'The whole diagram' }));
+    drillable(whole).forEach((n     ) => drillSel.appendChild(el('option', { value: n.id, text: `${n.label || n.id} and below` })));
+    if (drillTo && !drillable(whole).some((n     ) => n.id === drillTo)) {
+      const named = (whole.nodes || []).find((n     ) => n.id === drillTo);
+      drillSel.appendChild(el('option', { value: drillTo, text: `${named?.label || drillTo} and below` }));
+    }
+    drillSel.value = drillTo || '';
+    drillSel.onchange = () => drill(drillSel.value || null);
+    controls.appendChild(el('label', { class: 'ld-inst' }, 'Showing ', drillSel));
     const toggles = groupToggles(redrawBoth);
     if (toggles) controls.appendChild(toggles);
     const links = folded.links;
@@ -5160,6 +5239,16 @@ function addFlowSection(nav     , sections     ) {
             partsLabel: 'What it feeds',
           }),
         },
+        {
+          label: 'Drill into this',
+          // Only what carries something: an end load drilled into is one node on its own.
+          disabled: !(outgoing[n.id] || []).length || drillTo === n.id,
+          run: () => drill(n.id),
+        },
+        ...(drillTo ? [
+          { label: 'Out one level', disabled: !(incoming[drillTo] || []).length, run: () => drill((incoming[drillTo ] || [])[0]?.source || null) },
+          { label: 'Show the whole diagram', run: () => drill(null) },
+        ] : []),
         { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
         { label: 'Clear the trace', run: () => clearFocus(svg) },
         {
@@ -5452,7 +5541,11 @@ function addFlowSection(nav     , sections     ) {
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    const zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
+    // diagram itself changed, when the old view is of something that is no longer drawn.
+    if (keptView && !refit) zoom.setView(keptView);
+    refit = false;
 
     // Zoom where the diagram is, not in a toolbar under it: on a graph this size the reader's attention is
     // already inside the pane.
