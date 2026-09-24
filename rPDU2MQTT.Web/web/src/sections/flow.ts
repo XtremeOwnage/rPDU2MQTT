@@ -555,8 +555,8 @@ export function addFlowSection(nav: any, sections: any) {
       menu.open(e, [
         { label: 'The diagram', head: true },
         { label: 'Clear the trace', disabled: !focusedNode, run: () => clearFocus(svg) },
-        { label: 'Fit it to the page', run: () => (zoom as any)?.fit?.() },
-        { label: 'Read it again now', run: () => load() },
+        { label: 'Fit to the page', run: () => (zoom as any)?.fit?.() },
+        { label: 'Refresh', run: () => load() },
       ]);
     });
 

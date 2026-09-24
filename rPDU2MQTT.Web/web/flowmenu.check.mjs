@@ -125,7 +125,7 @@ shut();
 const canvas = query(sec, '.sankey-svg');
 if (!canvas?._on?.contextmenu) fail('the diagram itself does not answer a right-click');
 canvas._on.contextmenu[0]({ clientX: 40, clientY: 40, preventDefault() { } });
-for (const entry of ['Clear the trace', 'Fit it to the page', 'Read it again now'])
+for (const entry of ['Clear the trace', 'Fit to the page', 'Refresh'])
   if (!itemSaying(entry)) fail(`the canvas menu does not offer "${entry}": ${items().map(b => b.textContent).join(', ')}`);
 if (!itemSaying('Clear the trace').disabled) fail('the trace can be cleared when nothing is traced');
 // Tracing a node's supply gives it something to clear.
