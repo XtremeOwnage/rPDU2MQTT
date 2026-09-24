@@ -16,6 +16,9 @@ const series = {
   partial: '2026-08-07',
   series: [
     { node: 'solar', label: 'Solar', kind: 'solar', values: [100, 130, 162, null, 200, 228, 262, 297] },
+    // The strings the PV total is grouped from: the same energy again, which a per-kind total must not add.
+    { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', within: 'solar', values: [60, 78, 97, null, 120, 137, 157, 178] },
+    { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', within: 'solar', values: [40, 52, 65, null, 80, 91, 105, 119] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
     { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
     { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
@@ -91,7 +94,29 @@ if (!['polygon', 'circle'].flatMap(t => query(charts[headings.indexOf('Grid per 
 if (headings.some(h => /by node/.test(h))) fail(`a per-node chart is drawn on the whole-system page: ${headings.join(', ')}`);
 const buttons = query(sec, 'button', true).map(b => b.textContent);
 if (buttons.includes('None') || buttons.includes('Reset')) fail('the whole-system page offers a node selection');
-if (query(sec, 'tbody tr', true).length) fail('the whole-system page lists per-node totals');
+const rowHead = (r) => (query(r, 'th')?.textContent || '');
+if (query(sec, 'tbody tr', true).map(rowHead).some(h => /Solar|Grid|Battery|MPPT/.test(h)))
+  fail('the whole-system page lists per-node totals');
+
+// The same figures as a table, so a number can be read off rather than measured with the eye.
+const table = query(sec, '.trend-table');
+if (!table) fail('the charts are not also given as a table');
+const heads = query(query(table, 'thead'), 'th', true).map(h => h.textContent);
+for (const want of ['Day', 'Load (kWh)', 'Solar (kWh)', 'Battery charged (kWh)', 'Battery discharged (kWh)', 'Grid used (kWh)', 'Grid exported (kWh)'])
+  if (!heads.includes(want)) fail(`the table has no "${want}" column: ${heads.join(' | ')}`);
+const bodyRows = query(query(table, 'tbody'), 'tr', true);
+// Newest first: the day being asked about is nearly always the last one.
+if (bodyRows[0]?.dataset?.day !== '2026-08-07') fail(`the table does not start at the newest day: ${bodyRows[0]?.dataset?.day}`);
+const cellsOn = (day) => query(bodyRows.find(r => r.dataset.day === day), 'td', true).map(td => td.textContent);
+// 2026-08-05: solar 28, battery 7 out and 9 in, grid 9 in and 4 out, leaving the home 31.
+if (cellsOn('2026-08-05').join('|') !== '31|28|9|7|9|4') fail(`the day's row does not match what was charted: ${cellsOn('2026-08-05').join('|')}`);
+// A day nothing reported is empty, not zero.
+if (cellsOn('2026-08-03').some(c => c !== '—')) fail(`a day with no readings was given numbers: ${cellsOn('2026-08-03').join('|')}`);
+// The strings the PV total is made of are not added to it here either.
+if (cellsOn('2026-08-06')[1] !== '34') fail(`the table added the strings to the total they are part of: ${cellsOn('2026-08-06').join('|')}`);
+const totals = query(query(table, 'tfoot'), 'td', true);
+if (!totals.length || totals[1].textContent !== '159') fail(`the solar total over the window is wrong: ${totals.map(t => t.textContent).join('|')}`);
+if (!/readings are missing/.test(totals[1].title || totals[1].attrs?.title || '')) fail('a total summed over missing days does not say so');
 
 // Self-sufficiency on 2026-08-05: home 28 + (7 - 9) + (9 - 4) = 31, of which 9 was imported: 70.97%.
 const ssChart = charts[headings.indexOf('Self-sufficiency per day')];
@@ -110,6 +135,10 @@ const supplyText = query(sandbox.document.body, '.trend-card').textContent;
 if (!/-9|−9/.test(supplyText) || !/-4|−4/.test(supplyText)) fail(`charge and export are not negative: "${supplyText}"`);
 if (!supplyText.includes('31')) fail(`the day's energy does not net out: "${supplyText}"`);
 if (!query(supplyChart, 'line', true).some(l => l.attrs.stroke === 'var(--muted)')) fail('no zero line on a chart that draws both signs');
+
+// A node another one already counts is not added to it: the PV total is 28 for the day, not 28 plus the two
+// strings it is made of (#491).
+if (!/Solar\s*28\b/.test(supplyText)) fail(`solar for the day is not the PV total alone: "${supplyText}"`);
 
 // Days nothing at all reported are counted.
 if (!/2 with no reading/.test(query(sec, 'span', true).map(s => s.textContent).join(' '))) fail('the missing days are not counted');
@@ -147,4 +176,6 @@ const gridSvg = query(sec, 'svg', true)[query(sec, 'h3', true).map(h => h.textCo
 if (!['polyline', 'circle'].flatMap(t => query(gridSvg, t, true)).some(e => e.attrs.class === 'trend-line')) fail('choosing lines drew no line on the grid chart');
 
 console.log('trends: the whole system over the chosen window — grid, self-sufficiency and where the energy came from, '
-  + 'signed and netted, with no per-node selection on the page; empty days counted; the interval applies here too');
+  + 'signed and netted, a node another one already counts left out of its kind\u2019s total, and the same figures '
+  + 'as a table, newest day first, with an empty day empty and a total that says when it is summed over gaps; '
+  + 'no per-node selection on the page; empty days counted; the interval applies here too');

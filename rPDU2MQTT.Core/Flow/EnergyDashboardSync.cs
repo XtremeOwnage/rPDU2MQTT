@@ -89,6 +89,10 @@ public static class EnergyDashboardSync
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             if (include is not null && !include(node)) continue;
+            // A node another one already counts — an MPPT string beneath the PV total it is grouped from —
+            // would be the same production a second time on the dashboard (#491).
+            if (node.Within is { Length: > 0 } holder && graph.Nodes.Any(n => string.Equals(n.Id, holder, StringComparison.OrdinalIgnoreCase)))
+                continue;
             var outStat = statFor(node.Id, EnergyDirection.Out);
             var inStat = statFor(node.Id, EnergyDirection.In);
             var power = powerFor?.Invoke(node.Id);   // signed power sensor (positive supplying); optional

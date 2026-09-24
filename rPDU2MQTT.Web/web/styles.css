@@ -1672,3 +1672,15 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .hs-part-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .hs-part-num { text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (max-width: 560px) { .hs-part { grid-template-columns: 1fr 88px 5.5em; gap: 6px; } }
+
+/* The trends table: the same figures as the charts, read off rather than measured with the eye. */
+.trend-table-wrap { margin-top: 18px; overflow-x: auto; }
+.trend-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.trend-table th, .trend-table td { padding: 5px 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.trend-table thead th { color: var(--muted); font-weight: 600; text-align: right; font-size: 12px; }
+.trend-table thead th:first-child, .trend-table tbody th { text-align: left; font-weight: 600; }
+.trend-table td { text-align: right; font-variant-numeric: tabular-nums; }
+.trend-table tbody tr:hover { background: var(--panel2); }
+.trend-table tr.is-partial th { color: var(--muted); }
+.trend-table tfoot th, .trend-table tfoot td { border-top: 1px solid var(--line); border-bottom: 0; font-weight: 700; }
+.trend-table td.is-partial { color: var(--muted); }

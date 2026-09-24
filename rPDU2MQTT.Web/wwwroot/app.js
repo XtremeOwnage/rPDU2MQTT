@@ -8058,12 +8058,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
+    // A tile sums every node of its kind, so a node another one here already counts — a group's member
+    // beside the group's own total — must be left out of it, or the same energy is counted twice (#491).
+    const ofKind = (kind        ) => nodes
+      .filter((n     ) => n.kind === kind && !(n.within && nodes.some((o     ) => o.id === n.within)))
+      .map((n     ) => n.id);
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
-    const battIds = nodes.filter((n     ) => n.kind === 'battery').map((n     ) => n.id);
-    const gridIds = nodes.filter((n     ) => n.kind === 'grid').map((n     ) => n.id);
-    // The other two kinds, for the gauges: a tile sums every node of its kind, so its ceiling sums too.
-    const solarIds = nodes.filter((n     ) => n.kind === 'solar').map((n     ) => n.id);
-    const loadIds = nodes.filter((n     ) => n.kind === 'load').map((n     ) => n.id);
+    const battIds = ofKind('battery');
+    const gridIds = ofKind('grid');
+    const solarIds = ofKind('solar');
+    const loadIds = ofKind('load');
     const liveBy                         = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo                      = {};
@@ -9929,10 +9933,13 @@ function trendsPage(nav     , sections     , spec            ) {
 // Trends: the whole system over the chosen window — the grid, self-sufficiency, and where the energy came from.
 
 function addTrendsSection(nav     , sections     ) {
+  // The same figures as a table, under the charts: a number is easier to read off than a bar.
+  const tableBox = el('div', { class: 'trend-table-wrap' });
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
     stackable: false,
+    below: () => [tableBox],
     render: (p) => {
       const body = p.body();
       if (!body?.ok) return;
@@ -9942,15 +9949,20 @@ function addTrendsSection(nav     , sections     ) {
       const partial                = body.partial || null;
       const all        = body.series || [];
       const sumOf = (list       ) => days.map((_, d) => sumKnown(list.map((s     ) => signed(s)[d])));
+      // What may be added together: a node another one here already counts — a group's member beside the
+      // group's own total, a sub-panel beneath its panel — would be the same energy twice (#491).
+      const countable = (list       ) => list.filter((s     ) => !s.within || !all.some((o     ) => o.node === s.within));
+      const ofKind = (kind        , want                      ) =>
+        countable(all.filter((s     ) => s.kind === kind && (!want || want(s))));
       const byKind = (kind        ) => {
-        const members = all.filter((s     ) => s.kind === kind);
+        const members = ofKind(kind);
         return members.length ? sumOf(members) : null;
       };
       let drawn = 0;
 
       // --- Grid ------------------------------------------------------------------------------------
-      const gridSupply = all.filter((s     ) => s.kind === 'grid' && !isReturn(s));
-      const gridReturn = all.filter((s     ) => s.kind === 'grid' && isReturn(s));
+      const gridSupply = ofKind('grid', (s     ) => !isReturn(s));
+      const gridReturn = ofKind('grid', (s     ) => isReturn(s));
       const gridIn = byKind('grid');
       if (gridSupply.length) {
         const exports_ = gridReturn.length ? sumOf(gridReturn) : null;
@@ -9989,12 +10001,12 @@ function addTrendsSection(nav     , sections     ) {
       const supplyLines         = [];
       ([['solar', 'Solar'], ['battery', 'Battery out'], ['grid', 'Grid import']]                      )
         .forEach(([k, label]) => {
-          const v = sumOf(all.filter((s     ) => s.kind === k && !isReturn(s)));
+          const v = sumOf(ofKind(k, (s     ) => !isReturn(s)));
           if (v.some(x => x != null)) supplyLines.push({ label, color: KIND_COLOR[k], values: v });
         });
       ([['battery', 'Battery in', '#2f8f52'], ['grid', 'Grid export', '#6fb0e0']]                              )
         .forEach(([k, label, colour]) => {
-          const list = all.filter((s     ) => s.kind === k && isReturn(s));
+          const list = ofKind(k, (s     ) => isReturn(s));
           if (!list.length) return;
           const v = sumOf(list);
           if (v.some(x => x != null)) supplyLines.push({ label, color: colour, values: v });
@@ -10005,6 +10017,57 @@ function addTrendsSection(nav     , sections     ) {
           + 'so the same energy is not counted as produced and then again as returned.',
           barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
+      }
+
+      // --- The same thing as a table ---------------------------------------------------------------
+      tableBox.innerHTML = '';
+      const columns                                       = [
+        ['Load', null], ['Solar', byKind('solar')],
+        ['Battery charged', sumOf(ofKind('battery', (x     ) => isReturn(x))).map(v => (v == null ? null : Math.abs(v)))],
+        ['Battery discharged', sumOf(ofKind('battery', (x     ) => !isReturn(x)))],
+        ['Grid used', sumOf(ofKind('grid', (x     ) => !isReturn(x)))],
+        ['Grid exported', sumOf(ofKind('grid', (x     ) => isReturn(x))).map(v => (v == null ? null : Math.abs(v)))],
+      ];
+      // The home: what it was measured as, else what the measured sources leave for it.
+      const loadKind = byKind('load');
+      columns[0][1] = days.map((_, d) => homeEnergy({
+        ...(loadKind ? { load: loadKind[d] } : {}),
+        ...(loadKind ? {} : {
+          ...(solar ? { solar: solar[d] } : {}),
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+        }),
+      }));
+      const shown = columns.filter(([, v]) => v && v.some(x => x != null))                                 ;
+      if (p.summable() && shown.length) {
+        const num = (v               ) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
+        const table = el('table', { class: 'trend-table' });
+        table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: p.perDay() ? 'Day' : 'At' }),
+          ...shown.map(([label]) => el('th', { text: `${label} (${units})` })))));
+        const rows = el('tbody');
+        // Newest first: the day being asked about is nearly always the last one.
+        days.map((day, d) => ({ day, d })).reverse().forEach(({ day, d }) => {
+          const tr = el('tr', { class: day === partial ? 'is-partial' : '' });
+          tr.dataset.day = day;
+          tr.appendChild(el('th', { text: day + (day === partial ? ' · so far' : '') }));
+          shown.forEach(([, values]) => tr.appendChild(el('td', { text: num(values[d]) })));
+          rows.appendChild(tr);
+        });
+        table.appendChild(rows);
+        // A column's total is only a total when every day of it is known: one missing day makes it unknown.
+        const foot = el('tr', { class: 'is-total' });
+        foot.appendChild(el('th', { text: 'Total' }));
+        shown.forEach(([, values]) => {
+          const known = values.filter((v)              => v != null);
+          foot.appendChild(el('td', {
+            text: known.length ? num(known.reduce((a, v) => a + v, 0)) : '—',
+            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing, so this is the sum of what is known.`,
+            class: known.length === values.length ? '' : 'is-partial',
+          }));
+        });
+        table.appendChild(el('tfoot', {}, foot));
+        tableBox.appendChild(el('h3', { text: p.perDay() ? 'Day by day' : 'Reading by reading' }));
+        tableBox.appendChild(table);
       }
 
       if (!drawn)

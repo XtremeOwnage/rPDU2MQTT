@@ -801,6 +801,16 @@ you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Tot
 rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
 discovery is enabled — appears in Home Assistant as its own device.
 
+**A total by kind counts each node once.** Where one node already holds another — the MPPT strings a PV total
+is grouped from, a sub-panel beneath its panel — adding both would be the same energy twice. Every node and
+every series says what already counts it (`within`), and the Trends page, the Energy board's tiles and the
+Home Assistant Energy Dashboard sync leave those out of a per-kind total while still charting them on their
+own. Grouping the strings under the PV node is what says they are the same energy.
+
+**The Trends page also gives the figures as a table** under the charts — a row per day, newest first, with the
+home, solar, battery charged and discharged, and grid used and exported. A day nothing reported is empty
+rather than zero, and a column's total says when it is the sum of the days that are known.
+
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
 **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
 the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
