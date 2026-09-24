@@ -804,8 +804,9 @@ discovery is enabled — appears in Home Assistant as its own device.
 **Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
 **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
 the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
-Escape closes the menu, and a live reading arriving while it is open is held until it closes, so the diagram
-does not redraw out from under it.
+Escape, or a click anywhere else, closes the menu, and a live reading arriving while it is open is held until
+it closes, so the diagram does not redraw out from under it. A right-click on bare canvas is about the diagram
+instead: clear the trace, fit it to the page, or refresh.
 
 The history sheet covers the last hour, 6 hours, 24 hours, 7 days or 30 days, in whichever measurement is
 picked there — watts, amps, VA or today's energy — and says how much of the window is known, the peak and

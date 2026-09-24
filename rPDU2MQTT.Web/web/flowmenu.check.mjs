@@ -119,6 +119,32 @@ query(sheet(), 'button', true).find(b => b.textContent === 'Last 7 days').onclic
 await wait(120);
 if (!asked.some(u => /days=7&step=3600/.test(u))) fail(`picking a longer window asked for nothing: ${asked.join(' | ')}`);
 
+// A right-click on bare canvas is about the diagram, not a node. Nothing is traced yet, so there is nothing
+// to clear and that entry is dead rather than a no-op.
+shut();
+const canvas = query(sec, '.sankey-svg');
+if (!canvas?._on?.contextmenu) fail('the diagram itself does not answer a right-click');
+canvas._on.contextmenu[0]({ clientX: 40, clientY: 40, preventDefault() { } });
+for (const entry of ['Clear the trace', 'Fit to the page', 'Refresh'])
+  if (!itemSaying(entry)) fail(`the canvas menu does not offer "${entry}": ${items().map(b => b.textContent).join(', ')}`);
+if (!itemSaying('Clear the trace').disabled) fail('the trace can be cleared when nothing is traced');
+// Tracing a node's supply gives it something to clear.
+barFor('n30_1_5')._on.click[0]({ stopPropagation() { } });
+canvas._on.contextmenu[0]({ clientX: 40, clientY: 40, preventDefault() { } });
+if (itemSaying('Clear the trace').disabled) fail('a traced diagram cannot be untraced from the menu');
+itemSaying('Clear the trace').onclick();
+await wait(60);
+
+// A click anywhere else closes the menu: it must not be left hanging over the page.
+rightClick('n30_1_5');
+sandbox.document._on?.mousedown?.forEach(fn => fn({ target: getEl('sections') }));
+if (!menu().hidden) fail('a click away from the menu left it open');
+// …but a click inside it is not a click away from it.
+rightClick('n30_1_5');
+sandbox.document._on?.mousedown?.forEach(fn => fn({ target: itemSaying('History…') }));
+if (menu().hidden) fail('clicking an entry of the menu closed it before the entry ran');
+menu().hidden = true;
+
 // A tier's sheet breaks the total down into what it feeds, each on a strip of its own, busiest first.
 shut();
 rightClick('main_panel');
@@ -162,5 +188,6 @@ if (!/\.ctx-menu\s*\{[^}]*position:\s*absolute/.test(await readFile(new URL('../
 console.log('flow menu: a right-click on a node of the diagram offers its history, a trace of its supply and its editor — '
   + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, a gap '
   + 'where the node has no reading, what the tier feeds broken out beneath it busiest first, the measurement pickable '
-  + 'there, and the window kept for the next one; Escape closes the menu');
+  + 'there, and the window kept for the next one; bare canvas offers the diagram itself, with nothing to clear '
+  + 'until something is traced; and Escape, or a click away from it, closes the menu');
 process.exit(0);
