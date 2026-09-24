@@ -327,13 +327,18 @@ metricSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 if (!/metric=energy(&|$)/.test(decodeURIComponent(asked.at(-1)))) fail(`the chosen metric was not asked for: ${asked.at(-1)}`);
 
-// A counter's readings are differenced: 2 + 2 + 2 = 6 over three intervals; a re-base is a gap, not negative.
+// A counter's readings are differenced: 2 + 2 + 2 = 6 over three intervals. A counter that fell has been
+// re-based, and what it reads is what has run since, counted rather than dropped — never a negative.
 const solarCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Solar')), 'td', true).map(t => t.textContent);
 if (solarCells.includes('52') || solarCells.includes('16')) fail(`the counter itself was charted or summed: ${solarCells.join(' | ')}`);
 if (!solarCells.includes('6') || !solarCells.some(c => /3 of 4/.test(c))) fail(`the intervals do not add up: ${solarCells.join(' | ')}`);
 const gridCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Grid')), 'td', true).map(t => t.textContent);
 if (gridCells.some(c => /-/.test(c))) fail(`a counter re-base was charted as negative energy: ${gridCells.join(' | ')}`);
-if (!gridCells.includes('3') || !gridCells.some(c => /2 of 4/.test(c))) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
+// 8 → 9 is 1, the re-base to 1 counts as 1, and 1 → 3 is 2: 4 over three of the four readings.
+if (!gridCells.includes('4') || !gridCells.some(c => /3 of 4/.test(c))) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
+// …and the page says how much of what it drew came from a counter that had been re-based.
+const statusText = query(sec, '.ld-count')?.textContent || '';
+if (!/1 counted from a counter reset/.test(statusText)) fail(`the page does not say a reading came from a reset counter: "${statusText}"`);
 if (!/changed between two readings/.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
 if (query(sec, 'th', true).some(h => /kWh, est/.test(h.textContent))) fail('energy readings were integrated as if they were watts');
 

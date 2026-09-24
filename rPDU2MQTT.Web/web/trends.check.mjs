@@ -20,7 +20,8 @@ const series = {
     { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', within: 'solar', values: [60, 78, 97, null, 120, 137, 157, 178] },
     { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', within: 'solar', values: [40, 52, 65, null, 80, 91, 105, 119] },
     { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
-    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 65] },
+    // The battery counter was re-based on the last day: what it reads is what has run since.
+    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 2] },
     { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
     // Nothing read from the export meter at the end of the last day: the import is known, the net is not.
     { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, null] },
@@ -115,6 +116,15 @@ if (cellsOn('2026-08-05').join('|') !== '31|28|9|7|9|4|5') fail(`the day's row d
 // A day the export meter was not read is a day the net cannot be said, even though the import is known.
 if (cellsOn('2026-08-07')[4] !== '3') fail(`the import for the last day is wrong: ${cellsOn('2026-08-07').join('|')}`);
 if (cellsOn('2026-08-07')[6] !== '—') fail(`a net was given for a day with no export reading: ${cellsOn('2026-08-07').join('|')}`);
+
+// A counter that was re-based is counted from zero, and the cell says the day may have been more.
+const lastRow = bodyRows.find(r => r.dataset.day === '2026-08-07');
+if (cellsOn('2026-08-07')[3] !== '2') fail(`a re-based counter was not counted from zero: ${cellsOn('2026-08-07').join('|')}`);
+const resetCell = query(lastRow, 'td', true)[3];
+if (!resetCell.classList.contains('is-reset')) fail('a day counted from a reset counter is not marked');
+if (!/known to have run since/.test(resetCell.title || resetCell.attrs?.title || '')) fail('the mark does not say what it means');
+if (!/1 counted from a counter reset/.test(query(sec, 'span', true).map(x => x.textContent).join(' ')))
+  fail('the page does not say how many readings came from a reset counter');
 
 // A day nothing reported is empty, not zero.
 if (cellsOn('2026-08-03').some(c => c !== '—')) fail(`a day with no readings was given numbers: ${cellsOn('2026-08-03').join('|')}`);

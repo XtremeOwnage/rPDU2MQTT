@@ -94,6 +94,18 @@ export function addTrendsSection(nav: any, sections: any) {
       // --- The same thing as a table ---------------------------------------------------------------
       tableBox.innerHTML = '';
       const positive = (list: any[]) => sumOf(list).map(v => (v == null ? null : Math.abs(v)));
+      // A day counted from a counter that had been re-based is what is known to have run since, which may be
+      // short of the whole day. The figure is shown, and marked as the floor it is.
+      const resetOn = (list: any[]) => days.map((_, d) => list.some((x: any) => x.reset?.[d]));
+      const resets: Record<string, boolean[]> = {
+        Solar: resetOn(ofKind('solar')),
+        'Battery charged': resetOn(ofKind('battery', (x: any) => isReturn(x))),
+        'Battery discharged': resetOn(ofKind('battery', (x: any) => !isReturn(x))),
+        'Grid used': resetOn(ofKind('grid', (x: any) => !isReturn(x))),
+        'Grid exported': resetOn(ofKind('grid', (x: any) => isReturn(x))),
+      };
+      resets['Net grid'] = days.map((_, d) => resets['Grid used'][d] || resets['Grid exported'][d]);
+      resets.Load = days.map((_, d) => Object.entries(resets).some(([k, on]) => k !== 'Load' && on[d]));
       const gridBack = ofKind('grid', (x: any) => isReturn(x));
       const used = sumOf(ofKind('grid', (x: any) => !isReturn(x))), sent = positive(gridBack);
       // What the meter nets out to: import less export. With nothing exporting at all, the import is the net;
@@ -135,7 +147,12 @@ export function addTrendsSection(nav: any, sections: any) {
           const tr = el('tr', { class: day === partial ? 'is-partial' : '' });
           tr.dataset.day = day;
           tr.appendChild(el('th', { text: day + (day === partial ? ' · so far' : '') }));
-          shown.forEach(([, values]) => tr.appendChild(el('td', { text: num(values[d]) })));
+          shown.forEach(([label, values]) => tr.appendChild(el('td', {
+            text: num(values[d]),
+            class: values[d] != null && resets[label]?.[d] ? 'is-reset' : '',
+            title: values[d] != null && resets[label]?.[d]
+              ? 'The counter behind this was re-based during the day, so this is what is known to have run since — the day may have been more.' : '',
+          })));
           rows.appendChild(tr);
         });
         table.appendChild(rows);

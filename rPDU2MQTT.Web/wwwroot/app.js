@@ -9717,18 +9717,28 @@ function trendsPage(nav     , sections     , spec            ) {
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
   rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
-  // A counter's readings are not a per-bar quantity; the differences between them are, and a fall is a gap.
+  // A counter's readings are not a per-bar quantity; the differences between them are.
+  //
+  // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
+  // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
+  // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
   const toDeltas = (b     ) => {
+    let resets = 0;
     (b.series || []).forEach((s     ) => {
       const raw = s.values                     ;
+      s.reset = raw.map(() => false);
       s.values = raw.map((v, i) => {
         if (i === 0 || v == null) return null;
         const prev = raw[i - 1];
         if (prev == null) return null;
-        return v - prev < 0 ? null : v - prev;
+        if (v >= prev) return v - prev;
+        s.reset[i] = true;
+        resets++;
+        return v;
       });
     });
     b.deltas = true;
+    b.resets = resets;
   };
 
   const perDay = () => !!body?.days;
@@ -9802,6 +9812,7 @@ function trendsPage(nav     , sections     , spec            ) {
     return `${days().length} ${perDay() ? 'day(s)' : 'sample(s)'} from ${body.source}`
       + windowNote(body.at)
       + (gaps ? ` · ${gaps} with no reading` : '')
+      + (body.resets ? ` · ${body.resets} counted from a counter reset` : '')
       + (body.partial ? ` · ${body.partial} still in progress` : '')
       + widened + capped;
   };
@@ -9873,7 +9884,11 @@ function trendsPage(nav     , sections     , spec            ) {
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
-      (body.series || []).forEach((x     ) => { x.values = x.values.slice(1); });
+      // The marks are per reading, so they lose the lead day with the readings they belong to.
+      (body.series || []).forEach((x     ) => {
+        x.values = x.values.slice(1);
+        if (x.reset) x.reset = x.reset.slice(1);
+      });
     }
     if (!body?.ok) {
       whole = null;
@@ -10022,6 +10037,18 @@ function addTrendsSection(nav     , sections     ) {
       // --- The same thing as a table ---------------------------------------------------------------
       tableBox.innerHTML = '';
       const positive = (list       ) => sumOf(list).map(v => (v == null ? null : Math.abs(v)));
+      // A day counted from a counter that had been re-based is what is known to have run since, which may be
+      // short of the whole day. The figure is shown, and marked as the floor it is.
+      const resetOn = (list       ) => days.map((_, d) => list.some((x     ) => x.reset?.[d]));
+      const resets                            = {
+        Solar: resetOn(ofKind('solar')),
+        'Battery charged': resetOn(ofKind('battery', (x     ) => isReturn(x))),
+        'Battery discharged': resetOn(ofKind('battery', (x     ) => !isReturn(x))),
+        'Grid used': resetOn(ofKind('grid', (x     ) => !isReturn(x))),
+        'Grid exported': resetOn(ofKind('grid', (x     ) => isReturn(x))),
+      };
+      resets['Net grid'] = days.map((_, d) => resets['Grid used'][d] || resets['Grid exported'][d]);
+      resets.Load = days.map((_, d) => Object.entries(resets).some(([k, on]) => k !== 'Load' && on[d]));
       const gridBack = ofKind('grid', (x     ) => isReturn(x));
       const used = sumOf(ofKind('grid', (x     ) => !isReturn(x))), sent = positive(gridBack);
       // What the meter nets out to: import less export. With nothing exporting at all, the import is the net;
@@ -10063,7 +10090,12 @@ function addTrendsSection(nav     , sections     ) {
           const tr = el('tr', { class: day === partial ? 'is-partial' : '' });
           tr.dataset.day = day;
           tr.appendChild(el('th', { text: day + (day === partial ? ' · so far' : '') }));
-          shown.forEach(([, values]) => tr.appendChild(el('td', { text: num(values[d]) })));
+          shown.forEach(([label, values]) => tr.appendChild(el('td', {
+            text: num(values[d]),
+            class: values[d] != null && resets[label]?.[d] ? 'is-reset' : '',
+            title: values[d] != null && resets[label]?.[d]
+              ? 'The counter behind this was re-based during the day, so this is what is known to have run since — the day may have been more.' : '',
+          })));
           rows.appendChild(tr);
         });
         table.appendChild(rows);
