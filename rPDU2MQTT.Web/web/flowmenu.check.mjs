@@ -14,14 +14,20 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const graph = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
+    { id: 'grid', label: 'Grid', kind: 'grid', value: 900 },
     { id: 'main_panel', label: 'Main Panel', kind: 'panel', value: 900 },
+    { id: 'shed_panel', label: 'Shed Panel', kind: 'panel', value: 120 },
+    { id: 'shed_light', label: 'Shed light', kind: 'load', value: 120 },
     { id: 'n30_1_5', label: 'Kitchen lights', kind: 'breaker', value: 240 },
     // Derived by the bridge from what it polls: there is no config node to edit.
     { id: 'outlet:rack_pdu:1', label: 'Dell r730XD', kind: 'outlet', value: 240 },
   ],
   links: [
+    { source: 'grid', target: 'main_panel', value: 900 },
+    { source: 'grid', target: 'shed_panel', value: 120 },
     { source: 'main_panel', target: 'n30_1_5', value: 240 },
     { source: 'main_panel', target: 'outlet:rack_pdu:1', value: 240 },
+    { source: 'shed_panel', target: 'shed_light', value: 120 },
   ],
 };
 // What the history backend holds for the node, with one moment it has no reading for.
@@ -92,6 +98,61 @@ if (!menu() || menu().hidden) fail('a redraw closed the menu that was open over 
 if (!itemSaying('History…')) fail('the menu survived a redraw with nothing in it');
 if (!query(sec, '.flow-stage')?.children?.some?.(c => c === menu()))
   fail('the menu was left behind by the redraw rather than moved into the new diagram');
+
+// The zoom and the place on the page belong to the reader: a redraw does not put them back to the fitted
+// view (#492). The diagram is drawn at width = its own width x the zoom, so the attribute says where it is.
+const stageSvg = () => query(sec, '.sankey-svg');
+const drawnWidth = () => Number(stageSvg().attrs.width);
+const fitted = drawnWidth();
+query(sec, 'button', true).find(b => b.textContent === '+').onclick();
+const zoomed = drawnWidth();
+if (!(zoomed > fitted)) fail(`zooming in did not enlarge the diagram: ${fitted} then ${zoomed}`);
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(200);
+if (drawnWidth() !== zoomed) fail(`a redraw threw the reader's zoom away: ${zoomed} became ${drawnWidth()}`);
+// …and Fit is still the way back to the whole diagram.
+query(sec, 'button', true).find(b => b.textContent === '⤢').onclick();
+if (drawnWidth() === zoomed && zoomed !== fitted) fail('Fit no longer fits the diagram to the page');
+
+// Drilling into a node draws it and what is beneath it, and nothing else — not a highlight (#493).
+const drawnNodes = () => query(sec, 'rect', true).map(r => (r.attrs || {})['data-node']).filter(Boolean);
+const drillSel = () => query(sec, '.flow-drill');
+if (!drillSel()) fail('there is no way to pick what part of the diagram is drawn');
+// What is offered carries something: panels and the PDU, never an end load or an outlet.
+const offered = (drillSel().children || []).map(o => o.value);
+for (const want of ['main_panel', 'shed_panel'])
+  if (!offered.includes(want)) fail(`${want} is not offered to drill into: ${offered.join(', ')}`);
+for (const never of ['shed_light', 'n30_1_5', 'outlet:rack_pdu:1'])
+  if (offered.includes(never)) fail(`${never} has nothing beneath it and is offered anyway: ${offered.join(', ')}`);
+if (!drawnNodes().includes('shed_panel')) fail('the whole diagram is not drawn to start with');
+
+drillSel().value = 'main_panel';
+drillSel().onchange();
+await wait(200);
+const after = drawnNodes();
+if (!after.includes('main_panel') || !after.includes('n30_1_5')) fail(`drilling in dropped the node or its children: ${after.join(', ')}`);
+if (after.includes('shed_panel') || after.includes('grid')) fail(`drilling in still draws the rest: ${after.join(', ')}`);
+// It holds across a redraw, as the zoom does.
+query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
+await wait(200);
+if (drawnNodes().includes('shed_panel')) fail('a redraw undid the drill-down');
+if (drillSel().value !== 'main_panel') fail('the picker forgot what it is showing');
+
+// Out of it again, from the menu on a node.
+rightClick('n30_1_5');
+if (!itemSaying('Show the whole diagram')) fail(`no way back out of a drill-down: ${items().map(b => b.textContent).join(', ')}`);
+if (!itemSaying('Drill into this').disabled) fail('a node with nothing beneath it can be drilled into');
+itemSaying('Show the whole diagram').onclick();
+await wait(200);
+if (!drawnNodes().includes('shed_panel')) fail('showing the whole diagram left it drilled in');
+// …and into it from the menu, which is how a phone reaches it.
+rightClick('main_panel');
+itemSaying('Drill into this').onclick();
+await wait(200);
+if (drawnNodes().includes('shed_panel')) fail('the menu did not drill in');
+drillSel().value = '';
+drillSel().onchange();
+await wait(200);
 
 // A node the bridge derives has no config entry, so its editor entry is dead rather than misleading.
 rightClick('outlet:rack_pdu:1');
@@ -188,6 +249,8 @@ if (!/\.ctx-menu\s*\{[^}]*position:\s*absolute/.test(await readFile(new URL('../
 console.log('flow menu: a right-click on a node of the diagram offers its history, a trace of its supply and its editor — '
   + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, a gap '
   + 'where the node has no reading, what the tier feeds broken out beneath it busiest first, the measurement pickable '
-  + 'there, and the window kept for the next one; bare canvas offers the diagram itself, with nothing to clear '
+  + 'there, and the window kept for the next one; the reader\u2019s zoom survives a redraw; one node and what is '
+  + 'beneath it can be drawn on its own, from the picker or the menu, and holds across a redraw, with only what '
+  + 'carries something offered; bare canvas offers the diagram itself, with nothing to clear '
   + 'until something is traced; and Escape, or a click away from it, closes the menu');
 process.exit(0);
