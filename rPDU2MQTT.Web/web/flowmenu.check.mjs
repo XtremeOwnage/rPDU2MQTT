@@ -117,6 +117,11 @@ if (drawnWidth() === zoomed && zoomed !== fitted) fail('Fit no longer fits the d
 // Drilling into a node draws it and what is beneath it, and nothing else — not a highlight (#493).
 const drawnNodes = () => query(sec, 'rect', true).map(r => (r.attrs || {})['data-node']).filter(Boolean);
 const drillSel = () => query(sec, '.flow-drill');
+const canvasDbl = () => {
+  const on = query(sec, '.sankey-svg')?._on?.dblclick;
+  if (!on) fail('the diagram itself does not answer a double-click');
+  on[0]({ preventDefault() { }, stopPropagation() { } });
+};
 if (!drillSel()) fail('there is no way to pick what part of the diagram is drawn');
 // What is offered carries something: panels and the PDU, never an end load or an outlet.
 const offered = (drillSel().children || []).map(o => o.value);
@@ -132,6 +137,36 @@ await wait(200);
 const after = drawnNodes();
 if (!after.includes('main_panel') || !after.includes('n30_1_5')) fail(`drilling in dropped the node or its children: ${after.join(', ')}`);
 if (after.includes('shed_panel') || after.includes('grid')) fail(`drilling in still draws the rest: ${after.join(', ')}`);
+// Double-click is the same journey without the menu: into a node, then back out of it.
+drillSel().value = '';
+drillSel().onchange();
+await wait(150);
+const dblclick = (id) => {
+  const bar = barFor(id);
+  if (!bar?._on?.dblclick) fail(`${id} is not drawn, or does not answer a double-click`);
+  bar._on.dblclick[0]({ preventDefault() { }, stopPropagation() { } });
+};
+dblclick('main_panel');
+await wait(200);
+if (drawnNodes().includes('shed_panel')) fail('double-clicking a node did not drill into it');
+// Again on the node now drawn at the top: out one level, to what feeds it.
+dblclick('main_panel');
+await wait(200);
+if (!drawnNodes().includes('shed_panel')) fail('double-clicking what is drilled into did not come back out');
+// A node with nothing beneath it stays put rather than drawing itself alone.
+dblclick('main_panel');
+await wait(200);
+dblclick('n30_1_5');
+await wait(200);
+if (!drawnNodes().includes('main_panel')) fail(`double-clicking a leaf drew it on its own: ${drawnNodes().join(', ') || 'nothing at all'}`);
+// Bare canvas: out to the whole diagram.
+canvasDbl();
+await wait(200);
+if (!drawnNodes().includes('shed_panel')) fail('double-clicking the canvas did not show the whole diagram');
+drillSel().value = 'main_panel';
+drillSel().onchange();
+await wait(150);
+
 // It holds across a redraw, as the zoom does.
 query(sec, 'button', true).find(b => b.textContent === 'Refresh').onclick();
 await wait(200);
@@ -276,7 +311,8 @@ console.log('flow menu: a right-click on a node of the diagram offers its histor
   + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, a gap '
   + 'where the node has no reading, what the tier feeds broken out beneath it busiest first, the measurement pickable '
   + 'there, and the window kept for the next one; the reader\u2019s zoom survives a redraw; one node and what is '
-  + 'beneath it can be drawn on its own, from the picker or the menu, and holds across a redraw, with only what '
+  + 'beneath it can be drawn on its own, from the picker, the menu or a double-click \u2014 which comes back out '
+  + 'again on a second one, and on the canvas \u2014 and holds across a redraw, with only what '
   + 'carries something offered; a reading arriving while a control is in use waits until it is let go, and a '
   + 'control left focused does not freeze the page; '
   + 'bare canvas offers the diagram itself, with nothing to clear '

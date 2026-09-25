@@ -821,7 +821,9 @@ since the import alone is not one. A column's total says when it is the sum of t
 **The view is the reader's.** A live reading redraws the diagram without touching the zoom or where the pane
 is scrolled to — only **Fit** puts it back to the whole diagram. **Showing** draws one node and everything
 beneath it and nothing else, which is how a phone reads a panel's circuits: what carries something is offered
-(panels, breakers, inverters, PDUs), an end load is not, and the choice holds across a redraw.
+(panels, breakers, inverters, PDUs), an end load is not, and the choice holds across a redraw. **Double-click**
+a node to drill into it, the node at the top again to come back out one level, and bare canvas for the whole
+diagram.
 
 **A live reading waits while a control is in use.** Redrawing a page rebuilds its controls, which closes a
 dropdown someone has just opened and loses what they were typing. An update that arrives while a select, an
