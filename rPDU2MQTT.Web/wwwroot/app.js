@@ -623,17 +623,49 @@ function openStream() {
 function liveWhileActive(sec     , keyOf              , handler                     ) {
   let off      = null;
   let key = '';
+  // A reading that lands while a control is in use waits for it to be let go.
+  const deliver = holdWhileBusy(sec, handler);
   const sync = () => {
     const want = sec.classList.contains('active') ? keyOf() : '';
     if (want === key) return;
     key = want;
     if (off) { off(); off = null; }
-    if (want) off = subscribeLive(want, handler);
+    if (want) off = subscribeLive(want, deliver);
   };
   // activate() announces every tab switch, so this needs no knowledge of the nav.
   window.addEventListener?.('rpdu:activate', sync);
   sync();
   return sync;
+}
+
+/// Is someone using a control in this section — a dropdown they have opened, a box they are typing in?
+/// A redraw rebuilds those controls, which closes the dropdown under the hand that opened it.
+function busyInSection(sec     )          {
+  const active      = document.activeElement;
+  if (!active || active === document.body || !sec?.contains?.(active)) return false;
+  return /^(select|input|textarea)$/i.test(active.tagName || '');
+}
+
+/// Wrap a handler so an update arriving while a control is in use is held, and delivered as soon as it is
+/// let go. A control left focused does not freeze the page: past `maxHoldMs` the update goes through.
+function holdWhileBusy(sec     , handler                     , maxHoldMs = 60_000) {
+  let held      = null;
+  let since = 0;
+  const flush = () => {
+    if (held === null) return;
+    const data = held;
+    held = null;
+    since = 0;
+    handler(data);
+  };
+  // Let go of the control, and whatever arrived meanwhile is drawn.
+  sec?.addEventListener?.('focusout', () => setTimeout(() => { if (!busyInSection(sec)) flush(); }, 0));
+  return (data     ) => {
+    if (!busyInSection(sec)) { flush(); handler(data); return; }
+    if (since && Date.now() - since >= maxHoldMs) { held = data; flush(); return; }
+    if (!since) since = Date.now();
+    held = data;
+  };
 }
 
 // ── dirty.ts ────────────────────────────────────────────────────
@@ -4867,6 +4899,15 @@ function addFlowSection(nav     , sections     ) {
     redrawBoth();
   };
 
+  // Letting go of a control draws whatever arrived while it was in use.
+  sec.addEventListener('focusout', () => setTimeout(() => {
+    if (!heldGraph || menu.isOpen() || busyInSection(sec)) return;
+    const held = heldGraph;
+    heldGraph = null;
+    lastGraph = held;
+    draw(held);
+  }, 0));
+
   const draw = (graph     ) => {
     // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
     // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
@@ -5970,8 +6011,9 @@ function addFlowSection(nav     , sections     ) {
     () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
     (body     ) => {
       if (hist.day() || !body || !body.ok) return;
-      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes.
-      if (menu.isOpen()) { heldGraph = body; return; }
+      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
+      // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
+      if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
       lastGraph = body;
       draw(body);
     });
@@ -8341,7 +8383,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''),
     () => { if (!hist.day()) load(); });
   // Fallback for when the stream isn't up; it does nothing while it is.
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day() && !busyInSection(sec)) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
@@ -10737,7 +10779,7 @@ function addCircuitFinderSection(nav     , sections     ) {
 
   // While a session is open the channels are read in the background too, so a state is an average rather than
   // one instant — that is what lets a small load show through the noise.
-  setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
+  setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy && !busyInSection(sec)) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
 
   const offered = (id        ) => everything.checked || CIRCUIT_KINDS.includes(kinds[id] || 'node');
   const levels = ()          => stages
@@ -15178,7 +15220,7 @@ function addHomeSection(nav     , sections     ) {
   // The board is pushed from the server (#281) while this tab is on screen. The timer stays as the
   // fallback for when the stream isn't up — it does nothing while it is.
   liveWhileActive(sec, () => 'board', render);
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !busyInSection(sec)) load(); }, 10000);
   link.onclick = () => { activate(link, sec); load(); };
   return { link, load };
 }

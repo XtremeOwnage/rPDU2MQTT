@@ -49,9 +49,12 @@ export function textNode(t) { return Object.assign(makeEl('#text'), { _text: Str
 // What append()/appendChild() were handed: an element, or text to wrap in a node.
 function asNode(c) { return typeof c === 'string' || typeof c === 'number' ? textNode(c) : c; }
 
+// What has focus, module-wide: the element's focus()/blur() and document.activeElement are the same answer.
+let focused = null;
+
 export function makeEl(tag = 'div') {
   const node = {
-    tag, children: [], attrs: {}, style: {}, dataset: {}, _text: '',
+    tag, tagName: String(tag).toUpperCase(), children: [], attrs: {}, style: {}, dataset: {}, _text: '',
     // Form-control properties a real element always has. el() assigns a prop when `k in e` and falls back
     // to setAttribute otherwise, so without these an input's value silently became an attribute here while
     // being a property in the browser — and a test reading either one would disagree with the app.
@@ -99,6 +102,9 @@ export function makeEl(tag = 'div') {
       this.parent = null;
     },
     insertBefore(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
+    // focus(): what has it decides whether a redraw would pull a control out from under someone.
+    focus() { focused = this; },
+    blur() { if (focused === this) focused = null; },
     // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
     contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
     // `class` set as an attribute is the class list, as it is on an SVG element built with setAttribute.
@@ -129,7 +135,7 @@ export function makeEl(tag = 'div') {
       }
     },
     click() { if (typeof this.onclick === 'function') this.onclick({ preventDefault() { }, stopPropagation() { } }); },
-    focus() { }, select() { }, setSelectionRange() { },
+    select() { }, setSelectionRange() { },
     querySelector(s) { return query(this, s, false); },
     querySelectorAll(s) { return query(this, s, true); },
     getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; },
@@ -155,6 +161,9 @@ export function makeDom({ bodies }) {
     console,
     document: {
       body: root,
+      // What has focus, as a browser keeps it: a redraw while a control here is in use would close it.
+      get activeElement() { return focused; },
+      set activeElement(e) { focused = e; },
       // The theme sets data-theme here; nothing else touches it.
       documentElement: makeEl('html'),
       getElementById: (id) => getEl(id),

@@ -2,7 +2,7 @@
 // The verdicts come from the Status board via /api/status — this file only renders them. Deciding
 // what "stale" or "waiting" means lives with the component that knows, not in the browser.
 import { api, btn, el, activate, navLink } from '../helpers.js';
-import { liveWhileActive, realtimeLive } from '../realtime.js';
+import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 
 export function addHomeSection(nav: any, sections: any) {
   const link = navLink(nav, "Status", "◈");
@@ -71,7 +71,7 @@ export function addHomeSection(nav: any, sections: any) {
   // The board is pushed from the server (#281) while this tab is on screen. The timer stays as the
   // fallback for when the stream isn't up — it does nothing while it is.
   liveWhileActive(sec, () => 'board', render);
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !busyInSection(sec)) load(); }, 10000);
   link.onclick = () => { activate(link, sec); load(); };
   return { link, load };
 }

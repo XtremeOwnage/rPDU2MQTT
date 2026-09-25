@@ -5,6 +5,7 @@ import { activate, api, btn, el, instanceSelector, navLink, withInstance } from 
 import { state } from '../state.js';
 import { analyse, type Level } from '../circuit-finder.js';
 import { editNodeOnNextOpen } from './nodes.js';
+import { busyInSection } from '../realtime.js';
 
 /// What a load can actually sit on. A panel, the grid and an inverter all step with the load as well, being
 /// upstream of it, so offering them as answers only buries the circuit.
@@ -90,7 +91,7 @@ export function addCircuitFinderSection(nav: any, sections: any) {
 
   // While a session is open the channels are read in the background too, so a state is an average rather than
   // one instant — that is what lets a small load show through the noise.
-  setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
+  setInterval(() => { if (stages.length && sec.classList.contains('active') && !busy && !busyInSection(sec)) sample().then(render); }, Math.max(2, pollSeconds()) * 1000);
 
   const offered = (id: string) => everything.checked || CIRCUIT_KINDS.includes(kinds[id] || 'node');
   const levels = (): Level[] => stages

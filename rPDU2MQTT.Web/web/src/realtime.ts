@@ -137,15 +137,47 @@ function openStream() {
 export function liveWhileActive(sec: any, keyOf: () => string, handler: (data: any) => void) {
   let off: any = null;
   let key = '';
+  // A reading that lands while a control is in use waits for it to be let go.
+  const deliver = holdWhileBusy(sec, handler);
   const sync = () => {
     const want = sec.classList.contains('active') ? keyOf() : '';
     if (want === key) return;
     key = want;
     if (off) { off(); off = null; }
-    if (want) off = subscribeLive(want, handler);
+    if (want) off = subscribeLive(want, deliver);
   };
   // activate() announces every tab switch, so this needs no knowledge of the nav.
   window.addEventListener?.('rpdu:activate', sync);
   sync();
   return sync;
+}
+
+/// Is someone using a control in this section — a dropdown they have opened, a box they are typing in?
+/// A redraw rebuilds those controls, which closes the dropdown under the hand that opened it.
+export function busyInSection(sec: any): boolean {
+  const active: any = document.activeElement;
+  if (!active || active === document.body || !sec?.contains?.(active)) return false;
+  return /^(select|input|textarea)$/i.test(active.tagName || '');
+}
+
+/// Wrap a handler so an update arriving while a control is in use is held, and delivered as soon as it is
+/// let go. A control left focused does not freeze the page: past `maxHoldMs` the update goes through.
+export function holdWhileBusy(sec: any, handler: (data: any) => void, maxHoldMs = 60_000) {
+  let held: any = null;
+  let since = 0;
+  const flush = () => {
+    if (held === null) return;
+    const data = held;
+    held = null;
+    since = 0;
+    handler(data);
+  };
+  // Let go of the control, and whatever arrived meanwhile is drawn.
+  sec?.addEventListener?.('focusout', () => setTimeout(() => { if (!busyInSection(sec)) flush(); }, 0));
+  return (data: any) => {
+    if (!busyInSection(sec)) { flush(); handler(data); return; }
+    if (since && Date.now() - since >= maxHoldMs) { held = data; flush(); return; }
+    if (!since) since = Date.now();
+    held = data;
+  };
 }

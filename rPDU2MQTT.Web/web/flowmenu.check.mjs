@@ -154,6 +154,32 @@ drillSel().value = '';
 drillSel().onchange();
 await wait(200);
 
+// A reading that arrives while a control is in use waits: a redraw rebuilds the controls, which closes an
+// open dropdown under the hand that opened it.
+const got = [];
+const deliver = sandbox.holdWhileBusy(sec, (d) => got.push(d));
+deliver('first');
+if (got.join() !== 'first') fail(`an update was held although nothing was in use: ${got.join()}`);
+drillSel().focus();
+if (!sandbox.busyInSection(sec)) fail('a focused control in the section is not noticed');
+deliver('second');
+if (got.join() !== 'first') fail(`an update landed while a control was in use: ${got.join()}`);
+// Letting go of it draws whatever arrived meanwhile — the newest of it, not every one.
+deliver('third');
+drillSel().blur();
+sec.dispatch('focusout', {});
+await wait(30);
+if (got.join() !== 'first,third') fail(`the held update was not drawn when the control was let go: ${got.join()}`);
+// A control left focused does not freeze the page: past the hold, an update goes through.
+const slow = [];
+const impatient = sandbox.holdWhileBusy(sec, (d) => slow.push(d), 1);
+drillSel().focus();
+impatient('held');
+await wait(20);
+impatient('through');
+if (!slow.includes('through')) fail(`a control left focused froze the page: ${slow.join()}`);
+drillSel().blur();
+
 // A node the bridge derives has no config entry, so its editor entry is dead rather than misleading.
 rightClick('outlet:rack_pdu:1');
 if (!itemSaying('Edit this node')?.disabled) fail('a derived node offers an editor it does not have');
@@ -251,6 +277,8 @@ console.log('flow menu: a right-click on a node of the diagram offers its histor
   + 'where the node has no reading, what the tier feeds broken out beneath it busiest first, the measurement pickable '
   + 'there, and the window kept for the next one; the reader\u2019s zoom survives a redraw; one node and what is '
   + 'beneath it can be drawn on its own, from the picker or the menu, and holds across a redraw, with only what '
-  + 'carries something offered; bare canvas offers the diagram itself, with nothing to clear '
+  + 'carries something offered; a reading arriving while a control is in use waits until it is let go, and a '
+  + 'control left focused does not freeze the page; '
+  + 'bare canvas offers the diagram itself, with nothing to clear '
   + 'until something is traced; and Escape, or a click away from it, closes the menu');
 process.exit(0);

@@ -1,6 +1,6 @@
 // The Energy Overview: solar / battery / grid / home as tiles and an animated diagram.
 import { api, btn, el, activate, formatNum, svgEl, navLink, instanceSelector, withInstance } from '../helpers.js';
-import { liveWhileActive, realtimeLive } from '../realtime.js';
+import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 import { state } from '../state.js';
 // The energy rules every view shares — see energy.ts for why they are not written twice.
 import { homeEnergy, selfSufficiencyPct, coveredEnergy } from '../energy.js';
@@ -455,6 +455,6 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''),
     () => { if (!hist.day()) load(); });
   // Fallback for when the stream isn't up; it does nothing while it is.
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day()) load(); }, 8000);
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day() && !busyInSection(sec)) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
