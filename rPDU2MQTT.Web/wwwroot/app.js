@@ -5245,6 +5245,8 @@ function addFlowSection(nav     , sections     ) {
     const tintOf = (id        ) => colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
+    // …and on bare canvas, back out to the whole diagram.
+    svg.addEventListener('dblclick', () => { if (drillTo) drill(null); });
     focusedNode = null;
 
     /// What a right-click on bare canvas offers: the whole diagram rather than one node.
@@ -5522,6 +5524,13 @@ function addFlowSection(nav     , sections     ) {
       };
       [rect, lab].forEach((elm     ) => {
         elm.addEventListener('contextmenu', (e     ) => nodeMenu(e, n));
+        // Double-click is the shortest way in and out: into what carries something, out of what is drawn.
+        elm.addEventListener('dblclick', (e     ) => {
+          e.preventDefault?.();
+          e.stopPropagation?.();
+          if (drillTo === n.id) { drill((incoming[n.id] || [])[0]?.source || null); return; }
+          if ((outgoing[n.id] || []).length) drill(n.id);
+        });
         elm.addEventListener('mouseenter', (e     ) => showNodeCard(sec, e, card()));
         elm.addEventListener('mousemove', (e     ) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
