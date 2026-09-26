@@ -16,9 +16,13 @@ namespace rPDU2MQTT.Services;
 /// rather than only published. A reading that is not there is not written: a gap in the files is a gap in
 /// what was known, which is what every read of them then reports.
 /// </para>
+/// <para>
+/// Only the leader writes (#506). During a rolling update two processes are running and may share the one
+/// volume, and two writers appending to the same series file is corruption, not a race to be unlikely about.
+/// </para>
 /// </summary>
 public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live, LocalSeriesStore store,
-                                              ISnapshotCache? snapshots = null) : BackgroundService
+                                              ISnapshotCache? snapshots = null, LeaderState? leader = null) : BackgroundService
 {
     /// <summary>
     /// Every metric this build understands, read from the one table that defines them: power, apparent
@@ -50,7 +54,8 @@ public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live,
         {
             do
             {
-                try { Sweep(DateTime.UtcNow); }
+                // A standby records nothing; the leader it replaces is still writing.
+                try { if (leader is null || leader.IsLeader) Sweep(DateTime.UtcNow); }
                 catch (Exception ex) { Log.Warning($"Local history: a sweep failed ({ex.Message})."); }
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));

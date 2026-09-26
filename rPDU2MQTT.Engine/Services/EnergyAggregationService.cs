@@ -17,18 +17,29 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     private readonly IFlowValueSource upstream;
     private readonly IEnergyStore store;
     private readonly Core.ISnapshotCache? snapshots;
+    private readonly Core.LeaderState? leader;
     private readonly TimeZoneInfo zone;
     private volatile Dictionary<string, EnergyState> states = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Nodes whose device zeroes its energy counter each day (<c>Accumulation: period</c>), so no cumulative reading exists for them.</summary>
     private readonly HashSet<string> dailyCounters;
 
-    public EnergyAggregationService(Config cfg, IFlowValueSource upstream, IEnergyStore store, Core.ISnapshotCache? snapshots = null)
+    public EnergyAggregationService(Config cfg, IFlowValueSource upstream, IEnergyStore store, Core.ISnapshotCache? snapshots = null,
+                                    Core.LeaderState? leader = null)
     {
         this.cfg = cfg;
         this.upstream = upstream;
         this.store = store;
         this.snapshots = snapshots;
+        this.leader = leader;
+        // The last chance to write the totals while the lease is still held, so the next leader starts from
+        // them rather than from wherever this process last saved (#506).
+        if (leader is not null)
+            leader.SteppingDown += () =>
+            {
+                try { store.Save(states); }
+                catch (Exception ex) { Log.Warning($"Could not hand over the energy totals: {ex.Message}"); }
+            };
         zone = EnergyPeriod.Resolve(cfg.EnergyFlow.Aggregation.PeriodTimeZone, m => Log.Warning(m));
         dailyCounters = cfg.EnergyFlow.Nodes
             .Where(n => !string.IsNullOrWhiteSpace(n.Id))
@@ -99,14 +110,15 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
     /// whole reason the store exists — can be asserted directly; testing it by starting the service and
     /// waiting for a timer was timing-dependent, and duly failed on a slower machine.
     /// </summary>
-    public int LoadTotals()
+    /// <param name="mirror">Re-reading another process's totals: say nothing about what did not carry over, since nothing restarted.</param>
+    public int LoadTotals(bool mirror = false)
     {
         states = new Dictionary<string, EnergyState>(store.Load(), StringComparer.OrdinalIgnoreCase);
         loaded = true;
         CarriedOverNodes = states.Count;
         // Nothing carried over means every daily figure starts here, whatever the clock says the day is.
         AccumulatingSinceUtc = DateTime.UtcNow;
-        if (Periods && CarriedOverNodes == 0)
+        if (Periods && CarriedOverNodes == 0 && !mirror)
             Log.Warning($"Daily energy totals did not carry over: the {StoreKind} store held nothing. "
                       + "Today's figures accumulate from now, not from the period boundary — which is what "
                       + "a restart on an ephemeral store does every time it happens.");
@@ -149,11 +161,27 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
 
         var maxGap = TimeSpan.FromSeconds(Math.Max(1, agg.MaxGapSeconds));
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Math.Max(1, agg.SampleIntervalSeconds)));
+        // A standby mirrors the leader's totals instead of accumulating its own (#506): two processes adding
+        // the same readings into one counter is a total nothing can reconcile afterwards.
+        var mirroring = false;
         try
         {
             do
             {
-                try { Sample(maxGap); }
+                try
+                {
+                    if (Leading)
+                    {
+                        // Just promoted: carry on from where the last leader got to, not from this copy.
+                        if (mirroring) { LoadTotals(mirror: true); mirroring = false; }
+                        Sample(maxGap);
+                    }
+                    else
+                    {
+                        LoadTotals(mirror: true);
+                        mirroring = true;
+                    }
+                }
                 catch (Exception ex) { Log.Warning($"Energy aggregation pass failed: {ex.Message}"); }
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
@@ -161,10 +189,13 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         catch (OperationCanceledException) { /* shutting down */ }
         finally
         {
-            // A clean stop is the one chance to record the last few samples.
-            try { store.Save(states); } catch (Exception ex) { Log.Warning($"Could not persist energy totals on shutdown: {ex.Message}"); }
+            // A clean stop is the one chance to record the last few samples — the leader's, not a standby's copy.
+            if (Leading)
+                try { store.Save(states); } catch (Exception ex) { Log.Warning($"Could not persist energy totals on shutdown: {ex.Message}"); }
         }
     }
+
+    private bool Leading => leader is null || leader.IsLeader;
 
     /// <summary>One pass: integrate node power, and fold in every outlet's own counter. Internal so a test
     /// can drive it a tick at a time against a fixed clock instead of waiting on the timer.</summary>

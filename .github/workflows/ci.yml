@@ -75,6 +75,25 @@ jobs:
           done
           exit 0
 
+      - name: helm template (graceful rollout)
+        run: |
+          # #506: with the cache the chart deploys, the new pod is Ready before the old one stops, and the two
+          # coordinate through the leader lease. Without a cache there is nothing to coordinate through, so it
+          # must stay Recreate — two uncoordinated pods would both poll and publish.
+          main() { helm template rpdu2mqtt charts/rpdu2mqtt "$@" | awk '/^kind: Deployment/{d=1} d&&/^  name: rpdu2mqtt$/{p=1} p&&/^---/{exit} p'; }
+          out=$(main)
+          echo "$out" | grep -q 'type: RollingUpdate' || { echo "default should roll"; exit 1; }
+          echo "$out" | grep -q 'maxUnavailable: 0' || { echo "the old pod must stay until the new one is Ready"; exit 1; }
+          echo "$out" | grep -q 'RPDU2MQTT_LEADER_LEASE$' || { echo "a rolling pod must take the leader lease"; exit 1; }
+          echo "$out" | grep -q 'podAffinity' || { echo "a ReadWriteOnce volume needs the pods on one node"; exit 1; }
+          for args in "--set valkey.enabled=false" "--set gracefulRollout.enabled=false" \
+                      "--set history.persistence.accessMode=ReadWriteOncePod"; do
+            out=$(main $args)
+            echo "$out" | grep -q 'type: Recreate' || { echo "expected Recreate with [$args]"; exit 1; }
+            echo "$out" | grep -q 'RPDU2MQTT_LEADER_LEASE' && { echo "no lease expected with [$args]"; exit 1; }
+          done
+          exit 0
+
       - name: helm template (scheduled restart)
         run: |
           # Off by default: no CronJob, and no RBAC granted for one.

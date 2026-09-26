@@ -28,12 +28,13 @@ public sealed class StatusReporter : BackgroundService
     private readonly Core.Startup.ConfigurationFaults? faults;
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
+    private readonly LeaderState? leader;
     private readonly Core.History.LocalSeriesStore? localHistory;
     // Checking a directory means writing a probe file into it, so it is done once a minute, not per tick.
     private IReadOnlyList<Core.StorageUse>? storage;
     private DateTime storageCheckedUtc = DateTime.MinValue;
 
-    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null)
+    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null, LeaderState? leader = null)
     {
         this.config = config;
         board = statusBoard ?? new Core.Status.StatusBoard();
@@ -48,6 +49,7 @@ public sealed class StatusReporter : BackgroundService
         this.cacheProbe = cacheProbe;
         this.history = history;
         this.localHistory = localHistory;
+        this.leader = leader;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -163,7 +165,7 @@ public sealed class StatusReporter : BackgroundService
         {
             Title = $"Node · {self.Host}",
             // The role and version are what someone reads a node card FOR; the board derives the state.
-            Detail = $"{self.RoleLabel} · v{self.Version}",
+            Detail = $"{self.RoleLabel}{LeaseRole()} · v{self.Version}",
             EventUtc = self.StartedUtc,
         });
     }
@@ -191,6 +193,11 @@ public sealed class StatusReporter : BackgroundService
             TotalBytes = worst is { MustWrite: true } ? worst.TotalBytes : 0,
         });
     }
+
+    /// <summary>Under a leader lease (#506), whether this node is the one producing, and why not.</summary>
+    private string LeaseRole() => leader is not { Coordinated: true } ? ""
+        : leader.IsLeader ? " · leader"
+        : leader.StandbyReason is { } why ? $" · standby ({why})" : " · standby";
 
     /// <summary>
     /// Report one integration's own verdict. Its rule lives on the integration (IStatusProvider) or in the

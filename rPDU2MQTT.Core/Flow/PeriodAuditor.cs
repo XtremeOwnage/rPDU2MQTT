@@ -16,12 +16,26 @@ public sealed class PeriodAuditor : IPeriodAuditor
     private readonly Dictionary<string, PeriodCounterAudit.State> audit = new(StringComparer.Ordinal);
     private readonly Action<string> warn;
     private readonly object gate = new();
+    private readonly Func<bool> mayPersist;
 
-    public PeriodAuditor(IPeriodAuditStore store, Action<string>? warn = null)
+    /// <param name="mayPersist">Whether this process may write the verdicts — false on a standby (#506), which
+    /// judges the readings it shows but leaves the shared record to the leader.</param>
+    public PeriodAuditor(IPeriodAuditStore store, Action<string>? warn = null, Func<bool>? mayPersist = null)
     {
         this.store = store;
         this.warn = warn ?? (m => Serilog.Log.Warning(m));
+        this.mayPersist = mayPersist ?? (() => true);
         foreach (var (k, v) in store.Load()) audit[k] = v;
+    }
+
+    /// <summary>Take up the shared record again — on becoming the leader, where the last one left it.</summary>
+    public void Reload()
+    {
+        lock (gate)
+        {
+            audit.Clear();
+            foreach (var (k, v) in store.Load()) audit[k] = v;
+        }
     }
 
     public IReadOnlyCollection<WithheldSource> Withheld
@@ -46,8 +60,8 @@ public sealed class PeriodAuditor : IPeriodAuditor
             // Only when something moved. The high-water mark changes on most readings, and the store is a
             // file or a cache round-trip.
             var next = audit.TryGetValue(key, out var after) ? after : null;
-            if (prior is null || next is null
-                || prior.PeriodKey != next.PeriodKey || prior.HighWater != next.HighWater || prior.Contradicted != next.Contradicted)
+            if (mayPersist() && (prior is null || next is null
+                || prior.PeriodKey != next.PeriodKey || prior.HighWater != next.HighWater || prior.Contradicted != next.Contradicted))
                 store.Save(new Dictionary<string, PeriodCounterAudit.State>(audit));
 
             return allowed;

@@ -144,6 +144,54 @@ async function restartNow(settings: string[]) {
 let bootVersion: string | null = null;
 let returnWatch: any = null;
 let watchingForReturn = false;
+/// The process that last answered /api/status.
+let lastInstance: string | null = null;
+
+// --- The restart overlay -------------------------------------------------------------------------------
+// A restart or an update the operator asked for covers the page until the bridge is back: the page is
+// about to be stale or reloaded, and edits made meanwhile would be made against a process that is going.
+let restartBox: any = null;
+let restartFrom: string | null = null;
+let restartTimer: any = null;
+let restartParts: { title: any, elapsed: any, dismiss: any } | null = null;
+
+function showRestartOverlay(why: string) {
+  restartFrom = lastInstance;
+  const started = Date.now();
+  if (!restartBox) {
+    restartBox = el('div', { class: 'restart-overlay', role: 'alertdialog', 'aria-live': 'polite' });
+    const box = el('div', { class: 'restart-box' });
+    const title = el('div', { class: 'restart-title' });
+    const elapsed = el('div', { class: 'restart-elapsed' });
+    const dismiss = el('button', { class: 'ghost restart-dismiss', text: 'Dismiss' });
+    dismiss.onclick = () => hideRestartOverlay();
+    box.append(el('div', { class: 'restart-spinner' }), title,
+      el('div', { class: 'restart-line', text: 'Waiting for the bridge to come back.' }), elapsed, dismiss);
+    restartBox.appendChild(box);
+    document.body.appendChild(restartBox);
+    restartParts = { title, elapsed, dismiss };
+  }
+  const parts = restartParts!;
+  parts.title.textContent = why;
+  const tick = () => {
+    const secs = Math.round((Date.now() - started) / 1000);
+    parts.elapsed.textContent = secs < 90 ? `${secs} s` : `${secs} s — taking longer than expected`;
+    // Never a trap: past half a minute the page can be used again, restart or not.
+    parts.dismiss.hidden = secs < 30;
+  };
+  tick();
+  clearInterval(restartTimer);
+  restartTimer = setInterval(tick, 1000);
+}
+
+function hideRestartOverlay() {
+  clearInterval(restartTimer);
+  restartTimer = null;
+  restartFrom = null;
+  restartBox?.remove();
+  restartBox = null;
+  restartParts = null;
+}
 
 /// Poll until the bridge answers again, then carry on where we left off.
 function watchForReturn() {
@@ -155,6 +203,9 @@ function watchForReturn() {
     // While it is away this throws (connection refused) or answers with an error page; both mean "not yet".
     try { const r: any = await api('/api/status'); body = r && r.ok ? r.body : null; } catch { body = null; }
     if (!body || !body.version) return;
+    // A restart that was asked for is over when a different process answers. In a rolling update the old
+    // one keeps answering until the new one takes over; that is not the bridge coming back.
+    if (restartFrom && body.instance && body.instance === restartFrom) return;
     clearInterval(returnWatch);
     returnWatch = null;
     watchingForReturn = false;
@@ -167,6 +218,7 @@ function watchForReturn() {
 /// The bridge answered. Reload when it is a different build; otherwise just bring the page up to date.
 function cameBack(body: any) {
   restartFinished();
+  hideRestartOverlay();
   renderStatus(body);
 
   const now = body.version || '';
@@ -195,6 +247,7 @@ function renderStatus(body: any) {
   // What this page was loaded against. A restart that comes back on a different build means the assets in
   // this tab are the old ones, and no amount of reconnecting fixes that.
   if (!bootVersion && body.version) bootVersion = body.version;
+  if (body.instance) lastInstance = body.instance;
   set('st-version', e => { e.textContent = 'v' + (body.version || '?'); e.title = body.configSource ? 'Config source: ' + body.configSource : ''; });
   set('st-mqtt', e => {
     e.className = 'pill ' + (body.mqttConnected ? 'good' : 'bad');
@@ -234,7 +287,7 @@ function initLiveIndicator() {
     idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
   };
   // Both ways the bridge can go away: one we asked for, and one we only notice by the stream dropping.
-  onExpectRestart(watchForReturn);
+  onExpectRestart(() => { showRestartOverlay(expectedRestart() || 'Restarting'); watchForReturn(); });
   onRealtimeState(s => {
     if (s === 'down') watchForReturn();
     if (!pill) return;

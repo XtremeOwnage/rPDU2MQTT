@@ -51,7 +51,7 @@ public sealed class EnergyStoreReaderService : BackgroundService
         {
             do
             {
-                try { target.LoadTotals(); }
+                try { target.LoadTotals(mirror: true); }
                 catch (Exception ex) { Log.Debug($"Could not refresh the energy totals: {ex.Message}"); }
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
