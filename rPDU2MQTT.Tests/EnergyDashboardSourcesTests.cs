@@ -11,8 +11,10 @@ namespace rPDU2MQTT.Tests;
 /// </summary>
 public class EnergyDashboardSourcesTests
 {
+    // The builder says which total each node counts toward; with no Balance configured that is its kind.
     private static FlowGraph Graph(params FlowNode[] nodes) =>
-        new(nodes, System.Array.Empty<FlowLink>(), "realpower", "W");
+        new(nodes.Select(n => n with { Balance = EnergyBalance.RoleOf(null, n.Id, n.Kind, n.Within) }).ToArray(),
+            System.Array.Empty<FlowLink>(), "realpower", "W");
 
     // A resolver over a fixed (id, direction) -> entity_id table; anything absent is "no stat in HA".
     private static System.Func<string, EnergyDirection, string?> Stats(params (string id, EnergyDirection dir, string entity)[] rows) =>

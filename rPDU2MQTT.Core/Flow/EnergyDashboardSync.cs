@@ -66,7 +66,7 @@ public static class EnergyDashboardSync
     }
 
     /// <summary>
-    /// The kind-tagged flow nodes (<c>solar</c> / <c>battery</c> / <c>grid</c>) mapped onto Home Assistant's
+    /// The flow nodes the balance counts as <c>solar</c> / <c>battery</c> / <c>grid</c> mapped onto Home Assistant's
     /// Energy-Dashboard <c>energy_sources</c> — the grid/solar/battery buckets, as opposed to the "individual
     /// devices" list <see cref="BuildDeviceConsumption"/> fills. This is the roll-up that makes HA's dashboard
     /// actually reflect the system, not just tally sub-loads (#energy-rollup).
@@ -89,14 +89,13 @@ public static class EnergyDashboardSync
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
         {
             if (include is not null && !include(node)) continue;
-            // A node another one already counts — an MPPT string beneath the PV total it is grouped from —
-            // would be the same production a second time on the dashboard (#491).
-            if (node.Within is { Length: > 0 } holder && graph.Nodes.Any(n => string.Equals(n.Id, holder, StringComparison.OrdinalIgnoreCase)))
-                continue;
+            // Which total a node is in comes from the Balance (or, without one, its kind — once, so an MPPT
+            // string beneath the PV total it is grouped from is not the same production twice, #491). Home is
+            // not a source: Home Assistant works the home out from the sources itself.
             var outStat = statFor(node.Id, EnergyDirection.Out);
             var inStat = statFor(node.Id, EnergyDirection.In);
             var power = powerFor?.Invoke(node.Id);   // signed power sensor (positive supplying); optional
-            switch (node.Kind?.ToLowerInvariant())
+            switch (node.Balance)
             {
                 case "solar" when !string.IsNullOrEmpty(outStat):
                     var solar = new JsonObject { ["type"] = "solar", ["stat_energy_from"] = outStat };

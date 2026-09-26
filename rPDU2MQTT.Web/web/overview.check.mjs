@@ -12,15 +12,15 @@ const fail = (m) => { console.error('overview check FAILED: ' + m); process.exit
 // Solar is producing, the grid is importing, the battery is bound but nothing reports its charge, and
 // there is no reading at all for the load.
 const power = { ok: true, units: 'W', nodes: [
-  { id: 'solar', label: 'Solar', kind: 'solar', value: 4820 },
-  { id: 'grid', label: 'Grid', kind: 'grid', value: 1310 },
-  { id: 'battery', label: 'Battery', kind: 'battery', value: 0 },
+  { id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 4820 },
+  { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 1310 },
+  { id: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', value: 0 },
 ] };
 const energy = { ok: true, units: 'kWh', nodes: [
-  { id: 'solar', label: 'Solar', kind: 'solar', value: 28.9 },
-  { id: 'grid', label: 'Grid', kind: 'grid', value: 23 },
-  { id: 'grid#in', label: 'Grid (export)', kind: 'grid', value: 4.2 },
-  { id: 'battery', label: 'Battery', kind: 'battery', value: 0 },
+  { id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 28.9 },
+  { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 23 },
+  { id: 'grid#in', label: 'Grid (export)', kind: 'grid', balance: 'grid', value: 4.2 },
+  { id: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', value: 0 },
 ] };
 let board = { ok: true, cards: [
   { id: 'mqtt', level: 'good', title: 'MQTT', state: 'Connected', detail: '' },
@@ -37,8 +37,8 @@ const n = 96;
 const day = { ok: true, units: 'W', stepSeconds: 900,
   at: Array.from({ length: n }, (_, i) => new Date(Date.now() - (n - i) * 900e3).toISOString()),
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: Array.from({ length: n }, (_, i) => Math.max(0, Math.round(9600 * Math.sin(Math.PI * (i - 24) / 48)))) },
-    { node: 'battery', label: 'Battery', kind: 'battery', values: Array.from({ length: n }, (_, i) => i === 10 ? null : 0) },
+    { node: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', values: Array.from({ length: n }, (_, i) => Math.max(0, Math.round(9600 * Math.sin(Math.PI * (i - 24) / 48)))) },
+    { node: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', values: Array.from({ length: n }, (_, i) => i === 10 ? null : 0) },
   ] };
 
 const { sandbox, getEl } = makeDom({

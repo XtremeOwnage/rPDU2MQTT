@@ -584,14 +584,22 @@ public static class FlowGraphBuilder
         var shown = label.Keys.Where(id => wired.Contains(id) || leaf.ContainsKey(id)).ToList();
         // What already counts each of them, so a total by kind adds the same energy once (#491).
         var topology = FlowTopology.For(data, flow);
+        var within = shown.ToDictionary(id => id, id => CountOnce.CountedBy(flow, id, shown, topology), StringComparer.OrdinalIgnoreCase);
         var nodes = shown
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
                                        ValueOf(id), ImbalanceOf(id), DerivationOf(id),
                                        tags.TryGetValue(id, out var t) ? t : null, ThroughputOf(id),
-                                       Unavailable(id), CountOnce.CountedBy(flow, id, shown, topology)))
+                                       Unavailable(id), within[id])
+            {
+                // A return lane counts toward its node's total, and is judged by what holds that node.
+                Balance = EnergyBalance.RoleOf(flow, id, KindOf(id), within.TryGetValue(BaseOf(id), out var holder) ? holder : within[id]),
+            })
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new FlowGraph(nodes, links, metric, units);
+
+        static string BaseOf(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal) ? id[..^FlowMetricKey.InSuffix.Length] : id;
+        string KindOf(string id) => kind.TryGetValue(BaseOf(id), out var bk) ? bk : kind.TryGetValue(id, out var k2) ? k2 : "node";
     }
 }

@@ -5,6 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
+import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
 import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
@@ -401,6 +402,9 @@ export function openRenameDialog(node: any, flow: any, existingIds: Set<string>,
     const from = node.Id;
     node.Id = next;
     links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // It keeps its place in the energy balance and in any group that holds it.
+    renameInBalance(flow, from, next);
+    (flow.Groups || []).forEach((g: any) => { g.Members = (g.Members || []).map((m: string) => m === from ? next : m); });
     // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
     Object.keys(parents).forEach(child => {
       if (parents[child] === from) parents[child] = next;
@@ -441,6 +445,18 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   kindSel.value = node.Kind || 'node';
   kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
   grid.appendChild(field('Kind', kindSel));
+
+  // What it counts toward is not what it is: stored in EnergyFlow.Balance, so the Balance page and this
+  // field are one setting and a node sits under one total at most.
+  const flowCfg = ensure(state.data, 'EnergyFlow', {});
+  const roleSel = el('select') as HTMLSelectElement;
+  roleSel.appendChild(el('option', { value: '', text: 'Nothing' }));
+  BALANCE_ROLES.forEach(([role, , label]) => roleSel.appendChild(el('option', { value: role, text: label })));
+  roleSel.value = balanceRoleOf(flowCfg, node.Id);
+  roleSel.onchange = () => setBalanceRole(flowCfg, node.Id, roleSel.value);
+  grid.appendChild(field('Counts toward', roleSel,
+    'Which of the site’s Solar, Grid, Battery or Home totals this node is part of — the same list as the Balance page. '
+    + 'An MPPT string whose PV total is already counted is Nothing.'));
 
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });

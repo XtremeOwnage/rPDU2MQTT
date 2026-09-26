@@ -8,6 +8,7 @@ import { renderImportPanel } from '../node-templates.js';
 import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
 import { tagInput } from '../tags.js';
+import { renameInBalance } from './balance.js';
 
 export function flowCandidates(lastGraph: any, customNodes: any[]) {
   const cand = new Map<string, any>();
@@ -313,6 +314,8 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
       for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      // A deleted node is no longer part of any total.
+      renameInBalance(flow, n.Id, null);
       if (editing.id === n.Id) editing.id = null;
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();

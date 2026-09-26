@@ -521,6 +521,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             static (string Id, string Suffix) Lane(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal)
                 ? (id[..^FlowMetricKey.InSuffix.Length], FlowMetricKey.InSuffix) : (id, "");
             var ids = drawn.Select(s => Lane(s.node).Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            // The total each counts toward, from the same rule the live graph uses: a return lane is its node's.
+            var balance = shape.Nodes.Where(n => !n.Synthetic)
+                .ToDictionary(n => n.Id, n => n.Balance, StringComparer.OrdinalIgnoreCase);
             var series = drawn
                 .Select(s =>
                 {
@@ -530,6 +533,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     {
                         s.node, s.label, s.kind, s.tags, s.values,
                         within = holder is null ? null : holder + suffix,
+                        balance = balance.GetValueOrDefault(baseId),
                     };
                 })
                 .ToList();

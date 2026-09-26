@@ -1703,3 +1703,17 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .diag-storage td.use-low { color: var(--warn); font-weight: 600; }
 .diag-storage td.use-full { color: var(--bad); font-weight: 600; }
 .diag-warn { font-weight: 600; }
+
+/* The energy balance: the nodes each headline total is made of. */
+.balance-note { margin: 8px 0 14px; padding: 10px 14px; border: 1px dashed var(--line); border-radius: var(--r-sm); color: var(--muted); }
+.balance-note ul { margin: 6px 0 10px; padding-left: 18px; }
+.balance-role { margin: 0 0 14px; padding: 10px 14px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.balance-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.balance-head h3 { margin: 0; font-size: 15px; }
+.balance-total { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; }
+.balance-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.balance-chip { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel2); font-size: 13px; }
+.balance-chip.is-missing { border-color: var(--bad); color: var(--bad); }
+.balance-val { color: var(--faint); font-family: var(--mono); font-size: 12px; }
+.balance-x { background: none; border: 0; padding: 0 6px; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; }
+.balance-x:hover { color: var(--bad); }

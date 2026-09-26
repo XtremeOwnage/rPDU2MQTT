@@ -31,9 +31,9 @@ const cfg = {
 const graph = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
-    { id: 'solar', label: 'Solar', kind: 'solar', value: 4600 },
-    { id: 'grid', label: 'Grid', kind: 'grid', value: 7000 },
-    { id: 'battery', label: 'Battery', kind: 'battery', value: 1200 },
+    { id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 4600 },
+    { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 7000 },
+    { id: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', value: 1200 },
   ],
   links: [],
 };
