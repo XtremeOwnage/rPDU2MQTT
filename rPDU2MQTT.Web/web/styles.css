@@ -546,7 +546,11 @@
     border:1px solid var(--warn, #d08700); border-left-width:3px; border-radius:6px;
     padding:8px 10px; margin:0 0 8px; background:color-mix(in srgb, var(--warn, #d08700) 8%, transparent);
   }
-  .flow-contradiction > strong { color:var(--warn, #d08700); font-size:12px; }
+  .flow-contradiction > strong, .flow-banner-head > strong { color:var(--warn, #d08700); font-size:12px; }
+  /* Folded to its headline until opened: one line over the diagram, not half a phone's screen. */
+  .flow-contradiction:not(.is-open) { padding:4px 10px; }
+  .flow-banner-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .flow-banner-toggle { padding:1px 10px; font-size:11px; flex:none; }
 
   /* A row of controls joined into one: shared borders, only the outer corners rounded. */
   .input-group { display:inline-flex; align-items:stretch; }
