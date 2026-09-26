@@ -96,6 +96,29 @@ public class LocalHistoryProviderTests : IDisposable
         Assert.Equal([100d, 200, 300, 400, 500], series.Select(s => s["grid"]).ToArray());
     }
 
+    /// <summary>
+    /// Everything the build understands is recorded, not a list someone retyped: a metric added to the
+    /// bridge and left out here would be missing from the history with nothing to say so.
+    /// </summary>
+    [Fact]
+    public void EveryMetricTheBridgeUnderstandsIsStored()
+    {
+        var cfg = Configured(root);
+        // One of each, all on the same node.
+        var live = new Live(rPDU2MQTT.Core.Flow.FlowUnits.Metrics
+            .Select((m, i) => (m, i)).ToDictionary(x => $"grid|{x.m}", x => (double)(x.i + 1)));
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+
+        var stored = new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
+
+        Assert.Equal(rPDU2MQTT.Core.Flow.FlowUnits.Metrics.Length, stored);
+        foreach (var (metric, i) in rPDU2MQTT.Core.Flow.FlowUnits.Metrics.Select((m, i) => (m, i)))
+            Assert.Equal(i + 1, store.ValueAt("grid", metric, At(0), At(1)));
+        // …including the ones a hardcoded list forgot: the power factor, a percentage, a temperature.
+        foreach (var metric in new[] { "powerfactor", "percent", "temperature" })
+            Assert.False(double.IsNaN(store.ValueAt("grid", metric, At(0), At(1))), $"{metric} was not stored");
+    }
+
     /// <summary>A battery's charge and a grid's export are stored as their own series, as they are exported.</summary>
     [Fact]
     public void TheReturnLaneIsASeriesOfItsOwn()

@@ -20,9 +20,13 @@ namespace rPDU2MQTT.Services;
 public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live, LocalSeriesStore store,
                                               ISnapshotCache? snapshots = null) : BackgroundService
 {
-    /// <summary>What is worth storing for every node. A metric nothing reports costs nothing: it is skipped.</summary>
-    private static readonly string[] Metrics =
-        ["realpower", "apparentpower", "current", "voltage", "frequency", "energy", "energy_d", "soc"];
+    /// <summary>
+    /// Every metric this build understands, read from the one table that defines them: power, apparent
+    /// power, energy, the day's energy, current, voltage, frequency, power factor, state of charge, any
+    /// other percentage, and temperature. Retyping the list here is how a metric gets added to the bridge
+    /// and silently not recorded. A metric a node does not report costs nothing: it is skipped.
+    /// </summary>
+    private static string[] Metrics => FlowUnits.Metrics;
 
     /// <summary>How often the coarser tiers are filled and old chunks dropped.</summary>
     private static readonly TimeSpan Housekeeping = TimeSpan.FromMinutes(5);

@@ -499,6 +499,10 @@ chunk of time. There is no index and nothing to query: a reading's place in a fi
 (`(when − start) / interval`), so a window is a seek and a sequential read, and the whole database is a
 directory you can copy, tar or mount read-only.
 
+- **Every metric the bridge understands** is recorded for every node that reports one: power, apparent power,
+  energy, the day's energy, current, voltage, frequency, power factor, state of charge, any other percentage,
+  and temperature — plus the return lanes (battery charge, grid export) as series of their own. A metric a
+  node does not report is not stored for it, and costs nothing.
 - **A slot nobody wrote is "no reading"**, stored as NaN. Unknown is never a zero, in the files or out of them.
 - **Four resolutions, each kept for as long as you choose.** The readings as they arrive
   (`LocalRawKeepDays`), a minute at a time (`LocalMinuteKeepDays`), an hour (`LocalHourKeepDays`), and a day
