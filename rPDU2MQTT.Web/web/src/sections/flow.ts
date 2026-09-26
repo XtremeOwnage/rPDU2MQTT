@@ -95,10 +95,15 @@ export function addFlowSection(nav: any, sections: any) {
   metricSel.onchange = () => { load(); showDayNote(); };
   // Filled by draw(), which knows which nodes can be drilled into.
   const drillSlot = el('span', { class: 'flow-drill-slot' });
+  // Two ways to look at the same flow: which way it goes (Sankey), or what is using it (sunburst).
+  const modeSel = el('select', { title: 'How the flow is drawn.' }) as HTMLSelectElement;
+  [['sankey', 'Sankey'], ['sunburst', 'Sunburst']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
+  try { modeSel.value = localStorage.getItem('rpdu-flow-mode') === 'sunburst' ? 'sunburst' : 'sankey'; } catch { modeSel.value = 'sankey'; }
+  modeSel.onchange = () => { try { localStorage.setItem('rpdu-flow-mode', modeSel.value); } catch { /* this session only */ } refit = true; redrawBoth(); };
   const historyBtn = btn('History ▾');
   const viewBtn = btn('View ▾');
   viewBtn.title = 'Hide empty/small/no-data nodes, unmeasured load, animation, routing, groups and tags.';
-  bar.append(metricSel, drillSlot, instSel.wrap, historyBtn, viewBtn, refresh, count, dayNote);
+  bar.append(modeSel, metricSel, drillSlot, instSel.wrap, historyBtn, viewBtn, refresh, count, dayNote);
   head.appendChild(bar);
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
@@ -351,6 +356,25 @@ export function addFlowSection(nav: any, sections: any) {
     const links = folded.links;
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
+
+    if (modeSel.value === 'sunburst') {
+      if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
+      const sb = drawSunburst(nodes, links, {
+        units: graph.units || '',
+        onOpen: (id: string) => drill(id),
+        // Out one level: to what feeds the node drilled into, or to the whole diagram.
+        onOut: () => drill(drillTo ? ((whole.links || []).find((l: any) => l.target === drillTo)?.source || null) : null),
+      });
+      stage = el('div', { class: 'flow-stage sunburst-stage' }, sb, menu.el);
+      wrap.appendChild(stage);
+      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
+        text: 'Click an arc to centre on it · click the middle to go back out.' }));
+      zoom = null;
+      refit = false;
+      count.textContent = `${nodes.length} node(s)`;
+      wrap.style.minHeight = '';
+      return;
+    }
 
     const units = graph.units || '';
     // Which metric is actually on screen.
