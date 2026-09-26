@@ -39,6 +39,9 @@ const asked = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/flow?') || url.endsWith('/api/flow')) asked.push(url);
+    if (url.includes('/api/history/store'))
+      return { ok: true, path: '/data/history', fromEnvironment: true, recording: true, series: 42, bytes: 28 * 1024 * 1024,
+               tiers: [{ name: 'raw', intervalSeconds: 10, keepDays: 7 }, { name: 'minute', intervalSeconds: 60, keepDays: 90 }] };
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
       : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, History: { Enabled: true } }
@@ -239,6 +242,14 @@ if (keepFields.some(f => hidden(f))) fail('a retention setting is hidden');
 if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while the bridge keeps its own history');
 if (!query(historySection, '.field', true).some(f => f.textContent.includes('LocalEnabled')))
   fail('there is no way to say whether the bridge keeps its own copy of the readings');
+
+// An empty LocalPath resolves at runtime, so the page says what it resolved to rather than showing a blank
+// box on a bridge that is writing readings somewhere.
+const whereText = query(historySection, '.feature-pointer', true).map(d => d.textContent || '').join(' | ');
+if (!/\/data\/history/.test(whereText)) fail(`the page does not say where the readings are being written: ${whereText}`);
+if (!/RPDU2MQTT_HISTORY_DIRECTORY/.test(whereText)) fail('the page does not say the directory came from the deployment');
+if (!/42 series/.test(whereText) || !/28\.0 MB/.test(whereText)) fail(`the page does not say how much is stored: ${whereText}`);
+if (!/raw 7d/.test(whereText)) fail(`the page does not say what is kept: ${whereText}`);
 
 const provider = query(historySection, 'select', true)[0];
 if (!provider) fail('no provider control on the History page');

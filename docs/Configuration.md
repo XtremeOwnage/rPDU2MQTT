@@ -517,7 +517,9 @@ directory you can copy, tar or mount read-only.
 - **Roughly 1 GB a year** for two hundred series read every ten seconds, with the defaults.
 
 Put it on a volume. The Helm chart does this by default (`history.persistence.enabled`, mounted at
-`/data/history`); anywhere else and the readings go with the container at the next restart. A read-only
+`/data/history`) and passes that path as `RPDU2MQTT_HISTORY_DIRECTORY`; anywhere else and the readings go
+with the container at the next restart. `LocalPath` overrides it when set — left empty, the History page
+says which directory is in use, how many series are in it and how large it is. A read-only
 mount is reported by the backend test rather than discovered at the first sweep.
 
 The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
