@@ -112,20 +112,38 @@ public class LocalHistoryProviderTests : IDisposable
         Assert.Equal(450, found["grid#in"]);
     }
 
+    /// <summary>
+    /// Recording is a destination, not a backend. A store only written while it is also the chosen backend
+    /// is empty on the day someone switches to it — which is the day they want a year of readings.
+    /// </summary>
     [Fact]
-    public void NothingIsStoredWhenAnotherBackendIsChosen()
+    public void ReadingsAreKeptWhateverThePagesAreReadingFrom()
     {
         var cfg = Configured(root);
         cfg.History.Provider = "prometheus";
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var live = new Live(new() { ["grid|realpower"] = 800 });
 
-        // The writer only runs for its own backend; the sweep itself is what a test can call directly, so
-        // the router is what says who answers.
-        var router = new FlowHistoryRouter(new HttpClient(), cfg, store);
-        Assert.Equal("prometheus", router.Id);
+        var stored = new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        cfg.History.Provider = "local";
-        Assert.Equal("local", router.Id);
+        Assert.Equal(1, stored);
+        Assert.Equal(800, store.ValueAt("grid", "realpower", At(0), At(1)));
+        // …while the pages still read from the backend that was chosen.
+        Assert.Equal("prometheus", new FlowHistoryRouter(new HttpClient(), cfg, store).Id);
+    }
+
+    [Fact]
+    public void TurningTheStoreOffIsWhatStopsItRecording()
+    {
+        var cfg = Configured(root);
+        cfg.History.LocalEnabled = false;
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var writer = new LocalHistoryWriterService(cfg, new Live(new() { ["grid|realpower"] = 800 }), store);
+
+        // The service does nothing at all while it is off; the sweep is what a test drives directly.
+        Assert.False(writer.Recording);
+        cfg.History.LocalEnabled = true;
+        Assert.True(writer.Recording);
     }
 
     /// <summary>

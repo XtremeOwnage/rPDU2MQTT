@@ -31,7 +31,11 @@ public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live,
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!Local) return;
+        if (!Recording)
+        {
+            Log.Information("Local history: not recording — History.LocalEnabled is off, so nothing is kept here.");
+            return;
+        }
 
         var every = TimeSpan.FromSeconds(Math.Max(1, cfg.EnergyFlow.Aggregation.SampleIntervalSeconds));
         Log.Information($"Local history: storing every node's readings in {store.Root} every {every.TotalSeconds:0}s "
@@ -50,8 +54,11 @@ public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live,
         catch (OperationCanceledException) { /* shutting down */ }
     }
 
-    private bool Local => cfg.History.Enabled
-        && string.Equals(cfg.History.Provider, "local", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Recording is a destination of its own: the readings are kept whatever the pages are reading from.
+    /// A store only written while it is also the chosen backend is empty on the day someone chooses it.
+    /// </summary>
+    internal bool Recording => cfg.History.LocalEnabled;
 
     /// <summary>One pass: what every node reads now, stored. Internal so a test can drive it against a clock.</summary>
     internal int Sweep(DateTime now)

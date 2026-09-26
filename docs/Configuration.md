@@ -477,7 +477,8 @@ The Flow, Energy and Trends pages read past readings through one backend, chosen
 ```yaml
 History:
   Enabled: true
-  Provider: local          # local | prometheus | emoncms | homeassistant
+  Provider: local          # which backend the pages READ from
+  LocalEnabled: true       # whether the bridge KEEPS its own copy — on by default, whatever it reads from
   LocalPath: ''            # empty: the directory the deployment mounted, else one beside the program
   LocalRawKeepDays: 7        # as they arrive
   LocalMinuteKeepDays: 90    # a minute at a time
@@ -486,7 +487,13 @@ History:
   ToleranceSeconds: 30
 ```
 
-**`local` is the bridge's own store, and the default.** Every node's readings are written on the same sweep
+**Recording and reading are separate.** `LocalEnabled` says whether the bridge keeps its own copy of every
+reading; `Provider` says which backend the pages read from. Keeping the copy is on by default and goes on
+whatever is chosen, because a store that is only written while it is also the chosen backend is empty on the
+day someone switches to it — which is the day they wanted a year of readings. Turn `LocalEnabled` off and the
+bridge stores nothing of its own.
+
+**`local` is the bridge's own store, and the default to read from.** Every node's readings are written on the same sweep
 that already reads them, into a directory of fixed-interval files — one per series, per resolution, per
 chunk of time. There is no index and nothing to query: a reading's place in a file is arithmetic
 (`(when − start) / interval`), so a window is a seek and a sequential read, and the whole database is a

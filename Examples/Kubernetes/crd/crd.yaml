@@ -520,6 +520,9 @@ spec:
                   PrometheusUrl:
                     type: string
                     description: Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.
+                  LocalEnabled:
+                    type: boolean
+                    description: "Keep a copy of every reading in the bridge's own store, whether or not it is the backend the pages read from. On by default: a store nothing wrote to is empty on the day you want it."
                   LocalPath:
                     type: string
                     description: 'Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.'

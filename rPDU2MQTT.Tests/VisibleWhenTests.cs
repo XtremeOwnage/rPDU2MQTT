@@ -62,18 +62,14 @@ public class VisibleWhenTests
         Assert.Equal("Provider", url.VisibleWhen!.Key);
         Assert.Equal(["prometheus"], url.VisibleWhen.Values);
 
-        // Where the bridge keeps its own readings, and for how long, belongs to the local backend.
+        // Where the bridge keeps its own readings, and for how long, is not a backend's setting: it records
+        // whatever the pages read from, so hiding those behind the provider would hide a store that is still
+        // being written to.
         var own = history.Properties!.Where(p => p.Key.StartsWith("Local", StringComparison.Ordinal)).ToList();
         Assert.NotEmpty(own);
-        foreach (var setting in own)
-        {
-            Assert.Equal("Provider", setting.VisibleWhen!.Key);
-            Assert.Equal(["local"], setting.VisibleWhen.Values);
-        }
+        Assert.DoesNotContain(own, p => p.VisibleWhen is not null);
 
         // The rest of the page applies whichever backend is chosen, so nothing else is conditional.
-        Assert.DoesNotContain(
-            history.Properties!.Where(p => p.Key != "PrometheusUrl" && !p.Key.StartsWith("Local", StringComparison.Ordinal)),
-            p => p.VisibleWhen is not null);
+        Assert.DoesNotContain(history.Properties!.Where(p => p.Key != "PrometheusUrl"), p => p.VisibleWhen is not null);
     }
 }

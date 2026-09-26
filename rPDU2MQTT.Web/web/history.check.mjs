@@ -231,12 +231,14 @@ const keepFields = ['LocalRawKeepDays', 'LocalMinuteKeepDays', 'LocalHourKeepDay
     return field;
   });
 
-// Unset provider means the default, which is the bridge's own store: its directory is what is shown, and
-// another backend's settings are not.
-if (hidden(localField)) fail('the local store\'s directory is hidden while it is the provider');
+// Recording is a destination, not a backend: the store's own settings are on the page whatever the pages
+// read from, while a backend's settings belong to that backend.
+if (hidden(localField)) fail('the local store\'s directory is hidden');
 if (!hidden(promField)) fail('the Prometheus URL shows while the bridge keeps its own history');
-if (keepFields.some(f => hidden(f))) fail('a retention setting is hidden while the bridge keeps its own history');
+if (keepFields.some(f => hidden(f))) fail('a retention setting is hidden');
 if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while the bridge keeps its own history');
+if (!query(historySection, '.field', true).some(f => f.textContent.includes('LocalEnabled')))
+  fail('there is no way to say whether the bridge keeps its own copy of the readings');
 
 const provider = query(historySection, 'select', true)[0];
 if (!provider) fail('no provider control on the History page');
@@ -244,8 +246,9 @@ provider.value = 'prometheus';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
 if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
-if (!hidden(localField)) fail('the local store\'s directory shows while Prometheus is the provider');
-if (keepFields.some(f => !hidden(f))) fail('a retention setting shows while Prometheus is the provider');
+// …and they stay on the page: the readings are kept whatever is being read from.
+if (hidden(localField)) fail('the local store\'s directory went away when another backend was chosen');
+if (keepFields.some(f => hidden(f))) fail('a retention setting went away when another backend was chosen');
 
 provider.value = 'emoncms';
 provider.onchange({});
@@ -262,7 +265,6 @@ if (hidden(promField)) fail('switching back to Prometheus did not bring its URL 
 provider.value = 'local';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
-if (hidden(localField)) fail('switching to the local store did not show where it keeps its readings');
 if (!hidden(promField)) fail('the Prometheus URL stayed on the page after switching to the local store');
 
 // A test button has to end with a verdict. The action toasted `r.body.message`, so an answer carrying no
@@ -280,5 +282,6 @@ if (testBtn.disabled) fail('the test button was left disabled after the test fin
 
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
   + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
-  + 'provider\'s settings \u2014 the bridge\'s own store by default, with a retention setting per resolution '
-  + '\u2014 and says how the test ended');
+  + 'provider\'s settings \u2014 the bridge\'s own store by default \u2014 while the store\'s own settings, a '
+  + 'retention per resolution, stay on the page whatever is read from, since it records either way; and says '
+  + 'how the test ended');
