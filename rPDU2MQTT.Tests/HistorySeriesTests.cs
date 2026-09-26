@@ -116,6 +116,85 @@ public class HistorySeriesTests
         Assert.Equal(42, series[3]["grid"]);   // a reading holds until the next one
     }
 
+    /// <summary>Records how many reads were in flight at once, so "several at a time" can be asserted.</summary>
+    private sealed class Overlapping(Func<string, string> body, TimeSpan hold) : HttpMessageHandler
+    {
+        private int now;
+        public int Peak;
+        public int Reads;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var url = request.RequestUri!.ToString();
+            if (url.Contains("/feed/data.json"))
+            {
+                Interlocked.Increment(ref Reads);
+                var at = Interlocked.Increment(ref now);
+                // Peak is only ever raised, by whichever reader is deepest in at the time.
+                int seen;
+                while (at > (seen = Volatile.Read(ref Peak)) && Interlocked.CompareExchange(ref Peak, at, seen) != seen) { }
+                await Task.Delay(hold, ct);
+                Interlocked.Decrement(ref now);
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body(url)) };
+        }
+    }
+
+    /// <summary>One feed's entry in the list, named the way the reader looks a node's metric up.</summary>
+    private static string FeedEntry(int id, string node) => $"{{\"id\":\"{id}\",\"name\":\"{node}_energy\"}}";
+
+    /// <summary>The feed id a read asked for, so each feed can answer with its own value.</summary>
+    private static int AskedFor(string url) => int.Parse(System.Text.RegularExpressions.Regex.Match(url, "id=(\\d+)").Groups[1].Value);
+
+    /// <summary>
+    /// EmonCMS answers one feed per request, and one after another a hierarchy of any size is seconds of
+    /// waiting before a chart can be drawn. Several feeds are read at once — and every node still lands
+    /// against its own feed's readings, which is what a race would break.
+    /// </summary>
+    [Fact]
+    public async Task EmonCms_ReadsSeveralFeedsAtOnce_AndKeepsEachNodesOwnReadings()
+    {
+        var steps = Day(3);
+        var nodes = Enumerable.Range(1, 16).Select(i => $"n{i}").ToArray();
+        var feeds = "[" + string.Join(",", nodes.Select((n, i) => FeedEntry(i + 1, n))) + "]";
+        // Each feed answers with its own id as the value, so a reading landing on the wrong node is visible.
+        var handler = new Overlapping(url => url.Contains("/feed/list.json")
+            ? feeds
+            : "[" + string.Join(",", steps.Select(st => $"[{new DateTimeOffset(st).ToUnixTimeMilliseconds()},{AskedFor(url)}]")) + "]",
+            TimeSpan.FromMilliseconds(40));
+        var history = new EmonCmsFlowHistory(new HttpClient(handler), EmonConfigured());
+
+        var series = await history.SeriesAsync(nodes, "energy", steps, CancellationToken.None);
+
+        Assert.Equal(nodes.Length, handler.Reads);
+        Assert.True(handler.Peak > 1, $"the feeds were read one after another (peak {handler.Peak} in flight)");
+        // …and not all at once either: a backend keeping its feeds in MySQL is not helped by fifty at a time.
+        Assert.True(handler.Peak <= 8, $"{handler.Peak} reads were in flight at once");
+        for (var i = 0; i < nodes.Length; i++)
+            Assert.Equal(i + 1, series[0][nodes[i]]);
+    }
+
+    /// <summary>The same for a single instant: the flow diagram at a past moment asks for every node at once.</summary>
+    [Fact]
+    public async Task EmonCms_ReadsSeveralFeedsAtOnce_ForAnInstant()
+    {
+        var at = new DateTime(2026, 8, 20, 5, 0, 0, DateTimeKind.Utc);
+        var nodes = Enumerable.Range(1, 12).Select(i => $"n{i}").ToArray();
+        var feeds = "[" + string.Join(",", nodes.Select((n, i) => FeedEntry(i + 1, n))) + "]";
+        var handler = new Overlapping(url => url.Contains("/feed/list.json")
+            ? feeds
+            : $"[[{new DateTimeOffset(at).ToUnixTimeMilliseconds()},{AskedFor(url)}]]",
+            TimeSpan.FromMilliseconds(40));
+        var history = new EmonCmsFlowHistory(new HttpClient(handler), EmonConfigured());
+
+        var found = await history.ValuesAtAsync(nodes, "energy", at, CancellationToken.None);
+
+        Assert.Equal(nodes.Length, found.Count);
+        Assert.True(handler.Peak > 1, $"the feeds were read one after another (peak {handler.Peak} in flight)");
+        for (var i = 0; i < nodes.Length; i++)
+            Assert.Equal(i + 1, found[nodes[i]]);
+    }
+
     // --- Home Assistant -----------------------------------------------------------------------------
 
     private static Config HassConfigured()

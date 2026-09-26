@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
@@ -13,6 +14,35 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
 {
     private IReadOnlyDictionary<string, string>? feeds;
     private DateTime feedsAt;
+
+    /// <summary>
+    /// How many feeds are read at once. EmonCMS answers one feed per request — there is no endpoint that
+    /// takes a set — so a hierarchy of fifty nodes is fifty round trips, and one after another that is
+    /// seconds of waiting. Several at a time turns it into a fraction of that without burying a backend
+    /// whose feeds are rows in MySQL.
+    /// </summary>
+    private const int AtOnce = 8;
+
+    /// <summary>Read the feeds of `ids` together, `AtOnce` at a time, and give each one's answer to `take`.</summary>
+    private async Task ReadEachAsync<T>(IEnumerable<T> ids, Func<T, string> urlOf, Action<T, string> take, CancellationToken ct)
+    {
+        var answers = new ConcurrentBag<(T Id, string Body)>();
+        await Parallel.ForEachAsync(ids, new ParallelOptions { MaxDegreeOfParallelism = AtOnce, CancellationToken = ct }, async (id, token) =>
+        {
+            try
+            {
+                var response = await http.GetAsync(urlOf(id), token);
+                if (!response.IsSuccessStatusCode) return;
+                answers.Add((id, await response.Content.ReadAsStringAsync(token)));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Debug($"Flow history: EmonCMS read for '{id}' — {ex.Message}");
+            }
+        });
+        // Parsed on one thread: what the readers share is the answers, not the dictionaries they fill.
+        foreach (var (id, body) in answers) take(id, body);
+    }
 
     public string Id => "emoncms";
 
@@ -81,28 +111,20 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
         var from = start - (long)interval * 1000L;
 
         var perStep = steps.Select(_ => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)).ToList();
-        foreach (var node in nodeIds)
-        {
-            var wanted = MetricsHelper.EmonCmsFlowInputName(node, node, "", metric, cfg);
-            if (!list.TryGetValue(wanted, out var id)
-                && !list.TryGetValue($"{node}_{metric}", out id)
-                && !list.TryGetValue(node, out id)) continue;
+        var wanted = nodeIds
+            .Select(node => (Node: node, Feed: FeedFor(list, node, metric)))
+            .Where(x => x.Feed is not null)
+            .ToList();
 
-            var url = $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(id)}&start={from}&end={end}"
-                    + $"&interval={interval}&apikey={Uri.EscapeDataString(key)}";
-            try
+        await ReadEachAsync(wanted,
+            x => $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(x.Feed!)}&start={from}&end={end}"
+               + $"&interval={interval}&apikey={Uri.EscapeDataString(key)}",
+            (x, body) =>
             {
-                var response = await http.GetAsync(url, ct);
-                if (!response.IsSuccessStatusCode) continue;
-                var values = EmonCmsWire.Series(await response.Content.ReadAsStringAsync(ct), at);
+                var values = EmonCmsWire.Series(body, at);
                 for (var i = 0; i < values.Length; i++)
-                    if (values[i] is { } v) perStep[i][node] = v;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Log.Debug($"Flow history: EmonCMS feed {id} for '{node}' over {steps.Count} step(s) — {ex.Message}");
-            }
-        }
+                    if (values[i] is { } v) perStep[i][x.Node] = v;
+            }, ct);
         return perStep.Cast<IReadOnlyDictionary<string, double>>().ToList();
     }
 
@@ -120,34 +142,33 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
         var at = new DateTimeOffset(DateTime.SpecifyKind(atUtc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
         var window = Math.Max(1, cfg.History.ToleranceSeconds) * 1000L;
 
-        foreach (var node in nodeIds)
-        {
-            // The same key the export writes its feed under, then the older bare-node fallback.
-            var wanted = MetricsHelper.EmonCmsFlowInputName(node, node, "", metric, cfg);
-            if (!list.TryGetValue(wanted, out var id)
-                && !list.TryGetValue($"{node}_{metric}", out id)
-                && !list.TryGetValue(node, out id)) continue;
-            var url = $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(id)}&start={at - window}&end={at + window}"
-                    + $"&interval={Math.Max(1, cfg.History.ToleranceSeconds)}&apikey={Uri.EscapeDataString(key)}";
-            try
-            {
-                var response = await http.GetAsync(url, ct);
-                if (!response.IsSuccessStatusCode) continue;
-                if (EmonCmsWire.PointAt(await response.Content.ReadAsStringAsync(ct), at) is { } v)
-                    found[node] = v;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Log.Debug($"Flow history: EmonCMS feed {id} for '{node}' — {ex.Message}");
-            }
-        }
+        var wanted = nodeIds
+            .Select(node => (Node: node, Feed: FeedFor(list, node, metric)))
+            .Where(x => x.Feed is not null)
+            .ToList();
+
+        await ReadEachAsync(wanted,
+            x => $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(x.Feed!)}&start={at - window}&end={at + window}"
+               + $"&interval={Math.Max(1, cfg.History.ToleranceSeconds)}&apikey={Uri.EscapeDataString(key)}",
+            (x, body) => { if (EmonCmsWire.PointAt(body, at) is { } v) found[x.Node] = v; }, ct);
         return found;
+    }
+
+    /// <summary>The feed a node's metric is stored under: the key the export writes, then the older fallbacks.</summary>
+    private string? FeedFor(IReadOnlyDictionary<string, string> list, string node, string metric)
+    {
+        var wanted = MetricsHelper.EmonCmsFlowInputName(node, node, "", metric, cfg);
+        if (list.TryGetValue(wanted, out var id)) return id;
+        if (list.TryGetValue($"{node}_{metric}", out id)) return id;
+        return list.TryGetValue(node, out id) ? id : null;
     }
 
     /// <summary>The feed list, re-read every few minutes: feeds are created rarely, and once per node per view is a lot of calls.</summary>
     private async Task<IReadOnlyDictionary<string, string>> FeedsAsync(string baseUrl, string key, CancellationToken ct)
     {
         if (feeds is not null && DateTime.UtcNow - feedsAt < TimeSpan.FromMinutes(5)) return feeds;
+        // A big installation's list is hundreds of feeds and most of a second; it is read once per window,
+        // not once per node, and what it holds barely changes.
         try
         {
             var response = await http.GetAsync($"{baseUrl}/feed/list.json?apikey={Uri.EscapeDataString(key)}", ct);
