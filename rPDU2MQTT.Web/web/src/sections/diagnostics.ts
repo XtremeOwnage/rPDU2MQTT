@@ -68,7 +68,13 @@ export function addDiagnosticsSection(nav: any, sections: any) {
     }
     const table = el('table', { class: 'ld' });
     const head = el('tr');
-    ['What', 'Directory', 'Holding', 'Files', 'Mount', 'Free', 'Size'].forEach(h => head.appendChild(el('th', { text: h })));
+    // Holding, Files, Free and Size are figures: right-aligned so their digits line up.
+    const num = [false, false, true, true, false, true, true];
+    ['What', 'Directory', 'Holding', 'Files', 'Mount', 'Free', 'Size']
+      .forEach((h, i) => head.appendChild(el('th', { text: h, class: num[i] ? 'num' : '' })));
+    // The warning gets a column of its own, so a flagged row does not carry a cell the others lack.
+    const flagged = entries.some((e: any) => !e.exists || !e.writable);
+    if (flagged) head.appendChild(el('th', { text: 'Status' }));
     table.appendChild(el('thead', {}, head));
     const body = el('tbody');
     entries.forEach((e: any) => {
@@ -83,12 +89,12 @@ export function addDiagnosticsSection(nav: any, sections: any) {
         e.totalBytes ? size(e.freeBytes) : '—',
         e.totalBytes ? size(e.totalBytes) : '—',
       ];
-      cells.forEach(c => row.appendChild(el('td', { text: c })));
+      cells.forEach((c, i) => row.appendChild(el('td', { text: c, class: num[i] ? 'num' : '' })));
       // A mount that is missing or read-only stores nothing, and nothing else on this page says so.
       if (!e.exists || !e.writable) {
         row.classList.add('is-bad');
         row.appendChild(el('td', { class: 'diag-warn', text: !e.exists ? 'does not exist' : 'read-only' }));
-      }
+      } else if (flagged) row.appendChild(el('td'));
       body.appendChild(row);
     });
     table.appendChild(body);

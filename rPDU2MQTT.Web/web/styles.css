@@ -1693,6 +1693,9 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 
 /* Diagnostics: the directories this process writes to. */
 .diag-storage { margin: 4px 0 14px; overflow-x: auto; }
-.diag-storage td { white-space: nowrap; }
+.diag-storage th, .diag-storage td { white-space: nowrap; }
+/* The wrapper scrolls sideways, which makes it the sticky header's container: `top: var(--appbar-h)`
+   then parked the header 56px down inside the table, over the first rows. It is a short table. */
+.diag-storage table.ld th { position: static; }
 .diag-storage tr.is-bad td { color: var(--bad); }
 .diag-warn { font-weight: 600; }

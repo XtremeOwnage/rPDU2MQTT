@@ -73,6 +73,12 @@ if (!cells.includes('9.0 GB') || !cells.includes('10.0 GB')) fail(`free and tota
 const plans = rows.find(r => r.dataset.name === 'Floor plan images');
 if (!plans.classList.contains('is-bad')) fail('a directory that is not there is not marked');
 if (!/does not exist/.test(plans.textContent || '')) fail(`a missing directory reads as: ${plans.textContent}`);
+// Every row has a cell under every header, the flagged one included.
+const headers = query(diag, '.diag-storage th', true).length;
+for (const r of rows) {
+  const n = query(r, 'td', true).length;
+  if (n !== headers) fail(`${r.dataset.name} has ${n} cells under ${headers} headers`);
+}
 
 const debugBox = query(diag, '.diag-debug');
 if (!debugBox) fail('the Debug settings are not on the Diagnostics page');
