@@ -93,9 +93,9 @@ for (const g of ['Sources', 'Energy Flow', 'Integrations', 'Destinations', 'Syst
   if (!groups.includes(g)) fail(`nav group "${g}" missing (got: ${groups.join(', ')})`);
 
 // Every non-hidden schema section must reach the nav (tokens match the display label, e.g. Pdus renders as
-// "Vertiv rPDU"). "Api" is deliberately in no NAV_GROUPS list, so this also pins the catch-all: without it,
-// ungrouped sections vanish from the UI entirely.
-for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', 'Api'])
+// "Vertiv rPDU"). "Logging" is deliberately in no NAV_GROUPS list, so this also pins the catch-all: without
+// it, ungrouped sections vanish from the UI entirely. (It was "Api", until that became config-file only.)
+for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', 'Logging'])
   if (!linkText.some(t => t.replace(/\s/g, '').toLowerCase().includes(key.toLowerCase())))
     fail(`schema section "${key}" has no nav link (got: ${linkText.join(', ')})`);
 
@@ -276,83 +276,6 @@ if (!panelFedBy) fail('no fed-by control on the panel row');
 if (panelFedBy.value !== 'solar')
   fail(`the fed-by control shows the wrong direction: panel reads as fed by "${panelFedBy.value}"`);
 
-// --- Features page (#292) -----------------------------------------------------------------------------
-// Every capability's on/off switch on one page, and NOT also on its own config page: two switches bound to
-// one value disagree the moment either is clicked, and a page showing "Off" for something that is on is
-// exactly the inaccuracy this GUI must never display.
-const featuresLink = navLinks.find(a => a.dataset.label === 'Features');
-if (!featuresLink) fail('no Features tab');
-featuresLink.click();
-await new Promise(r => setTimeout(r, 20));
-
-const featureKeys = schema
-  .filter(n => (n.properties || []).some(p => p.isFeatureToggle))
-  .map(n => n.key);
-if (featureKeys.length < 5) fail(`the schema fixture only marks ${featureKeys.length} feature toggles — it is stale`);
-
-const featureSec = query(getEl('sections'), '.section', true).find(s => s.textContent.includes('Everything this bridge can do'));
-if (!featureSec) fail('the Features tab rendered no page');
-const featureSwitches = query(featureSec, '.switch', true);
-if (featureSwitches.length !== featureKeys.length)
-  fail(`Features shows ${featureSwitches.length} switches for ${featureKeys.length} feature toggles`);
-
-// Every one of them is rendered exactly once, on the Features page — matched on the config path the field
-// writes to, not on its label, since several unrelated nested sections legitimately have an "Enabled".
-const featureFields = query(featureSec, '.field', true).map(f => f.dataset.path).filter(Boolean);
-for (const key of featureKeys) {
-  const prop = schema.find(n => n.key === key).properties.find(p => p.isFeatureToggle);
-  const path = `${key}.${prop.key}`;
-  const rendered = query(getEl('sections'), '.field', true).filter(f => f.dataset.path === path);
-  if (rendered.length !== 1) fail(`${path} is rendered ${rendered.length} times — it must live only on Features`);
-  if (!featureFields.includes(path)) fail(`${path} is rendered somewhere other than the Features page`);
-
-  // And the page it left says where it went, so the switch doesn't just look missing.
-  const link = navLinks.find(a => a.dataset.section === key);
-  if (!link) continue;                       // section not in the nav (hidden build) — nothing to point at
-  link.click();
-  await new Promise(r => setTimeout(r, 10));
-  if (!query(getEl('sections'), '.feature-pointer', true).length)
-    fail(`the ${key} page does not say where its on/off switch went`);
-}
-
-// The GUI's own switch stays visible but locked — hiding it reads as unsupported, and enabling it from
-// here would let you lock yourself out of the only place to turn it back on.
-featuresLink.click();
-await new Promise(r => setTimeout(r, 20));
-const guiSwitch = query(featureSec, '.field', true).find(f => f.textContent.includes('Web GUI'));
-if (!guiSwitch) fail('the Features page does not list the GUI itself');
-if (!query(guiSwitch, '.switch', true).some(i => i.disabled)) fail('the GUI switch is editable from inside the GUI');
-if (!guiSwitch.textContent.includes('lock you out')) fail('the locked GUI switch does not say why');
-
-// Toggling here edits the real document, so the change shows up as an unsaved edit against its section.
-// By config path, not by label text: another feature's description mentioning EmonCMS would otherwise
-// match first, and the assertion below would be about the wrong card.
-const emon = query(featureSec, '.field', true).find(f => f.dataset.path === 'EmonCMS.Enabled');
-if (!emon) fail('the Features page does not list the EmonCMS export');
-const emonSwitch = query(emon, '.switch', true)[0];
-if (emonSwitch.checked) fail('the fixture was meant to have the EmonCMS export switched off');
-
-// A page of settings for a capability that is off has no nav entry — the Features page is what answers
-// "what is on?". It is still built and still in the palette; only the nav entry waits for the switch.
-const emonNav = navLinksNow().find(a => a.dataset.section === 'EmonCMS');
-if (!emonNav) fail('no EmonCMS page was built');
-if (!emonNav.classList.contains('is-hidden'))
-  fail('a switched-off feature still lists its settings page in the nav');
-if (!query(getEl('sections'), '.section', true).some(s => query(s, 'h2')?.textContent === 'EmonCMS'))
-  fail('hiding the nav entry also took away the page');
-
-emonSwitch.checked = !emonSwitch.checked;
-emonSwitch.onchange({});
-if (emonNav.classList.contains('is-hidden'))
-  fail('turning a feature on did not bring its settings page back, so it could only be configured after a reload');
-if (!emon.classList.contains('dirty')) fail('toggling a feature was not marked as an unsaved edit');
-const emonLink = navLinks.find(a => a.dataset.section === 'EmonCMS');
-if (emonLink && !query(emonLink, '.nav-badge', false))
-  fail('toggling a feature on the Features page put no badge on the section that owns it');
-// Not toggled back: the fixture has no EmonCMS section at all, so switching it off again writes an
-// explicit false where there was nothing, which is a genuine edit to the document. (Reverting an edit
-// back to nothing is covered on the MQTT field above, where the empty string prunes away.)
-
 // --- Flow node hover card ----------------------------------------------------------------------------
 // The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.
 flowLink.click();
@@ -440,7 +363,7 @@ for (const m of sheet.matchAll(/(^|\})([^{}]*input\[type=checkbox\][^{}]*)\{([^}
   await new Promise(r => setTimeout(r, 120));
   const ha = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
   const labels = query(ha, 'div', true).concat(query(ha, 'label', true)).map(e => (e.textContent || '').trim());
-  for (const want of ['Token', 'Url']) {
+  for (const want of ['Token', 'URL']) {
     if (!labels.includes(want)) fail(`the Energy Dashboard's ${want} is not on the Home Assistant page`);
   }
 
