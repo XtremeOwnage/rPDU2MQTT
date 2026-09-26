@@ -34,10 +34,10 @@ public class HistoryConfig
     [FeatureToggle]
     public bool Enabled { get; set; }
 
-    [DefaultValue("prometheus")]
-    [Description("Which backend to read from: 'prometheus' or 'emoncms'.")]
-    [AllowedValues("prometheus", "emoncms", "homeassistant")]
-    public string Provider { get; set; } = "prometheus";
+    [DefaultValue("local")]
+    [Description("Where past readings come from: 'local' (kept by the bridge itself, no other service needed), 'prometheus', 'emoncms' or 'homeassistant'.")]
+    [AllowedValues("local", "prometheus", "emoncms", "homeassistant")]
+    public string Provider { get; set; } = "local";
 
     /// <summary>
     /// Base URL of the Prometheus that scrapes this bridge — the server, not the exporter here.
@@ -45,6 +45,29 @@ public class HistoryConfig
     [Description("Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.")]
     [VisibleWhen(nameof(Provider), "prometheus")]
     public string? PrometheusUrl { get; set; }
+
+    [Description("Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.")]
+    [VisibleWhen(nameof(Provider), "local")]
+    [DefaultValue("")]
+    public string LocalPath { get; set; } = "";
+
+    [DefaultValue(7)]
+    [Range(1, 3650)]
+    [Description("How many days of readings are kept at the rate they arrive. Older ones are still there a minute at a time.")]
+    [VisibleWhen(nameof(Provider), "local")]
+    public int LocalRawKeepDays { get; set; } = 7;
+
+    [DefaultValue(90)]
+    [Range(1, 3650)]
+    [Description("How many days are kept a minute at a time.")]
+    [VisibleWhen(nameof(Provider), "local")]
+    public int LocalMinuteKeepDays { get; set; } = 90;
+
+    [DefaultValue(3650)]
+    [Range(1, 36500)]
+    [Description("How many days are kept an hour at a time. Ten years of hourly readings for two hundred series is about 15 MB.")]
+    [VisibleWhen(nameof(Provider), "local")]
+    public int LocalHourKeepDays { get; set; } = 3650;
 
     [DefaultValue(30)]
     [Range(1, 600)]

@@ -380,6 +380,20 @@ valkey:
 # ~1.5 MB limit and rewritten on every save — so they need somewhere of their own. With persistence on, a
 # volume is mounted at mountPath and the bridge stores images there. Leave it off to use an S3-compatible
 # bucket instead (PlanStorage.ObjectStore in the config, secret key in credentials.plansSecretKey).
+# The bridge keeps its own history of every reading (#502) — a directory of fixed-interval files, no other
+# service needed. It is on by default, with a volume, because history that lives in the container is lost at
+# the next restart, which is exactly when someone wants to look at it.
+history:
+  mountPath: /data/history
+  persistence:
+    enabled: true
+    # Use a claim you manage yourself instead of the one this chart creates.
+    existingClaim: ""
+    # About 1 GB per year for two hundred series at ten seconds, with the default retention.
+    size: 5Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
 floorPlans:
   mountPath: /data/plans
   persistence:

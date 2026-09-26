@@ -54,7 +54,7 @@ public class VisibleWhenTests
     }
 
     [Fact]
-    public void ThePrometheusUrlBelongsToThePrometheusProvider()
+    public void EachBackendsOwnSettingsAreShownForThatBackendAlone()
     {
         var history = ConfigSchema.Build().Single(n => n.Key == "History");
         var url = history.Properties!.Single(p => p.Key == "PrometheusUrl");
@@ -62,7 +62,18 @@ public class VisibleWhenTests
         Assert.Equal("Provider", url.VisibleWhen!.Key);
         Assert.Equal(["prometheus"], url.VisibleWhen.Values);
 
-        // The rest of the page applies to both backends, so nothing else is conditional.
-        Assert.DoesNotContain(history.Properties!.Where(p => p.Key != "PrometheusUrl"), p => p.VisibleWhen is not null);
+        // Where the bridge keeps its own readings, and for how long, belongs to the local backend.
+        var own = history.Properties!.Where(p => p.Key.StartsWith("Local", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(own);
+        foreach (var setting in own)
+        {
+            Assert.Equal("Provider", setting.VisibleWhen!.Key);
+            Assert.Equal(["local"], setting.VisibleWhen.Values);
+        }
+
+        // The rest of the page applies whichever backend is chosen, so nothing else is conditional.
+        Assert.DoesNotContain(
+            history.Properties!.Where(p => p.Key != "PrometheusUrl" && !p.Key.StartsWith("Local", StringComparison.Ordinal)),
+            p => p.VisibleWhen is not null);
     }
 }

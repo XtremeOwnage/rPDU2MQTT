@@ -219,15 +219,25 @@ const historySection = query(getEl('sections'), '.section', true).find(s => quer
 const hidden = (elm) => elm.classList.contains('is-hidden');
 const promField = query(historySection, '.field', true).find(f => f.textContent.includes('PrometheusUrl'));
 const emonPointer = query(historySection, '.feature-pointer', true).find(d => d.textContent.includes('EmonCMS history'));
+const localField = query(historySection, '.field', true).find(f => f.textContent.includes('LocalPath'));
 if (!promField) fail('the History page does not render the Prometheus URL at all');
 if (!emonPointer) fail('the History page never points at where EmonCMS is configured');
+if (!localField) fail('the History page does not say where the bridge keeps its own readings');
 
-// Unset provider means the default (prometheus), not "no provider" — its URL still has to be reachable.
-if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
-if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while Prometheus is the provider');
+// Unset provider means the default, which is the bridge's own store: its directory is what is shown, and
+// another backend's settings are not.
+if (hidden(localField)) fail('the local store\'s directory is hidden while it is the provider');
+if (!hidden(promField)) fail('the Prometheus URL shows while the bridge keeps its own history');
+if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while the bridge keeps its own history');
 
 const provider = query(historySection, 'select', true)[0];
 if (!provider) fail('no provider control on the History page');
+provider.value = 'prometheus';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
+if (!hidden(localField)) fail('the local store\'s directory shows while Prometheus is the provider');
+
 provider.value = 'emoncms';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
@@ -238,6 +248,13 @@ provider.value = 'prometheus';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
 if (hidden(promField)) fail('switching back to Prometheus did not bring its URL back');
+
+// …and back to the bridge's own store, which is where a fresh install starts.
+provider.value = 'local';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (hidden(localField)) fail('switching to the local store did not show where it keeps its readings');
+if (!hidden(promField)) fail('the Prometheus URL stayed on the page after switching to the local store');
 
 // A test button has to end with a verdict. The action toasted `r.body.message`, so an answer carrying no
 // message toasted nothing and a fetch that threw never got there — leaving "Testing…" on screen, which
@@ -254,4 +271,4 @@ if (testBtn.disabled) fail('the test button was left disabled after the test fin
 
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
   + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
-  + 'provider\'s settings and says how the test ended');
+  + 'provider\'s settings — the bridge\'s own store by default — and says how the test ended');

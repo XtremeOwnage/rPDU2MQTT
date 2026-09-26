@@ -52,6 +52,8 @@ credentials:
 | `credentials.emoncmsApiKey` | `""` | EmonCMS write key (`RPDU2MQTT_EMONCMS_APIKEY`). |
 | `credentials.apiKey` | `""` | REST API key enabling its write/control endpoints (`RPDU2MQTT_API_KEY`). Required to use control via the API when `kubernetesConfigSource.enabled`, since secrets are stripped from the CR. |
 | `credentials.plansSecretKey` | `""` | Secret access key for an S3-compatible floor plan image store (`RPDU2MQTT_PLANS_SECRET_KEY`). |
+| `history.persistence.enabled` | `true` | Create a PVC for the bridge's own history and mount it at `history.mountPath` (`/data/history`) on every pod. Readings kept anywhere else go with the container the next time it restarts. The claim is kept on uninstall. |
+| `history.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `5Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. About 1 GB per year for two hundred series at the default retention. With `split.enabled` the readings are written by the worker and read by the ui, so give it a class that allows `ReadWriteMany` — or keep history on one pod. |
 | `floorPlans.persistence.enabled` | `false` | Create a PVC for floor plan images and mount it at `floorPlans.mountPath` (`/data/plans`) on the pod serving the GUI. Images never go in the config or CR. The claim is kept on uninstall. |
 | `floorPlans.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `1Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. |
 | `existingSecret` | `""` | Use a Secret you manage instead of creating one. |

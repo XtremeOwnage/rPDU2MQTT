@@ -470,6 +470,43 @@ members that have data, and is itself "no data" when none of them do — never a
 In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled
 by default and poll on the same `Pdu.PollInterval` cadence.
 
+### History: where past readings come from
+
+The Flow, Energy and Trends pages read past readings through one backend, chosen by `History.Provider`.
+
+```yaml
+History:
+  Enabled: true
+  Provider: local          # local | prometheus | emoncms | homeassistant
+  LocalPath: ''            # empty: the directory the deployment mounted, else one beside the program
+  LocalRawKeepDays: 7
+  LocalMinuteKeepDays: 90
+  LocalHourKeepDays: 3650
+  ToleranceSeconds: 30
+```
+
+**`local` is the bridge's own store, and the default.** Every node's readings are written on the same sweep
+that already reads them, into a directory of fixed-interval files — one per series, per resolution, per
+chunk of time. There is no index and nothing to query: a reading's place in a file is arithmetic
+(`(when − start) / interval`), so a window is a seek and a sequential read, and the whole database is a
+directory you can copy, tar or mount read-only.
+
+- **A slot nobody wrote is "no reading"**, stored as NaN. Unknown is never a zero, in the files or out of them.
+- **Three resolutions.** The readings as they arrive (`LocalRawKeepDays`), then a minute at a time
+  (`LocalMinuteKeepDays`), then an hour (`LocalHourKeepDays`). A coarser tier holds the **last** reading of
+  each bucket — what a read asks for anyway, and what keeps a counter's meaning, which an average would not.
+  A chart over a month is answered from the hourly tier: thirty seeks, not a walk through a quarter of a
+  million readings.
+- **Retention deletes whole files**, never rewrites one: a chunk is a day, a month or a year of one series.
+- **Roughly 1 GB a year** for two hundred series read every ten seconds, with the defaults.
+
+Put it on a volume. The Helm chart does this by default (`history.persistence.enabled`, mounted at
+`/data/history`); anywhere else and the readings go with the container at the next restart. A read-only
+mount is reported by the backend test rather than discovered at the first sweep.
+
+The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
+unchanged: they answer for whatever was exported to them, including readings from before this bridge existed.
+
 ### Prometheus
 Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`) labelled by `device`, `source`, and
 `units`. Two independent delivery methods — enable **either or both**:

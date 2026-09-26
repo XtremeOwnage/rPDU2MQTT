@@ -1,0 +1,21 @@
+{{- if and .Values.history.persistence.enabled (not .Values.history.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rpdu2mqtt.fullname" . }}-history
+  labels:
+    {{- include "rpdu2mqtt.labels" . | nindent 4 }}
+  annotations:
+    # The readings outlive an uninstall: this is the record of what the house did, and it cannot be
+    # re-created from anywhere. Delete the claim by hand when it is genuinely no longer wanted.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.history.persistence.accessMode }}
+  {{- with .Values.history.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.history.persistence.size }}
+{{- end }}

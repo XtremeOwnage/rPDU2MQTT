@@ -512,13 +512,32 @@ spec:
                     type: string
                     enum:
                     - ''
+                    - local
                     - prometheus
                     - emoncms
                     - homeassistant
-                    description: "Which backend to read from: 'prometheus' or 'emoncms'."
+                    description: "Where past readings come from: 'local' (kept by the bridge itself, no other service needed), 'prometheus', 'emoncms' or 'homeassistant'."
                   PrometheusUrl:
                     type: string
                     description: Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.
+                  LocalPath:
+                    type: string
+                    description: 'Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.'
+                  LocalRawKeepDays:
+                    type: integer
+                    description: How many days of readings are kept at the rate they arrive. Older ones are still there a minute at a time.
+                    minimum: 1
+                    maximum: 3650
+                  LocalMinuteKeepDays:
+                    type: integer
+                    description: How many days are kept a minute at a time.
+                    minimum: 1
+                    maximum: 3650
+                  LocalHourKeepDays:
+                    type: integer
+                    description: How many days are kept an hour at a time. Ten years of hourly readings for two hundred series is about 15 MB.
+                    minimum: 1
+                    maximum: 36500
                   ToleranceSeconds:
                     type: integer
                     description: How far either side of the requested moment to look for a sample, in seconds. A scrape or feed interval longer than this returns nothing rather than a value from a different time.
