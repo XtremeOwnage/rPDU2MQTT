@@ -705,32 +705,24 @@ export function addFlowSection(nav: any, sections: any) {
       ]);
     };
 
-    /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
-    ///
-    /// Both halves of that are the rule, and neither works alone. Letting each band turn half of its own
-    /// thickness from the middle puts a thick ribbon's corners in a different place from a thin one's, and
-    /// their corners interlock — a row of notches reading as puzzle pieces. Giving each band a lane of its
-    /// own instead spreads the turns across the whole corridor, and the column of ribbons comes out as a
-    /// staircase. One axis and one width is the only arrangement where every vertical edge in a corridor
-    /// falls on one of two lines.
-    ///
-    /// A band thicker than the run narrows through the turn and widens again after it; a thinner one does
-    /// the reverse. That is the price of the rule, and it is the rule that was asked for.
-    const laneOf = new Map<any, { laneX: number; laneW: number }>();
-    {
-      const corridors = new Map<string, any[]>();
+    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath). The
+    // trunks of the sources sharing a corridor are spread across its middle, top source nearest the left,
+    // so a source's wires never run along another's trunk.
+    const wires = ribbonStyle !== 'curved';
+    const trunkOf = new Map<string, number>();
+    if (wires) {
+      const bySpan = new Map<string, Set<string>>();
       links.forEach((l: any) => {
         const s2 = pos[l.source], t2 = pos[l.target];
         if (!s2 || !t2) return;
         const key = `${s2.x + nodeW}|${t2.x}`;
-        (corridors.get(key) ?? corridors.set(key, []).get(key)!).push(l);
+        (bySpan.get(key) ?? bySpan.set(key, new Set()).get(key)!).add(l.source);
       });
-      for (const [key, list] of corridors) {
+      for (const [key, srcs] of bySpan) {
         const [left, right] = key.split('|').map(Number);
-        // A quarter of the corridor, bounded either side so it is neither a hairline nor a slab.
-        const laneW = Math.max(12, Math.min(40, (right - left) * 0.25));
-        const laneX = (left + right) / 2;
-        list.forEach((l: any) => laneOf.set(l, { laneX, laneW }));
+        const ordered = [...srcs].sort((a, b) => (pos[a]?.y ?? 0) - (pos[b]?.y ?? 0));
+        ordered.forEach((src, i) =>
+          trunkOf.set(`${src}|${key}`, left + (right - left) * (0.25 + 0.5 * (i + 0.5) / ordered.length)));
       }
     }
 
@@ -754,7 +746,31 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = tintOf(l.source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
+      const band = { x1, sTop, x2, tTop, h };
+      if (wires) {
+        const d = wirePath(ribbonStyle, { x1, sy: sTop + h / 2, x2, ty: tTop + h / 2, trunkX: trunkOf.get(`${l.source}|${x1}|${x2}`) ?? (x1 + x2) / 2 });
+        const width = unknownLink || idleLink ? 1.5 : wireWidth(h);
+        svg.appendChild(svgEl('path', {
+          d, fill: 'none', 'fill-opacity': '0',
+          stroke: unknownLink ? 'var(--muted)' : color, 'stroke-width': width,
+          'stroke-opacity': unknownLink ? '0.5' : '0.85', 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+          class: 'flow-ribbon flow-wire', 'data-src': l.source, 'data-dst': l.target,
+        }));
+        // A stream is a dash running along the wire itself.
+        if (animateFlow() && !unknownLink && !idleLink) {
+          const intensity = l.value / Math.max(1, maxTotal);
+          const duration = Math.max(0.9, Math.min(6, 3.2 - intensity * 9));
+          const stream = svgEl('path', {
+            d, fill: 'none', stroke: 'var(--fg)', 'stroke-opacity': '0.55',
+            'stroke-width': Math.max(1.2, width * 0.45), 'stroke-linecap': 'round', 'stroke-dasharray': '6 26',
+            class: 'flow-stream', 'data-src': l.source, 'data-dst': l.target,
+          });
+          stream.style.animationDuration = `${duration.toFixed(2)}s`;
+          svg.appendChild(stream);
+        }
+        s.outOff += h; t.inOff += h;
+        return;
+      }
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,

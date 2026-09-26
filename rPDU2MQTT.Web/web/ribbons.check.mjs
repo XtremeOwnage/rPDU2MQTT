@@ -1,7 +1,9 @@
-// Ribbon routing: the picker offers the three strategies, and each one draws a band that actually holds
-// together. A ribbon is a FILLED outline, so a routing that gets its offsets wrong does not merely look odd
-// — the outline crosses itself and the ribbon renders as a bow tie, and the animated stream, which clips
-// against that outline, disappears into the fold.
+// Link routing: the picker offers curved ribbons and two wiring styles.
+//
+// A curved ribbon is a filled band as thick as its flow. The wiring styles draw each link as a wire on a grid
+// instead: a band that thick cannot turn a right angle in a column gap, and every attempt at it came out as
+// solid blocks stacked into one another. A wire leaves the middle of its slot on the source bar, runs along
+// its source's trunk, and arrives at the middle of its slot on the target bar.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -53,8 +55,8 @@ async function render(style) {
   if (!sec) fail('could not find the Flow section');
   return {
     sec,
-    ribbons: query(sec, 'path', true).filter(p => p.attrs && p.attrs['fill-opacity'] !== undefined)
-      .map(p => p.attrs.d).filter(Boolean),
+    ribbons: query(sec, 'path', true).filter(p => p.attrs && p.attrs['fill-opacity'] !== undefined && p.attrs.d)
+      .map(p => ({ d: p.attrs.d, src: p.attrs['data-src'], dst: p.attrs['data-dst'], stroke: p.attrs['stroke-width'] })),
   };
 }
 
@@ -75,7 +77,7 @@ const geom = (() => {
   const sb = { console, window: {}, localStorage: { getItem: () => null, setItem: () => {} } };
   vm.createContext(sb);
   try { vm.runInContext(code, sb, { filename: 'app.js' }); } catch { /* no DOM: the bootstrap stops, the functions are defined */ }
-  if (typeof sb.ribbonOutline !== 'function' || typeof sb.lanePath !== 'function')
+  if (typeof sb.ribbonOutline !== 'function' || typeof sb.wirePath !== 'function' || typeof sb.wireWidth !== 'function')
     fail('the routing functions are not in the bundle');
   return sb;
 })();
@@ -100,115 +102,78 @@ function points(d) {
   return out.filter((p, i) => i === 0 || Math.abs(p[0] - out[i - 1][0]) > 0.01 || Math.abs(p[1] - out[i - 1][1]) > 0.01);
 }
 
-/// Do two segments properly cross (not merely touch at a shared endpoint)?
-function crosses(p, p2, q, q2) {
-  const d = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
-  const shared = [p, p2].some(a => [q, q2].some(b => Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01));
-  if (shared) return false;
-  return d(p, p2, q) !== d(p, p2, q2) && d(q, q2, p) !== d(q, q2, p2);
-}
-
-function selfIntersects(pts) {
-  for (let i = 0; i < pts.length - 1; i++)
-    for (let j = i + 2; j < pts.length - 1; j++)
-      if (crosses(pts[i], pts[i + 1], pts[j], pts[j + 1])) return [pts[i], pts[i + 1], pts[j], pts[j + 1]];
-  return null;
-}
-
-// Down, up, level, and a turn shorter than the band is thick — the shapes a real hierarchy produces.
-const BANDS = {
-  down:      { x1: 0, sTop: 20, x2: 200, tTop: 300, h: 40 },
-  up:        { x1: 0, sTop: 300, x2: 200, tTop: 20, h: 40 },
-  level:     { x1: 0, sTop: 100, x2: 200, tTop: 100, h: 40 },
-  shallow:   { x1: 0, sTop: 100, x2: 200, tTop: 112, h: 40 },
-  hairline:  { x1: 0, sTop: 40, x2: 200, tTop: 260, h: 1.5 },
-  // Thicker than the gap is wide, which is ordinary: a 4.6 kW band is 324px in a 163px column gap.
-  thickDown: { x1: 0, sTop: 20, x2: 163, tTop: 120, h: 324 },
-  thickUp:   { x1: 0, sTop: 120, x2: 163, tTop: 20, h: 324 },
+// Down, up, level, and a drop shorter than a corner — the shapes a real hierarchy produces.
+const WIRES = {
+  down:    { x1: 0, sy: 40, x2: 200, ty: 320, trunkX: 100 },
+  up:      { x1: 0, sy: 320, x2: 200, ty: 40, trunkX: 100 },
+  level:   { x1: 0, sy: 100, x2: 200, ty: 100, trunkX: 100 },
+  shallow: { x1: 0, sy: 100, x2: 200, ty: 106, trunkX: 100 },
+  // A trunk the renderer put past the corridor's edge is pulled back inside it.
+  outside: { x1: 0, sy: 40, x2: 200, ty: 320, trunkX: 260 },
 };
 
 for (const style of ['ortho', 'ortho-round']) {
-  for (const [name, b] of Object.entries(BANDS)) {
-    const d = geom.ribbonOutline(style, b);
+  for (const [name, w] of Object.entries(WIRES)) {
+    const d = geom.wirePath(style, w);
     const pts = points(d);
-
     if (d.includes('C')) fail(`${style}/${name} uses a cubic sweep: ${d}`);
     if (style === 'ortho' && d.includes('Q')) fail(`${style}/${name} rounds a corner it should not: ${d}`);
-
-    // Every straight run is along one axis or the other.
+    // Every run is along one axis.
     for (let i = 0; i < pts.length - 1; i++) {
       const dx = Math.abs(pts[i + 1][0] - pts[i][0]), dy = Math.abs(pts[i + 1][1] - pts[i][1]);
       if (dx > 0.1 && dy > 0.1) fail(`${style}/${name} has a diagonal run ${JSON.stringify([pts[i], pts[i + 1]])}: ${d}`);
     }
-
-    // Out, across, in: two bends a side, four for the closed outline. More than that is a staircase.
+    // Out, along the trunk, in: two turns at most.
     let turns = 0;
     for (let i = 1; i < pts.length - 1; i++) {
       const a = Math.abs(pts[i][0] - pts[i - 1][0]) > 0.1 ? 'h' : 'v';
-      const bb = Math.abs(pts[i + 1][0] - pts[i][0]) > 0.1 ? 'h' : 'v';
-      if (a !== bb) turns++;
+      const b = Math.abs(pts[i + 1][0] - pts[i][0]) > 0.1 ? 'h' : 'v';
+      if (a !== b) turns++;
     }
-    if (turns > 6) fail(`${style}/${name} turns ${turns} times — more than out/across/in a side: ${d}`);
-
-    const fold = selfIntersects(pts);
-    if (fold) fail(`${style}/${name} folds over itself at ${JSON.stringify(fold)}: ${d}`);
-
-    // The vertical run has to have width, or the band is two rectangles with nothing joining them: the
-    // fill renders both ends and the link between them is invisible.
-    const turnXs = [...new Set(pts.slice(0, -1).map((p, i) =>
-      Math.abs(pts[i + 1][0] - p[0]) < 0.1 && Math.abs(p[0] - b.x1) > 0.1 && Math.abs(p[0] - b.x2) > 0.1
-        ? Math.round(p[0] * 10) / 10 : null).filter(v => v !== null))];
-    if (turnXs.length === 1)
-      fail(`${style}/${name} steps both edges at the same x (${turnXs[0]}), so its vertical run has no `
-         + `width and the two ends are joined by nothing: ${d}`);
-
-    // It has to span the bars it connects, and stay between them. Straying outside the corridor is what
-    // drew a black slab out of the side of a panel: the band's corner sat half a THICKNESS from the step,
-    // and a thick ribbon is easily thicker than the gap between two columns is wide.
+    if (turns > 2) fail(`${style}/${name} turns ${turns} times: ${d}`);
+    // From the middle of the source slot to the middle of the target slot, inside the corridor.
+    const [first, last] = [pts[0], pts[pts.length - 1]];
+    if (Math.abs(first[0] - w.x1) > 0.1 || Math.abs(first[1] - w.sy) > 0.1) fail(`${style}/${name} does not leave (${w.x1},${w.sy}): ${d}`);
+    if (Math.abs(last[0] - w.x2) > 0.1 || Math.abs(last[1] - w.ty) > 0.1) fail(`${style}/${name} does not arrive at (${w.x2},${w.ty}): ${d}`);
     const xs = pts.map(p => p[0]);
-    if (Math.min(...xs) > b.x1 + 0.1 || Math.max(...xs) < b.x2 - 0.1)
-      fail(`${style}/${name} does not reach from ${b.x1} to ${b.x2}: ${d}`);
-    if (Math.min(...xs) < b.x1 - 0.1 || Math.max(...xs) > b.x2 + 0.1)
-      fail(`${style}/${name} leaves the corridor between the bars `
-         + `(spans ${Math.min(...xs)}..${Math.max(...xs)}, corridor is ${b.x1}..${b.x2}): ${d}`);
-    const startsAt = pts.filter(p => Math.abs(p[0] - b.x1) < 0.1).map(p => p[1]).sort((m, n) => m - n);
-    if (Math.abs(startsAt[0] - b.sTop) > 0.1 || Math.abs(startsAt[startsAt.length - 1] - (b.sTop + b.h)) > 0.1)
-      fail(`${style}/${name} leaves the source bar at ${JSON.stringify(startsAt)} rather than ${b.sTop}..${b.sTop + b.h}: ${d}`);
-    const endsAt = pts.filter(p => Math.abs(p[0] - b.x2) < 0.1).map(p => p[1]).sort((m, n) => m - n);
-    if (Math.abs(endsAt[0] - b.tTop) > 0.1 || Math.abs(endsAt[endsAt.length - 1] - (b.tTop + b.h)) > 0.1)
-      fail(`${style}/${name} meets the target bar at ${JSON.stringify(endsAt)} rather than ${b.tTop}..${b.tTop + b.h}: ${d}`);
+    if (Math.min(...xs) < w.x1 - 0.1 || Math.max(...xs) > w.x2 + 0.1) fail(`${style}/${name} leaves the corridor: ${d}`);
   }
 }
+if (!geom.wirePath('ortho-round', WIRES.down).includes('Q')) fail('a rounded wire has no rounded corner');
 
-// Rounding actually happens where there is room for it, and the lane follows the same route as its band.
-if (!geom.ribbonOutline('ortho-round', BANDS.down).includes('Q'))
-  fail('a long downward turn was not rounded at all');
-for (const style of ['ortho', 'ortho-round']) {
-  const lane = geom.lanePath(style, BANDS.up, 0.5);
-  if (/[C]/.test(lane)) fail(`the ${style} stream lane is a cubic sweep, so it leaves its own band: ${lane}`);
+// Thickness ranks the flows, and is never a slab or a hairline.
+{
+  const hs = [0, 1.5, 10, 50, 200, 800];
+  const ws = hs.map(h => geom.wireWidth(h));
+  for (let i = 1; i < ws.length; i++) if (ws[i] < ws[i - 1]) fail(`a larger flow drew a thinner wire: ${ws.join(', ')}`);
+  if (Math.min(...ws) < 1.5 || Math.max(...ws) > 10) fail(`wire widths leave 1.5..10: ${ws.join(', ')}`);
 }
 
 // --- The default is unchanged --------------------------------------------------------------------------
-{
-  const { ribbons } = await render('curved');
-  if (!ribbons.every(d => d.includes('C'))) fail('the default routing is no longer the curved band');
-}
+const curved = await render('curved');
+if (!curved.ribbons.every(r => r.d.includes('C'))) fail('the default routing is no longer the curved band');
 
-// --- Every routing still meets both bars in the same places --------------------------------------------
-{
-  const ends = {};
-  for (const style of ['curved', 'ortho', 'ortho-round']) {
-    const { ribbons } = await render(style);
-    ends[style] = ribbons.map(d => {
-      const pts = points(d);
-      return [pts[0][0], pts[0][1]].map(n => Math.round(n)).join(',');
-    }).sort().join(' | ');
+// --- A wire leaves from inside the slot its curved band would occupy, and arrives inside its target's -----
+for (const style of ['ortho', 'ortho-round']) {
+  const { ribbons } = await render(style);
+  if (ribbons.length !== curved.ribbons.length) fail(`${style} draws ${ribbons.length} links, curved draws ${curved.ribbons.length}`);
+  for (const w of ribbons) {
+    const band = curved.ribbons.find(r => r.src === w.src && r.dst === w.dst);
+    if (!band) fail(`${style}: no curved band for ${w.src}->${w.dst}`);
+    const bp = points(band.d), wp = points(w.d);
+    const cap = (pts, x) => pts.filter(p => Math.abs(p[0] - x) < 0.5).map(p => p[1]);
+    const x1 = Math.min(...bp.map(p => p[0])), x2 = Math.max(...bp.map(p => p[0]));
+    const [s0, s1] = [Math.min(...cap(bp, x1)), Math.max(...cap(bp, x1))];
+    const [t0, t1] = [Math.min(...cap(bp, x2)), Math.max(...cap(bp, x2))];
+    const start = wp[0], end = wp[wp.length - 1];
+    if (Math.abs(start[0] - x1) > 0.5 || start[1] < s0 - 0.5 || start[1] > s1 + 0.5)
+      fail(`${style}: ${w.src}->${w.dst} leaves at ${start} — outside its slot ${x1},${s0}..${s1}`);
+    if (Math.abs(end[0] - x2) > 0.5 || end[1] < t0 - 0.5 || end[1] > t1 + 0.5)
+      fail(`${style}: ${w.src}->${w.dst} arrives at ${end} — outside its slot ${x2},${t0}..${t1}`);
+    if (!(Number(w.stroke) > 0)) fail(`${style}: ${w.src}->${w.dst} is a wire with no stroke width`);
   }
-  if (ends.curved !== ends.ortho || ends.curved !== ends['ortho-round'])
-    fail(`the routings start at different places — the band must leave the same bar at the same height:\n`
-       + `  curved:      ${ends.curved}\n  ortho:       ${ends.ortho}\n  ortho-round: ${ends['ortho-round']}`);
 }
 
-console.log('ribbons: the routing picker offers curved / right angles / rounded angles; the grid routings '
-  + 'are axis-aligned, turn at most twice a side, round their corners when asked, and none of them folds '
-  + 'over itself going up or down — all three leaving each bar at the same place');
+console.log('ribbons: the picker offers curved ribbons and two wiring styles; a wire is axis-aligned, turns at most twice, '
+  + 'rounds its corners when asked, stays in its corridor, runs from the middle of its source slot to the middle of its target '
+  + 'slot, and its thickness ranks the flows');

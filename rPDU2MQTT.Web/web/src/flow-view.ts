@@ -311,8 +311,8 @@ export type RibbonStyle = 'curved' | 'ortho' | 'ortho-round';
 const RIBBON_KEY = 'rpdu-flow-ribbon';
 const RIBBON_STYLES: [RibbonStyle, string, string][] = [
   ['curved', 'Curved ribbons', 'The default: each ribbon sweeps from source to target as one smooth band.'],
-  ['ortho', 'Right angles', 'Route on a grid — out, across, in. Two bends at most, so a ribbon never staircases.'],
-  ['ortho-round', 'Rounded angles', 'The same grid routing, with the corners rounded as far as the turn allows.'],
+  ['ortho', 'Wiring', 'Each link a wire, thickness by flow, run along one trunk per source with square corners.'],
+  ['ortho-round', 'Wiring, rounded', 'The same wiring with rounded corners.'],
 ];
 
 export let ribbonStyle: RibbonStyle = (() => {
