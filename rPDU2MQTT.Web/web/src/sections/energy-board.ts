@@ -26,6 +26,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   const showSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
   showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
+  // The day's energy by default; a viewer who picks power keeps power.
+  try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
   // The past — periods and a date — is one click away rather than two rows above every live view.
@@ -66,13 +68,13 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
   historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
   syncHistory();
-  showSel.onchange = () => load();
+  showSel.onchange = () => { try { localStorage.setItem('rpdu-energy-show', showSel.value); } catch { /* this session only */ } load(); };
 
   // One column for the whole board.
   const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
   const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
-  const grid = el('div', { class: 'energy-grid' }); board.appendChild(grid);
-  const summary = el('div', { class: 'energy-summary' }); board.appendChild(summary);
+  const gridEl = el('div', { class: 'energy-grid' }); board.appendChild(gridEl);
+  const summaryEl = el('div', { class: 'energy-summary' }); board.appendChild(summaryEl);
 
   const fmtPower = (w: number | null) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
@@ -282,11 +284,17 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     try { r = await api(path); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     await loadTrend(metric);
-    grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
+    // Built off the page and swapped in whole at the end: emptying the tiles first left them blank for the
+    // length of the reads below, so every refresh flashed.
+    const grid = el('div'), summary = el('div');
+    const move = (from: any, to: any) => { to.innerHTML = ''; [...from.children].forEach((c: any) => to.appendChild(c)); };
+    const swap = () => { move(grid, gridEl); move(summary, summaryEl); };
     if (!r.body || !r.body.ok) {
       // Say what actually went wrong.
       const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
+      flowWrap.innerHTML = '';
+      swap();
       status.textContent = ''; return;
     }
     // Derived lanes are for the diagram, not the totals.
@@ -413,7 +421,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
     if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
-    if (arms.length) drawFlow(arms);
+    // Updated in place, so the dots keep moving across a refresh.
+    if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';
 
     // Solar
     if (solar.present)
@@ -472,6 +481,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     if (!grid.children.length)
       grid.appendChild(el('div', { class: 'desc', text: 'Nothing counts toward solar, battery, grid or home yet. Pick the nodes on the Balance page (or set a node’s Kind to solar, battery or grid) and bind a source — it’ll show here.' }));
+    swap();
     status.textContent = `updated ${new Date().toLocaleTimeString()}`;
   };
 

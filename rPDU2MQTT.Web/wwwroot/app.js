@@ -2132,8 +2132,39 @@ const NODEPOS                                           = {
   solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
 };
 
-/// Draw the arms into `target`, replacing whatever was there. `onOpen`, when given, makes a node clickable.
+/// How an arm's dots run: which way, how fast, how many. Rebuilt only when this changes, so a refresh with
+/// the same flow leaves the dots where they are instead of restarting them.
+const motionOf = (a         ) => {
+  const mag = Math.abs(a.flow ?? 0);
+  if (a.flow == null || mag <= 1) return 'still';
+  const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
+  const kw = mag / 1000;
+  const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
+  const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
+  // Rounded, so the ordinary jitter of a live reading does not restart the animation every refresh.
+  return `${toHub ? 'in' : 'out'}|${(Math.round(dur * 4) / 4).toFixed(2)}|${count}`;
+};
+
+/// Draw the arms into `target`. A refresh of the same arms updates the figures in place: the diagram is
+/// not replaced, so it neither flashes nor restarts its animation. `onOpen`, when given, makes a node clickable.
 function drawEnergyFlow(target     , arms           , onOpen                                     ) {
+    const shape = arms.map(a => a.key + ':' + (a.ids || []).join(',')).join(';');
+    const existing = target.firstChild;
+    if (existing && existing.dataset?.shape === shape) {
+      arms.forEach(a => {
+        const g = existing.querySelector?.(`[data-arm="${a.key}"]`);
+        if (!g) return;
+        const val = g.querySelector?.('.energy-node-val');
+        if (val && val.textContent !== a.text) val.textContent = a.text;
+        const live = a.flow != null && Math.abs(a.flow) > 1;
+        g.classList[live ? 'add' : 'remove']('live');
+        const dots = existing.querySelector?.(`[data-dots="${a.key}"]`);
+        const motion = motionOf(a);
+        if (dots && dots.dataset.motion !== motion) drawDots(dots, a, motion);
+      });
+      return;
+    }
+
     target.innerHTML = '';
     // Frame only the arms that exist.
     const ys = arms.map(a => NODEPOS[a.key].y);
@@ -2143,31 +2174,24 @@ function drawEnergyFlow(target     , arms           , onOpen                    
       viewBox: `12 ${y0} 416 ${y1 - y0}`,
       width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
     });
-    const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
-    svg.append(lines, dots, nodes);
+    svg.dataset.shape = shape;
+    const lines = svgEl('g', {}); const dotLayer = svgEl('g', {}); const nodes = svgEl('g', {});
+    svg.append(lines, dotLayer, nodes);
 
     arms.forEach(a => {
       const p = NODEPOS[a.key];
       // Base connector (always visible, dim) between the node and the hub.
       lines.appendChild(svgEl('line', { x1: p.x, y1: p.y, x2: HUB.x, y2: HUB.y, class: 'energy-arm' }));
 
-      // Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node). Home only ever consumes.
-      const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
-      const mag = Math.abs(a.flow ?? 0);
-      if (a.flow != null && mag > 1) {
-        const [sx, sy, ex, ey] = toHub ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
-        const kw = mag / 1000;
-        const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
-        const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
-        for (let i = 0; i < count; i++) {
-          const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
-          dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
-          dots.appendChild(dot);
-        }
-      }
+      const dots = svgEl('g', {});
+      dots.dataset.dots = a.key;
+      drawDots(dots, a, motionOf(a));
+      dotLayer.appendChild(dots);
 
       // Node: a coloured ring with its icon, a label and the live figure.
+      const mag = Math.abs(a.flow ?? 0);
       const g = svgEl('g', { class: 'energy-node' + (a.flow != null && mag > 1 ? ' live' : '') });
+      g.dataset.arm = a.key;
       g.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 26, class: 'energy-node-ring', style: `stroke:${a.color}` }));
       const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
       const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
@@ -2182,6 +2206,23 @@ function drawEnergyFlow(target     , arms           , onOpen                    
     nodes.appendChild(svgEl('circle', { cx: HUB.x, cy: HUB.y, r: 5, class: 'energy-hub' }));
     target.appendChild(svg);
   }
+
+/// The dots travelling one arm. Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node).
+/// Home only ever consumes.
+function drawDots(group     , a         , motion        ) {
+  group.innerHTML = '';
+  group.dataset.motion = motion;
+  if (motion === 'still') return;
+  const [dir, durS, countS] = motion.split('|');
+  const dur = Number(durS), count = Number(countS);
+  const p = NODEPOS[a.key];
+  const [sx, sy, ex, ey] = dir === 'in' ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
+  for (let i = 0; i < count; i++) {
+    const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
+    dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
+    group.appendChild(dot);
+  }
+}
 
 // ── flow-banners.ts ─────────────────────────────────────────────
 // The banners above the flow chart: sources the bridge is withholding, and figures their own flows contradict.
@@ -8397,6 +8438,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const showSel = el('select', { style: { width: 'auto' } })                     ;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
   showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
+  // The day's energy by default; a viewer who picks power keeps power.
+  try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
   // The past — periods and a date — is one click away rather than two rows above every live view.
@@ -8437,13 +8480,13 @@ function addEnergyOverviewSection(nav     , sections     ) {
   };
   historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
   syncHistory();
-  showSel.onchange = () => load();
+  showSel.onchange = () => { try { localStorage.setItem('rpdu-energy-show', showSel.value); } catch { /* this session only */ } load(); };
 
   // One column for the whole board.
   const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
   const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
-  const grid = el('div', { class: 'energy-grid' }); board.appendChild(grid);
-  const summary = el('div', { class: 'energy-summary' }); board.appendChild(summary);
+  const gridEl = el('div', { class: 'energy-grid' }); board.appendChild(gridEl);
+  const summaryEl = el('div', { class: 'energy-summary' }); board.appendChild(summaryEl);
 
   const fmtPower = (w               ) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
@@ -8653,11 +8696,17 @@ function addEnergyOverviewSection(nav     , sections     ) {
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     await loadTrend(metric);
-    grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
+    // Built off the page and swapped in whole at the end: emptying the tiles first left them blank for the
+    // length of the reads below, so every refresh flashed.
+    const grid = el('div'), summary = el('div');
+    const move = (from     , to     ) => { to.innerHTML = ''; [...from.children].forEach((c     ) => to.appendChild(c)); };
+    const swap = () => { move(grid, gridEl); move(summary, summaryEl); };
     if (!r.body || !r.body.ok) {
       // Say what actually went wrong.
       const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
+      flowWrap.innerHTML = '';
+      swap();
       status.textContent = ''; return;
     }
     // Derived lanes are for the diagram, not the totals.
@@ -8784,7 +8833,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
     if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
-    if (arms.length) drawFlow(arms);
+    // Updated in place, so the dots keep moving across a refresh.
+    if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';
 
     // Solar
     if (solar.present)
@@ -8843,6 +8893,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     if (!grid.children.length)
       grid.appendChild(el('div', { class: 'desc', text: 'Nothing counts toward solar, battery, grid or home yet. Pick the nodes on the Balance page (or set a node’s Kind to solar, battery or grid) and bind a source — it’ll show here.' }));
+    swap();
     status.textContent = `updated ${new Date().toLocaleTimeString()}`;
   };
 

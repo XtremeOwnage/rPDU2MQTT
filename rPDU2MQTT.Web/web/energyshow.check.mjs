@@ -61,6 +61,8 @@ const { sandbox, getEl } = makeDom({
     { ok: true },
 });
 vm.createContext(sandbox);
+// This viewer chose power; a new one gets the day's energy (checked below in energyshow).
+sandbox.localStorage.setItem('rpdu-energy-show', 'realpower');
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Energy').click();
@@ -82,6 +84,18 @@ const historyPanel = query(energySec, 'div', true).find(d => cn(d).includes('ene
 if (!historyPanel) fail('the period and date controls are not gathered behind History');
 if (!historyPanel.hidden) fail('the period and date controls open over a live view');
 if (!query(energySec, 'button', true).some(b => /^History/.test(b.textContent || ''))) fail('no History button');
+
+// A viewer who has not chosen sees the day's energy. The choice is remembered.
+{
+  const fresh = makeDom({ bodies: (url) => url.includes('/api/schema') ? schema : url.includes('/api/config') ? cfg : url.includes('/api/flow') ? today : { ok: true } });
+  vm.createContext(fresh.sandbox);
+  vm.runInContext(code, fresh.sandbox, { filename: 'app.js' });
+  await new Promise(r => setTimeout(r, 50));
+  query(fresh.getEl('nav'), 'a', true).find(a => a.dataset.label === 'Energy').click();
+  await new Promise(r => setTimeout(r, 300));
+  const sel = query(fresh.getEl('sections'), 'select', true).find(x => (x.children || []).some(o => (o.value || o.attrs?.value) === 'energy_d'));
+  if (!sel || sel.value !== 'energy_d') fail(`a new viewer does not see the day's energy (${sel?.value})`);
+}
 
 // A refresh empties and refills the board around several reads; the board's height is held across that,
 // or the page shrinks while it is empty and the browser clamps the scroll to the top.
