@@ -858,16 +858,19 @@ settings in one bordered box: History's four retention settings are grouped that
 
 ### Settings without a page
 
-`Health`, `PlanStorage` and `Debug` have no page in the GUI.
+Deployment settings have no page in the GUI. They are set in `config.yaml`, in `values.yaml`, or in the
+`RpduConfig` resource, beside the volume, service, port or container that backs them — all of them are still
+in the schema and the CRD.
 
-- `Health` (port, enabled) and `PlanStorage` (directory, bucket, size limit) are deployment settings. The
-  volume behind them is declared in the config file or the chart's values, and editing them from the GUI
-  would put a second source of truth against a mount the GUI cannot change.
+- `Health` (port), `Api` (port, key) and `PlanStorage` (directory, bucket, size limit): the listener or the
+  volume behind each is declared in the deployment, and a second editor in the GUI would disagree with it.
+- `Cache` (endpoint, prefix, timeout): the Valkey/Redis service is part of the deployment.
+- **Feature switches** — what is turned on at all — are set the same way. There is no Features page; each
+  page says where its own switch lives and does not render one.
 - `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page, beside the runtime
   state it is used to read.
 
-All three are still in the schema and the CRD, so they are set in `config.yaml`, in `values.yaml`, or in the
-`RpduConfig` resource as before.
+A page for a feature that is off stays hidden in the nav until it is turned on, as before.
 
 ## Energy Flow (Optional)
 

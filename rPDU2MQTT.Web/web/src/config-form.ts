@@ -27,7 +27,7 @@ import { addTagsSection } from './sections/tags-page.js';
 import { addHomeSection } from './sections/home.js';
 import { addOverviewSection } from './sections/overview.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
-import { addFeaturesSection, featureToggle, jumpToFeatures } from './sections/features.js';
+import { featureToggle } from './sections/features.js';
 
 // Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
 // stay in step with the document as it is typed.
@@ -424,7 +424,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
-  { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -470,15 +470,11 @@ function revealWrap(input: any) {
   return wrap;
 }
 
-// Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
-// a missing feature and sends the operator hunting for it.
+// Says where a section's on/off switch is. A control that simply vanishes reads as a missing feature and
+// sends the operator hunting for it; what turns it on is the config file, or the chart's values.
 function featurePointer(label: string) {
-  const wrap = el('div', { class: 'desc feature-pointer' });
-  wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
-  const go = btn('Features');
-  go.onclick = () => jumpToFeatures();
-  wrap.appendChild(go);
-  return wrap;
+  return el('div', { class: 'desc feature-pointer' },
+    el('span', { text: `${label} is turned on in the configuration file, or in the deployment's values — not here.` }));
 }
 
 // Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
@@ -615,11 +611,11 @@ export function build() {
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
   // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
   // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  // Health and PlanStorage are deployment settings — a port, a directory, a bucket — belonging to the
-  // config file or the chart's values, where the volume that backs them is also declared. Editing them from
-  // the GUI puts a second source of truth against a mount the GUI cannot change. Debug's two switches are
-  // rendered on Diagnostics, beside the runtime state they are used to investigate.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage']);
+  // Deployment settings have no page: ports, directories, buckets, the cache endpoint and what is switched
+  // on at all belong to the config file or the chart's values, where the volume, the service and the
+  // container that back them are also declared. Debug's two switches are on Diagnostics, beside the runtime
+  // state they are used to investigate.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //
