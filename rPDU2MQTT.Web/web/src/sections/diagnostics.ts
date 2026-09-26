@@ -1,6 +1,7 @@
 // Status / diagnostics: component health, versions, uptime, restart, and (in Kubernetes) logs + events.
-import { api, btn, activate, toast, navLink } from '../helpers.js';
+import { api, btn, activate, el, toast, navLink } from '../helpers.js';
 import { expectRestart } from '../realtime.js';
+import { renderSettingsOf } from '../config-form.js';
 
 export function addDiagnosticsSection(nav: any, sections: any) {
   const link = navLink(nav, "Diagnostics", "✚");
@@ -38,6 +39,14 @@ export function addDiagnosticsSection(nav: any, sections: any) {
       restartBar.appendChild(b);
     });
   };
+
+  // The debug switches are settings, but they are used while reading the state above them, so they are
+  // here rather than on a page of their own.
+  const debug = el('div', { class: 'diag-debug' });
+  sec.appendChild(el('h3', { text: 'Debug', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Settings for debugging and diagnostics.' }));
+  sec.appendChild(debug);
+  renderSettingsOf('Debug', debug);
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);

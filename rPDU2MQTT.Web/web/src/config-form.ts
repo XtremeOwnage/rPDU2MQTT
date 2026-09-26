@@ -184,6 +184,14 @@ function radioGroup(node: any, obj: any) {
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+/// One schema section's settings, rendered into another page. Edits land in the same place and the save
+/// bar counts them as it does anywhere else.
+export function renderSettingsOf(key: string, container: any) {
+  const node = (state.schema || []).find((n: any) => n.key === key);
+  if (!node?.properties) return;
+  renderObjectBody(node.properties, ensure(state.data, key, {}), container, [key]);
+}
+
 export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
   const here = [...path, node.key];
   if (node.type === 'object') {
@@ -574,7 +582,11 @@ export function build() {
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
   // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
   // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // Health and PlanStorage are deployment settings — a port, a directory, a bucket — belonging to the
+  // config file or the chart's values, where the volume that backs them is also declared. Editing them from
+  // the GUI puts a second source of truth against a mount the GUI cannot change. Debug's two switches are
+  // rendered on Diagnostics, beside the runtime state they are used to investigate.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //

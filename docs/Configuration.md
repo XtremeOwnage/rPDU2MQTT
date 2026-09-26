@@ -847,6 +847,19 @@ curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
 ```
 
+### Settings without a page
+
+`Health`, `PlanStorage` and `Debug` have no page in the GUI.
+
+- `Health` (port, enabled) and `PlanStorage` (directory, bucket, size limit) are deployment settings. The
+  volume behind them is declared in the config file or the chart's values, and editing them from the GUI
+  would put a second source of truth against a mount the GUI cannot change.
+- `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page, beside the runtime
+  state it is used to read.
+
+All three are still in the schema and the CRD, so they are set in `config.yaml`, in `values.yaml`, or in the
+`RpduConfig` resource as before.
+
 ## Energy Flow (Optional)
 
 The **Flow** tab models where your energy actually goes: PDU → outlet links are derived automatically, and

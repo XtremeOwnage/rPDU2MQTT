@@ -4186,6 +4186,14 @@ function addDiagnosticsSection(nav     , sections     ) {
     });
   };
 
+  // The debug switches are settings, but they are used while reading the state above them, so they are
+  // here rather than on a page of their own.
+  const debug = el('div', { class: 'diag-debug' });
+  sec.appendChild(el('h3', { text: 'Debug', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Settings for debugging and diagnostics.' }));
+  sec.appendChild(debug);
+  renderSettingsOf('Debug', debug);
+
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
@@ -15554,6 +15562,14 @@ function radioGroup(node     , obj     ) {
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+/// One schema section's settings, rendered into another page. Edits land in the same place and the save
+/// bar counts them as it does anywhere else.
+function renderSettingsOf(key        , container     ) {
+  const node = (state.schema || []).find((n     ) => n.key === key);
+  if (!node?.properties) return;
+  renderObjectBody(node.properties, ensure(state.data, key, {}), container, [key]);
+}
+
 function renderNode(node     , obj     , container     , path           = []) {
   const here = [...path, node.key];
   if (node.type === 'object') {
@@ -15943,7 +15959,11 @@ function build() {
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
   // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
   // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // Health and PlanStorage are deployment settings — a port, a directory, a bucket — belonging to the
+  // config file or the chart's values, where the volume that backs them is also declared. Editing them from
+  // the GUI puts a second source of truth against a mount the GUI cannot change. Debug's two switches are
+  // rendered on Diagnostics, beside the runtime state they are used to investigate.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //
