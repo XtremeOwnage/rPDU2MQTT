@@ -992,6 +992,28 @@
   .energy-node.is-linked:hover .energy-node-ring { stroke-width:3; }
   .energy-node.is-linked:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
+  /* The Flow page's header: title, what is drawn, and the History / View buttons on one line. */
+  .flow-head { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-2); }
+  .flow-head h2 { margin:0; }
+  .flow-head .ld-toolbar { margin:0; flex-wrap:wrap; gap:var(--sp-2); }
+  .flow-head select { width:auto; }
+  /* The panels behind those buttons. */
+  .flow-panel {
+    margin:0 0 var(--sp-3); padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--r);
+    background:var(--panel);
+  }
+  .flow-panel .ld-toolbar { margin:0 0 var(--sp-2); }
+  .flow-panel .ld-toolbar:last-child { margin-bottom:0; }
+  .flow-view-body { display:flex; flex-direction:column; gap:var(--sp-3); }
+  .flow-view-section { display:grid; grid-template-columns:90px minmax(0,1fr); gap:var(--sp-3); align-items:start; }
+  .flow-view-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding-top:6px; }
+  .flow-view-switches, .flow-view-chips { display:flex; flex-wrap:wrap; gap:var(--sp-2) var(--sp-4); align-items:center; }
+  .flow-view-chips { gap:6px; }
+  /* The section title says "Tags"; the strip's own label would say it twice. */
+  .flow-view-section .ld-toolbar { margin:0; }
+  .flow-view-section .ld-toolbar > span.desc:first-child { display:none; }
+  @media (max-width: 560px) { .flow-view-section { grid-template-columns:1fr; gap:var(--sp-1); } }
+
   /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
   .flow-stage { position: relative; }
   .flow-zoom {
@@ -1000,6 +1022,7 @@
   }
   .flow-zoom button {
     width: 30px; height: 28px; padding: 0; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
     background: var(--panel); border: 1px solid var(--line); opacity: 0.92;
   }
   .flow-zoom button:hover { opacity: 1; }
