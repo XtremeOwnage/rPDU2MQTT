@@ -5,6 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
+import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
 import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
@@ -18,11 +19,14 @@ let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 export function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
-  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const back = el('div', { class: 'sheet-backdrop' });
   // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
   // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
   // the screen actually has. Vertical scrolling only: the table below manages its own width.
-  const panel = el('div', { class: 'sheet-panel', style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(94vw, 1900px)', maxHeight: '86vh', overflowY: 'auto', overflowX: 'hidden' } });
+  // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
+  // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
+  // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
+  const panel = el('div', { class: 'sheet-panel' });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -144,7 +148,7 @@ function openTopicPicker(current: string, onPick: (topic: string) => void) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const load = async () => {
     const b = await fetchTopics(search.value.trim(), 100, filterIn.value.trim() || '#');
@@ -212,7 +216,7 @@ function openEmonCmsPicker(current: string, onPick: (feed: any) => void) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const draw = (feeds: any[]) => {
     const q = search.value.trim().toLowerCase();
@@ -325,7 +329,7 @@ function openModbusExplorer(src: any, onPick: () => void) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const pick = (register: number, dataType: string) => {
     src.Register = register;
@@ -401,6 +405,9 @@ export function openRenameDialog(node: any, flow: any, existingIds: Set<string>,
     const from = node.Id;
     node.Id = next;
     links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // It keeps its place in the energy balance and in any group that holds it.
+    renameInBalance(flow, from, next);
+    (flow.Groups || []).forEach((g: any) => { g.Members = (g.Members || []).map((m: string) => m === from ? next : m); });
     // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
     Object.keys(parents).forEach(child => {
       if (parents[child] === from) parents[child] = next;
@@ -430,7 +437,9 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   // No frame and no header of its own: this renders into a modal panel that already carries the node's name.
   const box = el('div', { class: 'node-editor' });
 
-  const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
+  // Laid out by class, so a phone can take it down to one column: two 150px columns of a label, a control
+  // and three lines of hint left each hint a word wide.
+  const grid = el('div', { class: 'node-editor-fields' });
 
   const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
   labIn.onchange = () => { node.Label = labIn.value.trim() || undefined; };
@@ -441,6 +450,18 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   kindSel.value = node.Kind || 'node';
   kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
   grid.appendChild(field('Kind', kindSel));
+
+  // What it counts toward is not what it is: stored in EnergyFlow.Balance, so the Balance page and this
+  // field are one setting and a node sits under one total at most.
+  const flowCfg = ensure(state.data, 'EnergyFlow', {});
+  const roleSel = el('select') as HTMLSelectElement;
+  roleSel.appendChild(el('option', { value: '', text: 'Nothing' }));
+  BALANCE_ROLES.forEach(([role, , label]) => roleSel.appendChild(el('option', { value: role, text: label })));
+  roleSel.value = balanceRoleOf(flowCfg, node.Id);
+  roleSel.onchange = () => setBalanceRole(flowCfg, node.Id, roleSel.value);
+  grid.appendChild(field('Counts toward', roleSel,
+    'Which of the site’s Solar, Grid, Battery or Home totals this node is part of — the same list as the Balance page. '
+    + 'An MPPT string whose PV total is already counted is Nothing.'));
 
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });

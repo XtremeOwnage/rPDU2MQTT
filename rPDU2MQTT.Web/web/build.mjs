@@ -56,6 +56,7 @@ const MODULES = [
   'sections/node-editor.ts',
   'sections/nodes.ts',
   'sections/groups.ts',
+  'sections/balance.ts',
   'sections/explorer.ts',
   'sections/tags-page.ts',
   'sections/energy-board.ts',

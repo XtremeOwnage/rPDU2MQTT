@@ -65,6 +65,15 @@ public class EnergyFlowConfig
     public List<EnergyFlowGroup> Groups { get; set; } = new();
 
     /// <summary>
+    /// Which nodes are the site's solar, grid, battery and home figures. Separate from <see cref="EnergyFlowNode.Kind"/>
+    /// because what a node is and what it counts toward are different questions: an inverter's reading is
+    /// the house load, and the MPPT strings a PV total is made of are solar but must not be added to it.
+    /// Empty keeps the older rule — every node of the kind, once.
+    /// </summary>
+    [Description("Which nodes make up the site's Solar, Grid, Battery and Home totals on the energy pages, Trends and the Home Assistant Energy Dashboard. Each list is summed. Leave every list empty to total nodes by their kind instead.")]
+    public EnergyBalanceConfig Balance { get; set; } = new();
+
+    /// <summary>
     /// Electrical panels and the breakers in their slots (#452) — the panel directory that otherwise lives on
     /// paper. Which channel a breaker is measured by is mapped separately (#454).
     /// </summary>
@@ -141,6 +150,22 @@ public class EnergyFlowConfig
 /// (#groups). The members are unchanged — they keep their links and export individually; the group is an
 /// overlay plus a rolled-up total.
 /// </summary>
+/// <summary>The nodes each headline total is made of (see <see cref="EnergyFlowConfig.Balance"/>).</summary>
+public class EnergyBalanceConfig
+{
+    [Description("Nodes whose output is solar production — a PV total, never the strings it is made of.")]
+    public List<string> Solar { get; set; } = new();
+
+    [Description("Nodes metering the grid connection: import out, export in.")]
+    public List<string> Grid { get; set; } = new();
+
+    [Description("Nodes metering battery banks: discharge out, charge in.")]
+    public List<string> Battery { get; set; } = new();
+
+    [Description("Nodes whose reading is what the home used — an inverter's load output, a whole-house meter. Empty works it out from the other three.")]
+    public List<string> Home { get; set; } = new();
+}
+
 /// <summary>A tag the configuration declares, and what it is for.</summary>
 public class TagDefinition
 {

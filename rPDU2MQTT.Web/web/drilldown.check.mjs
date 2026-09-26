@@ -24,18 +24,18 @@ const cfg = {
 const board = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
-    { id: 'mppt_1', label: 'MPPT 1', kind: 'solar', value: 2100 },
-    { id: 'mppt_2', label: 'MPPT 2', kind: 'solar', value: 1900 },
-    { id: 'grid', label: 'Grid', kind: 'grid', value: 800 },
+    { id: 'mppt_1', label: 'MPPT 1', kind: 'solar', balance: 'solar', value: 2100 },
+    { id: 'mppt_2', label: 'MPPT 2', kind: 'solar', balance: 'solar', value: 1900 },
+    { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 800 },
   ],
   links: [],
 };
 const series = {
   ok: true, metric: 'realpower', units: 'W',
   series: [
-    { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', values: [10, 900, 2100] },
-    { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', values: [12, 850, 1900] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [1400, 1000, 800] },
+    { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', balance: 'solar', values: [10, 900, 2100] },
+    { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', balance: 'solar', values: [12, 850, 1900] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [1400, 1000, 800] },
   ],
 };
 

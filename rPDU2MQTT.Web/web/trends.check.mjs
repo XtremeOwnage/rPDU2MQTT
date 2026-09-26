@@ -15,16 +15,16 @@ const series = {
   days: ['2026-07-31', '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
   partial: '2026-08-07',
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: [100, 130, 162, null, 200, 228, 262, 297] },
+    { node: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', values: [100, 130, 162, null, 200, 228, 262, 297] },
     // The strings the PV total is grouped from: the same energy again, which a per-kind total must not add.
     { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', within: 'solar', values: [60, 78, 97, null, 120, 137, 157, 178] },
     { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', within: 'solar', values: [40, 52, 65, null, 80, 91, 105, 119] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [50, 55, 59, null, 70, 79, 85, 88] },
     // The battery counter was re-based on the last day: what it reads is what has run since.
-    { node: 'battery', label: 'Battery', kind: 'battery', values: [20, 28, 37, null, 50, 57, 59, 2] },
-    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
+    { node: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', values: [20, 28, 37, null, 50, 57, 59, 2] },
+    { node: 'battery#in', label: 'Battery (charging)', kind: 'battery', balance: 'battery', values: [30, 40, 51, null, 60, 69, 72, 80] },
     // Nothing read from the export meter at the end of the last day: the import is known, the net is not.
-    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', values: [5, 6, 8, null, 10, 14, 14, null] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', balance: 'grid', values: [5, 6, 8, null, 10, 14, 14, null] },
   ],
 };
 
@@ -32,8 +32,8 @@ const power = {
   ok: true, metric: 'realpower', units: 'W', source: 'prometheus', stepSeconds: 300,
   at: ['2026-08-08T18:00:00Z', '2026-08-08T18:05:00Z', '2026-08-08T18:10:00Z', '2026-08-08T18:15:00Z'],
   series: [
-    { node: 'solar', label: 'Solar', kind: 'solar', values: [4200, 4400, null, 3900] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [0, 0, null, 120] },
+    { node: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', values: [4200, 4400, null, 3900] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [0, 0, null, 120] },
   ],
 };
 

@@ -151,7 +151,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   /// The gauge for a node, or undefined when one would be a guess.
   const gaugeFor = (ids: string[], value: number | null, units: string) => {
     const cfgNodes = (state.data?.EnergyFlow?.Nodes || []) as any[];
-    // Several tagged nodes of one kind (three MPPTs, two arrays) sum into one tile, so their ceilings sum too.
+    // Several nodes in one total (two arrays, two inverters) sum into one tile, so their ceilings sum too.
     const maxes = ids.map(id => cfgNodes.find(n => n.Id === id)?.Max).filter((m: any) => typeof m === 'number' && m > 0);
     if (!maxes.length || value == null) return undefined;
     const max = maxes.reduce((a: number, b: number) => a + b, 0);
@@ -163,8 +163,8 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     drawEnergyFlow(flowWrap, arms, (a, g) => openOnClick(g, a.ids!, a.label));
 
   // Why is this tile empty?
-  const whyNoReading = (kind: string) => {
-    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n: any) => (n.Kind || '') === kind);
+  const whyNoReading = (ids: string[]) => {
+    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n: any) => ids.includes(n.Id));
     if (!nodes.length) return 'no reading yet';
     const bound = nodes.flatMap((n: any) => n.Sources || []);
     if (!bound.length)
@@ -177,7 +177,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return bound.length > 1 ? `waiting on ${bound.length} sources` : `waiting on ${what}`;
   };
   // The hint under a tile: the direction when there's a value, the reason when there isn't.
-  const subOrWhy = (value: number | null, kind: string, whenKnown: string) => value == null ? whyNoReading(kind) : whenKnown;
+  const subOrWhy = (value: number | null, ids: string[], whenKnown: string) => value == null ? whyNoReading(ids) : whenKnown;
 
   // Same question for the battery's state of charge.
   const whyNoSoc = (battIds: string[], liveInfo: Record<string, any>) => {
@@ -197,9 +197,10 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return `no charge yet from ${what}`;
   };
 
-  // Sum a kind's out-direction (graph) values.
-  const sumKind = (nodes: any[], kind: string) => {
-    const ns = nodes.filter(n => (n.kind || 'node') === kind);
+  // Sum the out-direction (graph) values of the nodes a total is made of. Which those are is the server's
+  // call (the Balance, else each node's kind, once) — a return lane is left to the live reads below.
+  const sumRole = (nodes: any[], role: string) => {
+    const ns = nodes.filter(n => n.balance === role && !String(n.id || '').includes('#'));
     let sum = 0, known = false;
     ns.forEach(n => { if (typeof n.value === 'number') { sum += n.value; known = true; } });
     return { present: ns.length > 0, value: known ? sum : null };
@@ -265,16 +266,14 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n: any) => !String(n.id || '').includes('#'));
 
-    // A tile sums every node of its kind, so a node another one here already counts — a group's member
-    // beside the group's own total — must be left out of it, or the same energy is counted twice (#491).
-    const ofKind = (kind: string) => nodes
-      .filter((n: any) => n.kind === kind && !(n.within && nodes.some((o: any) => o.id === n.within)))
-      .map((n: any) => n.id);
+    // A tile sums the nodes the server says make up its total: the Balance where one is configured, else
+    // every node of the kind that nothing else here already counts (#491).
+    const ofRole = (role: string) => nodes.filter((n: any) => n.balance === role).map((n: any) => n.id);
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
-    const battIds = ofKind('battery');
-    const gridIds = ofKind('grid');
-    const solarIds = ofKind('solar');
-    const loadIds = ofKind('load');
+    const battIds = ofRole('battery');
+    const gridIds = ofRole('grid');
+    const solarIds = ofRole('solar');
+    const loadIds = ofRole('home');
     const liveBy: Record<string, number> = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo: Record<string, any> = {};
@@ -312,10 +311,10 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     const fmt = (v: number | null) => isEnergy ? fmtEnergy(v, units) : fmtPower(v);
     const dial = (ids: string[], v: number | null) => isEnergy ? undefined : gaugeFor(ids, v, 'W');
 
-    const solar = sumKind(nodes, 'solar');
-    const batt = sumKind(nodes, 'battery');   // out = discharge
-    const gridK = sumKind(nodes, 'grid');     // out = import
-    const load_ = sumKind(nodes, 'load');
+    const solar = sumRole(nodes, 'solar');
+    const batt = sumRole(nodes, 'battery');   // out = discharge
+    const gridK = sumRole(nodes, 'grid');     // out = import
+    const load_ = sumRole(nodes, 'home');
     const battIn = sumIn(battIds);            // charge
     const gridIn = sumIn(gridIds);            // export
 
@@ -358,7 +357,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
         eUnits = er.body.units || 'kWh';
         // From the answer, not from what was asked for.
         eWindow = er.body.metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
-        const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
+        const eSolar = sumRole(enodes, 'solar'), eBatt = sumRole(enodes, 'battery'), eGrid = sumRole(enodes, 'grid'), eLoad = sumRole(enodes, 'home');
         // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy: Record<string, number> = {};
         const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy_d#in' }));
@@ -392,12 +391,12 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
-        subOrWhy(solar.value, 'solar', solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
+        subOrWhy(solar.value, solarIds, solar.value! > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
         dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units), { ids: solarIds, label: 'Solar' }));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
-      const dir = subOrWhy(battNet, 'battery', battNet! > 1 ? 'discharging' : battNet! < -1 ? 'charging' : 'idle');
+      const dir = subOrWhy(battNet, battIds, battNet! > 1 ? 'discharging' : battNet! < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
       // SoC always leads the sub-line, so the state-of-charge slot is always shown.
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
@@ -415,7 +414,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
     if (gridK.present || gridIds.length) {
-      const sub = subOrWhy(gridNet, 'grid', gridNet! > 1 ? 'importing' : gridNet! < -1 ? 'exporting' : 'idle');
+      const sub = subOrWhy(gridNet, gridIds, gridNet! > 1 ? 'importing' : gridNet! < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
       // On energy the figure is the day's NET — import minus export, signed (#371).
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
@@ -426,7 +425,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
-      grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
+      grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading(loadIds) : (homeSub || 'consuming'), '',
         dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
 
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
@@ -445,7 +444,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     }
 
     if (!grid.children.length)
-      grid.appendChild(el('div', { class: 'desc', text: 'Nothing tagged yet. On the Nodes tab, set a node’s Kind to solar, battery, or grid and bind a source — it’ll show here.' }));
+      grid.appendChild(el('div', { class: 'desc', text: 'Nothing counts toward solar, battery, grid or home yet. Pick the nodes on the Balance page (or set a node’s Kind to solar, battery or grid) and bind a source — it’ll show here.' }));
     status.textContent = `updated ${new Date().toLocaleTimeString()}`;
   };
 
