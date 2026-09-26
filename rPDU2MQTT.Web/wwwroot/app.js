@@ -2425,103 +2425,36 @@ function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 // Device templates and the panels that import them live in node-templates.ts.
 
 // ── ribbons.ts ──────────────────────────────────────────────────
-// How a ribbon gets from one bar to the next.
+// How a link gets from one bar to the next: a curved band (the default), or a wire on a grid.
 //
-// A ribbon is a filled band, not a stroked line: it has a thickness that means something (the value), and
-// the animated stream clips against its outline. So each routing has to produce a closed outline rather
-// than a centre line — which is also why this is worth having on its own, testable, away from the 600-line
-// render.
-//
-// Every routing here obeys the same contract: the band leaves the source bar at x1 spanning
-// [sTop, sTop + h], and arrives at the target bar at x2 spanning [tTop, tTop + h]. Whatever happens in
-// between is the routing's business.
+// A band is filled, with a thickness that is the value; it leaves the source bar spanning [sTop, sTop + h]
+// and arrives at the target spanning [tTop, tTop + h]. A wire leaves the middle of that slot and arrives at
+// the middle of the target's, and says the value by its stroke width. Pure functions, testable away from
+// the render.
 
 /// One ribbon's geometry: where it starts, where it ends, and how thick it is.
 
 const r2 = (n        ) => Math.round(n * 100) / 100;
 
-/// The closed outline of a ribbon, as an SVG path.
-function ribbonOutline(style             , b      )         {
-  switch (style) {
-    case 'ortho': return orthoBand(b, 0);
-    case 'ortho-round': return orthoBand(b, cornerRadius(b));
-    default: return curvedBand(b);
-  }
+/// The closed outline of a curved ribbon, as an SVG path. The right-angle routings draw wires instead
+/// (wirePath below): a band as thick as its flow cannot turn a right angle in a column gap.
+function ribbonOutline(_style             , b      )         {
+  return curvedBand(b);
 }
 
-/// The line a stream of particles travels down the middle of the band, at fraction `f` across it.
-///
-/// It has to follow the same route as the outline or the particles swim outside their own ribbon — the
-/// stream is clipped to the band, so a mismatched lane simply disappears where it leaves.
-function lanePath(style             , b      , f        )         {
+/// The line a stream of particles travels down the band, at fraction `f` across it. It follows the same
+/// route as the outline, or the particles swim outside their own ribbon — the stream is clipped to the band.
+function lanePath(_style             , b      , f        )         {
   const sY = b.sTop + b.h * f, tY = b.tTop + b.h * f;
-  if (style === 'curved') {
-    const xc = (b.x1 + b.x2) / 2;
-    return `M${r2(b.x1)},${r2(sY)} C${r2(xc)},${r2(sY)} ${r2(xc)},${r2(tY)} ${r2(b.x2)},${r2(tY)}`;
-  }
-  // The grid routings share one elbow; a lane runs down the middle of it at its own offset.
-  const xc = elbowX(b);
-  const r = style === 'ortho-round' ? Math.min(cornerRadius(b), Math.abs(tY - sY) / 2) : 0;
-  return polyline([[b.x1, sY], [xc, sY], [xc, tY], [b.x2, tY]], r);
+  const xc = (b.x1 + b.x2) / 2;
+  return `M${r2(b.x1)},${r2(sY)} C${r2(xc)},${r2(sY)} ${r2(xc)},${r2(tY)} ${r2(b.x2)},${r2(tY)}`;
 }
 
-/// The original: one smooth band from source to target.
+/// One smooth band from source to target.
 function curvedBand({ x1, sTop, x2, tTop, h }      )         {
   const xc = (x1 + x2) / 2;
   return `M${r2(x1)},${r2(sTop)} C${r2(xc)},${r2(sTop)} ${r2(xc)},${r2(tTop)} ${r2(x2)},${r2(tTop)} `
        + `L${r2(x2)},${r2(tTop + h)} C${r2(xc)},${r2(tTop + h)} ${r2(xc)},${r2(sTop + h)} ${r2(x1)},${r2(sTop + h)} Z`;
-}
-
-/// How wide the vertical run is.
-///
-/// It wants to be the band's own thickness — that is what makes the turn constant-width, and it is right
-/// whenever there is room. There often is not: a 4.6 kW band is 324px thick in a 163px column gap, and a
-/// run that wide cannot sit between the two bars at all. It is capped to most of the corridor, so a very
-/// thick ribbon pinches at its turn rather than hanging out of the side of a panel.
-function runWidth(b      )         {
-  if (b.laneW != null) return Math.max(1.5, b.laneW);
-  return Math.max(1.5, Math.min(b.h, (b.x2 - b.x1) * 0.8));
-}
-
-/// Where the vertical run sits: mid-corridor, pulled in far enough that the whole run fits between the bars.
-function elbowX(b      )         {
-  const half = runWidth(b) / 2;
-  const mid = b.laneX ?? (b.x1 + b.x2) / 2;
-  return Math.min(Math.max(mid, b.x1 + half), b.x2 - half);
-}
-
-/// How much corner to round: as much as the turn and the runs allow, which on a long gentle turn is a lot.
-///
-/// The two corners share the vertical run between them, so neither may take more than half of it. The
-/// horizontal runs either side are theirs alone.
-function cornerRadius(b      )         {
-  const drop = Math.abs(b.tTop - b.sTop);
-  const half = runWidth(b) / 2;
-  const xc = elbowX(b);
-  return Math.max(0, Math.min(drop / 2, xc - half - b.x1, b.x2 - xc - half));
-}
-
-/// A band routed out, across and back in — two bends a side, never more.
-///
-/// The two edges turn on opposite sides of the vertical run, a run's width apart, which is what gives the
-/// turn its thickness. Which edge takes which side depends on the direction of travel: put both on the
-/// same side and the outline crosses itself and the ribbon renders as a bow tie; put them on the same x
-/// and the run has no width at all, so a long drop draws as two rectangles with nothing joining them.
-function orthoBand(b      , r        )         {
-  const { x1, sTop, x2, tTop, h } = b;
-
-  // Nothing to step over: a straight band, which is what the eye expects anyway.
-  if (Math.abs(tTop - sTop) <= 1)
-    return `M${r2(x1)},${r2(sTop)} L${r2(x2)},${r2(tTop)} L${r2(x2)},${r2(tTop + h)} L${r2(x1)},${r2(sTop + h)} Z`;
-
-  const xc = elbowX(b), half = runWidth(b) / 2;
-  const down = tTop > sTop ? 1 : -1;
-  const nearX = xc + down * half, farX = xc - down * half;
-
-  const upper = polyline([[x1, sTop], [nearX, sTop], [nearX, tTop], [x2, tTop]], r);
-  const lower = polyline([[x2, tTop + h], [farX, tTop + h], [farX, sTop + h], [x1, sTop + h]], r);
-  // The two sides, joined by the flat caps that sit against each bar.
-  return `${upper} L${r2(x2)},${r2(tTop + h)} ${lower.replace(/^M/, 'L')} Z`;
 }
 
 /// A polyline of right-angle turns, with each corner optionally rounded by `r`.
@@ -2547,6 +2480,26 @@ function polyline(pts            , r        )         {
   }
   const last = pts[pts.length - 1];
   return d + ` L${r2(last[0])},${r2(last[1])}`;
+}
+
+/// A link drawn as a wire rather than a band, for the right-angle routings.
+///
+/// A band as thick as its flow cannot turn a right angle in a column gap: a 1.5 kW band is hundreds of
+/// pixels thick in a gap a third of that, so every turn became a solid block and the blocks stacked into
+/// one another. A wire keeps the one thing a right-angle layout is for — seeing which circuit goes where —
+/// and says how much by its thickness instead. It leaves the middle of its slot on the source bar, runs to
+/// its source's trunk, along the trunk, and into the middle of its slot on the target bar.
+
+function wirePath(style             , w      )         {
+  if (Math.abs(w.ty - w.sy) <= 0.5) return `M${r2(w.x1)},${r2(w.sy)} L${r2(w.x2)},${r2(w.ty)}`;
+  const x = Math.min(Math.max(w.trunkX, w.x1 + 2), w.x2 - 2);
+  const r = style === 'ortho-round' ? 10 : 0;
+  return polyline([[w.x1, w.sy], [x, w.sy], [x, w.ty], [w.x2, w.ty]], r);
+}
+
+/// How thick a wire is for a band of thickness `h`: ordered like the flows, but never a slab or a hairline.
+function wireWidth(h        )         {
+  return Math.max(1.5, Math.min(10, 1.5 + Math.sqrt(Math.max(0, h)) * 0.6));
 }
 
 // ── flow-view.ts ────────────────────────────────────────────────
@@ -2860,8 +2813,8 @@ function unmeasuredToggle(onToggle            )              {
 const RIBBON_KEY = 'rpdu-flow-ribbon';
 const RIBBON_STYLES                                  = [
   ['curved', 'Curved ribbons', 'The default: each ribbon sweeps from source to target as one smooth band.'],
-  ['ortho', 'Right angles', 'Route on a grid — out, across, in. Two bends at most, so a ribbon never staircases.'],
-  ['ortho-round', 'Rounded angles', 'The same grid routing, with the corners rounded as far as the turn allows.'],
+  ['ortho', 'Wiring', 'Each link a wire, thickness by flow, run along one trunk per source with square corners.'],
+  ['ortho-round', 'Wiring, rounded', 'The same wiring with rounded corners.'],
 ];
 
 let ribbonStyle              = (() => {
@@ -5597,32 +5550,24 @@ function addFlowSection(nav     , sections     ) {
       ]);
     };
 
-    /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
-    ///
-    /// Both halves of that are the rule, and neither works alone. Letting each band turn half of its own
-    /// thickness from the middle puts a thick ribbon's corners in a different place from a thin one's, and
-    /// their corners interlock — a row of notches reading as puzzle pieces. Giving each band a lane of its
-    /// own instead spreads the turns across the whole corridor, and the column of ribbons comes out as a
-    /// staircase. One axis and one width is the only arrangement where every vertical edge in a corridor
-    /// falls on one of two lines.
-    ///
-    /// A band thicker than the run narrows through the turn and widens again after it; a thinner one does
-    /// the reverse. That is the price of the rule, and it is the rule that was asked for.
-    const laneOf = new Map                                       ();
-    {
-      const corridors = new Map               ();
+    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath). The
+    // trunks of the sources sharing a corridor are spread across its middle, top source nearest the left,
+    // so a source's wires never run along another's trunk.
+    const wires = ribbonStyle !== 'curved';
+    const trunkOf = new Map                ();
+    if (wires) {
+      const bySpan = new Map                     ();
       links.forEach((l     ) => {
         const s2 = pos[l.source], t2 = pos[l.target];
         if (!s2 || !t2) return;
         const key = `${s2.x + nodeW}|${t2.x}`;
-        (corridors.get(key) ?? corridors.set(key, []).get(key) ).push(l);
+        (bySpan.get(key) ?? bySpan.set(key, new Set()).get(key) ).add(l.source);
       });
-      for (const [key, list] of corridors) {
+      for (const [key, srcs] of bySpan) {
         const [left, right] = key.split('|').map(Number);
-        // A quarter of the corridor, bounded either side so it is neither a hairline nor a slab.
-        const laneW = Math.max(12, Math.min(40, (right - left) * 0.25));
-        const laneX = (left + right) / 2;
-        list.forEach((l     ) => laneOf.set(l, { laneX, laneW }));
+        const ordered = [...srcs].sort((a, b) => (pos[a]?.y ?? 0) - (pos[b]?.y ?? 0));
+        ordered.forEach((src, i) =>
+          trunkOf.set(`${src}|${key}`, left + (right - left) * (0.25 + 0.5 * (i + 0.5) / ordered.length)));
       }
     }
 
@@ -5646,7 +5591,31 @@ function addFlowSection(nav     , sections     ) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = tintOf(l.source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
+      const band = { x1, sTop, x2, tTop, h };
+      if (wires) {
+        const d = wirePath(ribbonStyle, { x1, sy: sTop + h / 2, x2, ty: tTop + h / 2, trunkX: trunkOf.get(`${l.source}|${x1}|${x2}`) ?? (x1 + x2) / 2 });
+        const width = unknownLink || idleLink ? 1.5 : wireWidth(h);
+        svg.appendChild(svgEl('path', {
+          d, fill: 'none', 'fill-opacity': '0',
+          stroke: unknownLink ? 'var(--muted)' : color, 'stroke-width': width,
+          'stroke-opacity': unknownLink ? '0.5' : '0.85', 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+          class: 'flow-ribbon flow-wire', 'data-src': l.source, 'data-dst': l.target,
+        }));
+        // A stream is a dash running along the wire itself.
+        if (animateFlow() && !unknownLink && !idleLink) {
+          const intensity = l.value / Math.max(1, maxTotal);
+          const duration = Math.max(0.9, Math.min(6, 3.2 - intensity * 9));
+          const stream = svgEl('path', {
+            d, fill: 'none', stroke: 'var(--fg)', 'stroke-opacity': '0.55',
+            'stroke-width': Math.max(1.2, width * 0.45), 'stroke-linecap': 'round', 'stroke-dasharray': '6 26',
+            class: 'flow-stream', 'data-src': l.source, 'data-dst': l.target,
+          });
+          stream.style.animationDuration = `${duration.toFixed(2)}s`;
+          svg.appendChild(stream);
+        }
+        s.outOff += h; t.inOff += h;
+        return;
+      }
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
