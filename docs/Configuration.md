@@ -502,7 +502,8 @@ directory you can copy, tar or mount read-only.
 - **Every metric the bridge understands** is recorded for every node that reports one: power, apparent power,
   energy, the day's energy, current, voltage, frequency, power factor, state of charge, any other percentage,
   and temperature — plus the return lanes (battery charge, grid export) as series of their own. A metric a
-  node does not report is not stored for it, and costs nothing.
+  node does not report is not stored for it, and costs nothing. A source can be bound to any of them except
+  the day's energy, which the bridge works out from a counter's rise rather than reading.
 - **A slot nobody wrote is "no reading"**, stored as NaN. Unknown is never a zero, in the files or out of them.
 - **Four resolutions, each kept for as long as you choose.** The readings as they arrive
   (`LocalRawKeepDays`), a minute at a time (`LocalMinuteKeepDays`), an hour (`LocalHourKeepDays`), and a day

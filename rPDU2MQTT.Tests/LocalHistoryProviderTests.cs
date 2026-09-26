@@ -44,7 +44,7 @@ public class LocalHistoryProviderTests : IDisposable
     private static DateTime At(int minute, int second = 0) => new(2026, 9, 20, 10, minute, second, DateTimeKind.Utc);
 
     [Fact]
-    public void ASweepStoresWhatEachNodeIsReading_AndTheReadGivesItBack()
+    public async Task ASweepStoresWhatEachNodeIsReading_AndTheReadGivesItBack()
     {
         var cfg = Configured(root);
         var live = new Live(new() { ["grid|realpower"] = 800, ["main|realpower"] = 780, ["main|energy"] = 1234.5 });
@@ -55,29 +55,30 @@ public class LocalHistoryProviderTests : IDisposable
         var stored = writer.Sweep(At(0));
 
         Assert.Equal(3, stored);
-        var found = history.ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None).Result;
+        var found = await history.ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None);
         Assert.Equal(800, found["grid"]);
         Assert.Equal(780, found["main"]);
         // …and each metric is a series of its own.
-        Assert.Equal(1234.5, history.ValuesAtAsync(["main"], "energy", At(0), CancellationToken.None).Result["main"]);
+        var energy = await history.ValuesAtAsync(["main"], "energy", At(0), CancellationToken.None);
+        Assert.Equal(1234.5, energy["main"]);
     }
 
     [Fact]
-    public void ANodeReadingNothingIsNotStored_SoItIsNotReadBackAsAZero()
+    public async Task ANodeReadingNothingIsNotStored_SoItIsNotReadBackAsAZero()
     {
         var cfg = Configured(root);
         var live = new Live(new() { ["grid|realpower"] = 800 });
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
         new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        var found = new LocalFlowHistory(cfg, store).ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None).Result;
+        var found = await new LocalFlowHistory(cfg, store).ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None);
 
         Assert.Equal(800, found["grid"]);
         Assert.False(found.ContainsKey("main"));
     }
 
     [Fact]
-    public void EverySweepIsItsOwnStep_SoAWindowIsWhatEachNodeWasDoing()
+    public async Task EverySweepIsItsOwnStep_SoAWindowIsWhatEachNodeWasDoing()
     {
         var cfg = Configured(root);
         var live = new Live(new() { ["grid|realpower"] = 100 });
@@ -91,7 +92,7 @@ public class LocalHistoryProviderTests : IDisposable
             steps.Add(At(i));
         }
 
-        var series = new LocalFlowHistory(cfg, store).SeriesAsync(["grid"], "realpower", steps, CancellationToken.None).Result;
+        var series = await new LocalFlowHistory(cfg, store).SeriesAsync(["grid"], "realpower", steps, CancellationToken.None);
 
         Assert.Equal([100d, 200, 300, 400, 500], series.Select(s => s["grid"]).ToArray());
     }
@@ -121,15 +122,15 @@ public class LocalHistoryProviderTests : IDisposable
 
     /// <summary>A battery's charge and a grid's export are stored as their own series, as they are exported.</summary>
     [Fact]
-    public void TheReturnLaneIsASeriesOfItsOwn()
+    public async Task TheReturnLaneIsASeriesOfItsOwn()
     {
         var cfg = Configured(root);
         var live = new Live(new() { ["grid|realpower"] = 0, ["grid|realpower#in"] = 450 });
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
         new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        var found = new LocalFlowHistory(cfg, store)
-            .ValuesAtAsync(["grid", "grid#in"], "realpower", At(0), CancellationToken.None).Result;
+        var found = await new LocalFlowHistory(cfg, store)
+            .ValuesAtAsync(["grid", "grid#in"], "realpower", At(0), CancellationToken.None);
 
         Assert.Equal(0, found["grid"]);
         Assert.Equal(450, found["grid#in"]);

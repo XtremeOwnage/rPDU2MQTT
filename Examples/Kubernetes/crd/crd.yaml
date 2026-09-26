@@ -88,6 +88,8 @@ spec:
                             - frequency
                             - powerfactor
                             - soc
+                            - percent
+                            - temperature
                             - energy_d
                           description: Which captured {measure} supplies which metric. A measure that is not listed is ignored, so this is also the filter for the readings worth importing. Choose 'energy_d' for a counter the device zeroes each day (e.g. ESPHome's energy_d); it is imported as energy with a daily-reset counter.
                         Tags:
@@ -972,17 +974,7 @@ spec:
                                 description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
-                                enum:
-                                - ''
-                                - realpower
-                                - apparentpower
-                                - energy
-                                - current
-                                - voltage
-                                - frequency
-                                - powerfactor
-                                - soc
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                                description: Which measurement this source supplies. The power, energy and current of a node are rolled up through the hierarchy; the rest — voltage, frequency, power factor, state of charge, any other percentage, temperature — are read at the node and shown, never summed.
                               Accumulation:
                                 type: string
                                 enum:
@@ -1068,17 +1060,7 @@ spec:
                                 description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
-                                enum:
-                                - ''
-                                - realpower
-                                - apparentpower
-                                - energy
-                                - current
-                                - voltage
-                                - frequency
-                                - powerfactor
-                                - soc
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                                description: Which measurement this source supplies. The power, energy and current of a node are rolled up through the hierarchy; the rest — voltage, frequency, power factor, state of charge, any other percentage, temperature — are read at the node and shown, never summed.
                               Accumulation:
                                 type: string
                                 enum:

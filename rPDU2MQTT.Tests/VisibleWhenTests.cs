@@ -53,6 +53,29 @@ public class VisibleWhenTests
         }
     }
 
+    /// <summary>
+    /// A source can be bound to every metric the bridge understands. The list used to be retyped on the
+    /// setting, so a metric added to the table — temperature — was recorded by the history and offered
+    /// by nothing.
+    /// </summary>
+    [Fact]
+    public void ASourceCanBeBoundToEveryMetricTheBridgeUnderstands()
+    {
+        var flow = ConfigSchema.Build().Single(n => n.Key == "EnergyFlow");
+        var metric = flow.Properties!.Single(p => p.Key == "Nodes")
+            .ValueSchema!.Properties!.Single(p => p.Key == "Sources")
+            .ValueSchema!.Properties!.Single(p => p.Key == "Metric");
+
+        Assert.Equal("enum", metric.Type);
+        foreach (var bindable in rPDU2MQTT.Core.Flow.FlowUnits.Bindable)
+            Assert.Contains(bindable, metric.EnumValues!);
+        // The ones a retyped list left out, temperature among them.
+        foreach (var missed in new[] { "temperature", "percent" })
+            Assert.Contains(missed, metric.EnumValues!);
+        // …and still not the day's energy, which is derived from a counter's rise rather than published.
+        Assert.DoesNotContain("energy_d", metric.EnumValues!);
+    }
+
     [Fact]
     public void EachBackendsOwnSettingsAreShownForThatBackendAlone()
     {
