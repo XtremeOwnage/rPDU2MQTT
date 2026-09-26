@@ -68,11 +68,17 @@ export function addBalanceSection(nav: any, sections: any) {
   const instSel = instanceSelector(() => load());
   const save = btn('Save', 'primary');
   const status = el('span', { class: 'ld-count' });
-  sec.appendChild(el('div', { class: 'ld-toolbar' }, instSel.wrap, save, status));
+  const toolbar = el('div', { class: 'ld-toolbar' }, instSel.wrap, save, status);
+  sec.appendChild(toolbar);
   const body = el('div');
   sec.appendChild(body);
 
   let lastGraph: any = null;
+  // What gets used, not what supplies or meters a total: an appliance, a PDU or one of its outlets is
+  // never the site's solar, grid, battery or home figure, and there are dozens of them. Offered only when
+  // asked for, for the setup where one is.
+  const END_LOADS = ['load', 'outlet', 'pdu'];
+  let everyNode = false;
 
   const render = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
@@ -144,6 +150,7 @@ export function addBalanceSection(nav: any, sections: any) {
       pick.appendChild(el('option', { value: '', text: `+ add a node to ${label}` }));
       [...cand.keys()]
         .filter(id => listed.get(id.toLowerCase()) !== role)
+        .filter(id => everyNode || !END_LOADS.includes(cand.get(id)?.kind || 'node'))
         .sort((a, b) => nm(a).localeCompare(nm(b)))
         .forEach(id => {
           const elsewhere = listed.get(id.toLowerCase());
@@ -154,6 +161,13 @@ export function addBalanceSection(nav: any, sections: any) {
       body.appendChild(card);
     });
   };
+
+  // Beside the lists, not inside each: one switch for every picker on the page.
+  const everyToggle = el('label', { class: 'ld-inst', title: 'Loads, PDUs and outlets are left out of the pickers: they use energy rather than being a site total.' });
+  const everyBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  everyBox.onchange = () => { everyNode = everyBox.checked; render(); };
+  everyToggle.append(everyBox, ' Offer loads, PDUs and outlets too');
+  toolbar.appendChild(everyToggle);
 
   const load = async () => {
     // The graph names every node that can be listed, the derived ones included, with what each reads now.

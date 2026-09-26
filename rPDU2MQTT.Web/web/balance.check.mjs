@@ -70,6 +70,24 @@ if (JSON.stringify(b.Solar) !== '["pv"]' || JSON.stringify(b.Grid) !== '["grid"]
   fail(`starting from the kind rule wrote ${JSON.stringify(b)}`);
 if (b.Home.length) fail(`nothing counted as home, yet Home became ${JSON.stringify(b.Home)}`);
 
+// End loads are not offered: an appliance is never a site total, and there are dozens of them.
+const offered = () => (query(role('home'), 'select', true)[0].children || []).map(o => o.value || o.attrs?.value);
+graph.nodes.push({ id: 'fridge', label: 'Fridge', kind: 'load', value: 150 }, { id: 'outlet:rack:1', label: 'Outlet 1', kind: 'outlet', value: 20 });
+link.click();
+await wait(150);
+if (offered().includes('fridge') || offered().includes('outlet:rack:1')) fail(`end loads are offered as a site total: ${offered().join(', ')}`);
+if (!offered().includes('inverter')) fail('the inverter is no longer offered');
+// …unless asked for.
+const every = query(sec(), 'label', true).find(l => /Offer loads/.test(l.textContent || ''));
+if (!every) fail('no way to offer loads for the setup where one is a total');
+const everyBox = query(every, 'input', true)[0];
+everyBox.checked = true;
+everyBox.onchange();
+await wait(20);
+if (!offered().includes('fridge')) fail('asking for loads did not offer them');
+everyBox.checked = false;
+everyBox.onchange();
+
 // The inverter's reading is the house load: add it to Home.
 const pick = query(role('home'), 'select', true)[0];
 pick.value = 'inverter';
@@ -116,4 +134,4 @@ sel.onchange();
 if (config.EnergyFlow.Balance.Battery.includes('battery') || !config.EnergyFlow.Balance.Home.includes('battery'))
   fail(`changing Counts toward did not move the node: ${JSON.stringify(config.EnergyFlow.Balance)}`);
 
-console.log('balance: the page shows what counts by kind and starts from it; a node is added to a total, moves rather than counting twice, and is removed; an entry naming no node is marked; the node editor edits the same list');
+console.log('balance: the page shows what counts by kind and starts from it; a node is added to a total, moves rather than counting twice, and is removed; an entry naming no node is marked; the node editor edits the same list; end loads are only offered when asked for');
