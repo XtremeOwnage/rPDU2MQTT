@@ -1679,15 +1679,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         // mount, or one that is full, otherwise looks like readings quietly not being kept.
         app.MapGet("/api/diagnostics/storage", (HttpContext ctx) =>
         {
-            var plans = !string.IsNullOrWhiteSpace(config.PlanStorage.Directory) ? config.PlanStorage.Directory
-                : Environment.GetEnvironmentVariable("RPDU2MQTT_PLANS_DIRECTORY");
-            var entries = new List<Core.StorageUse>();
-            if (localHistory is not null) entries.Add(Core.StorageUsage.For("History", localHistory.Root));
-            // An object store holds the images instead, and then there is no directory to report.
-            if (!config.PlanStorage.ObjectStore.IsEnabled() && !string.IsNullOrWhiteSpace(plans))
-                entries.Add(Core.StorageUsage.For("Floor plan images", plans));
-            var plugins = Path.Combine(AppContext.BaseDirectory, "plugins");
-            if (Directory.Exists(plugins)) entries.Add(Core.StorageUsage.For("Plugins", plugins));
+            var entries = Core.StorageUsage.Locations(config, localHistory?.Root, global::rPDU2MQTT.Plugins.PluginLoader.DefaultDirectory);
 
             return Results.Json(new
             {
@@ -1695,6 +1687,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 entries = entries.Select(e => new
                 {
                     e.Name, e.Path, e.Exists, e.Writable, e.Bytes, e.Files, e.Mount, e.TotalBytes, e.FreeBytes,
+                    // The same verdict the Status card uses, so the table cannot call fine what the card calls full.
+                    state = Core.StorageUsage.StateOf(e).ToString(),
+                    // How full the volume is on its own, for colouring the Used column — plugins included,
+                    // whose directory is only read and so never makes the state above worse than Ok.
+                    room = Core.StorageUsage.Room(e.FreeBytes, e.TotalBytes).ToString(),
                 }).ToList(),
             }, ConfigSchema.Json);
         });

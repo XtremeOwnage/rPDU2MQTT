@@ -66,4 +66,44 @@ public class StorageUsageTests : IDisposable
         // The mount is a prefix of the directory: the longest one, where volumes are nested.
         Assert.StartsWith(use.Mount!.TrimEnd(Path.DirectorySeparatorChar), use.Path, StringComparison.Ordinal);
     }
+
+    private static StorageUse Volume(long free, long total, string name = "History", bool exists = true, bool writable = true, bool mustWrite = true)
+        => new(name, "/data/" + name, exists, writable, 0, 0, "/data", total, free, mustWrite);
+
+    private const long GB = 1L << 30;
+
+    [Theory]
+    [InlineData(5 * GB, 10 * GB, StorageState.Ok)]
+    [InlineData(GB / 2 + 1, 10 * GB, StorageState.Low)]    // just over 5% free
+    [InlineData(GB / 5, 10 * GB, StorageState.Full)]       // 2% free
+    [InlineData(32L << 20, 100L << 20, StorageState.Full)] // a third free, but under 64 MB: full whatever its size
+    [InlineData(0, 0, StorageState.Ok)]                    // size unreadable: nothing to judge by
+    public void RoomIsJudgedByShareFreeAndAFloor(long free, long total, StorageState expected)
+        => Assert.Equal(expected, StorageUsage.Room(free, total));
+
+    /// <summary>A volume that did not mount reports the root filesystem's free space — plenty of it.</summary>
+    [Fact]
+    public void MissingAndReadOnlyOutrankFreeSpace()
+    {
+        Assert.Equal(StorageState.Missing, StorageUsage.StateOf(Volume(9 * GB, 10 * GB, exists: false, writable: false)));
+        Assert.Equal(StorageState.ReadOnly, StorageUsage.StateOf(Volume(9 * GB, 10 * GB, writable: false)));
+    }
+
+    /// <summary>Plugins are only read: shipped read-only, or on a busy root filesystem, is not a fault.</summary>
+    [Fact]
+    public void ADirectoryOnlyReadIsNotFaultedForBeingReadOnlyOrFull()
+        => Assert.Equal(StorageState.Ok, StorageUsage.StateOf(Volume(GB / 100, 10 * GB, "Plugins", writable: false, mustWrite: false)));
+
+    [Fact]
+    public void TheWorstDirectoryIsTheOneThatNeedsAttention()
+    {
+        var worst = StorageUsage.Worst([
+            Volume(9 * GB, 10 * GB, "History"),
+            Volume(GB / 2 + 1, 10 * GB, "Floor plan images"),
+            Volume(GB / 100, 10 * GB, "Plugins", mustWrite: false),
+        ]);
+
+        Assert.Equal("Floor plan images", worst!.Name);
+        Assert.Contains("free of 10.0 GB", StorageUsage.Describe(worst));
+    }
 }

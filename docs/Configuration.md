@@ -873,6 +873,11 @@ in the schema and the CRD.
 The Diagnostics page also lists every directory this process writes to — history, floor plan images,
 plugins — with what each holds, the file count, the mount it sits on and the free space there. A directory
 that is not there, or that cannot be written to, is marked: both look like data quietly not being kept.
+The Used column is green, amber when the volume has under 10% free, and red under 3% (or 64 MB).
+
+The Status board carries a **Storage** card judged by the directory in the worst shape: red when a
+directory is missing, read-only or full, amber when one is nearly full. The plugins directory is only read,
+so it is never faulted for being read-only or on a busy filesystem.
 
 A page for a feature that is off stays hidden in the nav until it is turned on, as before.
 

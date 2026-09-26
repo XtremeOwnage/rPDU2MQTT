@@ -1698,4 +1698,8 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
    then parked the header 56px down inside the table, over the first rows. It is a short table. */
 .diag-storage table.ld th { position: static; }
 .diag-storage tr.is-bad td { color: var(--bad); }
+.diag-storage tr.is-low td { color: var(--warn); }
+.diag-storage td.use-ok { color: var(--good); }
+.diag-storage td.use-low { color: var(--warn); font-weight: 600; }
+.diag-storage td.use-full { color: var(--bad); font-weight: 600; }
 .diag-warn { font-weight: 600; }

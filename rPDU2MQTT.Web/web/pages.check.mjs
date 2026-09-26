@@ -23,9 +23,11 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/restart/targets') ? { ok: true, method: 'local', targets: [] }
     : url.includes('/api/diagnostics/storage') ? { ok: true, entries: [
         { name: 'History', path: '/data/history', exists: true, writable: true, bytes: 28 * 1024 * 1024, files: 412,
-          mount: '/data/history', totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 },
+          mount: '/data/history', totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3, state: 'Ok', room: 'Ok' },
         { name: 'Floor plan images', path: '/data/plans', exists: false, writable: false, bytes: 0, files: 0,
-          mount: '/', totalBytes: 50 * 1024 ** 3, freeBytes: 20 * 1024 ** 3 },
+          mount: '/', totalBytes: 50 * 1024 ** 3, freeBytes: 20 * 1024 ** 3, state: 'Missing', room: 'Ok' },
+        { name: 'Plugins', path: '/app/plugins', exists: true, writable: true, bytes: 0, files: 0,
+          mount: '/', totalBytes: 100 * 1024 ** 3, freeBytes: 5 * 1024 ** 3, state: 'Low', room: 'Low' },
       ] }
     : { ok: true },
 });
@@ -62,7 +64,7 @@ const diag = query(getEl('sections'), '.section', true).find(s => s.classList.co
 if (!diag) fail('the Diagnostics page did not open');
 // What this process writes to, and the room left where it sits.
 const rows = query(diag, '.diag-storage tr', true).filter(r => r.dataset?.name);
-if (rows.length !== 2) fail(`the storage table lists ${rows.length} directories, not the 2 reported`);
+if (rows.length !== 3) fail(`the storage table lists ${rows.length} directories, not the 3 reported`);
 const history = rows.find(r => r.dataset.name === 'History');
 const cells = query(history, 'td', true).map(c => c.textContent);
 if (!cells.includes('/data/history')) fail(`the directory is not shown: ${cells.join(' | ')}`);
@@ -73,6 +75,17 @@ if (!cells.includes('9.0 GB') || !cells.includes('10.0 GB')) fail(`free and tota
 const plans = rows.find(r => r.dataset.name === 'Floor plan images');
 if (!plans.classList.contains('is-bad')) fail('a directory that is not there is not marked');
 if (!/does not exist/.test(plans.textContent || '')) fail(`a missing directory reads as: ${plans.textContent}`);
+// Nearly full is amber, not red: it is still storing everything.
+const low = rows.find(r => r.dataset.name === 'Plugins');
+if (!low.classList.contains('is-low') || low.classList.contains('is-bad')) fail('a nearly full volume is not marked amber');
+if (!/nearly full/.test(low.textContent || '')) fail(`a nearly full volume reads as: ${low.textContent}`);
+if (history.classList.contains('is-bad') || history.classList.contains('is-low')) fail('a healthy directory is marked');
+// How full each mount is, coloured by the server's verdict on it.
+const usedOf = r => query(r, 'td', true).find(c => /%$/.test(c.textContent || ''));
+if (usedOf(history)?.textContent !== '10%' || !usedOf(history).classList.contains('use-ok'))
+  fail(`the history volume's use reads ${usedOf(history)?.textContent} (${usedOf(history)?.className})`);
+if (usedOf(low)?.textContent !== '95%' || !usedOf(low).classList.contains('use-low'))
+  fail(`a nearly full volume's use reads ${usedOf(low)?.textContent} (${usedOf(low)?.className})`);
 // Every row has a cell under every header, the flagged one included.
 const headers = query(diag, '.diag-storage th', true).length;
 for (const r of rows) {

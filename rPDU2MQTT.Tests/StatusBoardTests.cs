@@ -146,4 +146,19 @@ public class StatusBoardTests
         Assert.Null(board.For("mqtt"));
         Assert.Empty(board.Board());
     }
+
+    [Theory]
+    [InlineData(true, 9L << 30, 10L << 30, StatusLevel.Good, "Available")]
+    [InlineData(true, 1L << 29, 10L << 30, StatusLevel.Warn, "Nearly full")]
+    [InlineData(true, 1L << 27, 10L << 30, StatusLevel.Bad, "Full")]
+    [InlineData(false, 9L << 30, 10L << 30, StatusLevel.Bad, "Unavailable")]
+    public void StorageIsJudgedByWhetherItIsThereAndTheRoomLeft(bool ok, long free, long total, StatusLevel level, string state)
+    {
+        var board = new StatusBoard();
+        board.Report("storage", StatusBoard.ComponentKind.Storage, new ComponentReport(Ok: ok, FreeBytes: free, TotalBytes: total));
+
+        var card = board.For("storage")!;
+        Assert.Equal(level, card.Level);
+        Assert.Equal(state, card.State);
+    }
 }
