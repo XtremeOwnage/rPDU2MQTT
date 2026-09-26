@@ -18,6 +18,9 @@
 {{- range $r := $roles }}
 {{- /* Plan images are served by whichever process runs the GUI. */}}
 {{- $plans := and $.Values.floorPlans.persistence.enabled (or (eq $r.component "") (eq $r.component "ui")) }}
+{{- /* The readings are written by the process that polls and read by the one serving the GUI, so both
+       carry the volume; with a single-writer access mode a split deployment needs a shared class. */}}
+{{- $history := $.Values.history.persistence.enabled }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -95,6 +98,11 @@ spec:
             - name: RPDU2MQTT_PLANS_DIRECTORY
               value: {{ $.Values.floorPlans.mountPath | quote }}
             {{- end }}
+            {{- if $history }}
+            # Where the bridge keeps its own readings, unless the configuration names somewhere itself.
+            - name: RPDU2MQTT_HISTORY_DIRECTORY
+              value: {{ $.Values.history.mountPath | quote }}
+            {{- end }}
             {{- if $.Values.kubernetesConfigSource.enabled }}
             - name: RPDU2MQTT_CONFIG_SOURCE
               value: k8s
@@ -170,6 +178,10 @@ spec:
             - name: plans
               mountPath: {{ $.Values.floorPlans.mountPath }}
             {{- end }}
+            {{- if $history }}
+            - name: history
+              mountPath: {{ $.Values.history.mountPath }}
+            {{- end }}
           {{- end }}
           {{- $res := $.Values.resources }}
           {{- if $r.component }}{{ $res = (index $.Values.split $r.component).resources | default $.Values.resources }}{{ end }}
@@ -192,6 +204,11 @@ spec:
         - name: plans
           persistentVolumeClaim:
             claimName: {{ $.Values.floorPlans.persistence.existingClaim | default (printf "%s-plans" (include "rpdu2mqtt.fullname" $)) }}
+        {{- end }}
+        {{- if $history }}
+        - name: history
+          persistentVolumeClaim:
+            claimName: {{ $.Values.history.persistence.existingClaim | default (printf "%s-history" (include "rpdu2mqtt.fullname" $)) }}
         {{- end }}
       {{- end }}
       {{- with $.Values.nodeSelector }}

@@ -219,15 +219,37 @@ const historySection = query(getEl('sections'), '.section', true).find(s => quer
 const hidden = (elm) => elm.classList.contains('is-hidden');
 const promField = query(historySection, '.field', true).find(f => f.textContent.includes('PrometheusUrl'));
 const emonPointer = query(historySection, '.feature-pointer', true).find(d => d.textContent.includes('EmonCMS history'));
+const localField = query(historySection, '.field', true).find(f => f.textContent.includes('LocalPath'));
 if (!promField) fail('the History page does not render the Prometheus URL at all');
 if (!emonPointer) fail('the History page never points at where EmonCMS is configured');
+if (!localField) fail('the History page does not say where the bridge keeps its own readings');
+// Each resolution's retention is a setting of its own, and all of them belong to the local store.
+const keepFields = ['LocalRawKeepDays', 'LocalMinuteKeepDays', 'LocalHourKeepDays', 'LocalDayKeepDays']
+  .map((name, i) => {
+    const field = query(historySection, '.field', true).find(f => f.textContent.includes(name));
+    if (!field) fail(`the History page has no retention setting for ${['raw', 'minute', 'hour', 'day'][i]} readings`);
+    return field;
+  });
 
-// Unset provider means the default (prometheus), not "no provider" — its URL still has to be reachable.
-if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
-if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while Prometheus is the provider');
+// Recording is a destination, not a backend: the store's own settings are on the page whatever the pages
+// read from, while a backend's settings belong to that backend.
+if (hidden(localField)) fail('the local store\'s directory is hidden');
+if (!hidden(promField)) fail('the Prometheus URL shows while the bridge keeps its own history');
+if (keepFields.some(f => hidden(f))) fail('a retention setting is hidden');
+if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while the bridge keeps its own history');
+if (!query(historySection, '.field', true).some(f => f.textContent.includes('LocalEnabled')))
+  fail('there is no way to say whether the bridge keeps its own copy of the readings');
 
 const provider = query(historySection, 'select', true)[0];
 if (!provider) fail('no provider control on the History page');
+provider.value = 'prometheus';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
+// …and they stay on the page: the readings are kept whatever is being read from.
+if (hidden(localField)) fail('the local store\'s directory went away when another backend was chosen');
+if (keepFields.some(f => hidden(f))) fail('a retention setting went away when another backend was chosen');
+
 provider.value = 'emoncms';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
@@ -238,6 +260,12 @@ provider.value = 'prometheus';
 provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
 if (hidden(promField)) fail('switching back to Prometheus did not bring its URL back');
+
+// …and back to the bridge's own store, which is where a fresh install starts.
+provider.value = 'local';
+provider.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (!hidden(promField)) fail('the Prometheus URL stayed on the page after switching to the local store');
 
 // A test button has to end with a verdict. The action toasted `r.body.message`, so an answer carrying no
 // message toasted nothing and a fetch that threw never got there — leaving "Testing…" on screen, which
@@ -254,4 +282,6 @@ if (testBtn.disabled) fail('the test button was left disabled after the test fin
 
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
   + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
-  + 'provider\'s settings and says how the test ended');
+  + 'provider\'s settings \u2014 the bridge\'s own store by default \u2014 while the store\'s own settings, a '
+  + 'retention per resolution, stay on the page whatever is read from, since it records either way; and says '
+  + 'how the test ended');

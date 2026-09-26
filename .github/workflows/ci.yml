@@ -93,5 +93,7 @@ jobs:
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt \
             --set kubernetesConfigSource.enabled=true --set kubernetesConfigSource.manageResource=false)
-          echo "$out" | grep -q 'kind: RpduConfig' && { echo "RpduConfig should not be rendered"; exit 1; }
+          # Anchored: the CRD the chart renders names RpduConfig as the kind it defines, indented under
+          # spec.names, and an unanchored match counts that as the resource itself.
+          echo "$out" | grep -q '^kind: RpduConfig' && { echo "RpduConfig should not be rendered"; exit 1; }
           echo "$out" | grep -q 'RPDU2MQTT_CONFIG_SOURCE' || { echo "app should still read from the CR"; exit 1; }

@@ -418,17 +418,49 @@ public static class ServiceConfiguration
     /// that asks for something absent fails the build instead of the deployment.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Where past readings come from, and — for the bridge's own store — what fills it (#502).
+    ///
+    /// <para>
+    /// Everything is registered whatever the provider is, and the router reads Enabled and Provider per
+    /// call, so switching backend takes a save rather than a restart. The writer keeps itself to its own
+    /// backend: it stores nothing while something else is answering.
+    /// </para>
+    /// <para>
+    /// Its own method so the graph can be built in a test: a registration whose constructor asks for
+    /// something nobody registered is only found at boot otherwise, in a crash loop.
+    /// </para>
+    /// </summary>
+    public static void AddHistory(IServiceCollection services, Config cfg)
+    {
+        // Where the deployment mounted a volume for it, unless the configuration names somewhere itself.
+        var historyPath = !string.IsNullOrWhiteSpace(cfg.History.LocalPath) ? cfg.History.LocalPath
+            : Environment.GetEnvironmentVariable("RPDU2MQTT_HISTORY_DIRECTORY") is { Length: > 0 } mounted ? mounted
+            : Path.Combine(AppContext.BaseDirectory, "history");
+        services.AddSingleton(_ => new Core.History.LocalSeriesStore(
+            historyPath,
+            rawIntervalSeconds: cfg.EnergyFlow.Aggregation.SampleIntervalSeconds,
+            toleranceSeconds: cfg.History.ToleranceSeconds,
+            rawKeepDays: cfg.History.LocalRawKeepDays,
+            minuteKeepDays: cfg.History.LocalMinuteKeepDays,
+            hourKeepDays: cfg.History.LocalHourKeepDays,
+            dayKeepDays: cfg.History.LocalDayKeepDays));
+        // A dashboard read must not hang the page when a remote backend is down or slow.
+        services.AddSingleton<Core.Flow.IMeasurementHistory>(sp =>
+            new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg,
+                                           sp.GetRequiredService<Core.History.LocalSeriesStore>()));
+        services.AddHostedService(sp => new Services.LocalHistoryWriterService(
+            cfg, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
+            sp.GetRequiredService<Core.History.LocalSeriesStore>(),
+            sp.GetService<Core.ISnapshotCache>()));
+    }
+
     public static void AddCache(IServiceCollection services, Config cfg)
     {
         // Registered whether or not the cache is enabled, so the Status board can say "not configured"
         // rather than the card simply being absent — an absent card looks like a feature that doesn't
         // exist, which is exactly the confusion this is meant to remove.
-        // History reads whatever the readings were already exported to; the bridge stores none itself (#372).
-        // Registered unconditionally, and the router reads Enabled and Provider per call — turning history
-        // on, or switching backend, takes effect on the next request rather than at the next restart.
-        // A dashboard read must not hang the page when the backend is down or slow.
-        services.AddSingleton<Core.Flow.IMeasurementHistory>(_ =>
-            new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg));
+        AddHistory(services, cfg);
 
         // The audit's verdicts have one owner; the ingests see only the port.
         services.AddSingleton<Core.Flow.IPeriodAuditor>(sp =>

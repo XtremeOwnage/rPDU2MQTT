@@ -17,6 +17,13 @@ namespace rPDU2MQTT.Models.Config;
 public sealed class TimeZoneChoicesAttribute : Attribute;
 
 /// <summary>
+/// Marks a setting whose choices are every metric this build understands, filled from
+/// <c>FlowUnits.Metrics</c> rather than retyped. A list typed out here is how a metric gets added to the
+/// bridge and silently cannot be bound to anything.
+/// </summary>
+public sealed class MetricChoicesAttribute : Attribute;
+
+/// <summary>
 /// Marks a setting the GUI must show but never let you change, with the reason to display.
 ///
 /// <para>

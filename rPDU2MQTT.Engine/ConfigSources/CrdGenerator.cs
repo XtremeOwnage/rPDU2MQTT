@@ -11,9 +11,31 @@ public static class CrdGenerator
 {
     public static string ToYaml()
     {
-        var serializer = new SerializerBuilder().Build();
-        return serializer.Serialize(BuildCrd());
+        var serializer = new SerializerBuilder().WithQuotingNecessaryStrings().Build();
+        return Quoted(serializer.Serialize(BuildCrd()));
     }
+
+    /// <summary>
+    /// Words a YAML 1.1 reader takes for booleans. Go's parser — which is kubectl's, Helm's and Argo's —
+    /// is YAML 1.1, and .NET's serializer quotes by the 1.2 rules, so it leaves these bare.
+    /// </summary>
+    private static readonly string[] ReadAsBooleans =
+        ["y", "Y", "n", "N", "yes", "Yes", "YES", "no", "No", "NO",
+         "true", "True", "TRUE", "false", "False", "FALSE", "on", "On", "ON", "off", "Off", "OFF"];
+
+    /// <summary>
+    /// Quote the property names those readers would otherwise mistake for a value.
+    ///
+    /// <para>
+    /// The floor plan's <c>Y</c> coordinate is the case that matters: emitted bare, every one of those tools
+    /// installs a schema describing a property called <c>true</c>. Y is then unvalidated — and on any object
+    /// that does not preserve unknown fields, the API server prunes it out of what anyone saves.
+    /// </para>
+    /// </summary>
+    private static string Quoted(string yaml) => System.Text.RegularExpressions.Regex.Replace(
+        yaml,
+        $"(?m)^(\\s*)({string.Join('|', ReadAsBooleans)}):",
+        m => $"{m.Groups[1].Value}\"{m.Groups[2].Value}\":");
 
     private static object BuildCrd()
     {
@@ -56,6 +78,13 @@ public static class CrdGenerator
             ["metadata"] = new Dictionary<string, object?>
             {
                 ["name"] = $"{RpduCrd.Plural}.{RpduCrd.Group}",
+                // Carried in the manifest itself so the Helm chart can render this file verbatim: parsing it
+                // to add the annotation is not safe, since a YAML reader takes the unquoted key "Y" — the
+                // floor plan's Y coordinate — for the boolean true. Outside Helm it means nothing.
+                ["annotations"] = new Dictionary<string, object?>
+                {
+                    ["helm.sh/resource-policy"] = "keep",
+                },
             },
             ["spec"] = new Dictionary<string, object?>
             {
@@ -110,13 +139,17 @@ public static class CrdGenerator
         foreach (var n in nodes)
             props[n.Key] = SchemaFor(n);
 
-        return new Dictionary<string, object?>
+        var schema = new Dictionary<string, object?>
         {
             ["type"] = "object",
             // Keep validation lenient/forward-compatible: known fields are typed, unknown are preserved.
             ["x-kubernetes-preserve-unknown-fields"] = true,
-            ["properties"] = props,
         };
+        // An object with nothing named in it — the value type of a free-form map — is described by its type
+        // alone. An empty `properties` is dropped by the API server, and a manifest carrying one is then
+        // permanently out of sync with what the cluster holds: a diff nobody can ever resolve.
+        if (props.Count > 0) schema["properties"] = props;
+        return schema;
     }
 
     private static object SchemaFor(SchemaNode n)

@@ -50,6 +50,13 @@ public static class FlowUnits
     /// </summary>
     public static readonly string[] Metrics = Table.Keys.ToArray();
 
+    /// <summary>
+    /// The metrics a source may be bound to: every one the build understands except the day's energy,
+    /// which is worked out here from a counter's rise rather than published by anything.
+    /// </summary>
+    public static readonly string[] Bindable =
+        [.. Metrics.Where(m => !string.Equals(m, EnergyPeriod.Metric, StringComparison.OrdinalIgnoreCase))];
+
     /// <summary>The unit the flow/exports express <paramref name="metric"/> in (blank for the unitless power factor).</summary>
     public static string Canonical(string metric) => Table.TryGetValue(metric, out var t) ? t.Canonical : "";
 

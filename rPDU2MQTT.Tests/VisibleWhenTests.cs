@@ -53,8 +53,31 @@ public class VisibleWhenTests
         }
     }
 
+    /// <summary>
+    /// A source can be bound to every metric the bridge understands. The list used to be retyped on the
+    /// setting, so a metric added to the table — temperature — was recorded by the history and offered
+    /// by nothing.
+    /// </summary>
     [Fact]
-    public void ThePrometheusUrlBelongsToThePrometheusProvider()
+    public void ASourceCanBeBoundToEveryMetricTheBridgeUnderstands()
+    {
+        var flow = ConfigSchema.Build().Single(n => n.Key == "EnergyFlow");
+        var metric = flow.Properties!.Single(p => p.Key == "Nodes")
+            .ValueSchema!.Properties!.Single(p => p.Key == "Sources")
+            .ValueSchema!.Properties!.Single(p => p.Key == "Metric");
+
+        Assert.Equal("enum", metric.Type);
+        foreach (var bindable in rPDU2MQTT.Core.Flow.FlowUnits.Bindable)
+            Assert.Contains(bindable, metric.EnumValues!);
+        // The ones a retyped list left out, temperature among them.
+        foreach (var missed in new[] { "temperature", "percent" })
+            Assert.Contains(missed, metric.EnumValues!);
+        // …and still not the day's energy, which is derived from a counter's rise rather than published.
+        Assert.DoesNotContain("energy_d", metric.EnumValues!);
+    }
+
+    [Fact]
+    public void EachBackendsOwnSettingsAreShownForThatBackendAlone()
     {
         var history = ConfigSchema.Build().Single(n => n.Key == "History");
         var url = history.Properties!.Single(p => p.Key == "PrometheusUrl");
@@ -62,7 +85,14 @@ public class VisibleWhenTests
         Assert.Equal("Provider", url.VisibleWhen!.Key);
         Assert.Equal(["prometheus"], url.VisibleWhen.Values);
 
-        // The rest of the page applies to both backends, so nothing else is conditional.
+        // Where the bridge keeps its own readings, and for how long, is not a backend's setting: it records
+        // whatever the pages read from, so hiding those behind the provider would hide a store that is still
+        // being written to.
+        var own = history.Properties!.Where(p => p.Key.StartsWith("Local", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(own);
+        Assert.DoesNotContain(own, p => p.VisibleWhen is not null);
+
+        // The rest of the page applies whichever backend is chosen, so nothing else is conditional.
         Assert.DoesNotContain(history.Properties!.Where(p => p.Key != "PrometheusUrl"), p => p.VisibleWhen is not null);
     }
 }

@@ -135,19 +135,16 @@ public static class ConfigSchema
     };
 
     /// <summary>
-    /// The metrics a live source may be bound to — read from <c>EnergyFlowSource.Metric</c>, which is what
-    /// actually validates a binding.
+    /// The metrics a live source may be bound to, from the table that defines what a metric is.
     ///
     /// <para>
-    /// Not every metric in the unit table: <c>energy_d</c> is derived by the aggregation service from a
+    /// Not every metric in that table: <c>energy_d</c> is derived by the aggregation service from a
     /// counter's rise, so offering it as something to bind would produce a binding the source validation
-    /// then rejects. Taken from the property rather than retyped so the offer and the rule cannot drift.
+    /// then rejects. <c>FlowUnits.Bindable</c> is the one place that rule is written down, and both the
+    /// setting's own choices and this list read it, so the offer and the rule cannot drift.
     /// </para>
     /// </summary>
-    private static readonly string[] BindableMetrics =
-        typeof(EnergyFlowSource).GetProperty(nameof(EnergyFlowSource.Metric))!
-            .GetCustomAttribute<AllowedValuesAttribute>()!.Values
-            .Select(v => v?.ToString() ?? "").ToArray();
+    private static readonly string[] BindableMetrics = Core.Flow.FlowUnits.Bindable;
 
     /// <summary>
     /// Source types a plugin has contributed, offered alongside the built-in mqtt/modbus in the node
@@ -287,6 +284,17 @@ public static class ConfigSchema
         {
             var values = allowed.Values.Select(v => v?.ToString() ?? string.Empty);
             node.EnumValues = (node.Required ? values : values.Prepend(string.Empty)).ToArray();
+            node.Type = "enum";
+            return node;
+        }
+
+        // Every metric this build understands, from the table that defines them (#502): retyping the list
+        // on each setting is how "temperature" ends up recorded by the history and bindable by nothing.
+        if (type == typeof(string) && prop.GetCustomAttribute<MetricChoicesAttribute>() is not null)
+        {
+            var metrics = Core.Flow.FlowUnits.Bindable.AsEnumerable();
+            node.EnumValues = (node.Required ? metrics : metrics.Prepend(string.Empty)).ToArray();
+            node.DynamicChoices = true;
             node.Type = "enum";
             return node;
         }

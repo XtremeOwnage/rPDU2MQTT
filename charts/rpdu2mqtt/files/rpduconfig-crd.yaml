@@ -2,6 +2,8 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: rpduconfigs.rpdu2mqtt.xtremeownage.com
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   group: rpdu2mqtt.xtremeownage.com
   scope: Namespaced
@@ -88,6 +90,8 @@ spec:
                             - frequency
                             - powerfactor
                             - soc
+                            - percent
+                            - temperature
                             - energy_d
                           description: Which captured {measure} supplies which metric. A measure that is not listed is ignored, so this is also the filter for the readings worth importing. Choose 'energy_d' for a counter the device zeroes each day (e.g. ESPHome's energy_d); it is imported as energy with a daily-reset counter.
                         Tags:
@@ -106,7 +110,7 @@ spec:
                       Scheme:
                         type: string
                         enum:
-                        - ''
+                        - ""
                         - mqtt
                         - mqtts
                         - ws
@@ -177,7 +181,7 @@ spec:
                         Scheme:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - http
                           - https
                           description: Connection scheme used
@@ -511,14 +515,41 @@ spec:
                   Provider:
                     type: string
                     enum:
-                    - ''
+                    - ""
+                    - local
                     - prometheus
                     - emoncms
                     - homeassistant
-                    description: "Which backend to read from: 'prometheus' or 'emoncms'."
+                    description: "Where past readings come from: 'local' (kept by the bridge itself, no other service needed), 'prometheus', 'emoncms' or 'homeassistant'."
                   PrometheusUrl:
                     type: string
                     description: Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.
+                  LocalEnabled:
+                    type: boolean
+                    description: "Keep a copy of every reading in the bridge's own store, whether or not it is the backend the pages read from. On by default: a store nothing wrote to is empty on the day you want it."
+                  LocalPath:
+                    type: string
+                    description: 'Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.'
+                  LocalRawKeepDays:
+                    type: integer
+                    description: How many days of readings are kept at the rate they arrive. Older ones are still there a minute at a time.
+                    minimum: 1
+                    maximum: 3650
+                  LocalMinuteKeepDays:
+                    type: integer
+                    description: How many days are kept a minute at a time.
+                    minimum: 1
+                    maximum: 3650
+                  LocalHourKeepDays:
+                    type: integer
+                    description: How many days are kept an hour at a time. Two years of hourly readings for two hundred series is about 3 MB.
+                    minimum: 1
+                    maximum: 36500
+                  LocalDayKeepDays:
+                    type: integer
+                    description: How many days are kept a day at a time — the resolution a month or a year of history is drawn from. A century of them for two hundred series is about 60 MB, so there is little reason to drop any.
+                    minimum: 1
+                    maximum: 36500
                   ToleranceSeconds:
                     type: integer
                     description: How far either side of the requested moment to look for a sample, in seconds. A scrape or feed interval longer than this returns nothing rather than a value from a different time.
@@ -595,7 +626,7 @@ spec:
                             Type:
                               type: string
                               enum:
-                              - ''
+                              - ""
                               - realpower
                               - energy
                               - energy_d
@@ -777,7 +808,7 @@ spec:
                   DistanceUnits:
                     type: string
                     enum:
-                    - ''
+                    - ""
                     - auto
                     - imperial
                     - metric
@@ -888,7 +919,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - node
                           - panel
                           - breaker
@@ -927,7 +958,7 @@ spec:
                         Mode:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - auto
                           - static
                           - residual
@@ -945,28 +976,18 @@ spec:
                                 description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
-                                enum:
-                                - ''
-                                - realpower
-                                - apparentpower
-                                - energy
-                                - current
-                                - voltage
-                                - frequency
-                                - powerfactor
-                                - soc
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                                description: Which measurement this source supplies. The power, energy and current of a node are rolled up through the hierarchy; the rest — voltage, frequency, power factor, state of charge, any other percentage, temperature — are read at the node and shown, never summed.
                               Accumulation:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - lifetime
                                 - period
                                 description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Check the topic before choosing: a publisher can offer both kinds, and firmware changes which. A daily counter tagged 'lifetime' is read as a meter running backwards every midnight and stops being published; a lifetime counter tagged 'period' is republished every poll as if that whole total were today's."
                               Direction:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - out
                                 - in
                                 - split
@@ -997,14 +1018,14 @@ spec:
                               RegisterType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - holding
                                 - input
                                 description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
                               DataType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - uint16
                                 - int16
                                 - uint32
@@ -1014,7 +1035,7 @@ spec:
                               WordOrder:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
@@ -1027,7 +1048,6 @@ spec:
                                 additionalProperties:
                                   type: object
                                   x-kubernetes-preserve-unknown-fields: true
-                                  properties: {}
                                 description: Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.
                           description: Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.
                         Mqtt:
@@ -1041,28 +1061,18 @@ spec:
                                 description: "Where this value comes from: 'mqtt' (subscribe to a broker topic), 'modbus' (read a register from a Modbus TCP connection), 'emoncms' (read an EmonCMS feed's current value), 'homeassistant' (read an entity's state), or 'derived' (work it out from this node's other readings — current as power ÷ voltage, for a meter that reports watts and volts but no amps)."
                               Metric:
                                 type: string
-                                enum:
-                                - ''
-                                - realpower
-                                - apparentpower
-                                - energy
-                                - current
-                                - voltage
-                                - frequency
-                                - powerfactor
-                                - soc
-                                description: 'Which measurement this source supplies (the flow is rolled up per metric): realpower = power, apparentpower, energy, current, voltage, frequency, powerfactor, or soc (battery state of charge %, shown on the Energy tile — not rolled up).'
+                                description: Which measurement this source supplies. The power, energy and current of a node are rolled up through the hierarchy; the rest — voltage, frequency, power factor, state of charge, any other percentage, temperature — are read at the node and shown, never summed.
                               Accumulation:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - lifetime
                                 - period
                                 description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Check the topic before choosing: a publisher can offer both kinds, and firmware changes which. A daily counter tagged 'lifetime' is read as a meter running backwards every midnight and stops being published; a lifetime counter tagged 'period' is republished every poll as if that whole total were today's."
                               Direction:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - out
                                 - in
                                 - split
@@ -1093,14 +1103,14 @@ spec:
                               RegisterType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - holding
                                 - input
                                 description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
                               DataType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - uint16
                                 - int16
                                 - uint32
@@ -1110,7 +1120,7 @@ spec:
                               WordOrder:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
@@ -1123,7 +1133,6 @@ spec:
                                 additionalProperties:
                                   type: object
                                   x-kubernetes-preserve-unknown-fields: true
-                                  properties: {}
                                 description: Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.
                           description: "Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat."
                     description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
@@ -1183,7 +1192,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - node
                           - panel
                           - breaker
@@ -1263,7 +1272,7 @@ spec:
                               Conductor:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - copper
                                 - aluminium
                                 description: What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.
@@ -1278,7 +1287,7 @@ spec:
                               State:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - identified
                                 - unknown
                                 - unused
@@ -1374,8 +1383,8 @@ spec:
                               Ground:
                                 type: string
                                 enum:
-                                - ''
-                                - ''
+                                - ""
+                                - ""
                                 - grass
                                 - concrete
                                 - gravel
@@ -1403,7 +1412,7 @@ spec:
                                         properties:
                                           X:
                                             type: number
-                                          Y:
+                                          "Y":
                                             type: number
                                       description: The room's outline on the plan, as points in drawing units. Empty until the room is drawn.
                                     Outdoor:
@@ -1412,8 +1421,8 @@ spec:
                                     Surface:
                                       type: string
                                       enum:
-                                      - ''
-                                      - ''
+                                      - ""
+                                      - ""
                                       - wood
                                       - tile
                                       - carpet
@@ -1468,7 +1477,7 @@ spec:
                                         properties:
                                           X:
                                             type: number
-                                          Y:
+                                          "Y":
                                             type: number
                                       description: "The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own."
                                     Locked:
@@ -1487,7 +1496,7 @@ spec:
                                     Kind:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - door
                                       - double-door
                                       - sliding-door
@@ -1498,7 +1507,7 @@ spec:
                                     X:
                                       type: number
                                       description: Centre of the opening across the plan, in drawing units.
-                                    Y:
+                                    "Y":
                                       type: number
                                       description: Centre of the opening down the plan, in drawing units.
                                     Angle:
@@ -1510,7 +1519,7 @@ spec:
                                     Swing:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - left
                                       - right
                                       description: Which end of a door the hinges are at.
@@ -1530,7 +1539,7 @@ spec:
                                     Kind:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - coincident
                                       - colinear
                                       - parallel
@@ -1574,7 +1583,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - outlet
                           - switch
                           - fixture
@@ -1629,7 +1638,7 @@ spec:
                         X:
                           type: number
                           description: Where it is on the floor plan, across, in drawing units.
-                        Y:
+                        "Y":
                           type: number
                           description: Where it is on the floor plan, down, in drawing units.
                         Circuit:
@@ -1651,7 +1660,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - circuit
                           - feeder
                           - service
@@ -1676,7 +1685,7 @@ spec:
                             properties:
                               X:
                                 type: number
-                              Y:
+                              "Y":
                                 type: number
                           description: 'The path between its ends, in drawing units: bends and, where an end is not an item, the end itself.'
                         Label:
@@ -1791,7 +1800,7 @@ spec:
                         Framing:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - auto
                           - tcp
                           - rtu-over-tcp
@@ -1820,7 +1829,6 @@ spec:
                 additionalProperties:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                  properties: {}
                 description: Settings for externally loaded plugins, keyed by plugin id.
               Cache:
                 type: object

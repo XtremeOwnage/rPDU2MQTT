@@ -8,9 +8,10 @@ namespace rPDU2MQTT.Services;
 /// <summary>
 /// Chooses the backend per call from the live configuration.
 /// </summary>
-public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IMeasurementHistory
+public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.LocalSeriesStore? store = null) : IMeasurementHistory
 {
     private readonly PrometheusFlowHistory prometheus = new(http, cfg);
+    private readonly Integrations.Local.LocalFlowHistory? local = store is null ? null : new(cfg, store);
     private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
     private readonly Integrations.HomeAssistant.HomeAssistantHistory homeAssistant = new(http, cfg);
 
@@ -20,6 +21,8 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg) : IMeasuremen
     {
         "emoncms" => emoncms,
         "homeassistant" => homeAssistant,
+        // Its own store, when one was built: without a directory to keep it in there is nothing to read.
+        "local" when local is not null => local,
         _ => prometheus,
     };
 
