@@ -479,9 +479,10 @@ History:
   Enabled: true
   Provider: local          # local | prometheus | emoncms | homeassistant
   LocalPath: ''            # empty: the directory the deployment mounted, else one beside the program
-  LocalRawKeepDays: 7
-  LocalMinuteKeepDays: 90
-  LocalHourKeepDays: 3650
+  LocalRawKeepDays: 7        # as they arrive
+  LocalMinuteKeepDays: 90    # a minute at a time
+  LocalHourKeepDays: 730     # an hour at a time
+  LocalDayKeepDays: 36500    # a day at a time
   ToleranceSeconds: 30
 ```
 
@@ -492,11 +493,14 @@ chunk of time. There is no index and nothing to query: a reading's place in a fi
 directory you can copy, tar or mount read-only.
 
 - **A slot nobody wrote is "no reading"**, stored as NaN. Unknown is never a zero, in the files or out of them.
-- **Three resolutions.** The readings as they arrive (`LocalRawKeepDays`), then a minute at a time
-  (`LocalMinuteKeepDays`), then an hour (`LocalHourKeepDays`). A coarser tier holds the **last** reading of
-  each bucket — what a read asks for anyway, and what keeps a counter's meaning, which an average would not.
-  A chart over a month is answered from the hourly tier: thirty seeks, not a walk through a quarter of a
-  million readings.
+- **Four resolutions, each kept for as long as you choose.** The readings as they arrive
+  (`LocalRawKeepDays`), a minute at a time (`LocalMinuteKeepDays`), an hour (`LocalHourKeepDays`), and a day
+  (`LocalDayKeepDays`). A coarser tier holds the **last** reading of each bucket — what a read asks for
+  anyway, and what keeps a counter's meaning, which an average would not. A chart over a month is answered a
+  day at a time: thirty seeks, not a walk through a quarter of a million readings.
+- **The raw tier is what costs the disk**; the rest is rounding. A century of daily readings is about 300 KB
+  per series, so there is little reason to drop any — which is why there is no separate monthly tier: a year
+  drawn by month is twelve reads of the daily one.
 - **Retention deletes whole files**, never rewrites one: a chunk is a day, a month or a year of one series.
 - **Roughly 1 GB a year** for two hundred series read every ten seconds, with the defaults.
 

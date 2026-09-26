@@ -117,12 +117,43 @@ public class LocalHistoryStoreTests : IDisposable
         var store = Store();
         var now = new DateTime(2026, 9, 20, 12, 0, 0, DateTimeKind.Utc);
 
-        // A month of daily steps: the raw tier is not kept that long, and a day is coarser than a minute.
-        Assert.Equal("hour", store.TierFor(now.AddDays(-30), 86400, now).Name);
+        // A month of daily steps is answered a day at a time: thirty slots, not seven hundred.
+        Assert.Equal("day", store.TierFor(now.AddDays(-30), 86400, now).Name);
+        // A year of it is the same tier — which is why there is little reason to drop any of it.
+        Assert.Equal("day", store.TierFor(now.AddYears(-1), 86400, now).Name);
+        // Hours over a fortnight are the hour tier's own question.
+        Assert.Equal("hour", store.TierFor(now.AddDays(-14), 3600, now).Name);
         // A few hours of five-minute steps: the minute tier is as fine as that question needs.
         Assert.Equal("minute", store.TierFor(now.AddHours(-3), 300, now).Name);
         // …but not at a step finer than it stores.
         Assert.Equal("raw", store.TierFor(now.AddHours(-3), 1, now).Name);
+    }
+
+    /// <summary>Each resolution is kept for as long as it is worth keeping, and that is a choice per tier.</summary>
+    [Fact]
+    public void EachResolutionIsKeptForItsOwnTime()
+    {
+        var store = new LocalSeriesStore(root, rawKeepDays: 3, minuteKeepDays: 30, hourKeepDays: 400, dayKeepDays: 3650);
+
+        Assert.Equal([3, 30, 400, 3650], store.Tiers.Select(t => t.KeepDays).ToArray());
+        Assert.Equal(["raw", "minute", "hour", "day"], store.Tiers.Select(t => t.Name).ToArray());
+        Assert.Equal([60, 3600, 86400], store.Tiers.Skip(1).Select(t => t.IntervalSeconds).ToArray());
+    }
+
+    /// <summary>A day's figure is the last reading of that day, worked out from the hour tier beneath it.</summary>
+    [Fact]
+    public void TheDayTierTakesTheLastReadingOfTheDay()
+    {
+        var store = Store();
+        var day = new DateTime(2026, 9, 20, 0, 0, 0, DateTimeKind.Utc);
+        // A counter through the day: the day is worth where it finished, not what it averaged.
+        for (var hour = 0; hour < 24; hour++) store.Write("main", "energy", day.AddHours(hour), 100 + hour);
+
+        store.Rollup("main", "energy", day.AddDays(1).AddMinutes(5));
+
+        // Read at a step a day apart, which is the tier a month-long chart uses.
+        var steps = new[] { day.AddDays(1) };
+        Assert.Equal(123, store.Series("main", "energy", steps, day.AddDays(1).AddMinutes(5))[0]);
     }
 
     [Fact]

@@ -39,15 +39,20 @@ public sealed class LocalSeriesStore
     private readonly int toleranceSeconds;
 
     public LocalSeriesStore(string root, int rawIntervalSeconds = 10, int toleranceSeconds = 30,
-                            int rawKeepDays = 7, int minuteKeepDays = 90, int hourKeepDays = 3650)
+                            int rawKeepDays = 7, int minuteKeepDays = 90, int hourKeepDays = 730,
+                            int dayKeepDays = 36500)
     {
         Root = root;
         this.toleranceSeconds = Math.Max(1, toleranceSeconds);
+        // Each resolution is kept for as long as it is worth keeping, and each is a choice of its own: the
+        // readings as they arrive are what costs the disk, and a day at a time costs almost nothing —
+        // a century of daily readings for one series is about 300 KB.
         Tiers =
         [
             new SeriesTier("raw", Math.Max(1, rawIntervalSeconds), ChunkSpan.Day, Math.Max(1, rawKeepDays)),
             new SeriesTier("minute", 60, ChunkSpan.Month, Math.Max(1, minuteKeepDays)),
             new SeriesTier("hour", 3600, ChunkSpan.Year, Math.Max(1, hourKeepDays)),
+            new SeriesTier("day", 86400, ChunkSpan.Year, Math.Max(1, dayKeepDays)),
         ];
     }
 
@@ -244,14 +249,17 @@ public sealed class LocalSeriesStore
     /// Fill the coarser tiers from the finer ones, for the recent buckets only. Re-running it changes
     /// nothing: a bucket's value is the last reading in it, whenever it is worked out.
     /// </summary>
-    public void Rollup(string node, string metric, DateTime nowUtc, int buckets = 180)
+    public void Rollup(string node, string metric, DateTime nowUtc, int? buckets = null)
     {
         for (var i = 1; i < Tiers.Count; i++)
         {
             var coarse = Tiers[i];
             var fine = Tiers[i - 1];
             var writes = new List<(DateTime At, double Value)>();
-            for (var back = buckets; back >= 1; back--)
+            // Only the recent buckets, and fewer of them the coarser the tier: re-working a day's figure
+            // every five minutes is three reads, where re-working a year of them would be hundreds.
+            var recent = buckets ?? (coarse.IntervalSeconds <= 60 ? 180 : coarse.IntervalSeconds <= 3600 ? 48 : 3);
+            for (var back = recent; back >= 1; back--)
             {
                 // Only buckets that have finished: one still filling would be stored as whatever it held.
                 var end = Floor(nowUtc, coarse.IntervalSeconds).AddSeconds(-(long)(back - 1) * coarse.IntervalSeconds);

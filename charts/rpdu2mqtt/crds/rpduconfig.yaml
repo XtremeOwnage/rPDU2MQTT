@@ -535,7 +535,12 @@ spec:
                     maximum: 3650
                   LocalHourKeepDays:
                     type: integer
-                    description: How many days are kept an hour at a time. Ten years of hourly readings for two hundred series is about 15 MB.
+                    description: How many days are kept an hour at a time. Two years of hourly readings for two hundred series is about 3 MB.
+                    minimum: 1
+                    maximum: 36500
+                  LocalDayKeepDays:
+                    type: integer
+                    description: How many days are kept a day at a time — the resolution a month or a year of history is drawn from. A century of them for two hundred series is about 60 MB, so there is little reason to drop any.
                     minimum: 1
                     maximum: 36500
                   ToleranceSeconds:

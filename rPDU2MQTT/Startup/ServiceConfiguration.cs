@@ -443,7 +443,8 @@ public static class ServiceConfiguration
             toleranceSeconds: cfg.History.ToleranceSeconds,
             rawKeepDays: cfg.History.LocalRawKeepDays,
             minuteKeepDays: cfg.History.LocalMinuteKeepDays,
-            hourKeepDays: cfg.History.LocalHourKeepDays));
+            hourKeepDays: cfg.History.LocalHourKeepDays,
+            dayKeepDays: cfg.History.LocalDayKeepDays));
         // A dashboard read must not hang the page when a remote backend is down or slow.
         services.AddSingleton<Core.Flow.IMeasurementHistory>(sp =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg,

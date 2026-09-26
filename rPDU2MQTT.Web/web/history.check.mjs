@@ -223,11 +223,19 @@ const localField = query(historySection, '.field', true).find(f => f.textContent
 if (!promField) fail('the History page does not render the Prometheus URL at all');
 if (!emonPointer) fail('the History page never points at where EmonCMS is configured');
 if (!localField) fail('the History page does not say where the bridge keeps its own readings');
+// Each resolution's retention is a setting of its own, and all of them belong to the local store.
+const keepFields = ['LocalRawKeepDays', 'LocalMinuteKeepDays', 'LocalHourKeepDays', 'LocalDayKeepDays']
+  .map((name, i) => {
+    const field = query(historySection, '.field', true).find(f => f.textContent.includes(name));
+    if (!field) fail(`the History page has no retention setting for ${['raw', 'minute', 'hour', 'day'][i]} readings`);
+    return field;
+  });
 
 // Unset provider means the default, which is the bridge's own store: its directory is what is shown, and
 // another backend's settings are not.
 if (hidden(localField)) fail('the local store\'s directory is hidden while it is the provider');
 if (!hidden(promField)) fail('the Prometheus URL shows while the bridge keeps its own history');
+if (keepFields.some(f => hidden(f))) fail('a retention setting is hidden while the bridge keeps its own history');
 if (!hidden(emonPointer)) fail('the EmonCMS pointer shows while the bridge keeps its own history');
 
 const provider = query(historySection, 'select', true)[0];
@@ -237,6 +245,7 @@ provider.onchange({});
 await new Promise(r => setTimeout(r, 100));
 if (hidden(promField)) fail('the Prometheus URL is hidden while Prometheus is the provider');
 if (!hidden(localField)) fail('the local store\'s directory shows while Prometheus is the provider');
+if (keepFields.some(f => !hidden(f))) fail('a retention setting shows while Prometheus is the provider');
 
 provider.value = 'emoncms';
 provider.onchange({});
@@ -271,4 +280,5 @@ if (testBtn.disabled) fail('the test button was left disabled after the test fin
 
 console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
   + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
-  + 'provider\'s settings — the bridge\'s own store by default — and says how the test ended');
+  + 'provider\'s settings \u2014 the bridge\'s own store by default, with a retention setting per resolution '
+  + '\u2014 and says how the test ended');

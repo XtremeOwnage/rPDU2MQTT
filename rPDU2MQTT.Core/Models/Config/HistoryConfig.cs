@@ -63,11 +63,17 @@ public class HistoryConfig
     [VisibleWhen(nameof(Provider), "local")]
     public int LocalMinuteKeepDays { get; set; } = 90;
 
-    [DefaultValue(3650)]
+    [DefaultValue(730)]
     [Range(1, 36500)]
-    [Description("How many days are kept an hour at a time. Ten years of hourly readings for two hundred series is about 15 MB.")]
+    [Description("How many days are kept an hour at a time. Two years of hourly readings for two hundred series is about 3 MB.")]
     [VisibleWhen(nameof(Provider), "local")]
-    public int LocalHourKeepDays { get; set; } = 3650;
+    public int LocalHourKeepDays { get; set; } = 730;
+
+    [DefaultValue(36500)]
+    [Range(1, 36500)]
+    [Description("How many days are kept a day at a time — the resolution a month or a year of history is drawn from. A century of them for two hundred series is about 60 MB, so there is little reason to drop any.")]
+    [VisibleWhen(nameof(Provider), "local")]
+    public int LocalDayKeepDays { get; set; } = 36500;
 
     [DefaultValue(30)]
     [Range(1, 600)]
