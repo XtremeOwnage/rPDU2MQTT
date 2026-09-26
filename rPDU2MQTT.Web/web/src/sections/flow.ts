@@ -1395,9 +1395,26 @@ export function addFlowSection(nav: any, sections: any) {
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
+      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
+      // their finger. It is drawn once they have let go and it has stopped coasting.
+      if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);
     });
+
+  let stillTimer: any = null;
+  const drawWhenStill = () => {
+    if (stillTimer) return;
+    stillTimer = setInterval(() => {
+      if (!heldGraph) { clearInterval(stillTimer); stillTimer = null; return; }
+      if (zoom?.busy?.() || menu.isOpen() || busyInSection(sec)) return;
+      clearInterval(stillTimer); stillTimer = null;
+      const held = heldGraph;
+      heldGraph = null;
+      lastGraph = held;
+      draw(held);
+    }, 300);
+  };
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };

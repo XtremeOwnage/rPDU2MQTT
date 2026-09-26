@@ -219,15 +219,28 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
 
-  /// Scale the diagram down until it fits the pane's width. Never scales UP: a small diagram is not
-  /// improved by being blown up to fill the pane.
-  const fit = () => {
+  /// The zoom that fits the diagram to the pane's width. Never above 1: a small diagram is not improved by
+  /// being blown up to fill the pane.
+  const fitZoom = () => {
     const w = width();
-    if (!w || !baseW) return;
-    const next = Math.min(1, Math.max(min, (w - 6) / baseW));
-    if (Math.abs(next - z) < 0.005) return;
-    z = next; apply(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+    return !w || !baseW ? z : Math.min(1, Math.max(min, (w - 6) / baseW));
   };
+
+  /// Scale the diagram down until it fits the pane's width, and go back to its top-left corner — what the
+  /// Fit button asks for.
+  const fit = () => {
+    const next = fitZoom();
+    if (Math.abs(next - z) < 0.005) return;
+    z = next; apply(); movedAt = Date.now(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+  };
+
+  // When the reader last touched the pane: a pointer down, or a scroll (a swipe carries on scrolling after
+  // the finger lifts). A redraw in the middle of either replaces the pane under the gesture and throws the
+  // reader back to where the old one started (#497).
+  let touchedAt = 0, movedAt = 0;
+  const touched = () => { touchedAt = Date.now(); };
+  // A scroll this code made itself — putting the view back after a redraw — is not the reader moving.
+  const onScroll = () => { if (Date.now() - movedAt > 150) touched(); };
 
   /// Zoom about a point given in client coordinates, keeping whatever is under it still.
   const zoomAbout = (clientX: number, clientY: number, factor: number) => {
@@ -269,6 +282,7 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
   };
 
   const onPointerDown = (e: any) => {
+    touched();
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2) pinchFrom = spread();
@@ -284,7 +298,9 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
     zoomAbout(m.x, m.y, now / pinchFrom);
     pinchFrom = now;
   };
-  const forget = (e: any) => { pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  const forget = (e: any) => { touched(); pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  scroll.addEventListener('scroll', onScroll, { passive: true });
+  cleanups.push(() => scroll.removeEventListener('scroll', onScroll));
 
   scroll.addEventListener('pointerdown', onPointerDown);
   scroll.addEventListener('pointermove', onPointerMove, { passive: false });
@@ -333,10 +349,18 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
   // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
   if (width() && width() < baseW) fit();
 
-  // Follow a rotation or a pane resize, unless the reader has since set their own zoom.
+  // Follow a rotation or a pane resize, unless the reader has since set their own zoom. Only a change of
+  // width counts: an observer reports once as soon as it is attached, and re-fitting on that report sent the
+  // reader back to the top-left corner on every live redraw whose labels came out a few pixels wider.
   let ro: any = null;
+  let seenW = width();
   try {
-    ro = new (globalThis as any).ResizeObserver(() => { if (!chosen) fit(); });
+    ro = new (globalThis as any).ResizeObserver(() => {
+      const w = width();
+      if (!w || Math.abs(w - seenW) < 1) return;
+      seenW = w;
+      if (!chosen) keepPlace(fitZoom());
+    });
     ro.observe(scroll);
     cleanups.push(() => ro.disconnect());
   } catch { /* no ResizeObserver: the fit on open is what matters */ }
@@ -354,16 +378,28 @@ export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, 
     const { x, y } = span();
     return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
   };
-  /// Put a view back after a redraw. Nothing is re-fitted under it: the reader is where they left off.
-  (detach as any).setView = (v: any) => {
-    if (!v || !(v.z > 0)) return;
-    z = Math.min(max, Math.max(min, v.z));
-    chosen = !!v.chosen;
+  /// Change the zoom and stay over the same part of the diagram, by where the pane is as a share of it.
+  const keepPlace = (next: number, at?: { left: number, top: number }) => {
+    const before = span();
+    const left = at ? at.left : before.x ? scroll.scrollLeft / before.x : 0;
+    const top = at ? at.top : before.y ? scroll.scrollTop / before.y : 0;
+    z = Math.min(max, Math.max(min, next));
     apply();
     const { x, y } = span();
-    scroll.scrollLeft = (v.left || 0) * x;
-    scroll.scrollTop = (v.top || 0) * y;
+    movedAt = Date.now();
+    scroll.scrollLeft = left * x;
+    scroll.scrollTop = top * y;
   };
+
+  /// Put a view back after a redraw: the reader is where they left off. A zoom they set is kept as it was;
+  /// one that was only ever the fit is the fit of the new drawing, which may be a few pixels wider.
+  (detach as any).setView = (v: any) => {
+    if (!v || !(v.z > 0)) return;
+    chosen = !!v.chosen;
+    keepPlace(chosen ? v.z : fitZoom(), { left: v.left || 0, top: v.top || 0 });
+  };
+  /// Is the reader in the middle of moving the pane — a finger or button down, or a swipe still coasting?
+  (detach as any).busy = (quietMs = 800) => pts.size > 0 || Date.now() - touchedAt < quietMs;
   /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
   /// at the pane is looking at.
   (detach as any).zoomBy = (factor: number) => {
