@@ -1675,6 +1675,30 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Does the history backend actually answer?
+        // The directories this process writes to, and the room left where each sits. A volume that did not
+        // mount, or one that is full, otherwise looks like readings quietly not being kept.
+        app.MapGet("/api/diagnostics/storage", (HttpContext ctx) =>
+        {
+            var plans = !string.IsNullOrWhiteSpace(config.PlanStorage.Directory) ? config.PlanStorage.Directory
+                : Environment.GetEnvironmentVariable("RPDU2MQTT_PLANS_DIRECTORY");
+            var entries = new List<Core.StorageUse>();
+            if (localHistory is not null) entries.Add(Core.StorageUsage.For("History", localHistory.Root));
+            // An object store holds the images instead, and then there is no directory to report.
+            if (!config.PlanStorage.ObjectStore.IsEnabled() && !string.IsNullOrWhiteSpace(plans))
+                entries.Add(Core.StorageUsage.For("Floor plan images", plans));
+            var plugins = Path.Combine(AppContext.BaseDirectory, "plugins");
+            if (Directory.Exists(plugins)) entries.Add(Core.StorageUsage.For("Plugins", plugins));
+
+            return Results.Json(new
+            {
+                ok = true,
+                entries = entries.Select(e => new
+                {
+                    e.Name, e.Path, e.Exists, e.Writable, e.Bytes, e.Files, e.Mount, e.TotalBytes, e.FreeBytes,
+                }).ToList(),
+            }, ConfigSchema.Json);
+        });
+
         // Where the readings are actually being written, which the LocalPath setting does not say when it is
         // empty: the directory then comes from RPDU2MQTT_HISTORY_DIRECTORY or falls back beside the program.
         app.MapGet("/api/history/store", (HttpContext ctx) =>

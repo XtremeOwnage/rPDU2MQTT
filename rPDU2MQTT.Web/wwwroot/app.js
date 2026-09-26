@@ -4194,6 +4194,53 @@ function addDiagnosticsSection(nav     , sections     ) {
   sec.appendChild(debug);
   renderSettingsOf('Debug', debug);
 
+  // What the bridge writes to, and the room left where it sits.
+  sec.appendChild(el('h3', { text: 'Storage', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  const storage = el('div', { class: 'diag-storage' });
+  sec.appendChild(storage);
+
+  const size = (n        ) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB`
+    : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB`
+      : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+
+  const loadStorage = async () => {
+    storage.innerHTML = '';
+    let r     ;
+    try { r = await api('/api/diagnostics/storage'); } catch { r = null; }
+    const entries = r?.body?.ok ? (r.body.entries || []) : [];
+    if (!entries.length) {
+      storage.appendChild(el('div', { class: 'desc', text: 'Nothing is written to disk by this process.' }));
+      return;
+    }
+    const table = el('table', { class: 'ld' });
+    const head = el('tr');
+    ['What', 'Directory', 'Holding', 'Files', 'Mount', 'Free', 'Size'].forEach(h => head.appendChild(el('th', { text: h })));
+    table.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    entries.forEach((e     ) => {
+      const row = el('tr');
+      row.dataset.name = e.name;
+      const cells = [
+        e.name,
+        e.path,
+        e.exists ? size(e.bytes) : 'not there',
+        e.exists ? String(e.files) : '—',
+        e.mount || '—',
+        e.totalBytes ? size(e.freeBytes) : '—',
+        e.totalBytes ? size(e.totalBytes) : '—',
+      ];
+      cells.forEach(c => row.appendChild(el('td', { text: c })));
+      // A mount that is missing or read-only stores nothing, and nothing else on this page says so.
+      if (!e.exists || !e.writable) {
+        row.classList.add('is-bad');
+        row.appendChild(el('td', { class: 'diag-warn', text: !e.exists ? 'does not exist' : 'read-only' }));
+      }
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    storage.appendChild(table);
+  };
+
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
@@ -4296,8 +4343,8 @@ function addDiagnosticsSection(nav     , sections     ) {
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
-  refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); loadRestartTargets(); };
+  refresh.onclick = () => { load(); loadStorage(); };
+  link.onclick = () => { activate(link, sec); load(); loadStorage(); loadRestartTargets(); };
 }
 
 // Kubernetes-only: on-demand pod logs + recent events.

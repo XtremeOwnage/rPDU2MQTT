@@ -870,6 +870,10 @@ in the schema and the CRD.
 - `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page, beside the runtime
   state it is used to read.
 
+The Diagnostics page also lists every directory this process writes to — history, floor plan images,
+plugins — with what each holds, the file count, the mount it sits on and the free space there. A directory
+that is not there, or that cannot be written to, is marked: both look like data quietly not being kept.
+
 A page for a feature that is off stays hidden in the nav until it is turned on, as before.
 
 ## Energy Flow (Optional)

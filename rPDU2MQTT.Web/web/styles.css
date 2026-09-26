@@ -1690,3 +1690,9 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 /* Settings the schema groups: drawn together, with the group's name on the border. */
 .setting-group { margin: 14px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
 .setting-group > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* Diagnostics: the directories this process writes to. */
+.diag-storage { margin: 4px 0 14px; overflow-x: auto; }
+.diag-storage td { white-space: nowrap; }
+.diag-storage tr.is-bad td { color: var(--bad); }
+.diag-warn { font-weight: 600; }

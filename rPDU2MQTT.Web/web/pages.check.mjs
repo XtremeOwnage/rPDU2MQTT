@@ -21,6 +21,12 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
     : url.includes('/api/restart/targets') ? { ok: true, method: 'local', targets: [] }
+    : url.includes('/api/diagnostics/storage') ? { ok: true, entries: [
+        { name: 'History', path: '/data/history', exists: true, writable: true, bytes: 28 * 1024 * 1024, files: 412,
+          mount: '/data/history', totalBytes: 10 * 1024 ** 3, freeBytes: 9 * 1024 ** 3 },
+        { name: 'Floor plan images', path: '/data/plans', exists: false, writable: false, bytes: 0, files: 0,
+          mount: '/', totalBytes: 50 * 1024 ** 3, freeBytes: 20 * 1024 ** 3 },
+      ] }
     : { ok: true },
 });
 vm.createContext(sandbox);
@@ -54,6 +60,20 @@ query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Diagnostics').clic
 await wait(150);
 const diag = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!diag) fail('the Diagnostics page did not open');
+// What this process writes to, and the room left where it sits.
+const rows = query(diag, '.diag-storage tr', true).filter(r => r.dataset?.name);
+if (rows.length !== 2) fail(`the storage table lists ${rows.length} directories, not the 2 reported`);
+const history = rows.find(r => r.dataset.name === 'History');
+const cells = query(history, 'td', true).map(c => c.textContent);
+if (!cells.includes('/data/history')) fail(`the directory is not shown: ${cells.join(' | ')}`);
+if (!cells.includes('28.0 MB')) fail(`what it holds is not shown: ${cells.join(' | ')}`);
+if (!cells.includes('412')) fail(`the file count is not shown: ${cells.join(' | ')}`);
+if (!cells.includes('9.0 GB') || !cells.includes('10.0 GB')) fail(`free and total are not shown: ${cells.join(' | ')}`);
+// A volume that did not mount is called out rather than reported as empty.
+const plans = rows.find(r => r.dataset.name === 'Floor plan images');
+if (!plans.classList.contains('is-bad')) fail('a directory that is not there is not marked');
+if (!/does not exist/.test(plans.textContent || '')) fail(`a missing directory reads as: ${plans.textContent}`);
+
 const debugBox = query(diag, '.diag-debug');
 if (!debugBox) fail('the Debug settings are not on the Diagnostics page');
 const fields = query(debugBox, '.field', true).map(f => f.textContent || '');
@@ -69,7 +89,8 @@ if (config.Debug.PublishMessages !== false) fail(`an edit on the Diagnostics pag
 const counted = getEl('save-count')?.textContent || '';
 if (!/unsaved change/.test(counted)) fail(`the edit was not counted as an unsaved change: "${counted}"`);
 
-console.log('pages: Health, PlanStorage, Api, Cache, Debug and Features have no page of their own, the schema '
+console.log('pages: Diagnostics lists what the bridge writes to with the room left where it sits, and a volume '
+  + 'that did not mount is called out; Health, PlanStorage, Api, Cache, Debug and Features have no page of their own, the schema '
   + 'still carries them, a page whose feature is switched elsewhere says where and offers no switch, and '
   + 'Debug\u2019s switches are on Diagnostics where an edit counts as an unsaved change');
 process.exit(0);
