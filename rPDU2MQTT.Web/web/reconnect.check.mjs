@@ -11,6 +11,10 @@ const fail = (m) => { console.error('reconnect check FAILED: ' + m); process.exi
 const tick = () => new Promise(r => setTimeout(r, 60));
 
 let version = '1.0.0';
+// Which process answers. A restart is a new one; during a rolling update the old one answers until the
+// new one takes over.
+let instance = 'p0';
+let processes = 0;
 const config = { History: { Enabled: false }, MQTT: { ClientID: 'rpdu2mqtt' } };
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
@@ -18,7 +22,7 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
     : url.includes('/api/status') ? {
-        ok: true, version, mqttConnected: true,
+        ok: true, version, instance, mqttConnected: true,
         restart: { required: true, settings: ['MQTT.ClientID'] },
       }
     : { ok: true },
@@ -44,6 +48,7 @@ const restartTo = async (to) => {
   const before = toasts().length;
   // What the bridge comes back as; the page polls for it the moment the restart is asked for.
   version = to;
+  instance = 'p' + (++processes);
   await restartPill.onclick();
   await tick();
   return toasts().slice(before);
@@ -77,6 +82,27 @@ if (reloads !== 1) fail('the page reloaded over unsaved changes');
 if (!said.some(t => /save or discard/i.test(t)))
   fail(`nothing told the operator their changes are holding the reload up: ${said.join(' | ')}`);
 
+// --- The overlay over a restart ------------------------------------------------------------------------
+// A restart the operator asked for covers the page until a DIFFERENT process answers. In a rolling update
+// the old process keeps answering for a while, and that is not the bridge coming back.
+const polls = [];
+sandbox.setInterval = (fn) => { polls.push(fn); return polls.length; };
+const overlayUp = () => query(sandbox.document.body, 'div', true).some(d => (d.className || d.attrs?.class || '').includes('restart-overlay'));
+const pollNow = async () => { for (const p of [...polls]) await p(); await tick(); };
+
+// Discard the edit, so the reload below is not held up by it.
+getEl('btn-discard')?.onclick?.();
+const old = instance;
+await restartPill.onclick();          // the old process is still answering
+await tick();
+if (!overlayUp()) fail('asking for a restart did not cover the page');
+if (instance !== old) fail('the fixture moved on by itself');
+await pollNow();
+if (!overlayUp()) fail('the old process answering was taken as the bridge coming back');
+instance = 'p-new';
+await pollNow();
+if (overlayUp()) fail('the overlay stayed up after a new process answered');
+
 console.log('reconnect: a restart onto the same build reconnects in place, an update to a new build reloads '
-  + 'the tab that is now running old assets, and unsaved changes hold that reload until they are dealt with');
+  + 'the tab that is now running old assets, and unsaved changes hold that reload until they are dealt with; a requested restart covers the page until a new process answers');
 process.exit(0);

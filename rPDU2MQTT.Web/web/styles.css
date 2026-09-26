@@ -743,6 +743,26 @@
   table.ld th.num, table.ld td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); }
   table.ld tbody tr:hover td { background:var(--panel2); }
 
+  /* --- Restart / update overlay: covers the page until a new process answers. ---------------------- */
+  .restart-overlay {
+    position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center;
+    padding:var(--sp-4); background:var(--scrim); backdrop-filter:blur(3px);
+  }
+  .restart-box {
+    min-width:min(340px,100%); max-width:440px; padding:var(--sp-5); text-align:center;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:var(--shadow-lg);
+    display:flex; flex-direction:column; align-items:center; gap:var(--sp-2);
+  }
+  .restart-title { font-size:15px; font-weight:650; }
+  .restart-line { color:var(--muted); font-size:13px; }
+  .restart-elapsed { color:var(--faint); font-size:12px; font-variant-numeric:tabular-nums; }
+  .restart-spinner {
+    width:28px; height:28px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--accent);
+    animation:rpdu-spin .9s linear infinite;
+  }
+  @keyframes rpdu-spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .restart-spinner { animation:none; } }
+
   /* --- Save bar ----------------------------------------------------------------------------------- */
   /* A floating bar that only exists when there is something to save — the old one sat there permanently,
      always enabled, saying nothing about what a click would actually write. */

@@ -340,9 +340,17 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // --- Payload builders --------------------------------------------------------------------------
 
     /// <summary>Header state: version, config source/writability, MQTT, and the operator's update report.</summary>
+    /// <summary>
+    /// This process, as opposed to this build. A restart on the same image keeps the version, and during a
+    /// rolling update the old process keeps answering until the new one takes over; the page waits for a
+    /// different instance before it says the restart is done.
+    /// </summary>
+    private static readonly string Instance = Guid.NewGuid().ToString("N")[..12];
+
     private async Task<object> BuildStatusAsync(string? user, CancellationToken ct) => new
     {
         version = Version,
+        instance = Instance,
         configSource = configSource.Describe,
         configWritable = configSource.CanWrite,
         gitops = configSource.IsGitOpsManaged,
