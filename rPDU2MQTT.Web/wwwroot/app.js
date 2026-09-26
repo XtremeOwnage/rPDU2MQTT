@@ -2913,35 +2913,43 @@ function animateToggle(onToggle            )              {
 
 // The "show a past moment" control, and the wording for what comes back, live in history-control.ts.
 
-function groupToggles(onToggle            , drawn = true)                     {
+/// The switches that change what the diagram draws — hide empty/small/no data, the unmeasured remainder,
+/// animation and ribbon routing.
+function viewSwitches(onToggle            )              {
+  const row = el('div', { class: 'flow-view-switches' });
+  row.append(hideEmptyToggle(onToggle), hideSmallSelect(onToggle), hideNoDataToggle(onToggle),
+             unmeasuredToggle(onToggle), animateToggle(onToggle), ribbonStyleSelect(onToggle));
+  return row;
+}
+
+/// One chip per group: collapse it into one node, or expand it into its members. Null with no groups.
+function groupChips(onToggle            )                     {
   const groups = flowGroups();
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  // The view switches are not about groups and must not disappear with them.
-  if (drawn) {
-    row.appendChild(hideEmptyToggle(onToggle));
-    row.appendChild(hideSmallSelect(onToggle));
-    row.appendChild(hideNoDataToggle(onToggle));
-    row.appendChild(unmeasuredToggle(onToggle));
-    row.appendChild(animateToggle(onToggle));
-    row.appendChild(ribbonStyleSelect(onToggle));
-  }
-  if (!groups.length) return drawn ? row : null;
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
+  if (!groups.length) return null;
+  const row = el('div', { class: 'flow-view-chips' });
   groups.forEach((g     ) => {
     const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
     // A group with no members has nothing to fold — collapsing/expanding it is a no-op.
-    chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
-      : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
+    chip.title = count === 0 ? 'No members. Add them on the Groups page.'
+      : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
-      if (count === 0) { toast(`“${g.Label || g.Id}” has no members yet — add some in the Groups section on the Nodes tab.`, false); return; }
+      if (count === 0) { toast(`“${g.Label || g.Id}” has no members. Add them on the Groups page.`, false); return; }
       on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
     };
     row.appendChild(chip);
   });
-  // Where membership is edited — the toggles only collapse/expand.
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
+  return row;
+}
+
+/// The switches and the group chips in one strip — for the Roll-up page, which has no View panel.
+function groupToggles(onToggle            , drawn = true)                     {
+  const chips = groupChips(onToggle);
+  if (!drawn && !chips) return null;
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  if (drawn) row.appendChild(viewSwitches(onToggle));
+  if (chips) row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }), chips);
   return row;
 }
 
@@ -4934,10 +4942,11 @@ function addFlowSection(nav     , sections     ) {
   // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
   link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
-  const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'Live power flow (from the latest poll). Outlet→PDU is auto-derived; add upstream nodes (panels, breakers, a “Total”) and drag to set each node’s feeder to model the full hierarchy. Link width is proportional to the measurement.';
-  sec.appendChild(d);
+  // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
+  // period row, the date row and two rows of view switches put the diagram half way down the screen.
+  const head = el('div', { class: 'flow-head' });
+  head.appendChild(el('h2', { text: 'Flow' }));
+  sec.appendChild(head);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = btn('Refresh');
@@ -4977,7 +4986,13 @@ function addFlowSection(nav     , sections     ) {
         : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
   };
   metricSel.onchange = () => { load(); showDayNote(); };
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote);
+  // Filled by draw(), which knows which nodes can be drilled into.
+  const drillSlot = el('span', { class: 'flow-drill-slot' });
+  const historyBtn = btn('History ▾');
+  const viewBtn = btn('View ▾');
+  viewBtn.title = 'Hide empty/small/no-data nodes, unmeasured load, animation, routing, groups and tags.';
+  bar.append(metricSel, drillSlot, instSel.wrap, historyBtn, viewBtn, refresh, count, dayNote);
+  head.appendChild(bar);
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what     ) => {
@@ -5003,12 +5018,27 @@ function addFlowSection(nav     , sections     ) {
     hadDay = true;
     load();
   });
-  // Each of these was its own full-width row with a margin under it, so five rows of controls stacked down
-  // the page while each used about a quarter of the line. They are one wrapping strip: side by side where
-  // there is room, folding onto more lines where there is not.
-  const controlsTop = el('div', { class: 'flow-controls' });
-  controlsTop.append(bar, periods.row, hist.row);
-  sec.appendChild(controlsTop);
+  // Behind buttons rather than over the diagram: the past, and how the diagram is drawn.
+  const historyPanel = el('div', { class: 'flow-panel' }, periods.row, hist.row);
+  const viewBody = el('div', { class: 'flow-view-body' });
+  const viewPanel = el('div', { class: 'flow-panel' }, viewBody);
+  sec.append(historyPanel, viewPanel);
+  let historyOpen = false, viewOpen = false;
+  const syncPanels = () => {
+    // Open while a past view is showing, so what is being looked at is never hidden.
+    const hOpen = historyOpen || !!hist.day();
+    historyPanel.hidden = !hOpen;
+    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : hOpen ? 'History ▴' : 'History ▾';
+    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
+    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
+    viewPanel.hidden = !viewOpen;
+    // A tag highlight dims most of the diagram; say so while the panel that set it is closed.
+    viewBtn.textContent = (activeTag ? `View · ${activeTag}` : 'View') + (viewOpen ? ' ▴' : ' ▾');
+    viewBtn.classList[activeTag ? 'add' : 'remove']('primary');
+  };
+  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncPanels(); };
+  viewBtn.onclick = () => { viewOpen = !viewOpen; syncPanels(); };
+  syncPanels();
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
@@ -5190,8 +5220,8 @@ function addFlowSection(nav     , sections     ) {
     const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
-    const controls = el('div', { class: 'flow-controls' });
-    wrap.appendChild(controls);
+    syncPanels();
+    // The view panel is rebuilt with the diagram: its switches and chips reflect what is drawn.
     // Which part of the hierarchy is drawn: everything, or one node and what is beneath it.
     const drillSel = el('select', { class: 'flow-drill', title: 'Draw one node and everything beneath it.' })                     ;
     drillSel.appendChild(el('option', { value: '', text: 'The whole diagram' }));
@@ -5202,9 +5232,15 @@ function addFlowSection(nav     , sections     ) {
     }
     drillSel.value = drillTo || '';
     drillSel.onchange = () => drill(drillSel.value || null);
-    controls.appendChild(el('label', { class: 'ld-inst' }, 'Showing ', drillSel));
-    const toggles = groupToggles(redrawBoth);
-    if (toggles) controls.appendChild(toggles);
+    drillSlot.innerHTML = '';
+    drillSlot.appendChild(drillSel);
+    viewBody.innerHTML = '';
+    const viewSection = (title        , body             ) =>
+      viewBody.appendChild(el('div', { class: 'flow-view-section' }, el('div', { class: 'flow-view-title', text: title }), body));
+    viewSection('Display', viewSwitches(redrawBoth));
+    const chips = groupChips(redrawBoth);
+    if (chips) viewSection('Groups', chips);
+    const controls = el('div');
     const links = folded.links;
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
@@ -5827,12 +5863,14 @@ function addFlowSection(nav     , sections     ) {
     const taggedById = new Map             (nodes.map((n     ) => [n.id, n]));
     const applyTag = (tag               ) => {
       if (tag) focusTag(svg, taggedById, tag); else clearFocus(svg);
+      syncPanels();
       const fresh = tagToggles(nodes, svg, applyTag);
       if (fresh && tagRow.parentNode) { tagRow.replaceWith(fresh); tagRow = fresh; }
     };
     let tagRow = tagToggles(nodes, svg, applyTag)       ;
     if (tagRow) {
       controls.appendChild(tagRow);
+      viewSection('Tags', controls);
       // Re-apply across the live repaint, so the selection survives a push.
       if (activeTag) focusTag(svg, taggedById, activeTag);
     }
