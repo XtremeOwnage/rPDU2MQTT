@@ -41,9 +41,22 @@ public static class ServiceConfiguration
         bool api = roles.HasFlag(HostRole.Api);
         bool ui = roles.HasFlag(HostRole.Ui);
 
-        // One process, so it is always the leader. The flag stays because the gate is real — it is what
-        // keeps run-once work run-once — and because a clustered implementation would set it from outside.
-        services.AddSingleton(new LeaderState { IsLeader = true });
+        // Who polls, publishes, accumulates and records. Alone, the worker always does. With a leader lease
+        // (#506) — asked for by the chart when a graceful rollout is configured, and kept in the cache — a
+        // worker starts as a standby and leads only while it holds the lease, so a rolling update never has
+        // two processes producing at once. A process without the worker role never leads.
+        // Kept in the configured cache, or — where the chart deployed Valkey but the configuration does not use
+        // it — at the address the chart passes, so a graceful rollout never depends on a setting it cannot see.
+        var leaseConnection = cfg.Cache.Enabled ? null : Environment.GetEnvironmentVariable(Services.LeaderLeaseService.ConnectionVariable);
+        var leaderLease = worker && Services.LeaderLeaseService.Requested;
+        if (leaderLease && !cfg.Cache.Enabled && string.IsNullOrWhiteSpace(leaseConnection))
+        {
+            Log.Error($"{Services.LeaderLeaseService.EnableVariable} is set, but Cache is not enabled: the lease has nowhere to be "
+                    + "kept, so this process leads on its own. A second process started beside it would poll and "
+                    + "publish as well. Enable the Cache, or deploy with a Recreate strategy.");
+            leaderLease = false;
+        }
+        services.AddSingleton(new LeaderState { IsLeader = worker && !leaderLease, Coordinated = leaderLease });
 
         // Bind Configuration + the source it came from (the GUI uses it to save).
         services.AddSingleton(cfg);
@@ -174,7 +187,8 @@ public static class ServiceConfiguration
                 new Core.Flow.CompositeFlowValueSource(
                     sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues),
                 sp.GetRequiredService<Core.Flow.IEnergyStore>(),
-                sp.GetRequiredService<Core.ISnapshotCache>()));
+                sp.GetRequiredService<Core.ISnapshotCache>(),
+                sp.GetService<LeaderState>()));
             // Accumulating is data production, so only the worker does it — otherwise every replica would
             // integrate the same readings into its own copy of the counter.
             if (worker)
@@ -324,7 +338,11 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Diagnostics.ProcessRegistry>();
         // Ownership of a shared resource. One process owns everything it can see; the seam stays so a
         // clustered implementation can be dropped in without an integration noticing.
-        services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
+        // With a leader lease every key belongs to the leader, so a gateway that takes one client moves with it.
+        if (leaderLease)
+            services.AddSingleton<Core.Integrations.ISingleOwnerLease>(sp => new Core.Integrations.LeaderGatedLease(sp.GetRequiredService<LeaderState>()));
+        else
+            services.AddSingleton<Core.Integrations.ISingleOwnerLease, Core.Integrations.SoleOwnerLease>();
 
         // Who this process is — one identity for everything that reports on its behalf.
         services.AddSingleton<Hosting.ProcessIdentity>();
@@ -405,6 +423,18 @@ public static class ServiceConfiguration
         // ---- Ui role: the embedded configuration GUI. ----
         if (ui && cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
+
+        // Last, so it is stopped first: on shutdown this process stops leading before anything else goes.
+        if (leaderLease)
+            services.AddHostedService(sp => new Services.LeaderLeaseService(
+                string.IsNullOrWhiteSpace(leaseConnection)
+                    ? sp.GetRequiredService<Services.RedisCacheClient>()
+                    : new Services.RedisCacheClient(new Models.Config.CacheConfig
+                    {
+                        Connection = leaseConnection, Password = cfg.Cache.Password,
+                        ConnectTimeoutSeconds = cfg.Cache.ConnectTimeoutSeconds,
+                    }, new Core.Flow.CacheHealth()),
+                sp.GetRequiredService<LeaderState>(), sp.GetRequiredService<IHiveMQClient>(), cfg.Cache.KeyPrefix));
     }
 
     /// <summary>
@@ -452,7 +482,9 @@ public static class ServiceConfiguration
         services.AddHostedService(sp => new Services.LocalHistoryWriterService(
             cfg, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
             sp.GetRequiredService<Core.History.LocalSeriesStore>(),
-            sp.GetService<Core.ISnapshotCache>()));
+            sp.GetService<Core.ISnapshotCache>(),
+            // The leader records; a standby, or a process that does not poll, does not (#506).
+            sp.GetService<LeaderState>()));
     }
 
     public static void AddCache(IServiceCollection services, Config cfg)
@@ -464,7 +496,15 @@ public static class ServiceConfiguration
 
         // The audit's verdicts have one owner; the ingests see only the port.
         services.AddSingleton<Core.Flow.IPeriodAuditor>(sp =>
-            new Core.Flow.PeriodAuditor(sp.GetRequiredService<Core.Flow.IPeriodAuditStore>()));
+        {
+            // Every process judges the readings it shows; only the leader writes the shared verdicts, and a
+            // newly promoted one takes up the record where the last leader left it (#506).
+            var leader = sp.GetService<LeaderState>();
+            var auditor = new Core.Flow.PeriodAuditor(sp.GetRequiredService<Core.Flow.IPeriodAuditStore>(),
+                                                      mayPersist: leader is null ? null : () => leader.IsLeader);
+            if (leader is not null) leader.Promoted += auditor.Reload;
+            return auditor;
+        });
 
         services.AddSingleton<Core.Flow.CacheHealth>();
         if (cfg.Cache.Enabled)

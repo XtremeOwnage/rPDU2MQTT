@@ -4,16 +4,23 @@
   Deployment per role (worker/api/ui) for anyone who wants tiers (#179) — only the worker produces data.
 */}}
 {{- $multi := gt (int .Values.replicaCount) 1 }}
-{{- $roles := list (dict "suffix" "" "role" "" "component" "" "replicas" .Values.replicaCount "strategy" (ternary "RollingUpdate" "Recreate" $multi)) }}
+{{- /* A graceful rollout (#506): the replacement comes up and is Ready before the old pod is stopped. Two
+       processes then run at once, so it needs the leader lease, which is kept in the cache — without one it
+       is Recreate, as before. A ReadWriteOncePod volume cannot be mounted by a second pod at all. */}}
+{{- $cacheOn := or .Values.valkey.enabled (dig "Cache" "Enabled" false .Values.config) }}
+{{- $podOnly := or (and .Values.history.persistence.enabled (eq .Values.history.persistence.accessMode "ReadWriteOncePod"))
+                   (and .Values.floorPlans.persistence.enabled (eq .Values.floorPlans.persistence.accessMode "ReadWriteOncePod")) }}
+{{- $graceful := and .Values.gracefulRollout.enabled $cacheOn (not $podOnly) }}
+{{- $roles := list (dict "suffix" "" "role" "" "component" "" "replicas" .Values.replicaCount "strategy" (ternary "RollingUpdate" "Recreate" (or $multi $graceful)) "lease" $graceful) }}
 {{- if .Values.split.enabled }}
 {{- $roles = list
-      (dict "suffix" "-worker" "role" "worker" "component" "worker" "replicas" (.Values.split.worker.replicaCount | int) "strategy" "Recreate")
-      (dict "suffix" "-api"    "role" "api"    "component" "api"    "replicas" (.Values.split.api.replicaCount    | int) "strategy" "RollingUpdate")
-      (dict "suffix" "-ui"     "role" "ui"     "component" "ui"     "replicas" (.Values.split.ui.replicaCount     | int) "strategy" "RollingUpdate") }}
+      (dict "suffix" "-worker" "role" "worker" "component" "worker" "replicas" (.Values.split.worker.replicaCount | int) "strategy" (ternary "RollingUpdate" "Recreate" $graceful) "lease" $graceful)
+      (dict "suffix" "-api"    "role" "api"    "component" "api"    "replicas" (.Values.split.api.replicaCount    | int) "strategy" "RollingUpdate" "lease" false)
+      (dict "suffix" "-ui"     "role" "ui"     "component" "ui"     "replicas" (.Values.split.ui.replicaCount     | int) "strategy" "RollingUpdate" "lease" false) }}
 {{- end }}
 {{- /* The operator (#210) manages this release's own Deployment; run it as its own single-replica process. */}}
 {{- if .Values.operator.enabled }}
-{{- $roles = append $roles (dict "suffix" "-operator" "role" "operator" "component" "operator" "replicas" 1 "strategy" "Recreate") }}
+{{- $roles = append $roles (dict "suffix" "-operator" "role" "operator" "component" "operator" "replicas" 1 "strategy" "Recreate" "lease" false) }}
 {{- end }}
 {{- range $r := $roles }}
 {{- /* Plan images are served by whichever process runs the GUI. */}}
@@ -35,6 +42,12 @@ spec:
   replicas: {{ $r.replicas }}
   strategy:
     type: {{ $r.strategy }}
+    {{- if eq $r.strategy "RollingUpdate" }}
+    # The replacement is Ready before the old pod is told to stop.
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- end }}
   selector:
     matchLabels:
       {{- include "rpdu2mqtt.selectorLabels" $ | nindent 6 }}
@@ -87,6 +100,19 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- if $r.lease }}
+            # Only the holder of the leader lease polls, publishes and records, so the old and new pod of a
+            # rolling update never both do (#506). A restart from the GUI rolls this Deployment.
+            - name: RPDU2MQTT_LEADER_LEASE
+              value: "true"
+            - name: RPDU2MQTT_DEPLOYMENT
+              value: {{ printf "%s%s" (include "rpdu2mqtt.fullname" $) $r.suffix | quote }}
+            {{- if $.Values.valkey.enabled }}
+            # Used only when the configuration does not enable the Cache itself.
+            - name: RPDU2MQTT_LEADER_LEASE_CONNECTION
+              value: {{ printf "%s-valkey:6379" (include "rpdu2mqtt.fullname" $) | quote }}
+            {{- end }}
+            {{- end }}
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -219,8 +245,24 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $.Values.affinity }}
+      {{- /* A ReadWriteOnce volume is attached to one node, and a surge pod scheduled on another cannot mount
+             it, so the rollout would stall. Keep this Deployment's pods on one node; the first pod is free to
+             land anywhere. Set affinity yourself to replace this. */}}
+      {{- $rwo := or (and $history (eq $.Values.history.persistence.accessMode "ReadWriteOnce"))
+                     (and $plans (eq $.Values.floorPlans.persistence.accessMode "ReadWriteOnce")) }}
+      {{- if $.Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $.Values.affinity | nindent 8 }}
+      {{- else if and $r.lease $rwo }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "rpdu2mqtt.selectorLabels" $ | nindent 18 }}
+                  {{- with $r.component }}
+                  app.kubernetes.io/component: {{ . }}
+                  {{- end }}
       {{- end }}
 {{- end }}

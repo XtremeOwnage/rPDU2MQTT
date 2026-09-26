@@ -1,3 +1,4 @@
+using k8s;
 using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Startup.ConfigSources;
@@ -53,6 +54,29 @@ public sealed class KubernetesPodRestarter : IProcessRestarter
 
     public async Task<string> RestartAsync(string reason, CancellationToken cancellationToken = default)
     {
+        // Under a leader lease (#506) the Deployment surges: roll it, and the replacement is up and ready
+        // before this pod is told to stop. Deleting the pod instead would stop it first and leave the gap a
+        // graceful rollout exists to close.
+        var deployment = Environment.GetEnvironmentVariable("RPDU2MQTT_DEPLOYMENT");
+        if (Services.LeaderLeaseService.Requested && !string.IsNullOrWhiteSpace(deployment))
+        {
+            try
+            {
+                Serilog.Log.Warning("Restart requested ({Reason}); rolling deployment {Namespace}/{Deployment}.",
+                    reason, kubernetes.Namespace, deployment);
+                var annotations = new Dictionary<string, string> { ["kubectl.kubernetes.io/restartedAt"] = DateTime.UtcNow.ToString("o") };
+                var body = new k8s.Models.V1Patch(
+                    System.Text.Json.JsonSerializer.Serialize(new { spec = new { template = new { metadata = new { annotations } } } }),
+                    k8s.Models.V1Patch.PatchType.MergePatch);
+                await kubernetes.Client.AppsV1.PatchNamespacedDeploymentAsync(body, deployment, kubernetes.Namespace, cancellationToken: cancellationToken);
+                return $"Rolling {deployment}: a replacement starts, takes over once it is ready, and then this pod stops.";
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "Could not roll deployment {Deployment} (RBAC?); replacing the pod instead.", deployment);
+            }
+        }
+
         var pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
         if (string.IsNullOrWhiteSpace(pod))
             return await fallback.RestartAsync(reason, cancellationToken);

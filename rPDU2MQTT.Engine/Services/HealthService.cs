@@ -23,16 +23,19 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
     // Every integration this build carries, and what each last did — exposed as standard health checks.
     private readonly Core.Integrations.IntegrationRegistry? integrations;
     private readonly Core.Integrations.IntegrationStatus? status;
+    private readonly Core.LeaderState? leader;
     private WebApplication? app;
 
     public HealthService(Config cfg, IHiveMQClient mqtt, HealthState health,
-        Core.Integrations.IntegrationRegistry? integrations = null, Core.Integrations.IntegrationStatus? status = null)
+        Core.Integrations.IntegrationRegistry? integrations = null, Core.Integrations.IntegrationStatus? status = null,
+        Core.LeaderState? leader = null)
     {
         this.cfg = cfg;
         this.mqtt = mqtt;
         this.health = health;
         this.integrations = integrations;
         this.status = status;
+        this.leader = leader;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -102,17 +105,37 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
     /// NOT ready, or <see langword="null"/> when ready.
     /// </summary>
     private string? NotReadyReason()
+        => NotReadyReason(mqtt.IsConnected(), health.LastPollUtc, leader, cfg.Primary.PollInterval, DateTime.UtcNow);
+
+    /// <summary>
+    /// The readiness rule, on its own so it can be tested.
+    ///
+    /// <para>
+    /// Under a leader lease (#506) ready means <i>ready to take over</i>. A standby does not poll — the old pod
+    /// still is, and many gateways accept one client — so "polled recently" cannot be asked of it. It is ready
+    /// once it is connected and can reach the lease: then the old pod can be told to stop, and this one takes
+    /// over within a second of it letting go. A leader just promoted is given one staleness window to make its
+    /// first poll, so the handover does not take it out of service for the length of one.
+    /// </para>
+    /// </summary>
+    internal static string? NotReadyReason(bool mqttConnected, DateTime? lastPollUtc, Core.LeaderState? leader, int pollInterval, DateTime now)
     {
-        if (!mqtt.IsConnected())
+        if (!mqttConnected)
             return "MQTT not connected";
 
-        var last = health.LastPollUtc;
-        if (last is null)
-            return "no successful PDU poll yet";
+        if (leader is { Coordinated: true, IsLeader: false })
+            return leader.StandbyReason is { } why && why.StartsWith("the lease store", StringComparison.Ordinal)
+                ? $"standby, and cannot take over: {why}"
+                : null;
 
-        var staleAfter = TimeSpan.FromSeconds(Math.Max(30, cfg.Primary.PollInterval * 3));
-        var age = DateTime.UtcNow - last.Value;
-        if (age >= staleAfter)
+        var staleAfter = TimeSpan.FromSeconds(Math.Max(30, pollInterval * 3));
+        var promotedRecently = leader is { Coordinated: true, LeaderSinceUtc: { } since } && now - since < staleAfter;
+
+        if (lastPollUtc is null)
+            return promotedRecently ? null : "no successful PDU poll yet";
+
+        var age = now - lastPollUtc.Value;
+        if (age >= staleAfter && !promotedRecently)
             return $"last PDU poll {age.TotalSeconds:0}s ago (> {staleAfter.TotalSeconds:0}s)";
 
         return null;

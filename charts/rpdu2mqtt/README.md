@@ -56,6 +56,7 @@ credentials:
 | `history.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `5Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. About 1 GB per year for two hundred series at the default retention. With `split.enabled` the readings are written by the worker and read by the ui, so give it a class that allows `ReadWriteMany` — or keep history on one pod. |
 | `floorPlans.persistence.enabled` | `false` | Create a PVC for floor plan images and mount it at `floorPlans.mountPath` (`/data/plans`) on the pod serving the GUI. Images never go in the config or CR. The claim is kept on uninstall. |
 | `floorPlans.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `1Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. |
+| `gracefulRollout.enabled` | `true` | Bring the new pod up and wait for it to be Ready before stopping the old one on an update or restart (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`). The two pods coordinate through a leader lease in Valkey, so it takes effect only with a cache (`valkey.enabled`, or `config.Cache.Enabled`); otherwise the Deployment stays `Recreate`. A `ReadWriteOnce` history/plans volume keeps the pods on one node; `ReadWriteOncePod` turns this off. See *Graceful rollout* under [Notes](#notes). |
 | `existingSecret` | `""` | Use a Secret you manage instead of creating one. |
 | `split.enabled` | `false` | Deploy the app's roles as separate Deployments (`-worker`, `-api`, `-ui`) so they scale independently. Off = one Deployment runs every role. The gui Service targets the `ui` pods and the metrics Service the `worker` pods. |
 | `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role Deployment (only with `split.enabled`). Keep `worker` at `1` — it owns the single PDU session. |
@@ -88,9 +89,19 @@ credentials:
   runs in the process that starts those services, which is the `worker`. The api/ui pods read what the
   worker produced and never open a device.
 
-- **One replica:** v4 coordinates within one process. Two replicas would each poll the PDUs and each run the
-  publishers — duplicate device sessions, duplicate output. Keep `replicaCount: 1`, and prefer a
-  `Recreate` rollout so two of them never overlap.
+- **Graceful rollout (#506):** with a cache, an update or a restart starts the replacement pod first. It
+  comes up as a *standby*: it serves the GUI and the API, mirrors the energy totals, and reports Ready once
+  it is connected to the broker and can reach the lease. Only then is the old pod stopped. On SIGTERM the old
+  pod writes its energy totals, lets go of the leader lease, and the standby takes it within a second and
+  starts polling, publishing, accumulating and writing history. Only the lease holder does any of that, so
+  at no point do two processes produce at once, and a pod killed without warning holds the lease for
+  15 s at most (`RPDU2MQTT_LEADER_LEASE_SECONDS`). While the cache is unreachable nobody can prove they
+  hold the lease, so nothing polls until it is back. The Status board's node card says which pod is
+  leading. Restart from the GUI rolls the Deployment instead of deleting the pod.
+
+- **Replicas:** without the leader lease, two replicas would each poll the PDUs and each run the
+  publishers — duplicate device sessions, duplicate output — so keep `replicaCount: 1`. With it (see
+  above), extra replicas are standbys that take over if the leader goes.
 
 - **Scheduled restarts:** `autoRestart.enabled=true` adds a CronJob that runs
   `kubectl rollout restart` against the Deployments *this release* renders — matched by label, so it can
@@ -163,5 +174,5 @@ credentials:
   unreachable, so give the API its own host or add those paths as above. Routing to `service: api`
   while the API is disabled fails the render rather than emitting a dangling backend. The API is
   unauthenticated for reads: put auth at your ingress, or restrict `networkPolicy.apiIngressFrom`.
-- **Single replica:** the bridge owns a PDU session and has no leader election; keep `replicaCount: 1`
-  (the Deployment uses the `Recreate` strategy).
+- **Single replica:** the bridge owns a PDU session. Without a cache there is no leader lease, so keep
+  `replicaCount: 1` (the Deployment uses the `Recreate` strategy); with one, see *Graceful rollout* above.

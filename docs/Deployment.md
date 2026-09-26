@@ -199,6 +199,12 @@ for you from `credentials.*` (or an `existingSecret`).
 
 - **Compose:** `docker compose pull && docker compose up -d`.
 - **Helm:** `helm upgrade rpdu2mqtt ./charts/rpdu2mqtt -n rpdu2mqtt -f my-values.yaml`.
+- **No gap on Kubernetes with a cache:** the Helm chart rolls the Deployment gracefully when Valkey is on
+  (`gracefulRollout.enabled`, the default). The new pod starts as a standby and takes over the moment the
+  old one stops, so readings keep flowing across the update. Outside Kubernetes, or without a cache, an
+  update restarts the process as before. To run the same coordination elsewhere, set
+  `RPDU2MQTT_LEADER_LEASE=true` on every instance with `Cache` enabled: only the one holding the lease polls
+  and publishes.
 - Pin `:X.Y.Z` for fully reproducible deploys; use `:X` / `:X.Y` to track a major/minor line, or `:stable` for the newest release. `:edge` follows `main` (unreleased).
 
 ## Troubleshooting
