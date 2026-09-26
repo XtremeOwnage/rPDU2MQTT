@@ -339,9 +339,13 @@ No phasing — the full feature ships at once:
 - **Watch** the CR and apply `spec` changes live (restarting only for listen ports / GUI auth).
 - CRD OpenAPI `spec` schema **generated from the `Config` model** (reusing the GUI's `ConfigSchema`
   reflection).
-- CRD shipped both in the Helm chart's `crds/` directory **and** as a standalone manifest; the app does
-  not self-register it. (Helm does not auto-upgrade `crds/`, so schema bumps need a documented
-  `kubectl apply`.)
+- Property names a YAML 1.1 reader takes for booleans (`Y`, `N`, `yes`, `on`, …) are **quoted** in the
+  generated manifest. Go's parser — kubectl's, Helm's and Argo's — is YAML 1.1, so a bare `Y:` installs a
+  schema describing a property called `true`. It was found in a live cluster.
+- CRD rendered by the Helm chart as part of the release (`crds.enabled`, on by default) **and** shipped as
+  a standalone manifest; the app does not self-register it. It is deliberately not in Helm's `crds/`
+  directory: Helm only ever installs that, so a schema bump silently left the cluster behind and the API
+  server pruned every field the old schema did not know.
 - RBAC: `get,list,watch` + `patch` on `rpduconfigs` and `patch` on `rpduconfigs/status`.
 
 **Possible future (not now):** a controller reconciling *multiple* `RpduConfig` instances (one per PDU)

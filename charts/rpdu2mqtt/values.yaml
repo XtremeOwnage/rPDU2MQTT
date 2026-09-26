@@ -148,7 +148,7 @@ autoRestart:
 # Store configuration in a Kubernetes RpduConfig custom resource instead of a ConfigMap.
 # When enabled: the chart creates the CR (from `config` above) and grants RBAC to read/write it,
 # the app reads config from the CR (RPDU2MQTT_CONFIG_SOURCE=k8s), and the GUI's Save writes back to
-# the CR. Requires the RpduConfig CRD to be installed (shipped in this chart's crds/ directory).
+# the CR. Requires the RpduConfig CRD, which this chart renders itself (see crds.enabled).
 kubernetesConfigSource:
   enabled: false
   # Name of the RpduConfig resource (defaults to the release fullname).
@@ -380,6 +380,12 @@ valkey:
 # ~1.5 MB limit and rewritten on every save — so they need somewhere of their own. With persistence on, a
 # volume is mounted at mountPath and the bridge stores images there. Leave it off to use an S3-compatible
 # bucket instead (PlanStorage.ObjectStore in the config, secret key in credentials.plansSecretKey).
+# The RpduConfig CRD is part of the release, so `helm upgrade` keeps it matching the app. Left in Helm's
+# crds/ directory it would only ever be installed, and an API server pruning fields its schema does not know
+# takes settings out of the config without saying so. Turn this off only if something else owns the CRD.
+crds:
+  enabled: true
+
 # The bridge keeps its own history of every reading (#502) — a directory of fixed-interval files, no other
 # service needed. It is on by default, with a volume, because history that lives in the container is lost at
 # the next restart, which is exactly when someone wants to look at it.

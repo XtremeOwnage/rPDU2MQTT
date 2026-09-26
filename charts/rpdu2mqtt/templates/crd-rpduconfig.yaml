@@ -1,0 +1,15 @@
+{{- /*
+  The CRD, rendered as part of the release rather than left in Helm's crds/ directory.
+
+  Helm applies crds/ on install and NEVER on upgrade, so a chart that keeps it there ships a schema that
+  silently stops matching the app — and an API server prunes every field its schema does not know, taking
+  settings out of the saved config without saying so.
+
+  Emitted verbatim, and deliberately not parsed: a YAML reader takes the unquoted key `Y` — the floor
+  plan's Y coordinate — for the boolean `true`, so a round trip through fromYaml/toYaml renames it and the
+  API server then prunes every Y it is given. The file is the generator's own output
+  (`rPDU2MQTT --emit-crd`), annotation and all.
+*/}}
+{{- if .Values.crds.enabled }}
+{{ .Files.Get "files/rpduconfig-crd.yaml" }}
+{{- end }}

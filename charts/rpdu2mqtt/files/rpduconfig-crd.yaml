@@ -2,6 +2,8 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: rpduconfigs.rpdu2mqtt.xtremeownage.com
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   group: rpdu2mqtt.xtremeownage.com
   scope: Namespaced
@@ -108,7 +110,7 @@ spec:
                       Scheme:
                         type: string
                         enum:
-                        - ''
+                        - ""
                         - mqtt
                         - mqtts
                         - ws
@@ -179,7 +181,7 @@ spec:
                         Scheme:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - http
                           - https
                           description: Connection scheme used
@@ -513,7 +515,7 @@ spec:
                   Provider:
                     type: string
                     enum:
-                    - ''
+                    - ""
                     - local
                     - prometheus
                     - emoncms
@@ -624,7 +626,7 @@ spec:
                             Type:
                               type: string
                               enum:
-                              - ''
+                              - ""
                               - realpower
                               - energy
                               - energy_d
@@ -806,7 +808,7 @@ spec:
                   DistanceUnits:
                     type: string
                     enum:
-                    - ''
+                    - ""
                     - auto
                     - imperial
                     - metric
@@ -917,7 +919,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - node
                           - panel
                           - breaker
@@ -956,7 +958,7 @@ spec:
                         Mode:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - auto
                           - static
                           - residual
@@ -978,14 +980,14 @@ spec:
                               Accumulation:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - lifetime
                                 - period
                                 description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Check the topic before choosing: a publisher can offer both kinds, and firmware changes which. A daily counter tagged 'lifetime' is read as a meter running backwards every midnight and stops being published; a lifetime counter tagged 'period' is republished every poll as if that whole total were today's."
                               Direction:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - out
                                 - in
                                 - split
@@ -1016,14 +1018,14 @@ spec:
                               RegisterType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - holding
                                 - input
                                 description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
                               DataType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - uint16
                                 - int16
                                 - uint32
@@ -1033,7 +1035,7 @@ spec:
                               WordOrder:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
@@ -1064,14 +1066,14 @@ spec:
                               Accumulation:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - lifetime
                                 - period
                                 description: "Whether this counter runs forever or restarts each day: 'lifetime' (default — a cumulative total whose rise is measured) or 'period' (the device resets it daily, so the reading already is today's total). Only meaningful for energy. Check the topic before choosing: a publisher can offer both kinds, and firmware changes which. A daily counter tagged 'lifetime' is read as a meter running backwards every midnight and stops being published; a lifetime counter tagged 'period' is republished every poll as if that whole total were today's."
                               Direction:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - out
                                 - in
                                 - split
@@ -1102,14 +1104,14 @@ spec:
                               RegisterType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - holding
                                 - input
                                 description: "For Type 'modbus': which register bank — 'holding' (function 3) or 'input' (function 4)."
                               DataType:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - uint16
                                 - int16
                                 - uint32
@@ -1119,7 +1121,7 @@ spec:
                               WordOrder:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - big
                                 - little
                                 description: "For Type 'modbus' 32-bit values: word order — 'big' (ABCD, high word first) or 'little' (CDAB, word-swapped)."
@@ -1192,7 +1194,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - node
                           - panel
                           - breaker
@@ -1272,7 +1274,7 @@ spec:
                               Conductor:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - copper
                                 - aluminium
                                 description: What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.
@@ -1287,7 +1289,7 @@ spec:
                               State:
                                 type: string
                                 enum:
-                                - ''
+                                - ""
                                 - identified
                                 - unknown
                                 - unused
@@ -1383,8 +1385,8 @@ spec:
                               Ground:
                                 type: string
                                 enum:
-                                - ''
-                                - ''
+                                - ""
+                                - ""
                                 - grass
                                 - concrete
                                 - gravel
@@ -1412,7 +1414,7 @@ spec:
                                         properties:
                                           X:
                                             type: number
-                                          Y:
+                                          "Y":
                                             type: number
                                       description: The room's outline on the plan, as points in drawing units. Empty until the room is drawn.
                                     Outdoor:
@@ -1421,8 +1423,8 @@ spec:
                                     Surface:
                                       type: string
                                       enum:
-                                      - ''
-                                      - ''
+                                      - ""
+                                      - ""
                                       - wood
                                       - tile
                                       - carpet
@@ -1477,7 +1479,7 @@ spec:
                                         properties:
                                           X:
                                             type: number
-                                          Y:
+                                          "Y":
                                             type: number
                                       description: "The area's outline on the plan, as points in drawing units. Optional: an area made of whole rooms needs no outline of its own."
                                     Locked:
@@ -1496,7 +1498,7 @@ spec:
                                     Kind:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - door
                                       - double-door
                                       - sliding-door
@@ -1507,7 +1509,7 @@ spec:
                                     X:
                                       type: number
                                       description: Centre of the opening across the plan, in drawing units.
-                                    Y:
+                                    "Y":
                                       type: number
                                       description: Centre of the opening down the plan, in drawing units.
                                     Angle:
@@ -1519,7 +1521,7 @@ spec:
                                     Swing:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - left
                                       - right
                                       description: Which end of a door the hinges are at.
@@ -1539,7 +1541,7 @@ spec:
                                     Kind:
                                       type: string
                                       enum:
-                                      - ''
+                                      - ""
                                       - coincident
                                       - colinear
                                       - parallel
@@ -1583,7 +1585,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - outlet
                           - switch
                           - fixture
@@ -1638,7 +1640,7 @@ spec:
                         X:
                           type: number
                           description: Where it is on the floor plan, across, in drawing units.
-                        Y:
+                        "Y":
                           type: number
                           description: Where it is on the floor plan, down, in drawing units.
                         Circuit:
@@ -1660,7 +1662,7 @@ spec:
                         Kind:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - circuit
                           - feeder
                           - service
@@ -1685,7 +1687,7 @@ spec:
                             properties:
                               X:
                                 type: number
-                              Y:
+                              "Y":
                                 type: number
                           description: 'The path between its ends, in drawing units: bends and, where an end is not an item, the end itself.'
                         Label:
@@ -1800,7 +1802,7 @@ spec:
                         Framing:
                           type: string
                           enum:
-                          - ''
+                          - ""
                           - auto
                           - tcp
                           - rtu-over-tcp

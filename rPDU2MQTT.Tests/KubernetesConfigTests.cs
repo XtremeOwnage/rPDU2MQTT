@@ -79,13 +79,59 @@ public class KubernetesConfigTests
     }
 
     /// <summary>
+    /// <summary>
+    /// A property name a YAML 1.1 reader takes for a boolean must be quoted.
+    ///
+    /// <para>
+    /// Go's parser is YAML 1.1 and is what kubectl, Helm and Argo all use, so a bare <c>Y:</c> — the floor
+    /// plan's Y coordinate — installs a schema describing a property called <c>true</c>. It was found in a
+    /// live cluster: the CRD there had <c>true</c> where Y belonged, so Y was unvalidated, and on any object
+    /// that does not preserve unknown fields it would have been pruned from whatever was saved.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void KeysAYamlReaderWouldTakeForBooleans_AreQuoted()
+    {
+        var crd = CrdGenerator.ToYaml();
+
+        Assert.Contains("\"Y\":", crd);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"(?m)^\s*(y|Y|n|N|yes|no|on|off|true|false):", System.Text.RegularExpressions.RegexOptions.IgnoreCase), crd);
+    }
+
+    /// <summary>
+    /// The chart must emit the CRD as it is, never parse it.
+    ///
+    /// <para>
+    /// A YAML reader takes the unquoted key <c>Y</c> — the floor plan's Y coordinate — for the boolean
+    /// <c>true</c>, so rendering the CRD through Helm's <c>fromYaml</c>/<c>toYaml</c> renamed the property
+    /// and the API server then pruned every Y it was given. Nothing about that failure is visible until
+    /// someone's floor plan comes back flattened onto one line.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TheChartEmitsTheCrdVerbatim()
+    {
+        var template = File.ReadAllText(Path.Combine(FindRepoRoot(), "charts", "rpdu2mqtt", "templates", "crd-rpduconfig.yaml"));
+
+        Assert.Contains(".Files.Get", template);
+        // The template's own comment explains the trap, so it is stripped before looking for the trap.
+        var code = System.Text.RegularExpressions.Regex.Replace(template, @"/\*.*?\*/", "", System.Text.RegularExpressions.RegexOptions.Singleline);
+        Assert.DoesNotContain("fromYaml", code);
+        Assert.DoesNotContain("toYaml", code);
+
+        // …and the file it emits carries the annotation that keeps the CRD when the release is removed,
+        // since a template that cannot parse it cannot add one.
+        var crd = File.ReadAllText(Path.Combine(FindRepoRoot(), "charts", "rpdu2mqtt", "files", "rpduconfig-crd.yaml"));
+        Assert.Contains("helm.sh/resource-policy: keep", crd);
+    }
+
     /// The committed CRD manifests are generated artifacts (<c>rPDU2MQTT --emit-crd</c>), and nothing was
     /// checking they still matched the config model. Examples/Kubernetes/crd/crd.yaml had silently drifted
     /// 199 lines behind across several releases — anyone applying it got a schema with no EnergyFlow and no
     /// EmonCMS feed settings. Pin both so adding a config field can't quietly leave them stale again.
     /// </summary>
     [Theory]
-    [InlineData("charts/rpdu2mqtt/crds/rpduconfig.yaml")]
+    [InlineData("charts/rpdu2mqtt/files/rpduconfig-crd.yaml")]
     [InlineData("Examples/Kubernetes/crd/crd.yaml")]
     public void CommittedCrdManifests_MatchTheGenerator(string relativePath)
     {
@@ -140,7 +186,7 @@ public class KubernetesConfigTests
     [Fact]
     public void TheCrdDoesNotEnumerateSourceTypes()
     {
-        var crd = File.ReadAllText(Path.Combine(FindRepoRoot(), "charts", "rpdu2mqtt", "crds", "rpduconfig.yaml"));
+        var crd = File.ReadAllText(Path.Combine(FindRepoRoot(), "charts", "rpdu2mqtt", "files", "rpduconfig-crd.yaml"));
 
         // The Type property of a flow source, and whatever follows it.
         var i = crd.IndexOf("Where this value comes from", StringComparison.Ordinal);

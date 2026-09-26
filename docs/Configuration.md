@@ -1000,7 +1000,7 @@ EnergyFlow:
 
 > **Kubernetes:** the CRD no longer enumerates a source's `Type` — the set is open, since plugins contribute
 > types at runtime. If your cluster still has an older CRD, saving a `derived` binding fails with
-> `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/crds/rpduconfig.yaml` once and it
+> `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/files/rpduconfig-crd.yaml` once and it
 > will not happen again, for this or any future type.
 
 ### Where today's totals are kept
