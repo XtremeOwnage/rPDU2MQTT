@@ -139,13 +139,17 @@ public static class CrdGenerator
         foreach (var n in nodes)
             props[n.Key] = SchemaFor(n);
 
-        return new Dictionary<string, object?>
+        var schema = new Dictionary<string, object?>
         {
             ["type"] = "object",
             // Keep validation lenient/forward-compatible: known fields are typed, unknown are preserved.
             ["x-kubernetes-preserve-unknown-fields"] = true,
-            ["properties"] = props,
         };
+        // An object with nothing named in it — the value type of a free-form map — is described by its type
+        // alone. An empty `properties` is dropped by the API server, and a manifest carrying one is then
+        // permanently out of sync with what the cluster holds: a diff nobody can ever resolve.
+        if (props.Count > 0) schema["properties"] = props;
+        return schema;
     }
 
     private static object SchemaFor(SchemaNode n)

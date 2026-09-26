@@ -80,6 +80,20 @@ public class KubernetesConfigTests
 
     /// <summary>
     /// <summary>
+    /// An object with nothing named in it carries no <c>properties</c> at all.
+    ///
+    /// <para>
+    /// The API server drops an empty <c>properties: {}</c>, so a manifest that includes one never matches
+    /// what the cluster holds — in Argo CD that is a permanent, unresolvable drift on the CRD.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AnEmptyPropertiesMapIsNotEmitted()
+    {
+        Assert.DoesNotContain("properties: {}", CrdGenerator.ToYaml());
+    }
+
+    /// <summary>
     /// A property name a YAML 1.1 reader takes for a boolean must be quoted.
     ///
     /// <para>

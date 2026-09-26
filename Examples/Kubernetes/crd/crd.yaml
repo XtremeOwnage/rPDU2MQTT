@@ -1048,7 +1048,6 @@ spec:
                                 additionalProperties:
                                   type: object
                                   x-kubernetes-preserve-unknown-fields: true
-                                  properties: {}
                                 description: Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.
                           description: Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value.
                         Mqtt:
@@ -1134,7 +1133,6 @@ spec:
                                 additionalProperties:
                                   type: object
                                   x-kubernetes-preserve-unknown-fields: true
-                                  properties: {}
                                 description: Extra settings for a plugin-supplied source type. The built-in mqtt and modbus types use the fields above instead.
                           description: "Deprecated: use Sources. Legacy MQTT bindings (implicitly Type 'mqtt'); still honored for back-compat."
                     description: Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id.
@@ -1831,7 +1829,6 @@ spec:
                 additionalProperties:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                  properties: {}
                 description: Settings for externally loaded plugins, keyed by plugin id.
               Cache:
                 type: object
