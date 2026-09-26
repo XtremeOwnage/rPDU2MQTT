@@ -106,10 +106,27 @@ const notice = notices.map(n => n.textContent).join(' ');
 if (!notice.includes('solar_assistant/total/pv_energy/state')) fail('the notice does not name the withheld binding');
 if (!notice.includes('did not reset')) fail('the notice does not say why the binding is withheld');
 
+// Folded to its headline by default: the explanation took half a phone's screen on every visit, and the
+// reader opened the page for the diagram. The headline stays; the rest is one tap away.
+const banner = notices[0];
+const body = query(banner, 'div', true).find(d => cn(d).includes('flow-banner-body'));
+const toggle = query(banner, 'button', true).find(b => cn(b).includes('flow-banner-toggle'));
+if (!body || !toggle) fail('the withheld notice cannot be folded');
+if (!body.hidden) fail('the withheld notice opens unfolded, taking the screen before the diagram');
+if (!/being withheld/.test(banner.textContent)) fail('the folded notice lost its headline');
+toggle.onclick();
+if (body.hidden) fail('Show did not open the notice');
+// A live redraw rebuilds the banner; one the reader opened stays open.
+query(sections, 'button', true).find(b => b.textContent === 'Refresh').click();
+await new Promise(r => setTimeout(r, 400));
+const again = query(sections, 'div', true).find(d => cn(d).includes('flow-contradiction'));
+const againBody = query(again, 'div', true).find(d => cn(d).includes('flow-banner-body'));
+if (!againBody || againBody.hidden) fail('a redraw folded a notice the reader had opened');
+
 // And nothing is announced when nothing is being withheld.
 sections = await render(0.12, 'energy_d', []);
 if (query(sections, 'div', true).filter(d => cn(d).includes('flow-contradiction')).length)
   fail('a notice appeared with nothing withheld and no contradiction');
 
 console.log('contradiction: contradicted nodes are named above the chart and marked on it; withheld sources '
-  + 'are announced with their reason; ordinary and lifetime-counter gaps stay quiet');
+  + 'are announced with their reason, folded to a headline until opened; ordinary and lifetime-counter gaps stay quiet');
