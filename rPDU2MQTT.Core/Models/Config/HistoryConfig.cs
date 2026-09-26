@@ -52,10 +52,12 @@ public class HistoryConfig
     /// while it is also the chosen backend has nothing in it on the day someone switches to it.
     /// </summary>
     [DefaultValue(true)]
+    [Display(Name = "Keep a local copy of every reading")]
     [Description("Keep a copy of every reading in the bridge's own store, whether or not it is the backend the pages read from. On by default: a store nothing wrote to is empty on the day you want it.")]
     [FeatureToggle]
     public bool LocalEnabled { get; set; } = true;
 
+    [Display(Name = "Local history directory")]
     [Description("Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.")]
     [DefaultValue("")]
     public string LocalPath { get; set; } = "";
@@ -63,21 +65,29 @@ public class HistoryConfig
     [DefaultValue(7)]
     [Range(1, 3650)]
     [Description("How many days of readings are kept at the rate they arrive. Older ones are still there a minute at a time.")]
+    [Display(Name = "Raw retention (days)")]
+    [SettingGroup("Retention")]
     public int LocalRawKeepDays { get; set; } = 7;
 
     [DefaultValue(90)]
     [Range(1, 3650)]
     [Description("How many days are kept a minute at a time.")]
+    [Display(Name = "Minutely retention (days)")]
+    [SettingGroup("Retention")]
     public int LocalMinuteKeepDays { get; set; } = 90;
 
     [DefaultValue(730)]
     [Range(1, 36500)]
     [Description("How many days are kept an hour at a time. Two years of hourly readings for two hundred series is about 3 MB.")]
+    [Display(Name = "Hourly retention (days)")]
+    [SettingGroup("Retention")]
     public int LocalHourKeepDays { get; set; } = 730;
 
     [DefaultValue(36500)]
     [Range(1, 36500)]
     [Description("How many days are kept a day at a time — the resolution a month or a year of history is drawn from. A century of them for two hundred series is about 60 MB, so there is little reason to drop any.")]
+    [Display(Name = "Daily retention (days)")]
+    [SettingGroup("Retention")]
     public int LocalDayKeepDays { get; set; } = 36500;
 
     [DefaultValue(30)]

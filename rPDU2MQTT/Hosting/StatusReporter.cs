@@ -28,8 +28,12 @@ public sealed class StatusReporter : BackgroundService
     private readonly Core.Startup.ConfigurationFaults? faults;
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
+    private readonly Core.History.LocalSeriesStore? localHistory;
+    // Checking a directory means writing a probe file into it, so it is done once a minute, not per tick.
+    private IReadOnlyList<Core.StorageUse>? storage;
+    private DateTime storageCheckedUtc = DateTime.MinValue;
 
-    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null)
+    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null)
     {
         this.config = config;
         board = statusBoard ?? new Core.Status.StatusBoard();
@@ -43,6 +47,7 @@ public sealed class StatusReporter : BackgroundService
         this.faults = faults;
         this.cacheProbe = cacheProbe;
         this.history = history;
+        this.localHistory = localHistory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -151,6 +156,8 @@ public sealed class StatusReporter : BackgroundService
             Detail = historyDetail,
         });
 
+        ReportStorage();
+
         // This process. Its silence is what tells the board a replica has gone.
         board.Report($"node:{self.Id}", Kind.Process, new ComponentReport
         {
@@ -161,9 +168,30 @@ public sealed class StatusReporter : BackgroundService
         });
     }
     /// <summary>
-    /// Report one integration's own verdict. Its rule lives on the integration (IStatusProvider) or in the
-    /// shared derivation — never here, which is where a branch per integration used to live.
+    /// The directories this process writes to, as one card judged by the one in the worst shape. A volume
+    /// that did not mount, went read-only or filled up otherwise looks like readings quietly not being kept.
     /// </summary>
+    private void ReportStorage()
+    {
+        if (storage is null || DateTime.UtcNow - storageCheckedUtc > TimeSpan.FromMinutes(1))
+        {
+            storage = Core.StorageUsage.Locations(config, localHistory?.Root, global::rPDU2MQTT.Plugins.PluginLoader.DefaultDirectory, count: false);
+            storageCheckedUtc = DateTime.UtcNow;
+        }
+
+        var worst = Core.StorageUsage.Worst(storage);
+        var state = worst is null ? Core.StorageState.Ok : Core.StorageUsage.StateOf(worst);
+        board.Report("storage", Kind.Storage, new ComponentReport
+        {
+            Enabled = worst is not null,
+            Ok = state is not (Core.StorageState.Missing or Core.StorageState.ReadOnly),
+            Detail = worst is null ? "Nothing is written to disk by this process" : Core.StorageUsage.Describe(worst),
+            // The tightest volume written to: the one that decides whether this is nearly full.
+            FreeBytes = worst is { MustWrite: true } ? worst.FreeBytes : 0,
+            TotalBytes = worst is { MustWrite: true } ? worst.TotalBytes : 0,
+        });
+    }
+
     /// <summary>
     /// Report one integration's own verdict. Its rule lives on the integration (IStatusProvider) or in the
     /// shared derivation — never here, which is where a branch per integration used to live.

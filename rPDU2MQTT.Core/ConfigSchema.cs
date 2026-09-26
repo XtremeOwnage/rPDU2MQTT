@@ -158,6 +158,29 @@ public static class ConfigSchema
     public static IReadOnlyList<(string Type, string Label)> PluginSourceTypes { get; set; } = [];
 
     /// <summary>Build the schema for the whole configuration model.</summary>
+    /// <summary>Initialisms that stay upper case once a name is split into words.</summary>
+    private static readonly HashSet<string> Initialisms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "URL", "URI", "API", "ID", "IP", "TLS", "SSL", "TCP", "UDP", "HTTP", "HTTPS", "MQTT", "PDU", "GUI",
+        "HA", "CRD", "CR", "JSON", "YAML", "CSV", "S3", "CT", "SOC", "PV", "AC", "DC", "VA", "UPS", "OIDC", "DNS",
+    };
+
+    /// <summary>
+    /// A property name as words: "PrometheusUrl" reads as "Prometheus URL", "LocalRawKeepDays" as
+    /// "Local Raw Keep Days". A name that already carries spaces, or that [Display] sets, is left alone.
+    /// </summary>
+    public static string Spaced(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Contains(' ')) return name;
+        var words = System.Text.RegularExpressions.Regex
+            .Matches(name, @"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+")
+            .Select(m => m.Value)
+            .Where(w => w.Length > 0)
+            .Select(w => Initialisms.Contains(w) ? w.ToUpperInvariant() : char.ToUpperInvariant(w[0]) + w[1..])
+            .ToList();
+        return words.Count == 0 ? name : string.Join(' ', words);
+    }
+
     public static List<SchemaNode> Build() => BuildObject(typeof(Config));
 
     /// <summary>
@@ -222,10 +245,9 @@ public static class ConfigSchema
             // Key drives the JSON payload + the CR spec; align it with [JsonPropertyName] so the GUI
             // JSON, the Kubernetes CR spec, and the YAML config all share one field vocabulary.
             Key = prop.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? prop.Name,
-            // Friendly display title for the GUI: [Display(Name)] wins, else the YAML alias / property name.
+            // Display title for the GUI: [Display(Name)] wins, else the property name spaced out.
             Label = prop.GetCustomAttribute<DisplayAttribute>()?.Name
-                ?? prop.GetCustomAttribute<YamlMemberAttribute>()?.Alias
-                ?? prop.Name,
+                ?? Spaced(prop.GetCustomAttribute<YamlMemberAttribute>()?.Alias ?? prop.Name),
             Description = ResolveDescription(prop),
             Required = prop.GetCustomAttribute<RequiredAttribute>() is not null,
         };
@@ -312,6 +334,8 @@ public static class ConfigSchema
 
         // Where this section sits in the nav, declared on the model rather than kept in a second list.
         if (prop.GetCustomAttribute<NavGroupAttribute>() is { } nav) node.Group = nav.Group;
+        // Settings drawn together in one bordered box on the page they belong to.
+        if (prop.GetCustomAttribute<SettingGroupAttribute>() is { } box) node.Group = box.Group;
 
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
 

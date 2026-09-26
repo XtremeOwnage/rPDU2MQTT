@@ -27,7 +27,7 @@ import { addTagsSection } from './sections/tags-page.js';
 import { addHomeSection } from './sections/home.js';
 import { addOverviewSection } from './sections/overview.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
-import { addFeaturesSection, featureToggle, jumpToFeatures } from './sections/features.js';
+import { featureToggle } from './sections/features.js';
 
 // Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
 // stay in step with the document as it is typed.
@@ -94,16 +94,32 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
   const isComplex = (c: any) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
-  if (scalars.length) {
+  const fields = new Map<string, any>();
+
+  // Settings the schema puts in a group are drawn together in a box of their own, in the order the group
+  // first appears. Retention is four numbers that only mean something beside each other.
+  const into = (list: any[], host: any) => {
     const grid = document.createElement('div'); grid.className = 'grid';
-    const fields = new Map<string, any>();
-    scalars.forEach(child => {
+    list.forEach(child => {
       renderNode(child, target, grid, path);
       fields.set(child.key, grid.children[grid.children.length - 1]);
     });
-    container.appendChild(grid);
-    wireVisibility(scalars, target, fields);
-  }
+    host.appendChild(grid);
+  };
+
+  const loose = scalars.filter(c => !c.group);
+  if (loose.length) into(loose, container);
+
+  const groups: string[] = [];
+  scalars.forEach(c => { if (c.group && !groups.includes(c.group)) groups.push(c.group); });
+  groups.forEach(name => {
+    const box = document.createElement('fieldset'); box.className = 'setting-group';
+    const legend = document.createElement('legend'); legend.textContent = name; box.appendChild(legend);
+    into(scalars.filter(c => c.group === name), box);
+    container.appendChild(box);
+  });
+
+  if (scalars.length) wireVisibility(scalars, target, fields);
   complex.forEach(child => renderNode(child, target, container, path));
 }
 
@@ -184,6 +200,14 @@ function radioGroup(node: any, obj: any) {
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+/// One schema section's settings, rendered into another page. Edits land in the same place and the save
+/// bar counts them as it does anywhere else.
+export function renderSettingsOf(key: string, container: any) {
+  const node = (state.schema || []).find((n: any) => n.key === key);
+  if (!node?.properties) return;
+  renderObjectBody(node.properties, ensure(state.data, key, {}), container, [key]);
+}
+
 export function renderNode(node: any, obj: any, container: any, path: string[] = []) {
   const here = [...path, node.key];
   if (node.type === 'object') {
@@ -199,6 +223,9 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
+    // The setting's own name, so anything looking for a field finds it by what it is rather than by the
+    // words on the label — which are there to be read, and change.
+    f.dataset.key = node.key;
     // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
     // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
     // like "Enabled", which several unrelated nested sections legitimately share.
@@ -397,7 +424,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
-  { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -443,15 +470,11 @@ function revealWrap(input: any) {
   return wrap;
 }
 
-// Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
-// a missing feature and sends the operator hunting for it.
+// Says where a section's on/off switch is. A control that simply vanishes reads as a missing feature and
+// sends the operator hunting for it; what turns it on is the config file, or the chart's values.
 function featurePointer(label: string) {
-  const wrap = el('div', { class: 'desc feature-pointer' });
-  wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
-  const go = btn('Features');
-  go.onclick = () => jumpToFeatures();
-  wrap.appendChild(go);
-  return wrap;
+  return el('div', { class: 'desc feature-pointer' },
+    el('span', { text: `${label} is turned on in the configuration file, or in the deployment's values — not here.` }));
 }
 
 // Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
@@ -468,6 +491,20 @@ function wireHistoryProvider(sec: any) {
   const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
   sync();
   visibilitySyncs.push(sync);
+
+  // LocalPath left empty resolves at runtime — to the directory the deployment mounted, else one beside the
+  // program. The box is then blank on a page that is in fact writing somewhere, so say where.
+  const where = el('div', { class: 'desc feature-pointer' });
+  sec.appendChild(where);
+  api('/api/history/store').then((r: any) => {
+    const b = r?.body;
+    if (!b?.ok) { where.hidden = true; return; }
+    const size = b.bytes > 1024 * 1024 ? `${(b.bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b.bytes / 1024)} KB`;
+    where.textContent = `${b.recording ? 'Writing to' : 'Not writing; the store is'} ${b.path}`
+      + `${b.fromEnvironment ? ' (from RPDU2MQTT_HISTORY_DIRECTORY, because LocalPath is empty)' : ''}`
+      + ` — ${b.series} series, ${size}. Retention: `
+      + (b.tiers || []).map((t: any) => `${t.name} ${t.keepDays}d`).join(', ') + '.';
+  }).catch(() => { where.hidden = true; });
 }
 
 // A settings page for a capability that is switched off is a page of settings for something that is not
@@ -574,7 +611,11 @@ export function build() {
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
   // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
   // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // Deployment settings have no page: ports, directories, buckets, the cache endpoint and what is switched
+  // on at all belong to the config file or the chart's values, where the volume, the service and the
+  // container that back them are also declared. Debug's two switches are on Diagnostics, beside the runtime
+  // state they are used to investigate.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //

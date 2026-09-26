@@ -1686,3 +1686,20 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .trend-table td.is-partial { color: var(--muted); }
 .trend-table td.is-reset { text-decoration: underline dotted var(--warn); text-underline-offset: 3px; }
 .flow-drill { max-width: 15em; }
+
+/* Settings the schema groups: drawn together, with the group's name on the border. */
+.setting-group { margin: 14px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.setting-group > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+
+/* Diagnostics: the directories this process writes to. */
+.diag-storage { margin: 4px 0 14px; overflow-x: auto; }
+.diag-storage th, .diag-storage td { white-space: nowrap; }
+/* The wrapper scrolls sideways, which makes it the sticky header's container: `top: var(--appbar-h)`
+   then parked the header 56px down inside the table, over the first rows. It is a short table. */
+.diag-storage table.ld th { position: static; }
+.diag-storage tr.is-bad td { color: var(--bad); }
+.diag-storage tr.is-low td { color: var(--warn); }
+.diag-storage td.use-ok { color: var(--good); }
+.diag-storage td.use-low { color: var(--warn); font-weight: 600; }
+.diag-storage td.use-full { color: var(--bad); font-weight: 600; }
+.diag-warn { font-weight: 600; }

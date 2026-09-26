@@ -18,6 +18,8 @@ public enum AgeStyle { None, Ago, At }
 /// <param name="IntervalSeconds">The cadence expected, where that decides staleness.</param>
 /// <param name="Title">Card title, when a component is one of many of its kind.</param>
 /// <param name="Count">A count worth showing — values exported, entities discovered.</param>
+/// <param name="FreeBytes">Free space on a volume, where that decides whether it is nearly full.</param>
+/// <param name="TotalBytes">That volume's size; 0 when it could not be read.</param>
 public sealed record ComponentReport(
     bool Enabled = true,
     bool? Ok = null,
@@ -25,7 +27,9 @@ public sealed record ComponentReport(
     DateTime? EventUtc = null,
     int IntervalSeconds = 0,
     string? Title = null,
-    int Count = 0);
+    int Count = 0,
+    long FreeBytes = 0,
+    long TotalBytes = 0);
 
 /// <summary>One card on the Status board.</summary>
 public sealed record ComponentStatus(
@@ -59,7 +63,7 @@ public sealed class StatusBoard
     private sealed record Entry(ComponentReport Report, DateTime ReportedUtc, ComponentKind Kind);
 
     /// <summary>The verdict rule a component is judged by — its kind, not its identity.</summary>
-    public enum ComponentKind { Broker, Device, Integration, Cache, History, Node, Process }
+    public enum ComponentKind { Broker, Device, Integration, Cache, History, Storage, Node, Process }
 
     /// <summary>Record what this process can see. Cheap, idempotent, called on a timer.</summary>
     public void Report(string id, ComponentKind kind, ComponentReport report)
@@ -143,6 +147,18 @@ public sealed class StatusBoard
                 : r.Ok == false ? (StatusLevel.Bad, "Unreachable", r.Detail)
                 : (StatusLevel.Warn, "Not checked", r.Detail),
 
+            // Not there or not writable loses every reading from now on; full is about to. Nearly full is
+            // the warning worth having while there is still time to grow the volume.
+            ComponentKind.Storage => !r.Enabled
+                ? (StatusLevel.Off, "Nothing stored", r.Detail)
+                : r.Ok == false ? (StatusLevel.Bad, "Unavailable", r.Detail)
+                : StorageUsage.Room(r.FreeBytes, r.TotalBytes) switch
+                {
+                    StorageState.Full => (StatusLevel.Bad, "Full", r.Detail),
+                    StorageState.Low => (StatusLevel.Warn, "Nearly full", r.Detail),
+                    _ => (StatusLevel.Good, "Available", r.Detail),
+                },
+
             ComponentKind.Process => (StatusLevel.Good, "Running", r.Detail),
 
             // Integrations and nodes: enabled, failing, working, or enabled and yet to report.
@@ -163,6 +179,7 @@ public sealed class StatusBoard
         ComponentKind.Integration => (30, "Integration", AgeStyle.Ago),
         ComponentKind.Cache => (55, "Cache", AgeStyle.None),
         ComponentKind.History => (58, "History", AgeStyle.None),
+        ComponentKind.Storage => (60, "Storage", AgeStyle.None),
         ComponentKind.Process => (70, "Process", AgeStyle.Ago),
         _ => (80, "Node", AgeStyle.Ago),
     };

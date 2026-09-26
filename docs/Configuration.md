@@ -517,7 +517,9 @@ directory you can copy, tar or mount read-only.
 - **Roughly 1 GB a year** for two hundred series read every ten seconds, with the defaults.
 
 Put it on a volume. The Helm chart does this by default (`history.persistence.enabled`, mounted at
-`/data/history`); anywhere else and the readings go with the container at the next restart. A read-only
+`/data/history`) and passes that path as `RPDU2MQTT_HISTORY_DIRECTORY`; anywhere else and the readings go
+with the container at the next restart. `LocalPath` overrides it when set — left empty, the History page
+says which directory is in use, how many series are in it and how large it is. A read-only
 mount is reported by the backend test rather than discovered at the first sweep.
 
 The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
@@ -846,6 +848,38 @@ curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"action":"reboot"}' \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
 ```
+
+### How settings are labelled
+
+A setting's label is its name as words — `PrometheusUrl` reads as "Prometheus URL", `ToleranceSeconds` as
+"Tolerance Seconds" — with initialisms (URL, API, MQTT, PDU, GUI, …) kept upper case. `[Display(Name)]` on
+the property overrides it where the name alone does not read well, and `[SettingGroup("…")]` draws related
+settings in one bordered box: History's four retention settings are grouped that way.
+
+### Settings without a page
+
+Deployment settings have no page in the GUI. They are set in `config.yaml`, in `values.yaml`, or in the
+`RpduConfig` resource, beside the volume, service, port or container that backs them — all of them are still
+in the schema and the CRD.
+
+- `Health` (port), `Api` (port, key) and `PlanStorage` (directory, bucket, size limit): the listener or the
+  volume behind each is declared in the deployment, and a second editor in the GUI would disagree with it.
+- `Cache` (endpoint, prefix, timeout): the Valkey/Redis service is part of the deployment.
+- **Feature switches** — what is turned on at all — are set the same way. There is no Features page; each
+  page says where its own switch lives and does not render one.
+- `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page, beside the runtime
+  state it is used to read.
+
+The Diagnostics page also lists every directory this process writes to — history, floor plan images,
+plugins — with what each holds, the file count, the mount it sits on and the free space there. A directory
+that is not there, or that cannot be written to, is marked: both look like data quietly not being kept.
+The Used column is green, amber when the volume has under 10% free, and red under 3% (or 64 MB).
+
+The Status board carries a **Storage** card judged by the directory in the worst shape: red when a
+directory is missing, read-only or full, amber when one is nearly full. The plugins directory is only read,
+so it is never faulted for being read-only or on a busy filesystem.
+
+A page for a feature that is off stays hidden in the nav until it is turned on, as before.
 
 ## Energy Flow (Optional)
 

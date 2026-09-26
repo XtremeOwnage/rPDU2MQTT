@@ -62,6 +62,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.Diagnostics.ProcessRegistry? processes;
     private readonly Core.Discovery.TopicIndex topicIndex;
     private readonly Core.Flow.IMeasurementHistory? history;
+    private readonly Core.History.LocalSeriesStore? localHistory;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -75,7 +76,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // What each Modbus device last did, for the diagnostics page.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -86,6 +87,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.processes = processes;
         this.topicIndex = topicIndex ?? new Core.Discovery.TopicIndex();
         this.history = history;
+        this.localHistory = localHistory;
         this.pending = pending ?? new Core.RestartPending();
         this.deployOperator = deployOperator;
         this.modbusDevices = modbusDevices;
@@ -1673,6 +1675,56 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Does the history backend actually answer?
+        // The directories this process writes to, and the room left where each sits. A volume that did not
+        // mount, or one that is full, otherwise looks like readings quietly not being kept.
+        app.MapGet("/api/diagnostics/storage", (HttpContext ctx) =>
+        {
+            var entries = Core.StorageUsage.Locations(config, localHistory?.Root, global::rPDU2MQTT.Plugins.PluginLoader.DefaultDirectory);
+
+            return Results.Json(new
+            {
+                ok = true,
+                entries = entries.Select(e => new
+                {
+                    e.Name, e.Path, e.Exists, e.Writable, e.Bytes, e.Files, e.Mount, e.TotalBytes, e.FreeBytes,
+                    // The same verdict the Status card uses, so the table cannot call fine what the card calls full.
+                    state = Core.StorageUsage.StateOf(e).ToString(),
+                    // How full the volume is on its own, for colouring the Used column — plugins included,
+                    // whose directory is only read and so never makes the state above worse than Ok.
+                    room = Core.StorageUsage.Room(e.FreeBytes, e.TotalBytes).ToString(),
+                }).ToList(),
+            }, ConfigSchema.Json);
+        });
+
+        // Where the readings are actually being written, which the LocalPath setting does not say when it is
+        // empty: the directory then comes from RPDU2MQTT_HISTORY_DIRECTORY or falls back beside the program.
+        app.MapGet("/api/history/store", (HttpContext ctx) =>
+        {
+            if (localHistory is null) return Results.Json(new { ok = false, message = "No local history store in this process." }, ConfigSchema.Json);
+            var root = localHistory.Root;
+            long bytes = 0;
+            var series = 0;
+            try
+            {
+                series = localHistory.Folders().Count;
+                bytes = Directory.Exists(root)
+                    ? new DirectoryInfo(root).EnumerateFiles("*.rts", SearchOption.AllDirectories).Sum(f => f.Length)
+                    : 0;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return Results.Json(new
+            {
+                ok = true,
+                path = root,
+                fromEnvironment = string.IsNullOrWhiteSpace(config.History.LocalPath),
+                recording = config.History.LocalEnabled,
+                series,
+                bytes,
+                tiers = localHistory.Tiers.Select(t => new { t.Name, t.IntervalSeconds, t.KeepDays }).ToList(),
+            }, ConfigSchema.Json);
+        });
+
         app.MapPost("/api/test/history", async (HttpContext ctx) =>
         {
             if (!config.History.Enabled)

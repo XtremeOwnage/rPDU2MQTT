@@ -4186,6 +4186,77 @@ function addDiagnosticsSection(nav     , sections     ) {
     });
   };
 
+  // The debug switches are settings, but they are used while reading the state above them, so they are
+  // here rather than on a page of their own.
+  const debug = el('div', { class: 'diag-debug' });
+  sec.appendChild(el('h3', { text: 'Debug', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Settings for debugging and diagnostics.' }));
+  sec.appendChild(debug);
+  renderSettingsOf('Debug', debug);
+
+  // What the bridge writes to, and the room left where it sits.
+  sec.appendChild(el('h3', { text: 'Storage', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  const storage = el('div', { class: 'diag-storage' });
+  sec.appendChild(storage);
+
+  const size = (n        ) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB`
+    : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB`
+      : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+
+  const loadStorage = async () => {
+    storage.innerHTML = '';
+    let r     ;
+    try { r = await api('/api/diagnostics/storage'); } catch { r = null; }
+    const entries = r?.body?.ok ? (r.body.entries || []) : [];
+    if (!entries.length) {
+      storage.appendChild(el('div', { class: 'desc', text: 'Nothing is written to disk by this process.' }));
+      return;
+    }
+    const table = el('table', { class: 'ld' });
+    const head = el('tr');
+    // Holding, Files, Free and Size are figures: right-aligned so their digits line up.
+    const num = [false, false, true, true, false, true, true, true];
+    ['What', 'Directory', 'Holding', 'Files', 'Mount', 'Free', 'Size', 'Used']
+      .forEach((h, i) => head.appendChild(el('th', { text: h, class: num[i] ? 'num' : '' })));
+    // The warning gets a column of its own, so a flagged row does not carry a cell the others lack.
+    // The server's verdict, the one the Status card is judged by, so the two cannot disagree.
+    const problem                         = { Missing: 'does not exist', ReadOnly: 'read-only', Full: 'full', Low: 'nearly full' };
+    const flagged = entries.some((e     ) => problem[e.state]);
+    if (flagged) head.appendChild(el('th', { text: 'Status' }));
+    table.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    entries.forEach((e     ) => {
+      const row = el('tr');
+      row.dataset.name = e.name;
+      const cells = [
+        e.name,
+        e.path,
+        e.exists ? size(e.bytes) : 'not there',
+        e.exists ? String(e.files) : '—',
+        e.mount || '—',
+        e.totalBytes ? size(e.freeBytes) : '—',
+        e.totalBytes ? size(e.totalBytes) : '—',
+      ];
+      cells.forEach((c, i) => row.appendChild(el('td', { text: c, class: num[i] ? 'num' : '' })));
+      // How full the mount is, coloured by the server's thresholds: green, amber when nearly full, red when full.
+      const used = el('td', { class: 'num' });
+      if (e.totalBytes) {
+        used.textContent = `${Math.round(100 * (e.totalBytes - e.freeBytes) / e.totalBytes)}%`;
+        used.classList.add(e.room === 'Full' ? 'use-full' : e.room === 'Low' ? 'use-low' : 'use-ok');
+      } else used.textContent = '—';
+      row.appendChild(used);
+      // A mount that is missing or read-only stores nothing, and nothing else on this page says so.
+      // Nearly full still stores everything, so it is amber; the rest are losing readings now or about to.
+      if (problem[e.state]) {
+        row.classList.add(e.state === 'Low' ? 'is-low' : 'is-bad');
+        row.appendChild(el('td', { class: 'diag-warn', text: problem[e.state] }));
+      } else if (flagged) row.appendChild(el('td'));
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    storage.appendChild(table);
+  };
+
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
   const info = document.createElement('table'); info.className = 'ld'; sec.appendChild(info);
   const k8sWrap = document.createElement('div'); sec.appendChild(k8sWrap);
@@ -4288,8 +4359,8 @@ function addDiagnosticsSection(nav     , sections     ) {
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
-  refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); loadRestartTargets(); };
+  refresh.onclick = () => { load(); loadStorage(); };
+  link.onclick = () => { activate(link, sec); load(); loadStorage(); loadRestartTargets(); };
 }
 
 // Kubernetes-only: on-demand pod logs + recent events.
@@ -15235,22 +15306,12 @@ function addHomeSection(nav     , sections     ) {
 }
 
 // ── sections/features.ts ────────────────────────────────────────
-// One page for every on/off switch in the product (#292).
+// Which setting turns each capability on, and how to reach a section's page.
 //
-// Each feature used to carry its own Enabled toggle on its own config page, so answering "what is this
-// bridge actually doing?" meant opening eight pages and reading eight switches. They are gathered here
-// instead, and removed from the individual pages, so there is exactly one place a feature is turned on and
-// exactly one answer to what is running.
-//
-// The list comes from the schema: the server marks the one setting that turns each capability on
-// ([FeatureToggle]), so a new one appears here without this file changing. It is marked rather than guessed
-// from the name because the names genuinely differ — Gui.Enabled, but HomeAssistant.DiscoveryEnabled and
-// Prometheus.Exporter — and a rule of "the boolean called Enabled" would have dropped the last two.
-// The schema field renderer, so a switch here is the same control as on the section page — same change
-// tracking, same locked-field handling. (The bundle is one shared scope, so this import is erased.)
-
-/// A section's feature switch, if it has one. Exported so the config form filters exactly the property this
-/// page renders — the two must agree, or a toggle is either duplicated or lost entirely.
+// The switches themselves are not edited in the GUI: a feature is turned on in the configuration file, or
+// in the deployment's values, where the service, volume or port it needs is declared beside it. The server
+// marks the one setting that turns each capability on ([FeatureToggle]) so a page can say where its switch
+// is, and so the nav can hide a page for something that is off.
 function featureToggle(node     )             {
   if (node?.type !== 'object') return null;
   return (node.properties || []).find((p     ) => p.isFeatureToggle) || null;
@@ -15263,69 +15324,6 @@ function jumpToSection(key        ) {
   const link = links.find(a => a.dataset && a.dataset.section === key);
   if (link) link.click();
 }
-
-/// The reverse trip: from a section's "turned on and off on the Features page" note back to this page.
-function jumpToFeatures() {
-  const links        = Array.from(document.querySelectorAll('nav a'));
-  const link = links.find(a => a.dataset && a.dataset.label === 'Features');
-  if (link) link.click();
-}
-
-function addFeaturesSection(nav     , sections     ) {
-  const link = navLink(nav, 'Features', '◉');
-  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'Features' }));
-  sec.appendChild(el('div', {
-    class: 'desc',
-    text: 'Everything this bridge can do, and whether it is doing it. Turning a feature on here does not configure it — use Settings on the card for that.',
-  }));
-
-  const body = el('div');
-  sec.appendChild(body);
-
-  const render = () => {
-    body.innerHTML = '';
-    const grid = el('div', { class: 'grid' });
-
-    const feats = state.schema
-      .map((n     ) => ({ section: n, prop: featureToggle(n) }))
-      .filter((f     ) => f.prop);
-
-    feats.forEach(({ section, prop }     ) => {
-      const label = FEATURE_LABELS[section.key] || section.label || section.key;
-      // The card's identity is the feature, not the word "Enabled" — and the description that explains the
-      // feature is the section's, since the property's own is usually just "turn it on".
-      renderNode({ ...prop, label, description: prop.description || section.description }, ensure(state.data, section.key, {}), grid, [section.key]);
-
-      const card = grid.children[grid.children.length - 1]       ;
-      const go = btn('Settings');
-      go.onclick = () => jumpToSection(section.key);
-      card.appendChild(el('div', { class: 'feature-go' }, go));
-    });
-
-    body.appendChild(grid);
-    if (!feats.length) body.appendChild(el('div', { class: 'desc', text: 'No optional features in this build.' }));
-  };
-
-  // Re-read on every visit: the switches are bound to the live config document, which the section pages and
-  // a reload both change underneath this page.
-  link.onclick = () => { render(); activate(link, sec); };
-  return { link, sec };
-}
-
-// Names that read as a capability rather than as a config section. Anything unlisted keeps its section
-// label, so this is a polish list, not a registry to maintain.
-const FEATURE_LABELS                         = {
-  Gui: 'Web GUI',
-  Api: 'REST API',
-  Health: 'Health endpoints',
-  Modbus: 'Modbus TCP polling',
-  EmonCMS: 'EmonCMS export',
-  HomeAssistant: 'Home Assistant discovery',
-  Prometheus: 'Prometheus metrics',
-  Operator: 'Kubernetes operator',
-  Cache: 'Persistent cache (Valkey/Redis)',
-};
 
 // ── sections/pdu-tags.ts ────────────────────────────────────────
 // PDU tags: default tags for every PDU and outlet, and each one's own, kept as the EnergyFlow tag rules.
@@ -15464,16 +15462,32 @@ function renderObjectBody(properties       , target     , container     , path  
   const isComplex = (c     ) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
-  if (scalars.length) {
+  const fields = new Map             ();
+
+  // Settings the schema puts in a group are drawn together in a box of their own, in the order the group
+  // first appears. Retention is four numbers that only mean something beside each other.
+  const into = (list       , host     ) => {
     const grid = document.createElement('div'); grid.className = 'grid';
-    const fields = new Map             ();
-    scalars.forEach(child => {
+    list.forEach(child => {
       renderNode(child, target, grid, path);
       fields.set(child.key, grid.children[grid.children.length - 1]);
     });
-    container.appendChild(grid);
-    wireVisibility(scalars, target, fields);
-  }
+    host.appendChild(grid);
+  };
+
+  const loose = scalars.filter(c => !c.group);
+  if (loose.length) into(loose, container);
+
+  const groups           = [];
+  scalars.forEach(c => { if (c.group && !groups.includes(c.group)) groups.push(c.group); });
+  groups.forEach(name => {
+    const box = document.createElement('fieldset'); box.className = 'setting-group';
+    const legend = document.createElement('legend'); legend.textContent = name; box.appendChild(legend);
+    into(scalars.filter(c => c.group === name), box);
+    container.appendChild(box);
+  });
+
+  if (scalars.length) wireVisibility(scalars, target, fields);
   complex.forEach(child => renderNode(child, target, container, path));
 }
 
@@ -15554,6 +15568,14 @@ function radioGroup(node     , obj     ) {
 }
 
 // Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
+/// One schema section's settings, rendered into another page. Edits land in the same place and the save
+/// bar counts them as it does anywhere else.
+function renderSettingsOf(key        , container     ) {
+  const node = (state.schema || []).find((n     ) => n.key === key);
+  if (!node?.properties) return;
+  renderObjectBody(node.properties, ensure(state.data, key, {}), container, [key]);
+}
+
 function renderNode(node     , obj     , container     , path           = []) {
   const here = [...path, node.key];
   if (node.type === 'object') {
@@ -15569,6 +15591,9 @@ function renderNode(node     , obj     , container     , path           = []) {
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
+    // The setting's own name, so anything looking for a field finds it by what it is rather than by the
+    // words on the label — which are there to be read, and change.
+    f.dataset.key = node.key;
     // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
     // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
     // like "Enabled", which several unrelated nested sections legitimately share.
@@ -15766,7 +15791,7 @@ const NAV_GROUPS                                        = [
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
-  { title: 'System', items: [{ tool: addHomeSection }, { tool: addFeaturesSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
@@ -15812,15 +15837,11 @@ function revealWrap(input     ) {
   return wrap;
 }
 
-// Says where a section's on/off switch went, and takes you there — a control that simply vanishes reads as
-// a missing feature and sends the operator hunting for it.
+// Says where a section's on/off switch is. A control that simply vanishes reads as a missing feature and
+// sends the operator hunting for it; what turns it on is the config file, or the chart's values.
 function featurePointer(label        ) {
-  const wrap = el('div', { class: 'desc feature-pointer' });
-  wrap.appendChild(el('span', { text: `${label} is turned on and off on the Features page. ` }));
-  const go = btn('Features');
-  go.onclick = () => jumpToFeatures();
-  wrap.appendChild(go);
-  return wrap;
+  return el('div', { class: 'desc feature-pointer' },
+    el('span', { text: `${label} is turned on in the configuration file, or in the deployment's values — not here.` }));
 }
 
 // Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
@@ -15837,6 +15858,20 @@ function wireHistoryProvider(sec     ) {
   const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
   sync();
   visibilitySyncs.push(sync);
+
+  // LocalPath left empty resolves at runtime — to the directory the deployment mounted, else one beside the
+  // program. The box is then blank on a page that is in fact writing somewhere, so say where.
+  const where = el('div', { class: 'desc feature-pointer' });
+  sec.appendChild(where);
+  api('/api/history/store').then((r     ) => {
+    const b = r?.body;
+    if (!b?.ok) { where.hidden = true; return; }
+    const size = b.bytes > 1024 * 1024 ? `${(b.bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b.bytes / 1024)} KB`;
+    where.textContent = `${b.recording ? 'Writing to' : 'Not writing; the store is'} ${b.path}`
+      + `${b.fromEnvironment ? ' (from RPDU2MQTT_HISTORY_DIRECTORY, because LocalPath is empty)' : ''}`
+      + ` — ${b.series} series, ${size}. Retention: `
+      + (b.tiers || []).map((t     ) => `${t.name} ${t.keepDays}d`).join(', ') + '.';
+  }).catch(() => { where.hidden = true; });
 }
 
 // A settings page for a capability that is switched off is a page of settings for something that is not
@@ -15943,7 +15978,11 @@ function build() {
   // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
   // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
   // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins']);
+  // Deployment settings have no page: ports, directories, buckets, the cache endpoint and what is switched
+  // on at all belong to the config file or the chart's values, where the volume, the service and the
+  // container that back them are also declared. Debug's two switches are on Diagnostics, beside the runtime
+  // state they are used to investigate.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
   // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
   // it belongs, and into System when it says nothing, so a new one is never lost.
   //

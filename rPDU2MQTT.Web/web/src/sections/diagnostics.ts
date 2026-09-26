@@ -1,6 +1,7 @@
 // Status / diagnostics: component health, versions, uptime, restart, and (in Kubernetes) logs + events.
-import { api, btn, activate, toast, navLink } from '../helpers.js';
+import { api, btn, activate, el, toast, navLink } from '../helpers.js';
 import { expectRestart } from '../realtime.js';
+import { renderSettingsOf } from '../config-form.js';
 
 export function addDiagnosticsSection(nav: any, sections: any) {
   const link = navLink(nav, "Diagnostics", "✚");
@@ -37,6 +38,77 @@ export function addDiagnosticsSection(nav: any, sections: any) {
       };
       restartBar.appendChild(b);
     });
+  };
+
+  // The debug switches are settings, but they are used while reading the state above them, so they are
+  // here rather than on a page of their own.
+  const debug = el('div', { class: 'diag-debug' });
+  sec.appendChild(el('h3', { text: 'Debug', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  sec.appendChild(el('div', { class: 'desc', text: 'Settings for debugging and diagnostics.' }));
+  sec.appendChild(debug);
+  renderSettingsOf('Debug', debug);
+
+  // What the bridge writes to, and the room left where it sits.
+  sec.appendChild(el('h3', { text: 'Storage', style: { margin: '18px 0 2px', fontSize: '15px' } }));
+  const storage = el('div', { class: 'diag-storage' });
+  sec.appendChild(storage);
+
+  const size = (n: number) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB`
+    : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB`
+      : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+
+  const loadStorage = async () => {
+    storage.innerHTML = '';
+    let r: any;
+    try { r = await api('/api/diagnostics/storage'); } catch { r = null; }
+    const entries = r?.body?.ok ? (r.body.entries || []) : [];
+    if (!entries.length) {
+      storage.appendChild(el('div', { class: 'desc', text: 'Nothing is written to disk by this process.' }));
+      return;
+    }
+    const table = el('table', { class: 'ld' });
+    const head = el('tr');
+    // Holding, Files, Free and Size are figures: right-aligned so their digits line up.
+    const num = [false, false, true, true, false, true, true, true];
+    ['What', 'Directory', 'Holding', 'Files', 'Mount', 'Free', 'Size', 'Used']
+      .forEach((h, i) => head.appendChild(el('th', { text: h, class: num[i] ? 'num' : '' })));
+    // The warning gets a column of its own, so a flagged row does not carry a cell the others lack.
+    // The server's verdict, the one the Status card is judged by, so the two cannot disagree.
+    const problem: Record<string, string> = { Missing: 'does not exist', ReadOnly: 'read-only', Full: 'full', Low: 'nearly full' };
+    const flagged = entries.some((e: any) => problem[e.state]);
+    if (flagged) head.appendChild(el('th', { text: 'Status' }));
+    table.appendChild(el('thead', {}, head));
+    const body = el('tbody');
+    entries.forEach((e: any) => {
+      const row = el('tr');
+      row.dataset.name = e.name;
+      const cells = [
+        e.name,
+        e.path,
+        e.exists ? size(e.bytes) : 'not there',
+        e.exists ? String(e.files) : '—',
+        e.mount || '—',
+        e.totalBytes ? size(e.freeBytes) : '—',
+        e.totalBytes ? size(e.totalBytes) : '—',
+      ];
+      cells.forEach((c, i) => row.appendChild(el('td', { text: c, class: num[i] ? 'num' : '' })));
+      // How full the mount is, coloured by the server's thresholds: green, amber when nearly full, red when full.
+      const used = el('td', { class: 'num' });
+      if (e.totalBytes) {
+        used.textContent = `${Math.round(100 * (e.totalBytes - e.freeBytes) / e.totalBytes)}%`;
+        used.classList.add(e.room === 'Full' ? 'use-full' : e.room === 'Low' ? 'use-low' : 'use-ok');
+      } else used.textContent = '—';
+      row.appendChild(used);
+      // A mount that is missing or read-only stores nothing, and nothing else on this page says so.
+      // Nearly full still stores everything, so it is amber; the rest are losing readings now or about to.
+      if (problem[e.state]) {
+        row.classList.add(e.state === 'Low' ? 'is-low' : 'is-bad');
+        row.appendChild(el('td', { class: 'diag-warn', text: problem[e.state] }));
+      } else if (flagged) row.appendChild(el('td'));
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    storage.appendChild(table);
   };
 
   const comp = document.createElement('div'); comp.style.margin = '6px 0 14px'; sec.appendChild(comp);
@@ -141,8 +213,8 @@ export function addDiagnosticsSection(nav: any, sections: any) {
     k8sWrap.innerHTML = '';
     if (b.kubernetes) buildK8sTools(k8sWrap);
   };
-  refresh.onclick = load;
-  link.onclick = () => { activate(link, sec); load(); loadRestartTargets(); };
+  refresh.onclick = () => { load(); loadStorage(); };
+  link.onclick = () => { activate(link, sec); load(); loadStorage(); loadRestartTargets(); };
 }
 
 // Kubernetes-only: on-demand pod logs + recent events.
