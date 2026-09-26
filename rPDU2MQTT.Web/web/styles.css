@@ -612,6 +612,24 @@
   /* The board is one column: the diagram sits over the tiles it summarises, both bounded so they don't
      drift apart on a wide screen. */
   .energy-board { max-width:1040px; }
+  /* Title and controls on one line, so the figures start near the top of the page. */
+  .energy-head-row { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-2); }
+  .energy-head-row h2 { margin:0; }
+  .energy-head-row .sec-actions { margin:0; }
+  .energy-history { margin-bottom:var(--sp-2); }
+  /* Wide screens: the diagram beside the tiles rather than over them, so the whole board is on screen. */
+  @media (min-width: 1100px) {
+    .energy-board { max-width:1280px; display:grid; grid-template-columns:minmax(300px,440px) minmax(0,1fr); gap:0 var(--sp-5); align-items:start; }
+    .energy-board > .energy-flow { grid-row:span 2; margin:0; max-width:none; }
+    .energy-board > .energy-grid { margin-top:0; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .energy-board > .energy-summary { grid-column:2; }
+  }
+  /* A phone: a smaller diagram, and the tiles two to a row. */
+  @media (max-width: 700px) {
+    .energy-board > .energy-flow { max-width:340px; }
+    .energy-board > .energy-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--sp-2); }
+    .energy-board .energy-value { font-size:22px; }
+  }
   /* auto-FIT, not auto-fill: with three tagged kinds the empty tracks collapse and the tiles stretch to
      the board's width, instead of huddling at the left with dead space beside them. */
   .energy-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:var(--sp-3); margin-top:var(--sp-4); }

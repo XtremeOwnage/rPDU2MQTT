@@ -14,8 +14,11 @@ import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
 export function addEnergyOverviewSection(nav: any, sections: any) {
   const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'Energy Overview' }));
-  sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
+  // One line of controls over the data: the page is opened for the figures, and a paragraph, a period row
+  // and a date picker above them pushed the tiles below the fold.
+  const head = el('div', { class: 'energy-head-row' });
+  head.appendChild(el('h2', { text: 'Energy' }));
+  sec.appendChild(head);
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');
@@ -25,8 +28,10 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
-  bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
-  sec.appendChild(bar);
+  // The past — periods and a date — is one click away rather than two rows above every live view.
+  const historyBtn = btn('History ▾');
+  bar.append(showSel, instSel.wrap, historyBtn, refresh, status);
+  head.appendChild(bar);
   // As on the Flow page: a whole day is an energy question, a specific time is a power one.
   let hadDay = false;
   const hist = historyControl((what: any) => {
@@ -47,8 +52,20 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     hadDay = true;
     load();
   });
-  sec.appendChild(periods.row);
-  sec.appendChild(hist.row);
+  const historyPanel = el('div', { class: 'energy-history' }, periods.row, hist.row);
+  sec.appendChild(historyPanel);
+  let historyOpen = false;
+  const syncHistory = () => {
+    // Open while a past view is showing, so what is being looked at is never hidden.
+    const open = historyOpen || !!hist.day();
+    historyPanel.hidden = !open;
+    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : open ? 'History ▴' : 'History ▾';
+    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
+    // No backend, no past to pick.
+    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
+  };
+  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
+  syncHistory();
   showSel.onchange = () => load();
 
   // One column for the whole board.
@@ -244,6 +261,16 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   const loadBoard = async () => {
+    syncHistory();
+    // The board is emptied and refilled around several reads. While it is empty the page is shorter, and the
+    // browser clamps the scroll position to the shorter page: every live refresh threw the reader back up.
+    // Holding the height across the rebuild means the page never shrinks.
+    const held = board.offsetHeight || 0;
+    if (held) board.style.minHeight = held + 'px';
+    try { await fillBoard(); } finally { board.style.minHeight = ''; }
+  };
+
+  const fillBoard = async () => {
     // The whole board reads one metric (#371).
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';

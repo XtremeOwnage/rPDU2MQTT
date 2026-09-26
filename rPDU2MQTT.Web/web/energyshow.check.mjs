@@ -73,6 +73,21 @@ const tileText = (label) => {
   return t;
 };
 
+// The figures come first: no paragraph over them, and the past is behind one History button until asked
+// for, rather than two rows of period buttons and a date picker above every live view.
+const energySec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (query(energySec, 'div', true).some(d => cn(d) === 'desc' && /Where your power is flowing/.test(d.textContent)))
+  fail('the explanatory paragraph is back over the figures');
+const historyPanel = query(energySec, 'div', true).find(d => cn(d).includes('energy-history'));
+if (!historyPanel) fail('the period and date controls are not gathered behind History');
+if (!historyPanel.hidden) fail('the period and date controls open over a live view');
+if (!query(energySec, 'button', true).some(b => /^History/.test(b.textContent || ''))) fail('no History button');
+
+// A refresh empties and refills the board around several reads; the board's height is held across that,
+// or the page shrinks while it is empty and the browser clamps the scroll to the top.
+if (!/board\.style\.minHeight = held \+ 'px'/.test(code) || !/finally \{ board\.style\.minHeight = ''; \}/.test(code))
+  fail('the board does not hold its height across a refresh, so the scroll resets');
+
 // History is on here, so the moment picker is offered. (That it is hidden when the feature is off is
 // pinned in smoke, whose config has no History section.)
 const histBar = query(getEl('sections'), 'div', true).filter(d => cn(d).includes('history-bar'));
