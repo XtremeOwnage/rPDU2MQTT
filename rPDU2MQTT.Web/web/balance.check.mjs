@@ -78,7 +78,7 @@ await wait(150);
 if (offered().includes('fridge') || offered().includes('outlet:rack:1')) fail(`end loads are offered as a site total: ${offered().join(', ')}`);
 if (!offered().includes('inverter')) fail('the inverter is no longer offered');
 // …unless asked for.
-const every = query(sec(), 'label', true).find(l => /Offer loads/.test(l.textContent || ''));
+const every = query(sec(), 'label', true).find(l => /Include loads/.test(l.textContent || ''));
 if (!every) fail('no way to offer loads for the setup where one is a total');
 const everyBox = query(every, 'input', true)[0];
 everyBox.checked = true;

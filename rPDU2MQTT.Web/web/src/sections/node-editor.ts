@@ -460,8 +460,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   roleSel.value = balanceRoleOf(flowCfg, node.Id);
   roleSel.onchange = () => setBalanceRole(flowCfg, node.Id, roleSel.value);
   grid.appendChild(field('Counts toward', roleSel,
-    'Which of the site’s Solar, Grid, Battery or Home totals this node is part of — the same list as the Balance page. '
-    + 'An MPPT string whose PV total is already counted is Nothing.'));
+    'Site total this node is summed into (EnergyFlow.Balance).'));
 
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
