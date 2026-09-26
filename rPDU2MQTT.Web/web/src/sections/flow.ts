@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
@@ -300,7 +300,9 @@ export function addFlowSection(nav: any, sections: any) {
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
-    const emptied = applyHideEmptyPref(shown.nodes, shown.links);
+    const zeroed = applyHideEmptyPref(shown.nodes, shown.links);
+    // ...and the ones carrying next to nothing, if a share is chosen (#497)...
+    const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
@@ -932,6 +934,7 @@ export function addFlowSection(nav: any, sections: any) {
     const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '')
+      + (emptied.hidden ? ` · ${emptied.hidden} small hidden` : '')
       + (folded.hidden ? ` · ${folded.hidden} with no data hidden` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
@@ -1095,9 +1098,9 @@ export function addFlowSection(nav: any, sections: any) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Three switches deliberately not gathered here: they sit on the diagram they change.
+    // The view switches are deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      'The “Hide empty”, “Hide small”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
       + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
       + 'saved by them.'));
   };
