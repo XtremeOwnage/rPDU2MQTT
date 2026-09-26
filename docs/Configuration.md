@@ -849,6 +849,13 @@ curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
 ```
 
+### How settings are labelled
+
+A setting's label is its name as words — `PrometheusUrl` reads as "Prometheus URL", `ToleranceSeconds` as
+"Tolerance Seconds" — with initialisms (URL, API, MQTT, PDU, GUI, …) kept upper case. `[Display(Name)]` on
+the property overrides it where the name alone does not read well, and `[SettingGroup("…")]` draws related
+settings in one bordered box: History's four retention settings are grouped that way.
+
 ### Settings without a page
 
 `Health`, `PlanStorage` and `Debug` have no page in the GUI.

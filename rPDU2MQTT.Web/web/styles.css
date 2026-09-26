@@ -1686,3 +1686,7 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .trend-table td.is-partial { color: var(--muted); }
 .trend-table td.is-reset { text-decoration: underline dotted var(--warn); text-underline-offset: 3px; }
 .flow-drill { max-width: 15em; }
+
+/* Settings the schema groups: drawn together, with the group's name on the border. */
+.setting-group { margin: 14px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.setting-group > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }

@@ -58,6 +58,27 @@ public class VisibleWhenTests
     /// setting, so a metric added to the table — temperature — was recorded by the history and offered
     /// by nothing.
     /// </summary>
+    /// <summary>A setting's label is words, not the property name the code uses.</summary>
+    [Fact]
+    public void SettingsAreLabelledForReading()
+    {
+        Assert.Equal("Prometheus URL", ConfigSchema.Spaced("PrometheusUrl"));
+        Assert.Equal("Tolerance Seconds", ConfigSchema.Spaced("ToleranceSeconds"));
+        Assert.Equal("GUI", ConfigSchema.Spaced("Gui"));
+        Assert.Equal("MQTT Topic Template", ConfigSchema.Spaced("MqttTopicTemplate"));
+        Assert.Equal("Max Megabytes", ConfigSchema.Spaced("MaxMegabytes"));
+        // A name that already reads as words is left alone.
+        Assert.Equal("Keep a local copy", ConfigSchema.Spaced("Keep a local copy"));
+
+        var history = ConfigSchema.Build().Single(n => n.Key == "History");
+        Assert.Equal("Prometheus URL", history.Properties!.Single(p => p.Key == "PrometheusUrl").Label);
+        // The four retention settings are one group, named for what they are.
+        var retention = history.Properties!.Where(p => p.Group == "Retention").ToList();
+        Assert.Equal(4, retention.Count);
+        Assert.Equal(["Raw retention (days)", "Minutely retention (days)", "Hourly retention (days)", "Daily retention (days)"],
+                     retention.Select(p => p.Label).ToArray());
+    }
+
     [Fact]
     public void ASourceCanBeBoundToEveryMetricTheBridgeUnderstands()
     {

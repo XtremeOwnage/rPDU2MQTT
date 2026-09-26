@@ -62,6 +62,7 @@ public class Config
     /// <summary>Where the Flow and Energy pages read past values from (#372).</summary>
     public HistoryConfig History { get; set; } = new HistoryConfig();
 
+    [System.ComponentModel.DataAnnotations.Display(Name = "EmonCMS")]
     [YamlMember(Alias = "EmonCMS", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "EmonCMS exporter")]
     [NavGroup("Destinations")]
     public EmonCMSConfig EmonCMS { get; set; } = new EmonCMSConfig();

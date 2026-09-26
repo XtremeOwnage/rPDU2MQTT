@@ -94,16 +94,32 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
   const isComplex = (c: any) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
-  if (scalars.length) {
+  const fields = new Map<string, any>();
+
+  // Settings the schema puts in a group are drawn together in a box of their own, in the order the group
+  // first appears. Retention is four numbers that only mean something beside each other.
+  const into = (list: any[], host: any) => {
     const grid = document.createElement('div'); grid.className = 'grid';
-    const fields = new Map<string, any>();
-    scalars.forEach(child => {
+    list.forEach(child => {
       renderNode(child, target, grid, path);
       fields.set(child.key, grid.children[grid.children.length - 1]);
     });
-    container.appendChild(grid);
-    wireVisibility(scalars, target, fields);
-  }
+    host.appendChild(grid);
+  };
+
+  const loose = scalars.filter(c => !c.group);
+  if (loose.length) into(loose, container);
+
+  const groups: string[] = [];
+  scalars.forEach(c => { if (c.group && !groups.includes(c.group)) groups.push(c.group); });
+  groups.forEach(name => {
+    const box = document.createElement('fieldset'); box.className = 'setting-group';
+    const legend = document.createElement('legend'); legend.textContent = name; box.appendChild(legend);
+    into(scalars.filter(c => c.group === name), box);
+    container.appendChild(box);
+  });
+
+  if (scalars.length) wireVisibility(scalars, target, fields);
   complex.forEach(child => renderNode(child, target, container, path));
 }
 
@@ -207,6 +223,9 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
+    // The setting's own name, so anything looking for a field finds it by what it is rather than by the
+    // words on the label — which are there to be read, and change.
+    f.dataset.key = node.key;
     // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
     // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
     // like "Enabled", which several unrelated nested sections legitimately share.

@@ -75,6 +75,15 @@ public sealed class NavGroupAttribute : Attribute
     public string Group { get; }
 }
 
+/// <summary>Settings that belong together on a page, drawn in one bordered box under this name.</summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class SettingGroupAttribute : Attribute
+{
+    public SettingGroupAttribute(string group) => Group = group;
+
+    public string Group { get; }
+}
+
 /// <summary>The entries of this list are a fixed set, identified by <paramref name="KeyProperty"/>.</summary>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class FixedListAttribute : Attribute
