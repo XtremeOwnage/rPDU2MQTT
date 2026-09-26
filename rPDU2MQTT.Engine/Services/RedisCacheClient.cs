@@ -17,7 +17,7 @@ namespace rPDU2MQTT.Services;
 /// opening another.
 /// </para>
 /// </summary>
-public sealed class RedisCacheClient : ICacheClient, IDisposable
+public sealed class RedisCacheClient : ICacheClient, Core.Integrations.ILeaseStore, IDisposable
 {
     private readonly Lazy<ConnectionMultiplexer?> connection;
     private readonly CacheHealth health;
@@ -90,6 +90,38 @@ public sealed class RedisCacheClient : ICacheClient, IDisposable
             return true;
         }
         catch (Exception ex) { health.Failed(ex.Message); return false; }
+    }
+
+    // Extend or delete only when the value is still ours: a GET then PEXPIRE could act on a lease another
+    // process took in between, which is the one thing a lease exists to prevent.
+    private const string RenewScript =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
+    private const string ReleaseScript =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+    public bool TryAcquire(string key, string owner, TimeSpan ttl)
+    {
+        var db = Db ?? throw new InvalidOperationException("cache is not connected");
+        return db.StringSet(key, owner, ttl, When.NotExists);
+    }
+
+    public bool Renew(string key, string owner, TimeSpan ttl)
+    {
+        var db = Db ?? throw new InvalidOperationException("cache is not connected");
+        return (long)db.ScriptEvaluate(RenewScript, [key], [owner, (long)ttl.TotalMilliseconds]) == 1;
+    }
+
+    public void Release(string key, string owner)
+    {
+        var db = Db ?? throw new InvalidOperationException("cache is not connected");
+        db.ScriptEvaluate(ReleaseScript, [key], [owner]);
+    }
+
+    public string? Holder(string key)
+    {
+        var db = Db ?? throw new InvalidOperationException("cache is not connected");
+        var v = db.StringGet(key);
+        return v.HasValue ? v.ToString() : null;
     }
 
     public void Dispose() { if (connection.IsValueCreated) connection.Value?.Dispose(); }

@@ -10,10 +10,22 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# Keep this at 1. v4 coordinates within one process: each replica would poll the PDUs and run the
-# publishers/exporters itself, so a second replica means duplicate device sessions and duplicate output —
-# not more throughput. (The seams for a coordinated fleet are still in the code; nothing implements them.)
+# Keep this at 1 unless gracefulRollout (below) is in effect. Without the leader lease each replica would
+# poll the PDUs and run the publishers/exporters itself — duplicate device sessions and duplicate output.
+# With it, extra replicas are standbys: they serve the GUI and API and take over if the leader goes.
 replicaCount: 1
+
+# Graceful rollout (#506): an update or restart brings the new pod up, waits for it to be Ready, and only
+# then stops the old one, instead of stopping first and missing readings for the length of a cold start.
+# The two pods coordinate through a leader lease in the cache — only the holder polls, publishes,
+# accumulates energy and writes history — so it takes effect only when the cache is on (valkey.enabled, or
+# config.Cache.Enabled pointing at your own instance). Otherwise the Deployment stays Recreate.
+#
+# Volumes: a ReadWriteOnce history or plans volume is attached to one node, so the pods are kept on one
+# node (a podAffinity, unless you set affinity yourself). ReadWriteMany lets them spread. ReadWriteOncePod
+# cannot be shared by two pods at all, and turns this off.
+gracefulRollout:
+  enabled: true
 
 # Legacy tiering (#179): split the app's roles into separate Deployments — worker (polls the PDUs,
 # publishes MQTT, serves /metrics), api (REST API), ui (config GUI). Off by default; prefer raising
