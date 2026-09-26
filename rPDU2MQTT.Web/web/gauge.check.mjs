@@ -31,9 +31,9 @@ const cfg = {
 const graph = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
-    { id: 'solar', label: 'Solar', kind: 'solar', value: 4600 },
-    { id: 'grid', label: 'Grid', kind: 'grid', value: 7000 },
-    { id: 'battery', label: 'Battery', kind: 'battery', value: 1200 },
+    { id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 4600 },
+    { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 7000 },
+    { id: 'battery', label: 'Battery', kind: 'battery', balance: 'battery', value: 1200 },
   ],
   links: [],
 };
@@ -48,6 +48,8 @@ const { sandbox, getEl } = makeDom({
     { ok: true },
 });
 vm.createContext(sandbox);
+// This viewer chose power; a new one gets the day's energy (checked below in energyshow).
+sandbox.localStorage.setItem('rpdu-energy-show', 'realpower');
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
 const navLinks = query(getEl('nav'), 'a', true);

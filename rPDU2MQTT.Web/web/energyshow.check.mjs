@@ -15,13 +15,15 @@ const cfg = { EnergyFlow: { Nodes: [{ Id: 'grid', Kind: 'grid', Max: 9000 }, { I
 
 const power = {
   ok: true, metric: 'realpower', units: 'W',
-  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 4600 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 1200 }],
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 4600 }, { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 1200 }],
   links: [],
 };
 // Exported more than imported today: out 2.0, in 7.5 -> net -5.5 kWh.
 const today = {
   ok: true, metric: 'energy_d', units: 'kWh',
-  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 41.2 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 2.0 }],
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 41.2 }, { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 2.0 },
+    // A string of that array: solar by kind, but the server did not count it toward the total.
+    { id: 'mppt_1', label: 'MPPT 1', kind: 'solar', value: 30 }],
   links: [],
 };
 
@@ -29,7 +31,7 @@ const today = {
 // a chart built from the wrong one is visible rather than plausible.
 const lifetime = {
   ok: true, metric: 'energy', units: 'kWh',
-  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', value: 9000 }, { id: 'grid', label: 'Grid', kind: 'grid', value: 3000 }],
+  nodes: [{ id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 9000 }, { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 3000 }],
   links: [],
 };
 
@@ -39,9 +41,9 @@ const pastDay = {
   ok: true, metric: 'energy_d', units: 'kWh', historical: true,
   at: '2026-08-03T04:59:59Z', source: 'prometheus',
   nodes: [
-    { id: 'solar', label: 'Solar', kind: 'solar', value: 12.5 },
-    { id: 'grid', label: 'Grid', kind: 'grid', value: 3.5 },
-    { id: 'grid#in', label: 'Grid (export)', kind: 'grid', value: 1.5 },
+    { id: 'solar', label: 'Solar', kind: 'solar', balance: 'solar', value: 12.5 },
+    { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 3.5 },
+    { id: 'grid#in', label: 'Grid (export)', kind: 'grid', balance: 'grid', value: 1.5 },
   ],
   links: [],
 };
@@ -59,6 +61,8 @@ const { sandbox, getEl } = makeDom({
     { ok: true },
 });
 vm.createContext(sandbox);
+// This viewer chose power; a new one gets the day's energy (checked below in energyshow).
+sandbox.localStorage.setItem('rpdu-energy-show', 'realpower');
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 50));
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Energy').click();
@@ -70,6 +74,33 @@ const tileText = (label) => {
   if (!t) fail(`no ${label} tile`);
   return t;
 };
+
+// The figures come first: no paragraph over them, and the past is behind one History button until asked
+// for, rather than two rows of period buttons and a date picker above every live view.
+const energySec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (query(energySec, 'div', true).some(d => cn(d) === 'desc' && /Where your power is flowing/.test(d.textContent)))
+  fail('the explanatory paragraph is back over the figures');
+const historyPanel = query(energySec, 'div', true).find(d => cn(d).includes('energy-history'));
+if (!historyPanel) fail('the period and date controls are not gathered behind History');
+if (!historyPanel.hidden) fail('the period and date controls open over a live view');
+if (!query(energySec, 'button', true).some(b => /^History/.test(b.textContent || ''))) fail('no History button');
+
+// A viewer who has not chosen sees the day's energy. The choice is remembered.
+{
+  const fresh = makeDom({ bodies: (url) => url.includes('/api/schema') ? schema : url.includes('/api/config') ? cfg : url.includes('/api/flow') ? today : { ok: true } });
+  vm.createContext(fresh.sandbox);
+  vm.runInContext(code, fresh.sandbox, { filename: 'app.js' });
+  await new Promise(r => setTimeout(r, 50));
+  query(fresh.getEl('nav'), 'a', true).find(a => a.dataset.label === 'Energy').click();
+  await new Promise(r => setTimeout(r, 300));
+  const sel = query(fresh.getEl('sections'), 'select', true).find(x => (x.children || []).some(o => (o.value || o.attrs?.value) === 'energy_d'));
+  if (!sel || sel.value !== 'energy_d') fail(`a new viewer does not see the day's energy (${sel?.value})`);
+}
+
+// A refresh empties and refills the board around several reads; the board's height is held across that,
+// or the page shrinks while it is empty and the browser clamps the scroll to the top.
+if (!/board\.style\.minHeight = held \+ 'px'/.test(code) || !/finally \{ board\.style\.minHeight = ''; \}/.test(code))
+  fail('the board does not hold its height across a refresh, so the scroll resets');
 
 // History is on here, so the moment picker is offered. (That it is hidden when the feature is off is
 // pinned in smoke, whose config has no History section.)
@@ -99,6 +130,8 @@ await new Promise(r => setTimeout(r, 400));
 const solarTile = tileText('Solar');
 if (!solarTile.textContent.includes('41.2')) fail(`the solar tile did not switch to the day's energy: ${solarTile.textContent}`);
 if (!solarTile.textContent.includes('kWh')) fail('the energy tile does not carry its unit');
+// What a tile adds up is the server's Balance, not every node of the kind: 41.2, never 71.2.
+if (solarTile.textContent.includes('71.2')) fail(`a node outside the balance was added to the solar tile: ${solarTile.textContent}`);
 
 // No dial: a Max is a power ceiling and means nothing against kWh.
 if (query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge')))

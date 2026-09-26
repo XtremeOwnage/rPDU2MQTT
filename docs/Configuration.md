@@ -888,11 +888,35 @@ you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Tot
 rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
 discovery is enabled — appears in Home Assistant as its own device.
 
-**A total by kind counts each node once.** Where one node already holds another — the MPPT strings a PV total
-is grouped from, a sub-panel beneath its panel — adding both would be the same energy twice. Every node and
-every series says what already counts it (`within`), and the Trends page, the Energy board's tiles and the
-Home Assistant Energy Dashboard sync leave those out of a per-kind total while still charting them on their
-own. Grouping the strings under the PV node is what says they are the same energy.
+### The energy balance: what counts as Solar, Grid, Battery and Home
+
+`EnergyFlow.Balance` names the nodes each headline total is made of. The Energy and Overview pages, Trends,
+self-sufficiency and the Home Assistant Energy Dashboard sync all read it, so they cannot disagree about what
+"solar" is. Each list is summed, and nothing outside the lists counts:
+
+```yaml
+EnergyFlow:
+  Balance:
+    Solar:   [pv_total]          # the PV total — not the MPPT strings it is made of as well
+    Grid:    [utility_meter]     # one reading of the grid, not the inverter's as well
+    Battery: [battery]           # discharge out, charge in
+    Home:    [inverter]          # the inverter's load output; empty works it out from the other three
+```
+
+What a node *is* (its `Kind`) and what it *counts toward* are separate on purpose. A hybrid inverter reports
+solar, battery, grid and load, each on a node of its own, and the node carrying its load output is the home
+total even though it is an inverter. MPPT strings stay `solar` so they are drawn as solar, and are simply
+not listed. Two inverters, two arrays or two battery banks are several entries in one list.
+
+Set it on the **Balance** page (under Energy Flow), or with **Counts toward** on a node — both edit the same
+list, and a node counts toward one total at most. A listed id that matches no node is marked on the Balance
+page, since that total is then short. Renaming a node in the editor keeps its place; deleting it removes it.
+
+**With every list empty, totals follow each node's kind, counting each node once** — the rule before the
+Balance existed, so an existing setup looks the same until you set one. A `load` node counts as Home. Where
+one node already holds another — the MPPT strings a PV total is grouped from, a sub-panel beneath its panel —
+adding both would be the same energy twice, so a node another one holds (`within`) is left out. The Balance
+page shows what that rule comes to and can start the lists from it.
 
 **A counter that was re-based is counted from zero.** Some counters re-base — weekly, on a device restart, or
 when a feed is recreated — and a reading lower than the one before it means the count started again. That

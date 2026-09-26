@@ -1208,6 +1208,31 @@ spec:
                             type: string
                           description: The ids of the member nodes this group aggregates.
                     description: Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.
+                  Balance:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      Solar:
+                        type: array
+                        items:
+                          type: string
+                        description: Nodes whose output is solar production — a PV total, never the strings it is made of.
+                      Grid:
+                        type: array
+                        items:
+                          type: string
+                        description: 'Nodes metering the grid connection: import out, export in.'
+                      Battery:
+                        type: array
+                        items:
+                          type: string
+                        description: 'Nodes metering battery banks: discharge out, charge in.'
+                      Home:
+                        type: array
+                        items:
+                          type: string
+                        description: Nodes whose reading is what the home used — an inverter's load output, a whole-house meter. Empty works it out from the other three.
+                    description: Which nodes make up the site's Solar, Grid, Battery and Home totals on the energy pages, Trends and the Home Assistant Energy Dashboard. Each list is summed. Leave every list empty to total nodes by their kind instead.
                   Panels:
                     type: array
                     items:

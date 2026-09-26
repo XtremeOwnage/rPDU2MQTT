@@ -21,13 +21,12 @@ export function addTrendsSection(nav: any, sections: any) {
       const partial: string | null = body.partial || null;
       const all: any[] = body.series || [];
       const sumOf = (list: any[]) => days.map((_, d) => sumKnown(list.map((s: any) => signed(s)[d])));
-      // What may be added together: a node another one here already counts — a group's member beside the
-      // group's own total, a sub-panel beneath its panel — would be the same energy twice (#491).
-      const countable = (list: any[]) => list.filter((s: any) => !s.within || !all.some((o: any) => o.node === s.within));
-      const ofKind = (kind: string, want?: (s: any) => boolean) =>
-        countable(all.filter((s: any) => s.kind === kind && (!want || want(s))));
-      const byKind = (kind: string) => {
-        const members = ofKind(kind);
+      // The series a total is made of, as the server decided: the Balance where one is set, else each node
+      // of the kind that nothing else already counts — a PV total and its strings are one solar (#491).
+      const ofKind = (role: string, want?: (s: any) => boolean) =>
+        all.filter((s: any) => s.balance === role && (!want || want(s)));
+      const byKind = (role: string) => {
+        const members = ofKind(role);
         return members.length ? sumOf(members) : null;
       };
       let drawn = 0;
@@ -48,7 +47,7 @@ export function addTrendsSection(nav: any, sections: any) {
       }
 
       // --- Self-sufficiency ---------------------------------------------------------------------------
-      const solar = byKind('solar'), batt = byKind('battery'), load = byKind('load');
+      const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
       // A share of energy over a period; instantaneous power is a different quantity.
       if (p.summable() && gridIn && (load || solar)) {
         const imported = sumOf(gridSupply);
@@ -122,7 +121,7 @@ export function addTrendsSection(nav: any, sections: any) {
         ['Net grid', netGrid],
       ];
       // The home: what it was measured as, else what the measured sources leave for it.
-      const loadKind = byKind('load');
+      const loadKind = byKind('home');
       columns[0][1] = days.map((_, d) => homeEnergy({
         ...(loadKind ? { load: loadKind[d] } : {}),
         ...(loadKind ? {} : {
