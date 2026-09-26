@@ -52,6 +52,7 @@ const MODULES = [
   'sections/diagnostics.ts',
   'sections/control.ts',
   'sections/livedata.ts',
+  'sunburst.ts',
   'sections/flow.ts',
   'sections/node-editor.ts',
   'sections/nodes.ts',

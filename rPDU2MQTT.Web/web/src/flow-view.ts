@@ -61,10 +61,13 @@ export function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links
     const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
     let sum = 0, known = false;
     (g.Members || []).forEach((m: string) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
+    // A group given no kind is what its members are, when they agree: a group of MPPTs is solar.
+    const kinds = new Set((g.Members || []).map((m: string) => byId[m]?.kind).filter(Boolean));
+    const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
     groupNode[g.Id] = anchor
       // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
       ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
-      : { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
+      : { id: g.Id, label: g.Label || g.Id, kind, value: known ? sum : null, group: true };
   });
 
   const remap = (id: string) => (memberOf[id] ? memberOf[id].Id : id);

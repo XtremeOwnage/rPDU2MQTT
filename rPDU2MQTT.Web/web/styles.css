@@ -1014,6 +1014,17 @@
   .flow-view-section .ld-toolbar > span.desc:first-child { display:none; }
   @media (max-width: 560px) { .flow-view-section { grid-template-columns:1fr; gap:var(--sp-1); } }
 
+  /* The flow as a sunburst: sized to the pane, never taller than the screen. */
+  .sunburst-stage { display:flex; justify-content:center; }
+  .sunburst-svg { width:100%; max-width:min(760px, calc(100vh - 180px)); height:auto; display:block; }
+  .sunburst-arc, .sunburst-supply { stroke:var(--bg); stroke-width:1; cursor:pointer; transition:opacity .15s; }
+  .sunburst-arc:hover, .sunburst-supply:hover { opacity:.8; }
+  .sunburst-label { font-size:10.5px; font-weight:600; fill:#10141b; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+  .sunburst-hub { fill:var(--panel); stroke:var(--line); stroke-width:1.5; cursor:pointer; }
+  .sunburst-hub-name { font-size:13px; font-weight:650; fill:var(--fg); text-anchor:middle; pointer-events:none; }
+  .sunburst-hub-value { font-size:17px; font-weight:700; fill:var(--fg); text-anchor:middle; pointer-events:none; font-variant-numeric:tabular-nums; }
+  .sunburst-hub-share { font-size:11px; fill:var(--muted); text-anchor:middle; pointer-events:none; }
+
   /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
   .flow-stage { position: relative; }
   .flow-zoom {
