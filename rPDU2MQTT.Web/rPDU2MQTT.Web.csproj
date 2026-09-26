@@ -101,6 +101,8 @@
 		<!-- "Hide empty" must clear switched-off outlets without hiding a node nothing measures, or cutting a
 		     zero chain off the live thing it feeds. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hideempty.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidesmall.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidenodata.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A binding worked out from other bindings can be complete in itself and still produce nothing, so
 		     the row has to say what it is still waiting for. -->

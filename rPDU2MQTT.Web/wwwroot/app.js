@@ -251,15 +251,28 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
 
-  /// Scale the diagram down until it fits the pane's width. Never scales UP: a small diagram is not
-  /// improved by being blown up to fill the pane.
-  const fit = () => {
+  /// The zoom that fits the diagram to the pane's width. Never above 1: a small diagram is not improved by
+  /// being blown up to fill the pane.
+  const fitZoom = () => {
     const w = width();
-    if (!w || !baseW) return;
-    const next = Math.min(1, Math.max(min, (w - 6) / baseW));
-    if (Math.abs(next - z) < 0.005) return;
-    z = next; apply(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+    return !w || !baseW ? z : Math.min(1, Math.max(min, (w - 6) / baseW));
   };
+
+  /// Scale the diagram down until it fits the pane's width, and go back to its top-left corner — what the
+  /// Fit button asks for.
+  const fit = () => {
+    const next = fitZoom();
+    if (Math.abs(next - z) < 0.005) return;
+    z = next; apply(); movedAt = Date.now(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+  };
+
+  // When the reader last touched the pane: a pointer down, or a scroll (a swipe carries on scrolling after
+  // the finger lifts). A redraw in the middle of either replaces the pane under the gesture and throws the
+  // reader back to where the old one started (#497).
+  let touchedAt = 0, movedAt = 0;
+  const touched = () => { touchedAt = Date.now(); };
+  // A scroll this code made itself — putting the view back after a redraw — is not the reader moving.
+  const onScroll = () => { if (Date.now() - movedAt > 150) touched(); };
 
   /// Zoom about a point given in client coordinates, keeping whatever is under it still.
   const zoomAbout = (clientX        , clientY        , factor        ) => {
@@ -301,6 +314,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   };
 
   const onPointerDown = (e     ) => {
+    touched();
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2) pinchFrom = spread();
@@ -316,7 +330,9 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     zoomAbout(m.x, m.y, now / pinchFrom);
     pinchFrom = now;
   };
-  const forget = (e     ) => { pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  const forget = (e     ) => { touched(); pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  scroll.addEventListener('scroll', onScroll, { passive: true });
+  cleanups.push(() => scroll.removeEventListener('scroll', onScroll));
 
   scroll.addEventListener('pointerdown', onPointerDown);
   scroll.addEventListener('pointermove', onPointerMove, { passive: false });
@@ -365,10 +381,18 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
   if (width() && width() < baseW) fit();
 
-  // Follow a rotation or a pane resize, unless the reader has since set their own zoom.
+  // Follow a rotation or a pane resize, unless the reader has since set their own zoom. Only a change of
+  // width counts: an observer reports once as soon as it is attached, and re-fitting on that report sent the
+  // reader back to the top-left corner on every live redraw whose labels came out a few pixels wider.
   let ro      = null;
+  let seenW = width();
   try {
-    ro = new (globalThis       ).ResizeObserver(() => { if (!chosen) fit(); });
+    ro = new (globalThis       ).ResizeObserver(() => {
+      const w = width();
+      if (!w || Math.abs(w - seenW) < 1) return;
+      seenW = w;
+      if (!chosen) keepPlace(fitZoom());
+    });
     ro.observe(scroll);
     cleanups.push(() => ro.disconnect());
   } catch { /* no ResizeObserver: the fit on open is what matters */ }
@@ -386,16 +410,28 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     const { x, y } = span();
     return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
   };
-  /// Put a view back after a redraw. Nothing is re-fitted under it: the reader is where they left off.
-  (detach       ).setView = (v     ) => {
-    if (!v || !(v.z > 0)) return;
-    z = Math.min(max, Math.max(min, v.z));
-    chosen = !!v.chosen;
+  /// Change the zoom and stay over the same part of the diagram, by where the pane is as a share of it.
+  const keepPlace = (next        , at                                ) => {
+    const before = span();
+    const left = at ? at.left : before.x ? scroll.scrollLeft / before.x : 0;
+    const top = at ? at.top : before.y ? scroll.scrollTop / before.y : 0;
+    z = Math.min(max, Math.max(min, next));
     apply();
     const { x, y } = span();
-    scroll.scrollLeft = (v.left || 0) * x;
-    scroll.scrollTop = (v.top || 0) * y;
+    movedAt = Date.now();
+    scroll.scrollLeft = left * x;
+    scroll.scrollTop = top * y;
   };
+
+  /// Put a view back after a redraw: the reader is where they left off. A zoom they set is kept as it was;
+  /// one that was only ever the fit is the fit of the new drawing, which may be a few pixels wider.
+  (detach       ).setView = (v     ) => {
+    if (!v || !(v.z > 0)) return;
+    chosen = !!v.chosen;
+    keepPlace(chosen ? v.z : fitZoom(), { left: v.left || 0, top: v.top || 0 });
+  };
+  /// Is the reader in the middle of moving the pane — a finger or button down, or a swipe still coasting?
+  (detach       ).busy = (quietMs = 800) => pts.size > 0 || Date.now() - touchedAt < quietMs;
   /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
   /// at the pane is looking at.
   (detach       ).zoomBy = (factor        ) => {
@@ -2148,56 +2184,79 @@ function drawEnergyFlow(target     , arms           , onOpen                    
   }
 
 // ── flow-banners.ts ─────────────────────────────────────────────
-// The banners above the flow chart: sources the bridge is withholding.
+// The banners above the flow chart: sources the bridge is withholding, and figures their own flows contradict.
+
+/// Which banners the reader has opened. Kept across the chart's live redraws, which rebuild them every few
+/// seconds; not across a reload, where each starts folded again.
+const opened = new Set        ();
+
+/// A banner folded to its one-line headline. Someone opening the Flow page is there for the diagram: the
+/// explanation took half a phone's screen on every visit, with no way to put it away, while the headline
+/// alone says what is wrong and that there is more to read.
+function foldable(key        , headline        , body               )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  box.dataset.banner = key;
+  const inner = el('div', { class: 'flow-banner-body' });
+  body.forEach(b => inner.appendChild(b));
+  const toggle = el('button', { class: 'flow-banner-toggle', type: 'button' });
+  const set = (open         ) => {
+    inner.hidden = !open;
+    toggle.textContent = open ? 'Hide' : 'Show';
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    box.classList.toggle('is-open', open);
+  };
+  toggle.onclick = () => {
+    const open = inner.hidden;
+    if (open) opened.add(key); else opened.delete(key);
+    set(open);
+  };
+  box.appendChild(el('div', { class: 'flow-banner-head' }, el('strong', { text: headline }), toggle));
+  box.appendChild(inner);
+  set(opened.has(key));
+  return box;
+}
 
 /// The banner naming every binding the bridge is dropping, and why.
 function withheldBanner(sources       )              {
-  const box = el('div', { class: 'flow-contradiction' });
-  box.appendChild(el('strong', {
-    text: sources.length === 1
-      ? '1 source is being withheld'
-      : `${sources.length} sources are being withheld`,
-  }));
-  box.appendChild(el('div', {
+  const parts                = [el('div', {
     class: 'desc',
     style: { margin: '2px 0 6px' },
     text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
         + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
-  }));
+  })];
   sources.forEach((w     ) => {
     const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
     row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
     row.appendChild(el('span', { text: w.reason || '' }));
-    box.appendChild(row);
+    parts.push(row);
   });
-  return box;
+  return foldable('withheld', sources.length === 1
+    ? '1 source is being withheld'
+    : `${sources.length} sources are being withheld`, parts);
 }
 
 /// The banner naming every node whose figure its own flows contradict, drawn above the chart.
 function contradictionBanner(items                                                , onFocus                      )              {
-  const box = el('div', { class: 'flow-contradiction' });
   const n = items.length;
-  box.appendChild(el('strong', {
-    text: n === 1
-      ? '1 node’s figure is contradicted by its own flows'
-      : `${n} nodes’ figures are contradicted by their own flows`,
-  }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    style: { margin: '2px 0 6px' },
-    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
-        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
-        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
-        + 'suspect until the gap is explained.',
-  }));
   const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
   items.forEach(it => {
     const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
     b.onclick = () => onFocus(it.id);
     row.appendChild(b);
   });
-  box.appendChild(row);
-  return box;
+  return foldable('contradicted', n === 1
+    ? '1 node’s figure is contradicted by its own flows'
+    : `${n} nodes’ figures are contradicted by their own flows`, [
+    el('div', {
+      class: 'desc',
+      style: { margin: '2px 0 6px' },
+      text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
+          + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
+          + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
+          + 'suspect until the gap is explained.',
+    }),
+    row,
+  ]);
 }
 
 /// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
@@ -2612,6 +2671,87 @@ function applyHideEmptyPref(nodes       , links       )                         
   };
 }
 
+/// Hide the branches carrying next to nothing (#497): a share of the diagram's total, below which a branch is
+/// hidden. Off (0) by default, and per-viewer like the other switches. A share rather than watts, so it
+/// means the same on a power, current or energy view and on a small house or a rack.
+const HIDE_SMALL_CHOICES                     = [[0, 'Off'], [0.5, 'under 0.5%'], [1, 'under 1%'], [2, 'under 2%'], [5, 'under 5%']];
+let hideSmallPercent = (() => {
+  try {
+    const v = Number(localStorage.getItem('rpdu-flow-hide-small') || '0');
+    return HIDE_SMALL_CHOICES.some(([p]) => p === v) ? v : 0;
+  } catch { return 0; }
+})();
+
+function setHideSmall(percent        ) {
+  hideSmallPercent = percent;
+  try { localStorage.setItem('rpdu-flow-hide-small', String(percent)); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading under the chosen share of the total when nothing downstream of them reaches it
+/// either, and say how many went.
+///
+/// The total is what enters the diagram: the sum of the nodes nothing feeds. The rules are the ones "Hide
+/// empty" keeps. A node with no data is left alone: it is a gap in the model, not a small reading. A small
+/// node above a large one stays, so what it feeds is never cut off from its supply. Signs are ignored:
+/// 40 W exported is as large as 40 W drawn.
+function applyHideSmallPref(nodes       , links       , percent = hideSmallPercent)                                                 {
+  if (!(percent > 0)) return { nodes, links, hidden: 0 };
+
+  const byId = new Map             (nodes.map((n     ) => [n.id, n]));
+  const out = new Map                  ();
+  const fed = new Set        ();
+  links.forEach((l     ) => { out.set(l.source, [...(out.get(l.source) || []), l.target]); fed.add(l.target); });
+
+  const size = (n     ) => typeof n?.value === 'number' ? Math.abs(n.value) : null;
+  const roots = nodes.filter((n     ) => !fed.has(n.id) && size(n) != null);
+  const total = roots.length ? roots.reduce((sum        , n     ) => sum + size(n) , 0)
+    : Math.max(0, ...nodes.map((n     ) => size(n) ?? 0));
+  if (!(total > 0)) return { nodes, links, hidden: 0 };
+  const floor = total * percent / 100;
+  const large = (n     ) => size(n) == null || size(n)  >= floor;
+
+  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
+  const feedsLarge = new Map                 ();
+  const walking = new Set        ();
+  const reaches = (id        )          => {
+    if (feedsLarge.has(id)) return feedsLarge.get(id) ;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && size(n) != null && size(n)  >= floor) || reaches(t);
+    });
+    walking.delete(id);
+    feedsLarge.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id        ) => byId.has(id) && (large(byId.get(id)) || reaches(id));
+  const kept = nodes.filter((n     ) => keep(n.id));
+  return {
+    nodes: kept,
+    links: links.filter((l     ) => keep(l.source) && keep(l.target)),
+    hidden: nodes.length - kept.length,
+  };
+}
+
+/// The "Hide small" view picker. Per-viewer, like the other switches.
+function hideSmallSelect(onChange            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'Hide branches carrying less than this share of everything entering the diagram — loads using next '
+      + 'to nothing. A small node that feeds a larger one stays, and a node with no data is never hidden by '
+      + 'this. How many were hidden is shown beside the node count. A view setting only; no total changes.',
+  });
+  const sel      = el('select', { style: { width: 'auto' } });
+  HIDE_SMALL_CHOICES.forEach(([p, label]) => sel.appendChild(el('option', { value: String(p), text: label })));
+  sel.value = String(hideSmallPercent);
+  sel.onchange = () => { setHideSmall(Number(sel.value) || 0); onChange(); };
+  lbl.append(document.createTextNode('Hide small'), sel);
+  return lbl;
+}
+
 /// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
 /// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
 let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
@@ -2738,6 +2878,7 @@ function groupToggles(onToggle            , drawn = true)                     {
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
     row.appendChild(hideEmptyToggle(onToggle));
+    row.appendChild(hideSmallSelect(onToggle));
     row.appendChild(hideNoDataToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
@@ -5003,7 +5144,9 @@ function addFlowSection(nav     , sections     ) {
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
-    const emptied = applyHideEmptyPref(shown.nodes, shown.links);
+    const zeroed = applyHideEmptyPref(shown.nodes, shown.links);
+    // ...and the ones carrying next to nothing, if a share is chosen (#497)...
+    const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
@@ -5634,6 +5777,7 @@ function addFlowSection(nav     , sections     ) {
     const unknownCount = nodes.filter((n     ) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '')
+      + (emptied.hidden ? ` · ${emptied.hidden} small hidden` : '')
       + (folded.hidden ? ` · ${folded.hidden} with no data hidden` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
@@ -5689,7 +5833,9 @@ function addFlowSection(nav     , sections     ) {
     fitBtn.style.padding = '1px 8px';
     fitBtn.style.fontSize = '11px';
     hints.appendChild(fitBtn);
-    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    // One line each, and the stylesheet shows the one this device can do: a mouse cannot pinch.
+    hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+    hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
     // The new content carries its own height now, so stop holding the old one.
     wrap.style.minHeight = '';
@@ -5797,9 +5943,9 @@ function addFlowSection(nav     , sections     ) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Three switches deliberately not gathered here: they sit on the diagram they change.
+    // The view switches are deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      'The “Hide empty”, “Hide small”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
       + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
       + 'saved by them.'));
   };
@@ -6094,9 +6240,26 @@ function addFlowSection(nav     , sections     ) {
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
+      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
+      // their finger. It is drawn once they have let go and it has stopped coasting.
+      if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);
     });
+
+  let stillTimer      = null;
+  const drawWhenStill = () => {
+    if (stillTimer) return;
+    stillTimer = setInterval(() => {
+      if (!heldGraph) { clearInterval(stillTimer); stillTimer = null; return; }
+      if (zoom?.busy?.() || menu.isOpen() || busyInSection(sec)) return;
+      clearInterval(stillTimer); stillTimer = null;
+      const held = heldGraph;
+      heldGraph = null;
+      lastGraph = held;
+      draw(held);
+    }, 300);
+  };
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
