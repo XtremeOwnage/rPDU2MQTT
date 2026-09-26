@@ -152,7 +152,7 @@ public class EnergyOutSensorTests
     public void TheDashboardBindsTheNamedDirection_NotTheTotal()
     {
         var graph = new FlowGraph(
-            [new FlowNode("grid", "Grid", "grid", 800)],
+            [new FlowNode("grid", "Grid", "grid", 800) { Balance = EnergyBalance.Grid }],
             [], "realpower", "W");
 
         var entities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -177,7 +177,7 @@ public class EnergyOutSensorTests
     public void WithoutTheNamedDirection_TheDashboardFallsBackToEnergy()
     {
         // A one-way node publishes no energy_out, and there `energy` IS the out direction.
-        var graph = new FlowGraph([new FlowNode("solar", "Solar", "solar", 4200)], [], "realpower", "W");
+        var graph = new FlowGraph([new FlowNode("solar", "Solar", "solar", 4200) { Balance = EnergyBalance.Solar }], [], "realpower", "W");
         var entities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["energyflow_solar_energy"] = "sensor.solar_energy",

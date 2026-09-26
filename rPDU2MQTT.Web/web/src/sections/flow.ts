@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
@@ -300,7 +300,9 @@ export function addFlowSection(nav: any, sections: any) {
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
-    const emptied = applyHideEmptyPref(shown.nodes, shown.links);
+    const zeroed = applyHideEmptyPref(shown.nodes, shown.links);
+    // ...and the ones carrying next to nothing, if a share is chosen (#497)...
+    const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
@@ -932,6 +934,7 @@ export function addFlowSection(nav: any, sections: any) {
     const unknownCount = nodes.filter((n: any) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '')
+      + (emptied.hidden ? ` · ${emptied.hidden} small hidden` : '')
       + (folded.hidden ? ` · ${folded.hidden} with no data hidden` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
@@ -987,7 +990,9 @@ export function addFlowSection(nav: any, sections: any) {
     fitBtn.style.padding = '1px 8px';
     fitBtn.style.fontSize = '11px';
     hints.appendChild(fitBtn);
-    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    // One line each, and the stylesheet shows the one this device can do: a mouse cannot pinch.
+    hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+    hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
     // The new content carries its own height now, so stop holding the old one.
     wrap.style.minHeight = '';
@@ -1095,9 +1100,9 @@ export function addFlowSection(nav: any, sections: any) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Three switches deliberately not gathered here: they sit on the diagram they change.
+    // The view switches are deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      'The “Hide empty”, “Hide small”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
       + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
       + 'saved by them.'));
   };
@@ -1392,9 +1397,26 @@ export function addFlowSection(nav: any, sections: any) {
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
+      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
+      // their finger. It is drawn once they have let go and it has stopped coasting.
+      if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);
     });
+
+  let stillTimer: any = null;
+  const drawWhenStill = () => {
+    if (stillTimer) return;
+    stillTimer = setInterval(() => {
+      if (!heldGraph) { clearInterval(stillTimer); stillTimer = null; return; }
+      if (zoom?.busy?.() || menu.isOpen() || busyInSection(sec)) return;
+      clearInterval(stillTimer); stillTimer = null;
+      const held = heldGraph;
+      heldGraph = null;
+      lastGraph = held;
+      draw(held);
+    }, 300);
+  };
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };

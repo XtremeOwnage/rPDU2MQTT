@@ -42,9 +42,11 @@ export function addOverviewSection(nav: any, sections: any) {
     : Math.abs(w) >= 1000 ? `${formatNum(Math.round(w / 100) / 10)} kW` : `${formatNum(Math.round(w))} W`;
   const fmtKwh = (v: number | null) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} kWh`;
 
-  const idsOfKind = (nodes: any[], kind: string) => nodes.filter(n => n.kind === kind && !n.id.includes('#')).map(n => n.id);
-  const sumOfKind = (nodes: any[], kind: string) => {
-    const vals = nodes.filter(n => n.kind === kind && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
+  // The nodes a total is made of, as the server decided: the Balance where one is set, else each node's kind,
+  // counted once. Summing by kind here counted a PV total and its MPPT strings both.
+  const idsOfRole = (nodes: any[], role: string) => nodes.filter(n => n.balance === role && !n.id.includes('#')).map(n => n.id);
+  const sumOfRole = (nodes: any[], role: string) => {
+    const vals = nodes.filter(n => n.balance === role && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
     return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) : null;
   };
 
@@ -184,17 +186,17 @@ export function addOverviewSection(nav: any, sections: any) {
       for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
       return total as number | null;
     });
-    const ofKind = (kind: string, returns = false) => (body.series || [])
-      .filter((s: any) => s.kind === kind && String(s.node).endsWith('#in') === returns);
+    const ofRole = (role: string, returns = false) => (body.series || [])
+      .filter((s: any) => s.balance === role && String(s.node).endsWith('#in') === returns);
 
     /// What the house drew at each step: the same balance as the figure above, done per reading rather
     /// than once. A step missing any part of that balance is a gap — filling it with a zero would draw a
     /// house that stopped using power.
     const homeValues = () => {
-      const metered = ofKind('load');
+      const metered = ofRole('home');
       if (metered.length) return sumSeries(metered);
       const net = (kind: string) => {
-        const out = sumSeries(ofKind(kind)), back = sumSeries(ofKind(kind, true));
+        const out = sumSeries(ofRole(kind)), back = sumSeries(ofRole(kind, true));
         if (!out.length && !back.length) return [];
         return Array.from({ length: steps }, (_, i) => {
           const o = out[i], b = back[i];
@@ -202,7 +204,7 @@ export function addOverviewSection(nav: any, sections: any) {
           return (o ?? 0) - (b ?? 0);
         });
       };
-      const solar = sumSeries(ofKind('solar')), grid = net('grid'), batt = net('battery');
+      const solar = sumSeries(ofRole('solar')), grid = net('grid'), batt = net('battery');
       const parts = [solar, grid, batt].filter(p => p.some(v => v != null));
       if (!parts.length) return [];
       return Array.from({ length: steps }, (_, i) => {
@@ -213,7 +215,7 @@ export function addOverviewSection(nav: any, sections: any) {
     };
 
     const strip = ([kind, label, icon]: [string, string, string]) => {
-      const values = kind === 'home' ? homeValues() : sumSeries(ofKind(kind));
+      const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
       // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
       // its own says "something happened" without saying what.
@@ -247,17 +249,17 @@ export function addOverviewSection(nav: any, sections: any) {
 
   const drawNow = (power: any, energy: any, live: Record<string, number>, liveInfo: Record<string, any>) => {
     const nodes = (power?.nodes || []) as any[];
-    const solarIds = idsOfKind(nodes, 'solar'), gridIds = idsOfKind(nodes, 'grid'), battIds = idsOfKind(nodes, 'battery');
-    const solarW = sumOfKind(nodes, 'solar');
-    const gridOut = sumOfKind(nodes, 'grid');
+    const solarIds = idsOfRole(nodes, 'solar'), gridIds = idsOfRole(nodes, 'grid'), battIds = idsOfRole(nodes, 'battery');
+    const solarW = sumOfRole(nodes, 'solar');
+    const gridOut = sumOfRole(nodes, 'grid');
     const gridIn = sumKnown(gridIds.map(id => live[`${id}|realpower#in`]));
-    const battOut = sumOfKind(nodes, 'battery');
+    const battOut = sumOfRole(nodes, 'battery');
     const battIn = sumKnown(battIds.map(id => live[`${id}|realpower#in`]));
     // One signed figure per bidirectional node: out is positive, in is negative.
     const gridNet = gridOut == null && gridIn == null ? null : (gridOut || 0) - (gridIn || 0);
     const battNet = battOut == null && battIn == null ? null : (battOut || 0) - (battIn || 0);
     // A metered load node wins over the balance of sources; without one the home is what is left over.
-    const loadW = idsOfKind(nodes, 'load').length ? sumOfKind(nodes, 'load') : undefined;
+    const loadW = idsOfRole(nodes, 'home').length ? sumOfRole(nodes, 'home') : undefined;
     const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
 
     const arms: FlowArm[] = [];
@@ -287,14 +289,14 @@ export function addOverviewSection(nav: any, sections: any) {
       todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
       return;
     }
-    const eSolar = sumOfKind(eNodes, 'solar');
-    const eGridOut = sumOfKind(eNodes, 'grid');
+    const eSolar = sumOfRole(eNodes, 'solar');
+    const eGridOut = sumOfRole(eNodes, 'grid');
     const eGridIn = sumKnown(gridIds.map(id => {
       const n = eNodes.find((x: any) => x.id === id + '#in');
       return typeof n?.value === 'number' ? n.value : undefined;
     }));
-    const eBattOut = sumOfKind(eNodes, 'battery');
-    const eLoad = idsOfKind(eNodes, 'load').length ? sumOfKind(eNodes, 'load') : undefined;
+    const eBattOut = sumOfRole(eNodes, 'battery');
+    const eLoad = idsOfRole(eNodes, 'home').length ? sumOfRole(eNodes, 'home') : undefined;
     const eHome = homeEnergy({
       solar: eSolar, battery: eBattOut,
       grid: eGridOut == null && eGridIn == null ? null : (eGridOut || 0) - (eGridIn || 0),
@@ -320,7 +322,7 @@ export function addOverviewSection(nav: any, sections: any) {
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || []) as any[];
-      const battIds = idsOfKind(nodes, 'battery'), gridIds = idsOfKind(nodes, 'grid');
+      const battIds = idsOfRole(nodes, 'battery'), gridIds = idsOfRole(nodes, 'grid');
       const q = [
         ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
         ...battIds.map(id => ({ Node: id, Metric: 'soc' })),

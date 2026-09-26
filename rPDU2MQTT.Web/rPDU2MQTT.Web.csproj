@@ -78,6 +78,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/panelschedule.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowmenu.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/pages.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/balance.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/floorplan.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/timeline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A fixed list is the set the build ships: no Add, no Remove, and the field that names an entry is
@@ -100,6 +101,8 @@
 		<!-- "Hide empty" must clear switched-off outlets without hiding a node nothing measures, or cutting a
 		     zero chain off the live thing it feeds. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hideempty.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidesmall.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidenodata.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- A binding worked out from other bindings can be complete in itself and still produce nothing, so
 		     the row has to say what it is still waiting for. -->
@@ -141,6 +144,8 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/reconnect.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
 		     fine in Firefox and sat on top of the first row in Chrome. -->
+		<!-- The editing dialog on a phone: it must not clip what it cannot fit. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/phonedialog.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />
 	</Target>

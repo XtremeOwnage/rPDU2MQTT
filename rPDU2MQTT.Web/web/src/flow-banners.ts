@@ -1,54 +1,77 @@
-// The banners above the flow chart: sources the bridge is withholding.
+// The banners above the flow chart: sources the bridge is withholding, and figures their own flows contradict.
 import { el } from './helpers.js';
+
+/// Which banners the reader has opened. Kept across the chart's live redraws, which rebuild them every few
+/// seconds; not across a reload, where each starts folded again.
+const opened = new Set<string>();
+
+/// A banner folded to its one-line headline. Someone opening the Flow page is there for the diagram: the
+/// explanation took half a phone's screen on every visit, with no way to put it away, while the headline
+/// alone says what is wrong and that there is more to read.
+function foldable(key: string, headline: string, body: HTMLElement[]): HTMLElement {
+  const box = el('div', { class: 'flow-contradiction' });
+  box.dataset.banner = key;
+  const inner = el('div', { class: 'flow-banner-body' });
+  body.forEach(b => inner.appendChild(b));
+  const toggle = el('button', { class: 'flow-banner-toggle', type: 'button' });
+  const set = (open: boolean) => {
+    inner.hidden = !open;
+    toggle.textContent = open ? 'Hide' : 'Show';
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    box.classList.toggle('is-open', open);
+  };
+  toggle.onclick = () => {
+    const open = inner.hidden;
+    if (open) opened.add(key); else opened.delete(key);
+    set(open);
+  };
+  box.appendChild(el('div', { class: 'flow-banner-head' }, el('strong', { text: headline }), toggle));
+  box.appendChild(inner);
+  set(opened.has(key));
+  return box;
+}
 
 /// The banner naming every binding the bridge is dropping, and why.
 export function withheldBanner(sources: any[]): HTMLElement {
-  const box = el('div', { class: 'flow-contradiction' });
-  box.appendChild(el('strong', {
-    text: sources.length === 1
-      ? '1 source is being withheld'
-      : `${sources.length} sources are being withheld`,
-  }));
-  box.appendChild(el('div', {
+  const parts: HTMLElement[] = [el('div', {
     class: 'desc',
     style: { margin: '2px 0 6px' },
     text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
         + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
-  }));
+  })];
   sources.forEach((w: any) => {
     const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
     row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
     row.appendChild(el('span', { text: w.reason || '' }));
-    box.appendChild(row);
+    parts.push(row);
   });
-  return box;
+  return foldable('withheld', sources.length === 1
+    ? '1 source is being withheld'
+    : `${sources.length} sources are being withheld`, parts);
 }
 
 /// The banner naming every node whose figure its own flows contradict, drawn above the chart.
 export function contradictionBanner(items: { id: string, label: string, share: number }[], onFocus: (id: string) => void): HTMLElement {
-  const box = el('div', { class: 'flow-contradiction' });
   const n = items.length;
-  box.appendChild(el('strong', {
-    text: n === 1
-      ? '1 node’s figure is contradicted by its own flows'
-      : `${n} nodes’ figures are contradicted by their own flows`,
-  }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    style: { margin: '2px 0 6px' },
-    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
-        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
-        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
-        + 'suspect until the gap is explained.',
-  }));
   const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
   items.forEach(it => {
     const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
     b.onclick = () => onFocus(it.id);
     row.appendChild(b);
   });
-  box.appendChild(row);
-  return box;
+  return foldable('contradicted', n === 1
+    ? '1 node’s figure is contradicted by its own flows'
+    : `${n} nodes’ figures are contradicted by their own flows`, [
+    el('div', {
+      class: 'desc',
+      style: { margin: '2px 0 6px' },
+      text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
+          + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
+          + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
+          + 'suspect until the gap is explained.',
+    }),
+    row,
+  ]);
 }
 
 /// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.

@@ -162,6 +162,87 @@ export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; 
   };
 }
 
+/// Hide the branches carrying next to nothing (#497): a share of the diagram's total, below which a branch is
+/// hidden. Off (0) by default, and per-viewer like the other switches. A share rather than watts, so it
+/// means the same on a power, current or energy view and on a small house or a rack.
+export const HIDE_SMALL_CHOICES: [number, string][] = [[0, 'Off'], [0.5, 'under 0.5%'], [1, 'under 1%'], [2, 'under 2%'], [5, 'under 5%']];
+export let hideSmallPercent = (() => {
+  try {
+    const v = Number(localStorage.getItem('rpdu-flow-hide-small') || '0');
+    return HIDE_SMALL_CHOICES.some(([p]) => p === v) ? v : 0;
+  } catch { return 0; }
+})();
+
+export function setHideSmall(percent: number) {
+  hideSmallPercent = percent;
+  try { localStorage.setItem('rpdu-flow-hide-small', String(percent)); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading under the chosen share of the total when nothing downstream of them reaches it
+/// either, and say how many went.
+///
+/// The total is what enters the diagram: the sum of the nodes nothing feeds. The rules are the ones "Hide
+/// empty" keeps. A node with no data is left alone: it is a gap in the model, not a small reading. A small
+/// node above a large one stays, so what it feeds is never cut off from its supply. Signs are ignored:
+/// 40 W exported is as large as 40 W drawn.
+export function applyHideSmallPref(nodes: any[], links: any[], percent = hideSmallPercent): { nodes: any[]; links: any[]; hidden: number } {
+  if (!(percent > 0)) return { nodes, links, hidden: 0 };
+
+  const byId = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
+  const out = new Map<string, string[]>();
+  const fed = new Set<string>();
+  links.forEach((l: any) => { out.set(l.source, [...(out.get(l.source) || []), l.target]); fed.add(l.target); });
+
+  const size = (n: any) => typeof n?.value === 'number' ? Math.abs(n.value) : null;
+  const roots = nodes.filter((n: any) => !fed.has(n.id) && size(n) != null);
+  const total = roots.length ? roots.reduce((sum: number, n: any) => sum + size(n)!, 0)
+    : Math.max(0, ...nodes.map((n: any) => size(n) ?? 0));
+  if (!(total > 0)) return { nodes, links, hidden: 0 };
+  const floor = total * percent / 100;
+  const large = (n: any) => size(n) == null || size(n)! >= floor;
+
+  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
+  const feedsLarge = new Map<string, boolean>();
+  const walking = new Set<string>();
+  const reaches = (id: string): boolean => {
+    if (feedsLarge.has(id)) return feedsLarge.get(id)!;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && size(n) != null && size(n)! >= floor) || reaches(t);
+    });
+    walking.delete(id);
+    feedsLarge.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id: string) => byId.has(id) && (large(byId.get(id)) || reaches(id));
+  const kept = nodes.filter((n: any) => keep(n.id));
+  return {
+    nodes: kept,
+    links: links.filter((l: any) => keep(l.source) && keep(l.target)),
+    hidden: nodes.length - kept.length,
+  };
+}
+
+/// The "Hide small" view picker. Per-viewer, like the other switches.
+export function hideSmallSelect(onChange: () => void): HTMLElement {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'Hide branches carrying less than this share of everything entering the diagram — loads using next '
+      + 'to nothing. A small node that feeds a larger one stays, and a node with no data is never hidden by '
+      + 'this. How many were hidden is shown beside the node count. A view setting only; no total changes.',
+  });
+  const sel: any = el('select', { style: { width: 'auto' } });
+  HIDE_SMALL_CHOICES.forEach(([p, label]) => sel.appendChild(el('option', { value: String(p), text: label })));
+  sel.value = String(hideSmallPercent);
+  sel.onchange = () => { setHideSmall(Number(sel.value) || 0); onChange(); };
+  lbl.append(document.createTextNode('Hide small'), sel);
+  return lbl;
+}
+
 /// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
 /// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
 export let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
@@ -289,6 +370,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
     row.appendChild(hideEmptyToggle(onToggle));
+    row.appendChild(hideSmallSelect(onToggle));
     row.appendChild(hideNoDataToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));

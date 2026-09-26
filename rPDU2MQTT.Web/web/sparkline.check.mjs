@@ -27,9 +27,9 @@ const cfg = {
 const board = {
   ok: true, metric: 'realpower', units: 'W',
   nodes: [
-    { id: 'solar_a', label: 'Array A', kind: 'solar', value: 2300 },
-    { id: 'solar_b', label: 'Array B', kind: 'solar', value: 2300 },
-    { id: 'grid', label: 'Grid', kind: 'grid', value: 1200 },
+    { id: 'solar_a', label: 'Array A', kind: 'solar', balance: 'solar', value: 2300 },
+    { id: 'solar_b', label: 'Array B', kind: 'solar', balance: 'solar', value: 2300 },
+    { id: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', value: 1200 },
   ],
   links: [],
 };
@@ -70,9 +70,9 @@ const gridded = (root) => sparks(root).filter(s => query(s, 'line', true).some(l
 const withData = {
   ok: true, metric: 'realpower', units: 'W',
   series: [
-    { node: 'solar_a', label: 'Array A', kind: 'solar', values: [100, 400, 900, 1600, 2300] },
-    { node: 'solar_b', label: 'Array B', kind: 'solar', values: [110, 420, 880, 1580, 2300] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
+    { node: 'solar_a', label: 'Array A', kind: 'solar', balance: 'solar', values: [100, 400, 900, 1600, 2300] },
+    { node: 'solar_b', label: 'Array B', kind: 'solar', balance: 'solar', values: [110, 420, 880, 1580, 2300] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
   ],
 };
 const drawn = await render(withData);
@@ -93,9 +93,9 @@ if (sparks(none).length)
 const gapped = {
   ok: true, metric: 'realpower', units: 'W',
   series: [
-    { node: 'solar_a', label: 'Array A', kind: 'solar', values: [100, 400, null, 1600, 2300] },
-    { node: 'solar_b', label: 'Array B', kind: 'solar', values: [110, 420, null, 1580, 2300] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
+    { node: 'solar_a', label: 'Array A', kind: 'solar', balance: 'solar', values: [100, 400, null, 1600, 2300] },
+    { node: 'solar_b', label: 'Array B', kind: 'solar', balance: 'solar', values: [110, 420, null, 1580, 2300] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
   ],
 };
 const withGap = await render(gapped);
@@ -109,9 +109,9 @@ if (lines(solarSpark).length !== 2)
 const partial = {
   ok: true, metric: 'realpower', units: 'W',
   series: [
-    { node: 'solar_a', label: 'Array A', kind: 'solar', values: [100, 400, 900, 1600, 2300] },
-    { node: 'solar_b', label: 'Array B', kind: 'solar', values: [null, null, null, null, null] },
-    { node: 'grid', label: 'Grid', kind: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
+    { node: 'solar_a', label: 'Array A', kind: 'solar', balance: 'solar', values: [100, 400, 900, 1600, 2300] },
+    { node: 'solar_b', label: 'Array B', kind: 'solar', balance: 'solar', values: [null, null, null, null, null] },
+    { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [1800, 1600, 1400, 1300, 1200] },
   ],
 };
 const half = await render(partial);

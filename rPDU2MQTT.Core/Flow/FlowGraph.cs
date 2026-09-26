@@ -42,6 +42,10 @@ public sealed record FlowNode(
     /// by kind adds it once. Null when nothing else here holds it.</summary>
     public string? Within { get; init; } = Within;
 
+    /// <summary>The headline total this node counts toward — <c>solar</c>, <c>grid</c>, <c>battery</c> or
+    /// <c>home</c> — or null. See <see cref="EnergyBalance"/>; a page sums by this, never by kind.</summary>
+    public string? Balance { get; init; }
+
     /// <summary>A node the builder invented: a return lane (<c>…#in</c>) or unmetered remainder (<c>…#unmeasured</c>).</summary>
     public bool Synthetic => Id.Contains('#');
 

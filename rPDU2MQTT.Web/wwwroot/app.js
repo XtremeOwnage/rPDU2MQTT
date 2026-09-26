@@ -251,15 +251,28 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
 
-  /// Scale the diagram down until it fits the pane's width. Never scales UP: a small diagram is not
-  /// improved by being blown up to fill the pane.
-  const fit = () => {
+  /// The zoom that fits the diagram to the pane's width. Never above 1: a small diagram is not improved by
+  /// being blown up to fill the pane.
+  const fitZoom = () => {
     const w = width();
-    if (!w || !baseW) return;
-    const next = Math.min(1, Math.max(min, (w - 6) / baseW));
-    if (Math.abs(next - z) < 0.005) return;
-    z = next; apply(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+    return !w || !baseW ? z : Math.min(1, Math.max(min, (w - 6) / baseW));
   };
+
+  /// Scale the diagram down until it fits the pane's width, and go back to its top-left corner — what the
+  /// Fit button asks for.
+  const fit = () => {
+    const next = fitZoom();
+    if (Math.abs(next - z) < 0.005) return;
+    z = next; apply(); movedAt = Date.now(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
+  };
+
+  // When the reader last touched the pane: a pointer down, or a scroll (a swipe carries on scrolling after
+  // the finger lifts). A redraw in the middle of either replaces the pane under the gesture and throws the
+  // reader back to where the old one started (#497).
+  let touchedAt = 0, movedAt = 0;
+  const touched = () => { touchedAt = Date.now(); };
+  // A scroll this code made itself — putting the view back after a redraw — is not the reader moving.
+  const onScroll = () => { if (Date.now() - movedAt > 150) touched(); };
 
   /// Zoom about a point given in client coordinates, keeping whatever is under it still.
   const zoomAbout = (clientX        , clientY        , factor        ) => {
@@ -301,6 +314,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   };
 
   const onPointerDown = (e     ) => {
+    touched();
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2) pinchFrom = spread();
@@ -316,7 +330,9 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     zoomAbout(m.x, m.y, now / pinchFrom);
     pinchFrom = now;
   };
-  const forget = (e     ) => { pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  const forget = (e     ) => { touched(); pts.delete(e.pointerId); if (pts.size < 2) pinchFrom = 0; };
+  scroll.addEventListener('scroll', onScroll, { passive: true });
+  cleanups.push(() => scroll.removeEventListener('scroll', onScroll));
 
   scroll.addEventListener('pointerdown', onPointerDown);
   scroll.addEventListener('pointermove', onPointerMove, { passive: false });
@@ -365,10 +381,18 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
   if (width() && width() < baseW) fit();
 
-  // Follow a rotation or a pane resize, unless the reader has since set their own zoom.
+  // Follow a rotation or a pane resize, unless the reader has since set their own zoom. Only a change of
+  // width counts: an observer reports once as soon as it is attached, and re-fitting on that report sent the
+  // reader back to the top-left corner on every live redraw whose labels came out a few pixels wider.
   let ro      = null;
+  let seenW = width();
   try {
-    ro = new (globalThis       ).ResizeObserver(() => { if (!chosen) fit(); });
+    ro = new (globalThis       ).ResizeObserver(() => {
+      const w = width();
+      if (!w || Math.abs(w - seenW) < 1) return;
+      seenW = w;
+      if (!chosen) keepPlace(fitZoom());
+    });
     ro.observe(scroll);
     cleanups.push(() => ro.disconnect());
   } catch { /* no ResizeObserver: the fit on open is what matters */ }
@@ -386,16 +410,28 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
     const { x, y } = span();
     return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
   };
-  /// Put a view back after a redraw. Nothing is re-fitted under it: the reader is where they left off.
-  (detach       ).setView = (v     ) => {
-    if (!v || !(v.z > 0)) return;
-    z = Math.min(max, Math.max(min, v.z));
-    chosen = !!v.chosen;
+  /// Change the zoom and stay over the same part of the diagram, by where the pane is as a share of it.
+  const keepPlace = (next        , at                                ) => {
+    const before = span();
+    const left = at ? at.left : before.x ? scroll.scrollLeft / before.x : 0;
+    const top = at ? at.top : before.y ? scroll.scrollTop / before.y : 0;
+    z = Math.min(max, Math.max(min, next));
     apply();
     const { x, y } = span();
-    scroll.scrollLeft = (v.left || 0) * x;
-    scroll.scrollTop = (v.top || 0) * y;
+    movedAt = Date.now();
+    scroll.scrollLeft = left * x;
+    scroll.scrollTop = top * y;
   };
+
+  /// Put a view back after a redraw: the reader is where they left off. A zoom they set is kept as it was;
+  /// one that was only ever the fit is the fit of the new drawing, which may be a few pixels wider.
+  (detach       ).setView = (v     ) => {
+    if (!v || !(v.z > 0)) return;
+    chosen = !!v.chosen;
+    keepPlace(chosen ? v.z : fitZoom(), { left: v.left || 0, top: v.top || 0 });
+  };
+  /// Is the reader in the middle of moving the pane — a finger or button down, or a swipe still coasting?
+  (detach       ).busy = (quietMs = 800) => pts.size > 0 || Date.now() - touchedAt < quietMs;
   /// Zoom from a button rather than a gesture: about the middle of the pane, which is what someone looking
   /// at the pane is looking at.
   (detach       ).zoomBy = (factor        ) => {
@@ -2096,8 +2132,39 @@ const NODEPOS                                           = {
   solar: { x: 220, y: 46 }, grid: { x: 66, y: 150 }, battery: { x: 374, y: 150 }, home: { x: 220, y: 254 },
 };
 
-/// Draw the arms into `target`, replacing whatever was there. `onOpen`, when given, makes a node clickable.
+/// How an arm's dots run: which way, how fast, how many. Rebuilt only when this changes, so a refresh with
+/// the same flow leaves the dots where they are instead of restarting them.
+const motionOf = (a         ) => {
+  const mag = Math.abs(a.flow ?? 0);
+  if (a.flow == null || mag <= 1) return 'still';
+  const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
+  const kw = mag / 1000;
+  const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
+  const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
+  // Rounded, so the ordinary jitter of a live reading does not restart the animation every refresh.
+  return `${toHub ? 'in' : 'out'}|${(Math.round(dur * 4) / 4).toFixed(2)}|${count}`;
+};
+
+/// Draw the arms into `target`. A refresh of the same arms updates the figures in place: the diagram is
+/// not replaced, so it neither flashes nor restarts its animation. `onOpen`, when given, makes a node clickable.
 function drawEnergyFlow(target     , arms           , onOpen                                     ) {
+    const shape = arms.map(a => a.key + ':' + (a.ids || []).join(',')).join(';');
+    const existing = target.firstChild;
+    if (existing && existing.dataset?.shape === shape) {
+      arms.forEach(a => {
+        const g = existing.querySelector?.(`[data-arm="${a.key}"]`);
+        if (!g) return;
+        const val = g.querySelector?.('.energy-node-val');
+        if (val && val.textContent !== a.text) val.textContent = a.text;
+        const live = a.flow != null && Math.abs(a.flow) > 1;
+        g.classList[live ? 'add' : 'remove']('live');
+        const dots = existing.querySelector?.(`[data-dots="${a.key}"]`);
+        const motion = motionOf(a);
+        if (dots && dots.dataset.motion !== motion) drawDots(dots, a, motion);
+      });
+      return;
+    }
+
     target.innerHTML = '';
     // Frame only the arms that exist.
     const ys = arms.map(a => NODEPOS[a.key].y);
@@ -2107,31 +2174,24 @@ function drawEnergyFlow(target     , arms           , onOpen                    
       viewBox: `12 ${y0} 416 ${y1 - y0}`,
       width: '100%', preserveAspectRatio: 'xMidYMid meet', class: 'energy-flow-svg',
     });
-    const lines = svgEl('g', {}); const dots = svgEl('g', {}); const nodes = svgEl('g', {});
-    svg.append(lines, dots, nodes);
+    svg.dataset.shape = shape;
+    const lines = svgEl('g', {}); const dotLayer = svgEl('g', {}); const nodes = svgEl('g', {});
+    svg.append(lines, dotLayer, nodes);
 
     arms.forEach(a => {
       const p = NODEPOS[a.key];
       // Base connector (always visible, dim) between the node and the hub.
       lines.appendChild(svgEl('line', { x1: p.x, y1: p.y, x2: HUB.x, y2: HUB.y, class: 'energy-arm' }));
 
-      // Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node). Home only ever consumes.
-      const toHub = a.key === 'home' ? false : (a.flow ?? 0) >= 0;
-      const mag = Math.abs(a.flow ?? 0);
-      if (a.flow != null && mag > 1) {
-        const [sx, sy, ex, ey] = toHub ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
-        const kw = mag / 1000;
-        const dur = Math.max(2.2, 6 - Math.min(3.5, kw * 0.9));       // more power → faster
-        const count = Math.min(5, Math.max(2, Math.round(1 + kw)));    // …and denser
-        for (let i = 0; i < count; i++) {
-          const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
-          dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
-          dots.appendChild(dot);
-        }
-      }
+      const dots = svgEl('g', {});
+      dots.dataset.dots = a.key;
+      drawDots(dots, a, motionOf(a));
+      dotLayer.appendChild(dots);
 
       // Node: a coloured ring with its icon, a label and the live figure.
+      const mag = Math.abs(a.flow ?? 0);
       const g = svgEl('g', { class: 'energy-node' + (a.flow != null && mag > 1 ? ' live' : '') });
+      g.dataset.arm = a.key;
       g.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 26, class: 'energy-node-ring', style: `stroke:${a.color}` }));
       const icon = svgEl('text', { x: p.x, y: p.y + 1, class: 'energy-node-icon' }); icon.textContent = a.icon; g.appendChild(icon);
       const lab = svgEl('text', { x: p.x, y: p.y + 42, class: 'energy-node-label' }); lab.textContent = a.label; g.appendChild(lab);
@@ -2147,57 +2207,97 @@ function drawEnergyFlow(target     , arms           , onOpen                    
     target.appendChild(svg);
   }
 
+/// The dots travelling one arm. Direction: >0 supplies the hub (node→hub); <0 draws from it (hub→node).
+/// Home only ever consumes.
+function drawDots(group     , a         , motion        ) {
+  group.innerHTML = '';
+  group.dataset.motion = motion;
+  if (motion === 'still') return;
+  const [dir, durS, countS] = motion.split('|');
+  const dur = Number(durS), count = Number(countS);
+  const p = NODEPOS[a.key];
+  const [sx, sy, ex, ey] = dir === 'in' ? [p.x, p.y, HUB.x, HUB.y] : [HUB.x, HUB.y, p.x, p.y];
+  for (let i = 0; i < count; i++) {
+    const dot = svgEl('circle', { r: 3.4, fill: a.color, class: 'energy-dot' });
+    dot.appendChild(svgEl('animateMotion', { dur: `${dur}s`, repeatCount: 'indefinite', begin: `-${(dur / count) * i}s`, path: `M${sx},${sy} L${ex},${ey}` }));
+    group.appendChild(dot);
+  }
+}
+
 // ── flow-banners.ts ─────────────────────────────────────────────
-// The banners above the flow chart: sources the bridge is withholding.
+// The banners above the flow chart: sources the bridge is withholding, and figures their own flows contradict.
+
+/// Which banners the reader has opened. Kept across the chart's live redraws, which rebuild them every few
+/// seconds; not across a reload, where each starts folded again.
+const opened = new Set        ();
+
+/// A banner folded to its one-line headline. Someone opening the Flow page is there for the diagram: the
+/// explanation took half a phone's screen on every visit, with no way to put it away, while the headline
+/// alone says what is wrong and that there is more to read.
+function foldable(key        , headline        , body               )              {
+  const box = el('div', { class: 'flow-contradiction' });
+  box.dataset.banner = key;
+  const inner = el('div', { class: 'flow-banner-body' });
+  body.forEach(b => inner.appendChild(b));
+  const toggle = el('button', { class: 'flow-banner-toggle', type: 'button' });
+  const set = (open         ) => {
+    inner.hidden = !open;
+    toggle.textContent = open ? 'Hide' : 'Show';
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    box.classList.toggle('is-open', open);
+  };
+  toggle.onclick = () => {
+    const open = inner.hidden;
+    if (open) opened.add(key); else opened.delete(key);
+    set(open);
+  };
+  box.appendChild(el('div', { class: 'flow-banner-head' }, el('strong', { text: headline }), toggle));
+  box.appendChild(inner);
+  set(opened.has(key));
+  return box;
+}
 
 /// The banner naming every binding the bridge is dropping, and why.
 function withheldBanner(sources       )              {
-  const box = el('div', { class: 'flow-contradiction' });
-  box.appendChild(el('strong', {
-    text: sources.length === 1
-      ? '1 source is being withheld'
-      : `${sources.length} sources are being withheld`,
-  }));
-  box.appendChild(el('div', {
+  const parts                = [el('div', {
     class: 'desc',
     style: { margin: '2px 0 6px' },
     text: 'These bindings are reporting, but what they report can be shown to be wrong, so it is not being '
         + 'used. The nodes below show no data for them rather than a figure that is not what it claims.',
-  }));
+  })];
   sources.forEach((w     ) => {
     const row = el('div', { class: 'nh-warn', style: { margin: '3px 0' } });
     row.appendChild(el('strong', { text: `${w.node} · ${w.source}: ` }));
     row.appendChild(el('span', { text: w.reason || '' }));
-    box.appendChild(row);
+    parts.push(row);
   });
-  return box;
+  return foldable('withheld', sources.length === 1
+    ? '1 source is being withheld'
+    : `${sources.length} sources are being withheld`, parts);
 }
 
 /// The banner naming every node whose figure its own flows contradict, drawn above the chart.
 function contradictionBanner(items                                                , onFocus                      )              {
-  const box = el('div', { class: 'flow-contradiction' });
   const n = items.length;
-  box.appendChild(el('strong', {
-    text: n === 1
-      ? '1 node’s figure is contradicted by its own flows'
-      : `${n} nodes’ figures are contradicted by their own flows`,
-  }));
-  box.appendChild(el('div', {
-    class: 'desc',
-    style: { margin: '2px 0 6px' },
-    text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
-        + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
-        + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
-        + 'suspect until the gap is explained.',
-  }));
   const row = el('div', { class: 'ld-toolbar', style: { gap: '6px', flexWrap: 'wrap' } });
   items.forEach(it => {
     const b = btn(`${it.label} · ${Math.round(it.share * 100)}% unaccounted`);
     b.onclick = () => onFocus(it.id);
     row.appendChild(b);
   });
-  box.appendChild(row);
-  return box;
+  return foldable('contradicted', n === 1
+    ? '1 node’s figure is contradicted by its own flows'
+    : `${n} nodes’ figures are contradicted by their own flows`, [
+    el('div', {
+      class: 'desc',
+      style: { margin: '2px 0 6px' },
+      text: 'More than a quarter of what passes through them is unaccounted for — too much to be rounding or '
+          + 'sampling skew. Usually a source scaled wrongly, a sensor measuring one leg of the node, or a '
+          + 'counter that is not the kind it was configured as. The readings are still shown; treat them as '
+          + 'suspect until the gap is explained.',
+    }),
+    row,
+  ]);
 }
 
 /// What fraction of a node's throughput its own flows cannot account for, or null when there is no gap.
@@ -2612,6 +2712,87 @@ function applyHideEmptyPref(nodes       , links       )                         
   };
 }
 
+/// Hide the branches carrying next to nothing (#497): a share of the diagram's total, below which a branch is
+/// hidden. Off (0) by default, and per-viewer like the other switches. A share rather than watts, so it
+/// means the same on a power, current or energy view and on a small house or a rack.
+const HIDE_SMALL_CHOICES                     = [[0, 'Off'], [0.5, 'under 0.5%'], [1, 'under 1%'], [2, 'under 2%'], [5, 'under 5%']];
+let hideSmallPercent = (() => {
+  try {
+    const v = Number(localStorage.getItem('rpdu-flow-hide-small') || '0');
+    return HIDE_SMALL_CHOICES.some(([p]) => p === v) ? v : 0;
+  } catch { return 0; }
+})();
+
+function setHideSmall(percent        ) {
+  hideSmallPercent = percent;
+  try { localStorage.setItem('rpdu-flow-hide-small', String(percent)); } catch { /* private mode: this session only */ }
+}
+
+/// Drop nodes reading under the chosen share of the total when nothing downstream of them reaches it
+/// either, and say how many went.
+///
+/// The total is what enters the diagram: the sum of the nodes nothing feeds. The rules are the ones "Hide
+/// empty" keeps. A node with no data is left alone: it is a gap in the model, not a small reading. A small
+/// node above a large one stays, so what it feeds is never cut off from its supply. Signs are ignored:
+/// 40 W exported is as large as 40 W drawn.
+function applyHideSmallPref(nodes       , links       , percent = hideSmallPercent)                                                 {
+  if (!(percent > 0)) return { nodes, links, hidden: 0 };
+
+  const byId = new Map             (nodes.map((n     ) => [n.id, n]));
+  const out = new Map                  ();
+  const fed = new Set        ();
+  links.forEach((l     ) => { out.set(l.source, [...(out.get(l.source) || []), l.target]); fed.add(l.target); });
+
+  const size = (n     ) => typeof n?.value === 'number' ? Math.abs(n.value) : null;
+  const roots = nodes.filter((n     ) => !fed.has(n.id) && size(n) != null);
+  const total = roots.length ? roots.reduce((sum        , n     ) => sum + size(n) , 0)
+    : Math.max(0, ...nodes.map((n     ) => size(n) ?? 0));
+  if (!(total > 0)) return { nodes, links, hidden: 0 };
+  const floor = total * percent / 100;
+  const large = (n     ) => size(n) == null || size(n)  >= floor;
+
+  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
+  const feedsLarge = new Map                 ();
+  const walking = new Set        ();
+  const reaches = (id        )          => {
+    if (feedsLarge.has(id)) return feedsLarge.get(id) ;
+    if (walking.has(id)) return false;
+    walking.add(id);
+    const answer = (out.get(id) || []).some(t => {
+      const n = byId.get(t);
+      return (n && size(n) != null && size(n)  >= floor) || reaches(t);
+    });
+    walking.delete(id);
+    feedsLarge.set(id, answer);
+    return answer;
+  };
+
+  const keep = (id        ) => byId.has(id) && (large(byId.get(id)) || reaches(id));
+  const kept = nodes.filter((n     ) => keep(n.id));
+  return {
+    nodes: kept,
+    links: links.filter((l     ) => keep(l.source) && keep(l.target)),
+    hidden: nodes.length - kept.length,
+  };
+}
+
+/// The "Hide small" view picker. Per-viewer, like the other switches.
+function hideSmallSelect(onChange            )              {
+  const lbl = el('label', {
+    class: 'desc',
+    style: { margin: '0', display: 'inline-flex', alignItems: 'center', gap: '4px' },
+    title: 'Hide branches carrying less than this share of everything entering the diagram — loads using next '
+      + 'to nothing. A small node that feeds a larger one stays, and a node with no data is never hidden by '
+      + 'this. How many were hidden is shown beside the node count. A view setting only; no total changes.',
+  });
+  const sel      = el('select', { style: { width: 'auto' } });
+  HIDE_SMALL_CHOICES.forEach(([p, label]) => sel.appendChild(el('option', { value: String(p), text: label })));
+  sel.value = String(hideSmallPercent);
+  sel.onchange = () => { setHideSmall(Number(sel.value) || 0); onChange(); };
+  lbl.append(document.createTextNode('Hide small'), sel);
+  return lbl;
+}
+
 /// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
 /// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
 let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
@@ -2738,6 +2919,7 @@ function groupToggles(onToggle            , drawn = true)                     {
   // The view switches are not about groups and must not disappear with them.
   if (drawn) {
     row.appendChild(hideEmptyToggle(onToggle));
+    row.appendChild(hideSmallSelect(onToggle));
     row.appendChild(hideNoDataToggle(onToggle));
     row.appendChild(unmeasuredToggle(onToggle));
     row.appendChild(animateToggle(onToggle));
@@ -5003,7 +5185,9 @@ function addFlowSection(nav     , sections     ) {
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
-    const emptied = applyHideEmptyPref(shown.nodes, shown.links);
+    const zeroed = applyHideEmptyPref(shown.nodes, shown.links);
+    // ...and the ones carrying next to nothing, if a share is chosen (#497)...
+    const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     const controls = el('div', { class: 'flow-controls' });
@@ -5634,6 +5818,7 @@ function addFlowSection(nav     , sections     ) {
     const unknownCount = nodes.filter((n     ) => !known(n.id)).length;
     count.textContent = `${nodes.length} node(s) · ${links.length} link(s)`
       + (unknownCount ? ` · ${unknownCount} with no data` : '')
+      + (emptied.hidden ? ` · ${emptied.hidden} small hidden` : '')
       + (folded.hidden ? ` · ${folded.hidden} with no data hidden` : '');
     count.title = unknownCount
       ? 'Nothing measures these nodes, and no single path determines them. Bind a source, or mark a feeder "residual" to say where the remainder comes from — values are never invented for them.'
@@ -5689,7 +5874,9 @@ function addFlowSection(nav     , sections     ) {
     fitBtn.style.padding = '1px 8px';
     fitBtn.style.fontSize = '11px';
     hints.appendChild(fitBtn);
-    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    // One line each, and the stylesheet shows the one this device can do: a mouse cannot pinch.
+    hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+    hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
     // The new content carries its own height now, so stop holding the old one.
     wrap.style.minHeight = '';
@@ -5797,9 +5984,9 @@ function addFlowSection(nav     , sections     ) {
       ' Derive kWh from power for nodes that report only watts (an estimate — a real energy source always wins)'));
     body.appendChild(aggIntegrate);
 
-    // Three switches deliberately not gathered here: they sit on the diagram they change.
+    // The view switches are deliberately not gathered here: they sit on the diagram they change.
     body.appendChild(el('div', { class: 'desc', style: { marginTop: '14px' } },
-      'The “Hide empty”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
+      'The “Hide empty”, “Hide small”, “Unmeasured load” and “Animate flow” switches stay on the Flow page: they change '
       + 'what the diagram shows rather than what is configured, and they are per-browser — nothing here is '
       + 'saved by them.'));
   };
@@ -6094,9 +6281,26 @@ function addFlowSection(nav     , sections     ) {
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
+      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
+      // their finger. It is drawn once they have let go and it has stopped coasting.
+      if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);
     });
+
+  let stillTimer      = null;
+  const drawWhenStill = () => {
+    if (stillTimer) return;
+    stillTimer = setInterval(() => {
+      if (!heldGraph) { clearInterval(stillTimer); stillTimer = null; return; }
+      if (zoom?.busy?.() || menu.isOpen() || busyInSection(sec)) return;
+      clearInterval(stillTimer); stillTimer = null;
+      const held = heldGraph;
+      heldGraph = null;
+      lastGraph = held;
+      draw(held);
+    }, 300);
+  };
   metricSel.addEventListener('change', () => syncLive());
 
   link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
@@ -6111,11 +6315,14 @@ let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 function overlay(title        , onClose             )                                   {
-  const back = el('div', { style: { position: 'fixed', inset: '0', background: 'rgba(0,0,0,.55)', zIndex: '50', display: 'flex', alignItems: 'center', justifyContent: 'center' } });
+  const back = el('div', { class: 'sheet-backdrop' });
   // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
   // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
   // the screen actually has. Vertical scrolling only: the table below manages its own width.
-  const panel = el('div', { class: 'sheet-panel', style: { background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: '8px', padding: '14px', width: 'min(94vw, 1900px)', maxHeight: '86vh', overflowY: 'auto', overflowX: 'hidden' } });
+  // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
+  // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
+  // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
+  const panel = el('div', { class: 'sheet-panel' });
   const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
   head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
   const x = btn('Close');
@@ -6237,7 +6444,7 @@ function openTopicPicker(current        , onPick                         ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const load = async () => {
     const b = await fetchTopics(search.value.trim(), 100, filterIn.value.trim() || '#');
@@ -6305,7 +6512,7 @@ function openEmonCmsPicker(current        , onPick                     ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const draw = (feeds       ) => {
     const q = search.value.trim().toLowerCase();
@@ -6418,7 +6625,7 @@ function openModbusExplorer(src     , onPick            ) {
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'sheet-scroll' }, tbl));
 
   const pick = (register        , dataType        ) => {
     src.Register = register;
@@ -6494,6 +6701,9 @@ function openRenameDialog(node     , flow     , existingIds             , onRena
     const from = node.Id;
     node.Id = next;
     links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
+    // It keeps its place in the energy balance and in any group that holds it.
+    renameInBalance(flow, from, next);
+    (flow.Groups || []).forEach((g     ) => { g.Members = (g.Members || []).map((m        ) => m === from ? next : m); });
     // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
     Object.keys(parents).forEach(child => {
       if (parents[child] === from) parents[child] = next;
@@ -6523,7 +6733,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   // No frame and no header of its own: this renders into a modal panel that already carries the node's name.
   const box = el('div', { class: 'node-editor' });
 
-  const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' } });
+  // Laid out by class, so a phone can take it down to one column: two 150px columns of a label, a control
+  // and three lines of hint left each hint a word wide.
+  const grid = el('div', { class: 'node-editor-fields' });
 
   const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
   labIn.onchange = () => { node.Label = labIn.value.trim() || undefined; };
@@ -6534,6 +6746,17 @@ function renderNodeEditor(node     , links       , cand                  , reren
   kindSel.value = node.Kind || 'node';
   kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
   grid.appendChild(field('Kind', kindSel));
+
+  // What it counts toward is not what it is: stored in EnergyFlow.Balance, so the Balance page and this
+  // field are one setting and a node sits under one total at most.
+  const flowCfg = ensure(state.data, 'EnergyFlow', {});
+  const roleSel = el('select')                     ;
+  roleSel.appendChild(el('option', { value: '', text: 'Nothing' }));
+  BALANCE_ROLES.forEach(([role, , label]) => roleSel.appendChild(el('option', { value: role, text: label })));
+  roleSel.value = balanceRoleOf(flowCfg, node.Id);
+  roleSel.onchange = () => setBalanceRole(flowCfg, node.Id, roleSel.value);
+  grid.appendChild(field('Counts toward', roleSel,
+    'Site total this node is summed into (EnergyFlow.Balance).'));
 
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
@@ -7317,6 +7540,8 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
       for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
+      // A deleted node is no longer part of any total.
+      renameInBalance(flow, n.Id, null);
       if (editing.id === n.Id) editing.id = null;
       toast(`${n.Label || n.Id} deleted.`, true);
       rerender();
@@ -7326,7 +7551,9 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     body.appendChild(tr);
   });
   tbl.appendChild(body);
-  box.appendChild(tbl);
+  // Scrolls within itself: a table wider than a phone widened the whole page, so the page scrolled sideways
+  // and a dialog opened over it landed off to one side.
+  box.appendChild(el('div', { class: 'nodes-scroll' }, tbl));
 
   // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
   syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
@@ -7445,6 +7672,183 @@ function addGroupsSection(nav     , sections     ) {
 
   const load = async () => {
     // The flow graph names the nodes a group can hold, derived ones included.
+    let r     ;
+    try { r = await api(withInstance('/api/flow', instSel)); } catch { r = null; }
+    lastGraph = r?.body?.ok ? r.body : null;
+    render();
+  };
+  save.onclick = () => saveConfig(load);
+  link.onclick = () => { activate(link, sec); load(); };
+  return { link, sec };
+}
+
+// ── sections/balance.ts ─────────────────────────────────────────
+// The Balance: which nodes are the site's solar, grid, battery and home totals. Separate from a node's Kind,
+// because what a node is and what it counts toward are different questions — an inverter's reading is the
+// house load, and the MPPT strings a PV total is made of are solar without being added to it.
+
+/// The four totals, in the order the energy pages show them. Keys match EnergyFlow.Balance and the
+/// `balance` the server puts on every node.
+const BALANCE_ROLES                                     = [
+  ['solar', 'Solar', 'Solar', 'Sum of listed nodes. Out = production.'],
+  ['grid', 'Grid', 'Grid', 'Sum of listed nodes. Out = import, in = export.'],
+  ['battery', 'Battery', 'Battery', 'Sum of listed nodes. Out = discharge, in = charge.'],
+  ['home', 'Home', 'Home', 'Sum of listed nodes. Empty: solar + grid net + battery net.'],
+];
+
+const balanceOf = (flow     ) => ensure(flow, 'Balance', {});
+const listOf = (flow     , key        )           => ensure(balanceOf(flow), key, []);
+
+/// Has the configuration named any node? Without it the server totals nodes by kind.
+function balanceConfigured(flow     ) {
+  const b = flow?.Balance || {};
+  return BALANCE_ROLES.some(([, key]) => (b[key] || []).length > 0);
+}
+
+/// The total a node is listed under, or '' when none.
+function balanceRoleOf(flow     , id        ) {
+  const b = flow?.Balance || {};
+  const hit = BALANCE_ROLES.find(([, key]) => (b[key] || []).some((x        ) => x.toLowerCase() === id.toLowerCase()));
+  return hit ? hit[0] : '';
+}
+
+/// Put a node under one total (or none). A node in two totals would be counted in both, so it moves.
+function setBalanceRole(flow     , id        , role        ) {
+  BALANCE_ROLES.forEach(([r, key]) => {
+    const list = listOf(flow, key);
+    for (let i = list.length - 1; i >= 0; i--) if (list[i].toLowerCase() === id.toLowerCase()) list.splice(i, 1);
+    if (r === role) list.push(id);
+  });
+  refreshDirty();
+}
+
+/// A renamed node keeps its place in the balance; a deleted one leaves it.
+function renameInBalance(flow     , from        , to               ) {
+  const b = flow?.Balance;
+  if (!b) return;
+  BALANCE_ROLES.forEach(([, key]) => {
+    const list           = b[key] || [];
+    for (let i = list.length - 1; i >= 0; i--)
+      if (list[i] === from) { if (to) list[i] = to; else list.splice(i, 1); }
+  });
+}
+
+function addBalanceSection(nav     , sections     ) {
+  const link = navLink(nav, 'Balance', '⚖');
+  link.dataset.section = 'EnergyFlow';
+  const sec = el('div', { class: 'section' });
+  sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'Energy balance' }));
+  sec.appendChild(el('div', { class: 'desc' },
+    'Nodes summed into each site total. Used by Energy, Overview, Trends, self-sufficiency and the HA Energy '
+    + 'Dashboard. Unlisted nodes are not counted. Stored in EnergyFlow.Balance.'));
+
+  const instSel = instanceSelector(() => load());
+  const save = btn('Save', 'primary');
+  const status = el('span', { class: 'ld-count' });
+  const toolbar = el('div', { class: 'ld-toolbar' }, instSel.wrap, save, status);
+  sec.appendChild(toolbar);
+  const body = el('div');
+  sec.appendChild(body);
+
+  let lastGraph      = null;
+  // What gets used, not what supplies or meters a total: an appliance, a PDU or one of its outlets is
+  // never the site's solar, grid, battery or home figure, and there are dozens of them. Offered only when
+  // asked for, for the setup where one is.
+  const END_LOADS = ['load', 'outlet', 'pdu'];
+  let everyNode = false;
+
+  const render = () => {
+    const flow = ensure(state.data, 'EnergyFlow', {});
+    const cand = flowCandidates(lastGraph, ensure(flow, 'Nodes', []));
+    const graphNodes        = (lastGraph?.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
+    const valueOf = (id        ) => graphNodes.find(n => n.id.toLowerCase() === id.toLowerCase())?.value;
+    const units = lastGraph?.units || 'W';
+    const nm = (id        ) => cand.get(id)?.label || id;
+    const fmt = (v     ) => typeof v === 'number' ? `${formatNum(Math.round(v))} ${units}` : '—';
+    body.innerHTML = '';
+
+    const configured = balanceConfigured(flow);
+    status.textContent = configured ? '' : 'not set — totals follow each node’s kind';
+
+    // Until something is named, the pages total by kind. Say what that comes to, and offer it as the start.
+    if (!configured) {
+      const note = el('div', { class: 'balance-note' });
+      note.appendChild(el('div', { text: 'Not set. Totals fall back to node kind (load = Home), excluding nodes held by another node:' }));
+      const ul = el('ul');
+      BALANCE_ROLES.forEach(([role, , label]) => {
+        const ids = graphNodes.filter(n => n.balance === role).map(n => n.id);
+        ul.appendChild(el('li', { text: `${label}: ${ids.length ? ids.map(nm).join(', ') : 'nothing'}` }));
+      });
+      note.appendChild(ul);
+      const adopt = btn('Start from these', 'small');
+      adopt.title = 'Copy these into the lists. Not saved until Save.';
+      adopt.onclick = () => {
+        BALANCE_ROLES.forEach(([role]) => graphNodes.filter(n => n.balance === role).forEach(n => setBalanceRole(flow, n.id, role)));
+        render();
+      };
+      note.appendChild(adopt);
+      body.appendChild(note);
+    }
+
+    const listed = new Map                ();
+    BALANCE_ROLES.forEach(([role, key]) => listOf(flow, key).forEach(id => listed.set(id.toLowerCase(), role)));
+
+    BALANCE_ROLES.forEach(([role, key, label, hint]) => {
+      const list = listOf(flow, key);
+      const card = el('div', { class: 'balance-role' });
+      card.dataset.role = role;
+      const total = list.reduce((sum               , id) => {
+        const v = valueOf(id);
+        return typeof v === 'number' ? (sum ?? 0) + v : sum;
+      }, null);
+      card.appendChild(el('div', { class: 'balance-head' },
+        el('h3', { text: label }),
+        el('span', { class: 'balance-total', text: list.length ? `${fmt(total)} now` : '' })));
+      card.appendChild(el('div', { class: 'desc', text: hint }));
+
+      const chips = el('div', { class: 'balance-chips' });
+      list.forEach(id => {
+        const missing = !cand.has(id);
+        const chip = el('span', { class: 'balance-chip' + (missing ? ' is-missing' : '') });
+        chip.dataset.node = id;
+        chip.appendChild(el('span', { text: nm(id) }));
+        chip.appendChild(el('span', { class: 'balance-val', text: missing ? 'no such node' : fmt(valueOf(id)) }));
+        if (missing) chip.title = `No node “${id}” on the flow graph.`;
+        const x = el('button', { class: 'balance-x', text: '×', title: `Remove from ${label}` });
+        x.onclick = () => { setBalanceRole(flow, id, ''); render(); };
+        chip.appendChild(x);
+        chips.appendChild(chip);
+      });
+      if (!list.length) chips.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: role === 'home' ? 'Empty: derived.' : 'Empty.' }));
+      card.appendChild(chips);
+
+      // Add a node. One listed under another total moves here, since it cannot count toward both.
+      const pick = el('select', { style: { width: 'auto' } })                     ;
+      pick.appendChild(el('option', { value: '', text: `+ add a node to ${label}` }));
+      [...cand.keys()]
+        .filter(id => listed.get(id.toLowerCase()) !== role)
+        .filter(id => everyNode || !END_LOADS.includes(cand.get(id)?.kind || 'node'))
+        .sort((a, b) => nm(a).localeCompare(nm(b)))
+        .forEach(id => {
+          const elsewhere = listed.get(id.toLowerCase());
+          pick.appendChild(el('option', { value: id, text: nm(id) + (elsewhere ? ` (moves from ${elsewhere})` : '') }));
+        });
+      pick.onchange = () => { if (pick.value) { setBalanceRole(flow, pick.value, role); render(); } };
+      card.appendChild(pick);
+      body.appendChild(card);
+    });
+  };
+
+  // Beside the lists, not inside each: one switch for every picker on the page.
+  const everyToggle = el('label', { class: 'ld-inst', title: 'Pickers exclude kinds load, pdu and outlet unless checked.' });
+  const everyBox = el('input', { type: 'checkbox' })                    ;
+  everyBox.onchange = () => { everyNode = everyBox.checked; render(); };
+  everyToggle.append(everyBox, ' Include loads, PDUs, outlets');
+  toolbar.appendChild(everyToggle);
+
+  const load = async () => {
+    // The graph names every node that can be listed, the derived ones included, with what each reads now.
     let r     ;
     try { r = await api(withInstance('/api/flow', instSel)); } catch { r = null; }
     lastGraph = r?.body?.ok ? r.body : null;
@@ -8022,8 +8426,11 @@ function addTagsSection(nav     , sections     ) {
 function addEnergyOverviewSection(nav     , sections     ) {
   const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'Energy Overview' }));
-  sec.appendChild(el('div', { class: 'desc', text: 'Where your power is flowing right now, from the latest poll. Figures are summed from the nodes you tagged solar / battery / grid; anything unmeasured shows “—”, never a guess. Tag nodes and bind their sources on the Nodes tab.' }));
+  // One line of controls over the data: the page is opened for the figures, and a paragraph, a period row
+  // and a date picker above them pushed the tiles below the fold.
+  const head = el('div', { class: 'energy-head-row' });
+  head.appendChild(el('h2', { text: 'Energy' }));
+  sec.appendChild(head);
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');
@@ -8031,10 +8438,14 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const showSel = el('select', { style: { width: 'auto' } })                     ;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
   showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
+  // The day's energy by default; a viewer who picks power keeps power.
+  try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
-  bar.append(refresh, el('span', { class: 'desc', style: { margin: '0' }, text: 'Show:' }), showSel, instSel.wrap, status);
-  sec.appendChild(bar);
+  // The past — periods and a date — is one click away rather than two rows above every live view.
+  const historyBtn = btn('History ▾');
+  bar.append(showSel, instSel.wrap, historyBtn, refresh, status);
+  head.appendChild(bar);
   // As on the Flow page: a whole day is an energy question, a specific time is a power one.
   let hadDay = false;
   const hist = historyControl((what     ) => {
@@ -8055,15 +8466,27 @@ function addEnergyOverviewSection(nav     , sections     ) {
     hadDay = true;
     load();
   });
-  sec.appendChild(periods.row);
-  sec.appendChild(hist.row);
-  showSel.onchange = () => load();
+  const historyPanel = el('div', { class: 'energy-history' }, periods.row, hist.row);
+  sec.appendChild(historyPanel);
+  let historyOpen = false;
+  const syncHistory = () => {
+    // Open while a past view is showing, so what is being looked at is never hidden.
+    const open = historyOpen || !!hist.day();
+    historyPanel.hidden = !open;
+    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : open ? 'History ▴' : 'History ▾';
+    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
+    // No backend, no past to pick.
+    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
+  };
+  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
+  syncHistory();
+  showSel.onchange = () => { try { localStorage.setItem('rpdu-energy-show', showSel.value); } catch { /* this session only */ } load(); };
 
   // One column for the whole board.
   const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
   const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
-  const grid = el('div', { class: 'energy-grid' }); board.appendChild(grid);
-  const summary = el('div', { class: 'energy-summary' }); board.appendChild(summary);
+  const gridEl = el('div', { class: 'energy-grid' }); board.appendChild(gridEl);
+  const summaryEl = el('div', { class: 'energy-summary' }); board.appendChild(summaryEl);
 
   const fmtPower = (w               ) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
@@ -8159,7 +8582,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   /// The gauge for a node, or undefined when one would be a guess.
   const gaugeFor = (ids          , value               , units        ) => {
     const cfgNodes = (state.data?.EnergyFlow?.Nodes || [])         ;
-    // Several tagged nodes of one kind (three MPPTs, two arrays) sum into one tile, so their ceilings sum too.
+    // Several nodes in one total (two arrays, two inverters) sum into one tile, so their ceilings sum too.
     const maxes = ids.map(id => cfgNodes.find(n => n.Id === id)?.Max).filter((m     ) => typeof m === 'number' && m > 0);
     if (!maxes.length || value == null) return undefined;
     const max = maxes.reduce((a        , b        ) => a + b, 0);
@@ -8171,8 +8594,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     drawEnergyFlow(flowWrap, arms, (a, g) => openOnClick(g, a.ids , a.label));
 
   // Why is this tile empty?
-  const whyNoReading = (kind        ) => {
-    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n     ) => (n.Kind || '') === kind);
+  const whyNoReading = (ids          ) => {
+    const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n     ) => ids.includes(n.Id));
     if (!nodes.length) return 'no reading yet';
     const bound = nodes.flatMap((n     ) => n.Sources || []);
     if (!bound.length)
@@ -8185,7 +8608,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return bound.length > 1 ? `waiting on ${bound.length} sources` : `waiting on ${what}`;
   };
   // The hint under a tile: the direction when there's a value, the reason when there isn't.
-  const subOrWhy = (value               , kind        , whenKnown        ) => value == null ? whyNoReading(kind) : whenKnown;
+  const subOrWhy = (value               , ids          , whenKnown        ) => value == null ? whyNoReading(ids) : whenKnown;
 
   // Same question for the battery's state of charge.
   const whyNoSoc = (battIds          , liveInfo                     ) => {
@@ -8205,9 +8628,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return `no charge yet from ${what}`;
   };
 
-  // Sum a kind's out-direction (graph) values.
-  const sumKind = (nodes       , kind        ) => {
-    const ns = nodes.filter(n => (n.kind || 'node') === kind);
+  // Sum the out-direction (graph) values of the nodes a total is made of. Which those are is the server's
+  // call (the Balance, else each node's kind, once) — a return lane is left to the live reads below.
+  const sumRole = (nodes       , role        ) => {
+    const ns = nodes.filter(n => n.balance === role && !String(n.id || '').includes('#'));
     let sum = 0, known = false;
     ns.forEach(n => { if (typeof n.value === 'number') { sum += n.value; known = true; } });
     return { present: ns.length > 0, value: known ? sum : null };
@@ -8251,6 +8675,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
   };
 
   const loadBoard = async () => {
+    syncHistory();
+    // The board is emptied and refilled around several reads. While it is empty the page is shorter, and the
+    // browser clamps the scroll position to the shorter page: every live refresh threw the reader back up.
+    // Holding the height across the rebuild means the page never shrinks.
+    const held = board.offsetHeight || 0;
+    if (held) board.style.minHeight = held + 'px';
+    try { await fillBoard(); } finally { board.style.minHeight = ''; }
+  };
+
+  const fillBoard = async () => {
     // The whole board reads one metric (#371).
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
@@ -8262,27 +8696,31 @@ function addEnergyOverviewSection(nav     , sections     ) {
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     await loadTrend(metric);
-    grid.innerHTML = ''; summary.innerHTML = ''; flowWrap.innerHTML = '';
+    // Built off the page and swapped in whole at the end: emptying the tiles first left them blank for the
+    // length of the reads below, so every refresh flashed.
+    const grid = el('div'), summary = el('div');
+    const move = (from     , to     ) => { to.innerHTML = ''; [...from.children].forEach((c     ) => to.appendChild(c)); };
+    const swap = () => { move(grid, gridEl); move(summary, summaryEl); };
     if (!r.body || !r.body.ok) {
       // Say what actually went wrong.
       const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
+      flowWrap.innerHTML = '';
+      swap();
       status.textContent = ''; return;
     }
     // Derived lanes are for the diagram, not the totals.
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
-    // A tile sums every node of its kind, so a node another one here already counts — a group's member
-    // beside the group's own total — must be left out of it, or the same energy is counted twice (#491).
-    const ofKind = (kind        ) => nodes
-      .filter((n     ) => n.kind === kind && !(n.within && nodes.some((o     ) => o.id === n.within)))
-      .map((n     ) => n.id);
+    // A tile sums the nodes the server says make up its total: the Balance where one is configured, else
+    // every node of the kind that nothing else here already counts (#491).
+    const ofRole = (role        ) => nodes.filter((n     ) => n.balance === role).map((n     ) => n.id);
     // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
-    const battIds = ofKind('battery');
-    const gridIds = ofKind('grid');
-    const solarIds = ofKind('solar');
-    const loadIds = ofKind('load');
+    const battIds = ofRole('battery');
+    const gridIds = ofRole('grid');
+    const solarIds = ofRole('solar');
+    const loadIds = ofRole('home');
     const liveBy                         = {};
     // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo                      = {};
@@ -8320,10 +8758,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const fmt = (v               ) => isEnergy ? fmtEnergy(v, units) : fmtPower(v);
     const dial = (ids          , v               ) => isEnergy ? undefined : gaugeFor(ids, v, 'W');
 
-    const solar = sumKind(nodes, 'solar');
-    const batt = sumKind(nodes, 'battery');   // out = discharge
-    const gridK = sumKind(nodes, 'grid');     // out = import
-    const load_ = sumKind(nodes, 'load');
+    const solar = sumRole(nodes, 'solar');
+    const batt = sumRole(nodes, 'battery');   // out = discharge
+    const gridK = sumRole(nodes, 'grid');     // out = import
+    const load_ = sumRole(nodes, 'home');
     const battIn = sumIn(battIds);            // charge
     const gridIn = sumIn(gridIds);            // export
 
@@ -8366,7 +8804,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
         eUnits = er.body.units || 'kWh';
         // From the answer, not from what was asked for.
         eWindow = er.body.metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
-        const eSolar = sumKind(enodes, 'solar'), eBatt = sumKind(enodes, 'battery'), eGrid = sumKind(enodes, 'grid'), eLoad = sumKind(enodes, 'load');
+        const eSolar = sumRole(enodes, 'solar'), eBatt = sumRole(enodes, 'battery'), eGrid = sumRole(enodes, 'grid'), eLoad = sumRole(enodes, 'home');
         // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy                         = {};
         const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy_d#in' }));
@@ -8395,17 +8833,18 @@ function addEnergyOverviewSection(nav     , sections     ) {
     if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
     if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
-    if (arms.length) drawFlow(arms);
+    // Updated in place, so the dots keep moving across a refresh.
+    if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';
 
     // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
-        subOrWhy(solar.value, 'solar', solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
+        subOrWhy(solar.value, solarIds, solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
         dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units), { ids: solarIds, label: 'Solar' }));
 
     // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
-      const dir = subOrWhy(battNet, 'battery', battNet  > 1 ? 'discharging' : battNet  < -1 ? 'charging' : 'idle');
+      const dir = subOrWhy(battNet, battIds, battNet  > 1 ? 'discharging' : battNet  < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
       // SoC always leads the sub-line, so the state-of-charge slot is always shown.
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
@@ -8423,7 +8862,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
     if (gridK.present || gridIds.length) {
-      const sub = subOrWhy(gridNet, 'grid', gridNet  > 1 ? 'importing' : gridNet  < -1 ? 'exporting' : 'idle');
+      const sub = subOrWhy(gridNet, gridIds, gridNet  > 1 ? 'importing' : gridNet  < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
       // On energy the figure is the day's NET — import minus export, signed (#371).
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
@@ -8434,7 +8873,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     // Home load (computed above with the flow arms).
     if (home != null || load_.present)
-      grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading('load') : (homeSub || 'consuming'), '',
+      grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading(loadIds) : (homeSub || 'consuming'), '',
         dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
 
     // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
@@ -8453,7 +8892,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     }
 
     if (!grid.children.length)
-      grid.appendChild(el('div', { class: 'desc', text: 'Nothing tagged yet. On the Nodes tab, set a node’s Kind to solar, battery, or grid and bind a source — it’ll show here.' }));
+      grid.appendChild(el('div', { class: 'desc', text: 'Nothing counts toward solar, battery, grid or home yet. Pick the nodes on the Balance page (or set a node’s Kind to solar, battery or grid) and bind a source — it’ll show here.' }));
+    swap();
     status.textContent = `updated ${new Date().toLocaleTimeString()}`;
   };
 
@@ -8506,9 +8946,11 @@ function addOverviewSection(nav     , sections     ) {
     : Math.abs(w) >= 1000 ? `${formatNum(Math.round(w / 100) / 10)} kW` : `${formatNum(Math.round(w))} W`;
   const fmtKwh = (v               ) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} kWh`;
 
-  const idsOfKind = (nodes       , kind        ) => nodes.filter(n => n.kind === kind && !n.id.includes('#')).map(n => n.id);
-  const sumOfKind = (nodes       , kind        ) => {
-    const vals = nodes.filter(n => n.kind === kind && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
+  // The nodes a total is made of, as the server decided: the Balance where one is set, else each node's kind,
+  // counted once. Summing by kind here counted a PV total and its MPPT strings both.
+  const idsOfRole = (nodes       , role        ) => nodes.filter(n => n.balance === role && !n.id.includes('#')).map(n => n.id);
+  const sumOfRole = (nodes       , role        ) => {
+    const vals = nodes.filter(n => n.balance === role && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
     return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
   };
 
@@ -8648,17 +9090,17 @@ function addOverviewSection(nav     , sections     ) {
       for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
       return total                 ;
     });
-    const ofKind = (kind        , returns = false) => (body.series || [])
-      .filter((s     ) => s.kind === kind && String(s.node).endsWith('#in') === returns);
+    const ofRole = (role        , returns = false) => (body.series || [])
+      .filter((s     ) => s.balance === role && String(s.node).endsWith('#in') === returns);
 
     /// What the house drew at each step: the same balance as the figure above, done per reading rather
     /// than once. A step missing any part of that balance is a gap — filling it with a zero would draw a
     /// house that stopped using power.
     const homeValues = () => {
-      const metered = ofKind('load');
+      const metered = ofRole('home');
       if (metered.length) return sumSeries(metered);
       const net = (kind        ) => {
-        const out = sumSeries(ofKind(kind)), back = sumSeries(ofKind(kind, true));
+        const out = sumSeries(ofRole(kind)), back = sumSeries(ofRole(kind, true));
         if (!out.length && !back.length) return [];
         return Array.from({ length: steps }, (_, i) => {
           const o = out[i], b = back[i];
@@ -8666,7 +9108,7 @@ function addOverviewSection(nav     , sections     ) {
           return (o ?? 0) - (b ?? 0);
         });
       };
-      const solar = sumSeries(ofKind('solar')), grid = net('grid'), batt = net('battery');
+      const solar = sumSeries(ofRole('solar')), grid = net('grid'), batt = net('battery');
       const parts = [solar, grid, batt].filter(p => p.some(v => v != null));
       if (!parts.length) return [];
       return Array.from({ length: steps }, (_, i) => {
@@ -8677,7 +9119,7 @@ function addOverviewSection(nav     , sections     ) {
     };
 
     const strip = ([kind, label, icon]                          ) => {
-      const values = kind === 'home' ? homeValues() : sumSeries(ofKind(kind));
+      const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
       // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
       // its own says "something happened" without saying what.
@@ -8711,17 +9153,17 @@ function addOverviewSection(nav     , sections     ) {
 
   const drawNow = (power     , energy     , live                        , liveInfo                     ) => {
     const nodes = (power?.nodes || [])         ;
-    const solarIds = idsOfKind(nodes, 'solar'), gridIds = idsOfKind(nodes, 'grid'), battIds = idsOfKind(nodes, 'battery');
-    const solarW = sumOfKind(nodes, 'solar');
-    const gridOut = sumOfKind(nodes, 'grid');
+    const solarIds = idsOfRole(nodes, 'solar'), gridIds = idsOfRole(nodes, 'grid'), battIds = idsOfRole(nodes, 'battery');
+    const solarW = sumOfRole(nodes, 'solar');
+    const gridOut = sumOfRole(nodes, 'grid');
     const gridIn = sumKnown(gridIds.map(id => live[`${id}|realpower#in`]));
-    const battOut = sumOfKind(nodes, 'battery');
+    const battOut = sumOfRole(nodes, 'battery');
     const battIn = sumKnown(battIds.map(id => live[`${id}|realpower#in`]));
     // One signed figure per bidirectional node: out is positive, in is negative.
     const gridNet = gridOut == null && gridIn == null ? null : (gridOut || 0) - (gridIn || 0);
     const battNet = battOut == null && battIn == null ? null : (battOut || 0) - (battIn || 0);
     // A metered load node wins over the balance of sources; without one the home is what is left over.
-    const loadW = idsOfKind(nodes, 'load').length ? sumOfKind(nodes, 'load') : undefined;
+    const loadW = idsOfRole(nodes, 'home').length ? sumOfRole(nodes, 'home') : undefined;
     const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
 
     const arms            = [];
@@ -8751,14 +9193,14 @@ function addOverviewSection(nav     , sections     ) {
       todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
       return;
     }
-    const eSolar = sumOfKind(eNodes, 'solar');
-    const eGridOut = sumOfKind(eNodes, 'grid');
+    const eSolar = sumOfRole(eNodes, 'solar');
+    const eGridOut = sumOfRole(eNodes, 'grid');
     const eGridIn = sumKnown(gridIds.map(id => {
       const n = eNodes.find((x     ) => x.id === id + '#in');
       return typeof n?.value === 'number' ? n.value : undefined;
     }));
-    const eBattOut = sumOfKind(eNodes, 'battery');
-    const eLoad = idsOfKind(eNodes, 'load').length ? sumOfKind(eNodes, 'load') : undefined;
+    const eBattOut = sumOfRole(eNodes, 'battery');
+    const eLoad = idsOfRole(eNodes, 'home').length ? sumOfRole(eNodes, 'home') : undefined;
     const eHome = homeEnergy({
       solar: eSolar, battery: eBattOut,
       grid: eGridOut == null && eGridIn == null ? null : (eGridOut || 0) - (eGridIn || 0),
@@ -8784,7 +9226,7 @@ function addOverviewSection(nav     , sections     ) {
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || [])         ;
-      const battIds = idsOfKind(nodes, 'battery'), gridIds = idsOfKind(nodes, 'grid');
+      const battIds = idsOfRole(nodes, 'battery'), gridIds = idsOfRole(nodes, 'grid');
       const q = [
         ...[...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'realpower#in' })),
         ...battIds.map(id => ({ Node: id, Metric: 'soc' })),
@@ -10179,13 +10621,12 @@ function addTrendsSection(nav     , sections     ) {
       const partial                = body.partial || null;
       const all        = body.series || [];
       const sumOf = (list       ) => days.map((_, d) => sumKnown(list.map((s     ) => signed(s)[d])));
-      // What may be added together: a node another one here already counts — a group's member beside the
-      // group's own total, a sub-panel beneath its panel — would be the same energy twice (#491).
-      const countable = (list       ) => list.filter((s     ) => !s.within || !all.some((o     ) => o.node === s.within));
-      const ofKind = (kind        , want                      ) =>
-        countable(all.filter((s     ) => s.kind === kind && (!want || want(s))));
-      const byKind = (kind        ) => {
-        const members = ofKind(kind);
+      // The series a total is made of, as the server decided: the Balance where one is set, else each node
+      // of the kind that nothing else already counts — a PV total and its strings are one solar (#491).
+      const ofKind = (role        , want                      ) =>
+        all.filter((s     ) => s.balance === role && (!want || want(s)));
+      const byKind = (role        ) => {
+        const members = ofKind(role);
         return members.length ? sumOf(members) : null;
       };
       let drawn = 0;
@@ -10206,7 +10647,7 @@ function addTrendsSection(nav     , sections     ) {
       }
 
       // --- Self-sufficiency ---------------------------------------------------------------------------
-      const solar = byKind('solar'), batt = byKind('battery'), load = byKind('load');
+      const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
       // A share of energy over a period; instantaneous power is a different quantity.
       if (p.summable() && gridIn && (load || solar)) {
         const imported = sumOf(gridSupply);
@@ -10280,7 +10721,7 @@ function addTrendsSection(nav     , sections     ) {
         ['Net grid', netGrid],
       ];
       // The home: what it was measured as, else what the measured sources leave for it.
-      const loadKind = byKind('load');
+      const loadKind = byKind('home');
       columns[0][1] = days.map((_, d) => homeEnergy({
         ...(loadKind ? { load: loadKind[d] } : {}),
         ...(loadKind ? {} : {
@@ -15787,7 +16228,7 @@ function renderList(node     , arr       , path          ) {
 const NAV_GROUPS                                        = [
   // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   // The status board is a System page: it answers "is the bridge healthy", which is the second question.
@@ -16782,6 +17223,16 @@ async function checkUpdatesNow() {
 
 let saving = false;
 
+/// The page keeps the bar's height free at its foot, so the last thing on it can be scrolled up past the
+/// bar. On a phone the bar wraps to two or three rows and covered the bottom of every page — on the
+/// Balance page, the whole Home total, with no way to reach it but to save or discard first.
+function reserveForSaveBar() {
+  const bar      = document.getElementById('savebar');
+  const h = bar && !bar.classList.contains('is-hidden') ? Math.ceil(bar.offsetHeight || 0) : 0;
+  document.documentElement?.style?.setProperty?.('--savebar-h', h + 'px');
+}
+try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { /* no window: tests */ }
+
 function renderSaveBar() {
   const bar      = document.getElementById('savebar');
   const count      = document.getElementById('save-count');
@@ -16792,6 +17243,7 @@ function renderSaveBar() {
   const n = changes().length;
   bar.classList[n ? 'remove' : 'add']('is-hidden');
   if (count) count.textContent = n === 1 ? '1 unsaved change' : n + ' unsaved changes';
+  reserveForSaveBar();
   if (note) note.classList[configWritable ? 'add' : 'remove']('is-hidden');
   if (save) {
     save.disabled = saving || !configWritable;
