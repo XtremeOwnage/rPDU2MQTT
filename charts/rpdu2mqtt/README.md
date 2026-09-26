@@ -93,7 +93,9 @@ credentials:
   comes up as a *standby*: it serves the GUI and the API, mirrors the energy totals, and reports Ready once
   it is connected to the broker and can reach the lease. Only then is the old pod stopped. On SIGTERM the old
   pod writes its energy totals, lets go of the leader lease, and the standby takes it within a second and
-  starts polling, publishing, accumulating and writing history. Only the lease holder does any of that, so
+  starts polling, publishing, accumulating and writing history. The old pod then keeps answering the GUI and
+  API for 10 s (`RPDU2MQTT_SHUTDOWN_DRAIN_SECONDS`) with `/readyz` failing, so the gateway stops routing to
+  it before it closes its listeners; a new pod is not Ready until its GUI and API are listening. Only the lease holder does any of that, so
   at no point do two processes produce at once, and a pod killed without warning holds the lease for
   15 s at most (`RPDU2MQTT_LEADER_LEASE_SECONDS`). While the cache is unreachable nobody can prove they
   hold the lease, so nothing polls until it is back. The Status board's node card says which pod is

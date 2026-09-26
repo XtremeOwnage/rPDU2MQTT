@@ -424,6 +424,11 @@ public static class ServiceConfiguration
         if (ui && cfg.Gui.Enabled)
             services.AddHostedService<Services.Gui.GuiService>();
 
+        // Stopped before the web hosts: they keep answering while the gateway stops routing here. Only under a
+        // rolling update — with Recreate the replacement waits for this pod to be gone, so a drain is a gap.
+        if (leaderLease)
+            services.AddHostedService<Services.ShutdownDrainService>();
+
         // Last, so it is stopped first: on shutdown this process stops leading before anything else goes.
         if (leaderLease)
             services.AddHostedService(sp => new Services.LeaderLeaseService(

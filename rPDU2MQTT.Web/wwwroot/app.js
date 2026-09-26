@@ -8702,8 +8702,18 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const move = (from     , to     ) => { to.innerHTML = ''; [...from.children].forEach((c     ) => to.appendChild(c)); };
     const swap = () => { move(grid, gridEl); move(summary, summaryEl); };
     if (!r.body || !r.body.ok) {
+      // A gateway answering for a bridge that is restarting (502/503/504), or no answer at all, is a gap,
+      // not a verdict: keep the figures already on screen and say so beside them. Clearing the board for
+      // it turned every rolling update into a page of red text.
+      const transient = !r.status || r.status === 502 || r.status === 503 || r.status === 504;
+      if (transient && gridEl.children.length) {
+        status.textContent = `bridge not answering (${r.status || 'no response'}) — showing the last reading, retrying`;
+        return;
+      }
       // Say what actually went wrong.
-      const why = (r.body && r.body.message) || `the server answered ${r.status ?? '?'} with no explanation`;
+      const why = (r.body && r.body.message)
+        || (transient ? `the bridge is not answering (${r.status || 'no response'}) — it may be restarting; retrying`
+                      : `the server answered ${r.status ?? '?'} with no explanation`);
       grid.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: 'Could not load energy data — ' + why }));
       flowWrap.innerHTML = '';
       swap();

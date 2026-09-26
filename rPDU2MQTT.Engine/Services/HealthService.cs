@@ -24,12 +24,14 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
     private readonly Core.Integrations.IntegrationRegistry? integrations;
     private readonly Core.Integrations.IntegrationStatus? status;
     private readonly Core.LeaderState? leader;
+    private readonly IHostApplicationLifetime? lifetime;
     private WebApplication? app;
 
     public HealthService(Config cfg, IHiveMQClient mqtt, HealthState health,
         Core.Integrations.IntegrationRegistry? integrations = null, Core.Integrations.IntegrationStatus? status = null,
-        Core.LeaderState? leader = null)
+        Core.LeaderState? leader = null, IHostApplicationLifetime? lifetime = null)
     {
+        this.lifetime = lifetime;
         this.cfg = cfg;
         this.mqtt = mqtt;
         this.health = health;
@@ -105,7 +107,17 @@ public sealed class HealthService : IHostedService, IAsyncDisposable
     /// NOT ready, or <see langword="null"/> when ready.
     /// </summary>
     private string? NotReadyReason()
-        => NotReadyReason(mqtt.IsConnected(), health.LastPollUtc, leader, cfg.Primary.PollInterval, DateTime.UtcNow);
+    {
+        // Not ready until every service — the GUI and API listeners among them — has started: a pod marked
+        // Ready before its pages listen is sent requests it refuses. And not ready from SIGTERM on, so it is
+        // taken out of rotation while it drains (ShutdownDrainService).
+        if (lifetime is not null)
+        {
+            if (lifetime.ApplicationStopping.IsCancellationRequested) return "shutting down";
+            if (!lifetime.ApplicationStarted.IsCancellationRequested) return "starting";
+        }
+        return NotReadyReason(mqtt.IsConnected(), health.LastPollUtc, leader, cfg.Primary.PollInterval, DateTime.UtcNow);
+    }
 
     /// <summary>
     /// The readiness rule, on its own so it can be tested.

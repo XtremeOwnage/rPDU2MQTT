@@ -69,6 +69,11 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "rpdu2mqtt.serviceAccountName" $ }}
+      {{- if $r.lease }}
+      # Room for the drain after SIGTERM (10s of still answering while the gateway stops routing here) and
+      # an ordinary shutdown after it.
+      terminationGracePeriodSeconds: 45
+      {{- end }}
       {{- with $.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
