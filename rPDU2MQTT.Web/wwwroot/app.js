@@ -15853,6 +15853,20 @@ function wireHistoryProvider(sec     ) {
   const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
   sync();
   visibilitySyncs.push(sync);
+
+  // LocalPath left empty resolves at runtime — to the directory the deployment mounted, else one beside the
+  // program. The box is then blank on a page that is in fact writing somewhere, so say where.
+  const where = el('div', { class: 'desc feature-pointer' });
+  sec.appendChild(where);
+  api('/api/history/store').then((r     ) => {
+    const b = r?.body;
+    if (!b?.ok) { where.hidden = true; return; }
+    const size = b.bytes > 1024 * 1024 ? `${(b.bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b.bytes / 1024)} KB`;
+    where.textContent = `${b.recording ? 'Writing to' : 'Not writing; the store is'} ${b.path}`
+      + `${b.fromEnvironment ? ' (from RPDU2MQTT_HISTORY_DIRECTORY, because LocalPath is empty)' : ''}`
+      + ` — ${b.series} series, ${size}. Retention: `
+      + (b.tiers || []).map((t     ) => `${t.name} ${t.keepDays}d`).join(', ') + '.';
+  }).catch(() => { where.hidden = true; });
 }
 
 // A settings page for a capability that is switched off is a page of settings for something that is not
