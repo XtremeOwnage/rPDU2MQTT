@@ -913,6 +913,14 @@
     background: var(--panel); border: 1px solid var(--line); opacity: 0.92;
   }
   .flow-zoom button:hover { opacity: 1; }
+  /* The gesture line says what this device can do: pinching needs a touch screen, Ctrl + scroll a mouse. */
+  .flow-gestures .on-touch { display: none; }
+  /* A touch screen pinches and swipes, so the floating buttons only cover the diagram; Fit sits under it. */
+  @media (hover: none) and (pointer: coarse) {
+    .flow-zoom { display: none; }
+    .flow-gestures .on-touch { display: inline; }
+    .flow-gestures .on-mouse { display: none; }
+  }
 
   /* --- Overview: the landing page ------------------------------------------------------------------- */
   .ov-h3 { margin: 22px 0 8px; font-size: 15px; }

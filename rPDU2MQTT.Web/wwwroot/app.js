@@ -5810,7 +5810,9 @@ function addFlowSection(nav     , sections     ) {
     fitBtn.style.padding = '1px 8px';
     fitBtn.style.fontSize = '11px';
     hints.appendChild(fitBtn);
-    hints.appendChild(el('span', { text: 'Drag or swipe to pan · pinch to zoom · Ctrl/⌘ + scroll to zoom.' }));
+    // One line each, and the stylesheet shows the one this device can do: a mouse cannot pinch.
+    hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+    hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
     // The new content carries its own height now, so stop holding the old one.
     wrap.style.minHeight = '';

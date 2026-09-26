@@ -100,5 +100,15 @@ if (zoomD.busy()) fail('the redraw\'s own scroll holds the next redraw, so it wo
 if (!/zoom\?\.busy\?\.\(\)\) \{ heldGraph = body; drawWhenStill\(\)/.test(code))
   fail('the Flow page draws a live reading even while the reader is moving the diagram');
 
+// A touch screen gets no floating zoom buttons (it pinches, and Fit is under the diagram), and each device is
+// told only the gestures it has: a mouse cannot pinch, and a phone has no Ctrl key.
+const css = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
+const touch = /@media \(hover: none\) and \(pointer: coarse\)\s*\{([^}]*\}[^}]*\}[^}]*\}[^}]*)\}/.exec(css)?.[1] || '';
+if (!/\.flow-zoom\s*\{\s*display:\s*none/.test(touch)) fail('the floating zoom buttons still show on a touch screen');
+if (!/\.flow-gestures \.on-mouse\s*\{\s*display:\s*none/.test(touch)) fail('a touch screen is still told to use Ctrl + scroll');
+if (!/^\s*\.flow-gestures \.on-touch\s*\{\s*display:\s*none/m.test(css)) fail('a mouse is still told to pinch');
+if (!/class: 'on-touch', text: '[^']*pinch/.test(code) || /class: 'on-mouse', text: '[^']*pinch/.test(code))
+  fail('pinching is not confined to the touch line');
+
 console.log('flowview: a live redraw keeps the reader where they were, even when the drawing comes out wider; a '
   + 'chosen zoom is kept; a rotation re-fits in place; a reading arriving mid-swipe or mid-pinch waits until the pane is still');
