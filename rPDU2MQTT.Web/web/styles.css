@@ -992,6 +992,59 @@
   .energy-node.is-linked:hover .energy-node-ring { stroke-width:3; }
   .energy-node.is-linked:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
+  /* The Flow page's header: title, what is drawn, and the History / View buttons on one line. */
+  .flow-head { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-2); }
+  .flow-head h2 { margin:0; }
+  .flow-head .ld-toolbar { margin:0; flex-wrap:wrap; gap:var(--sp-2); }
+  .flow-head select { width:auto; }
+  /* The panels behind those buttons. */
+  .flow-panel {
+    margin:0 0 var(--sp-3); padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--r);
+    background:var(--panel);
+  }
+  .flow-panel .ld-toolbar { margin:0 0 var(--sp-2); }
+  .flow-panel .ld-toolbar:last-child { margin-bottom:0; }
+  .flow-view-body { display:flex; flex-direction:column; gap:var(--sp-3); }
+  .flow-view-section { display:grid; grid-template-columns:90px minmax(0,1fr); gap:var(--sp-3); align-items:start; }
+  .flow-view-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding-top:6px; }
+  .flow-view-switches, .flow-view-chips { display:flex; flex-wrap:wrap; gap:var(--sp-2) var(--sp-4); align-items:center; }
+  .flow-view-chips { gap:6px; }
+  /* The section title says "Tags"; the strip's own label would say it twice. */
+  .flow-view-section .ld-toolbar { margin:0; }
+  .flow-view-section .ld-toolbar > span.desc:first-child { display:none; }
+  @media (max-width: 560px) { .flow-view-section { grid-template-columns:1fr; gap:var(--sp-1); } }
+
+  /* The flow as a sunburst: sized to the pane, never taller than the screen. */
+  .sunburst-stage { display:flex; justify-content:center; }
+  .sunburst-svg { width:100%; max-width:min(760px, calc(100vh - 180px)); height:auto; display:block; }
+  .sunburst-arc, .sunburst-supply { stroke:var(--bg); stroke-width:1; cursor:pointer; transition:opacity .15s; }
+  .sunburst-arc:hover, .sunburst-supply:hover { opacity:.8; }
+  .sunburst-arc.is-leaf { cursor:default; }
+  .sunburst-arc.is-dim { opacity:.28; }
+  .nh-path { margin-top:4px; font-size:11px; color:var(--faint); overflow-wrap:anywhere; }
+
+  /* The flow as a treemap: boxes positioned in % of a frame whose shape is fixed by aspect-ratio. */
+  .treemap-stage { display:block; }
+  .treemap { position:relative; width:100%; max-height:calc(100vh - 170px); min-height:320px; border-radius:var(--r); overflow:hidden; background:var(--panel2); }
+  .treemap-root, .treemap-cell { position:absolute; box-sizing:border-box; overflow:hidden; }
+  .treemap-root { display:flex; align-items:flex-start; gap:8px; padding:2px 8px; height:20px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }
+  .treemap-root .treemap-name, .treemap-root .treemap-val { color:var(--fg); line-height:16px; }
+  .treemap-cell { display:flex; flex-direction:column; padding:2px 6px; border:1px solid var(--bg); border-radius:3px; color:#10141b; cursor:pointer; transition:filter .12s; }
+  .treemap-cell.is-leaf { cursor:default; }
+  .treemap-rest { position:absolute; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; padding:2px 6px;
+    color:rgba(16, 20, 27, .7); border-radius:3px;
+    background:repeating-linear-gradient(135deg, rgba(0, 0, 0, .10) 0 6px, rgba(0, 0, 0, 0) 6px 12px); }
+  .treemap-cell:hover { filter:brightness(1.12); outline:2px solid var(--fg); outline-offset:-2px; z-index:1; }
+  .treemap-cell.is-nested { flex-direction:row; align-items:baseline; gap:8px; }
+  .treemap-name { font-size:11.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; line-height:15px; }
+  .treemap-val { font-size:11px; font-weight:600; opacity:.8; white-space:nowrap; font-variant-numeric:tabular-nums; line-height:15px; }
+  .treemap-cell:not(.is-nested) .treemap-val { font-size:12.5px; }
+  .sunburst-label { font-size:10.5px; font-weight:600; fill:#10141b; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+  .sunburst-hub { fill:var(--panel); stroke:var(--line); stroke-width:1.5; cursor:pointer; }
+  .sunburst-hub-name { font-size:13px; font-weight:650; fill:var(--fg); text-anchor:middle; pointer-events:none; }
+  .sunburst-hub-value { font-size:17px; font-weight:700; fill:var(--fg); text-anchor:middle; pointer-events:none; font-variant-numeric:tabular-nums; }
+  .sunburst-hub-share { font-size:11px; fill:var(--muted); text-anchor:middle; pointer-events:none; }
+
   /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
   .flow-stage { position: relative; }
   .flow-zoom {
@@ -1000,6 +1053,7 @@
   }
   .flow-zoom button {
     width: 30px; height: 28px; padding: 0; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
     background: var(--panel); border: 1px solid var(--line); opacity: 0.92;
   }
   .flow-zoom button:hover { opacity: 1; }
@@ -1092,6 +1146,18 @@
     flex: 1 1 100%; display: flex; gap: 12px; align-items: flex-start; margin: 0 0 4px; padding: 12px 14px;
     border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-bg);
   }
+  .ov-alert { position: relative; }
+  .ov-alert-body { flex: 1; min-width: 0; padding-right: 22px; }
+  .ov-alert-x {
+    position: absolute; top: 6px; right: 8px; width: 24px; height: 24px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; color: inherit; border: 0; border-radius: 4px;
+    font-size: 18px; line-height: 1; cursor: pointer; opacity: .6;
+  }
+  .ov-alert-x:hover { opacity: 1; background: rgba(127, 127, 127, .18); }
+  .ov-alerts-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12.5px; color: var(--muted); }
+  .ov-alerts-head .ov-alert-more { margin-top: 0; }
+  .ov-alerts-head > span { margin-right: auto; }
   .ov-alert.bad { background: var(--bad-bg); border-color: var(--bad); }
   .ov-alert.warn { background: var(--warn-bg); border-color: var(--warn); }
   .ov-alert-icon { font-size: 20px; line-height: 1.2; }

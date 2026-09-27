@@ -61,10 +61,13 @@ export function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links
     const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
     let sum = 0, known = false;
     (g.Members || []).forEach((m: string) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
+    // A group given no kind is what its members are, when they agree: a group of MPPTs is solar.
+    const kinds = new Set((g.Members || []).map((m: string) => byId[m]?.kind).filter(Boolean));
+    const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
     groupNode[g.Id] = anchor
       // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
       ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
-      : { id: g.Id, label: g.Label || g.Id, kind: g.Kind || 'node', value: known ? sum : null, group: true };
+      : { id: g.Id, label: g.Label || g.Id, kind, value: known ? sum : null, group: true };
   });
 
   const remap = (id: string) => (memberOf[id] ? memberOf[id].Id : id);
@@ -311,8 +314,8 @@ export type RibbonStyle = 'curved' | 'ortho' | 'ortho-round';
 const RIBBON_KEY = 'rpdu-flow-ribbon';
 const RIBBON_STYLES: [RibbonStyle, string, string][] = [
   ['curved', 'Curved ribbons', 'The default: each ribbon sweeps from source to target as one smooth band.'],
-  ['ortho', 'Right angles', 'Route on a grid — out, across, in. Two bends at most, so a ribbon never staircases.'],
-  ['ortho-round', 'Rounded angles', 'The same grid routing, with the corners rounded as far as the turn allows.'],
+  ['ortho', 'Wiring', 'Each link a wire, thickness by flow, run along one trunk per source with square corners.'],
+  ['ortho-round', 'Wiring, rounded', 'The same wiring with rounded corners.'],
 ];
 
 export let ribbonStyle: RibbonStyle = (() => {
@@ -364,35 +367,43 @@ export function animateToggle(onToggle: () => void): HTMLElement {
 
 // The "show a past moment" control, and the wording for what comes back, live in history-control.ts.
 
-export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | null {
+/// The switches that change what the diagram draws — hide empty/small/no data, the unmeasured remainder,
+/// animation and ribbon routing.
+export function viewSwitches(onToggle: () => void): HTMLElement {
+  const row = el('div', { class: 'flow-view-switches' });
+  row.append(hideEmptyToggle(onToggle), hideSmallSelect(onToggle), hideNoDataToggle(onToggle),
+             unmeasuredToggle(onToggle), animateToggle(onToggle), ribbonStyleSelect(onToggle));
+  return row;
+}
+
+/// One chip per group: collapse it into one node, or expand it into its members. Null with no groups.
+export function groupChips(onToggle: () => void): HTMLElement | null {
   const groups = flowGroups();
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
-  // The view switches are not about groups and must not disappear with them.
-  if (drawn) {
-    row.appendChild(hideEmptyToggle(onToggle));
-    row.appendChild(hideSmallSelect(onToggle));
-    row.appendChild(hideNoDataToggle(onToggle));
-    row.appendChild(unmeasuredToggle(onToggle));
-    row.appendChild(animateToggle(onToggle));
-    row.appendChild(ribbonStyleSelect(onToggle));
-  }
-  if (!groups.length) return drawn ? row : null;
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }));
+  if (!groups.length) return null;
+  const row = el('div', { class: 'flow-view-chips' });
   groups.forEach((g: any) => {
     const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
     // A group with no members has nothing to fold — collapsing/expanding it is a no-op.
-    chip.title = count === 0 ? 'No members yet — add nodes to this group on the Nodes tab; then it collapses/expands.'
-      : on ? `Collapsed — click to expand its ${count} member(s)` : 'Expanded — click to collapse into one node';
+    chip.title = count === 0 ? 'No members. Add them on the Groups page.'
+      : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
-      if (count === 0) { toast(`“${g.Label || g.Id}” has no members yet — add some in the Groups section on the Nodes tab.`, false); return; }
+      if (count === 0) { toast(`“${g.Label || g.Id}” has no members. Add them on the Groups page.`, false); return; }
       on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
     };
     row.appendChild(chip);
   });
-  // Where membership is edited — the toggles only collapse/expand.
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 6px', fontSize: '11px' }, text: '· add/remove members in the Groups section on the Nodes tab' }));
+  return row;
+}
+
+/// The switches and the group chips in one strip — for the Roll-up page, which has no View panel.
+export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | null {
+  const chips = groupChips(onToggle);
+  if (!drawn && !chips) return null;
+  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  if (drawn) row.appendChild(viewSwitches(onToggle));
+  if (chips) row.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Groups:' }), chips);
   return row;
 }
 

@@ -8,11 +8,14 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
 import { openHistorySheet } from '../history-sheet.js';
+import { drawSunburst } from '../sunburst.js';
+import { drawTreemap } from '../treemap.js';
+import { flowCardRows } from '../flow-card.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 
@@ -49,10 +52,11 @@ export function addFlowSection(nav: any, sections: any) {
   // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
   link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Energy Flow'; sec.appendChild(h);
-  const d = document.createElement('div'); d.className = 'desc';
-  d.textContent = 'Live power flow (from the latest poll). Outlet→PDU is auto-derived; add upstream nodes (panels, breakers, a “Total”) and drag to set each node’s feeder to model the full hierarchy. Link width is proportional to the measurement.';
-  sec.appendChild(d);
+  // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
+  // period row, the date row and two rows of view switches put the diagram half way down the screen.
+  const head = el('div', { class: 'flow-head' });
+  head.appendChild(el('h2', { text: 'Flow' }));
+  sec.appendChild(head);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const refresh = btn('Refresh');
@@ -92,7 +96,20 @@ export function addFlowSection(nav: any, sections: any) {
         : `No period time zone is configured, so the server's own zone (${p.zone}) is used — in a container that is usually UTC, which is unlikely to be the day you mean. Set EnergyFlow.Aggregation.PeriodTimeZone.`;
   };
   metricSel.onchange = () => { load(); showDayNote(); };
-  bar.appendChild(refresh); bar.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel)); bar.appendChild(instSel.wrap); bar.appendChild(count); bar.appendChild(dayNote);
+  // Filled by draw(), which knows which nodes can be drilled into.
+  const drillSlot = el('span', { class: 'flow-drill-slot' });
+  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it — as rings
+  // (sunburst) or as boxes sized to their share (treemap).
+  const modeSel = el('select', { title: 'How the flow is drawn.' }) as HTMLSelectElement;
+  const MODES = [['sankey', 'Sankey'], ['sunburst', 'Sunburst'], ['treemap', 'Treemap']];
+  MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
+  try { const m = localStorage.getItem('rpdu-flow-mode'); modeSel.value = MODES.some(([v]) => v === m) ? m! : 'sankey'; } catch { modeSel.value = 'sankey'; }
+  modeSel.onchange = () => { try { localStorage.setItem('rpdu-flow-mode', modeSel.value); } catch { /* this session only */ } refit = true; redrawBoth(); };
+  const historyBtn = btn('History ▾');
+  const viewBtn = btn('View ▾');
+  viewBtn.title = 'Hide empty/small/no-data nodes, unmeasured load, animation, routing, groups and tags.';
+  bar.append(modeSel, metricSel, drillSlot, instSel.wrap, historyBtn, viewBtn, refresh, count, dayNote);
+  head.appendChild(bar);
   // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
   let hadDay = false;
   const hist = historyControl((what: any) => {
@@ -118,12 +135,27 @@ export function addFlowSection(nav: any, sections: any) {
     hadDay = true;
     load();
   });
-  // Each of these was its own full-width row with a margin under it, so five rows of controls stacked down
-  // the page while each used about a quarter of the line. They are one wrapping strip: side by side where
-  // there is room, folding onto more lines where there is not.
-  const controlsTop = el('div', { class: 'flow-controls' });
-  controlsTop.append(bar, periods.row, hist.row);
-  sec.appendChild(controlsTop);
+  // Behind buttons rather than over the diagram: the past, and how the diagram is drawn.
+  const historyPanel = el('div', { class: 'flow-panel' }, periods.row, hist.row);
+  const viewBody = el('div', { class: 'flow-view-body' });
+  const viewPanel = el('div', { class: 'flow-panel' }, viewBody);
+  sec.append(historyPanel, viewPanel);
+  let historyOpen = false, viewOpen = false;
+  const syncPanels = () => {
+    // Open while a past view is showing, so what is being looked at is never hidden.
+    const hOpen = historyOpen || !!hist.day();
+    historyPanel.hidden = !hOpen;
+    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : hOpen ? 'History ▴' : 'History ▾';
+    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
+    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
+    viewPanel.hidden = !viewOpen;
+    // A tag highlight dims most of the diagram; say so while the panel that set it is closed.
+    viewBtn.textContent = (activeTag ? `View · ${activeTag}` : 'View') + (viewOpen ? ' ▴' : ' ▾');
+    viewBtn.classList[activeTag ? 'add' : 'remove']('primary');
+  };
+  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncPanels(); };
+  viewBtn.onclick = () => { viewOpen = !viewOpen; syncPanels(); };
+  syncPanels();
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
@@ -305,8 +337,8 @@ export function addFlowSection(nav: any, sections: any) {
     const emptied = applyHideSmallPref(zeroed.nodes, zeroed.links);
     // ...and the nodes nothing measures, if that one is on; how many went is said beside the count.
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
-    const controls = el('div', { class: 'flow-controls' });
-    wrap.appendChild(controls);
+    syncPanels();
+    // The view panel is rebuilt with the diagram: its switches and chips reflect what is drawn.
     // Which part of the hierarchy is drawn: everything, or one node and what is beneath it.
     const drillSel = el('select', { class: 'flow-drill', title: 'Draw one node and everything beneath it.' }) as HTMLSelectElement;
     drillSel.appendChild(el('option', { value: '', text: 'The whole diagram' }));
@@ -317,12 +349,44 @@ export function addFlowSection(nav: any, sections: any) {
     }
     drillSel.value = drillTo || '';
     drillSel.onchange = () => drill(drillSel.value || null);
-    controls.appendChild(el('label', { class: 'ld-inst' }, 'Showing ', drillSel));
-    const toggles = groupToggles(redrawBoth);
-    if (toggles) controls.appendChild(toggles);
+    drillSlot.innerHTML = '';
+    drillSlot.appendChild(drillSel);
+    viewBody.innerHTML = '';
+    const viewSection = (title: string, body: HTMLElement) =>
+      viewBody.appendChild(el('div', { class: 'flow-view-section' }, el('div', { class: 'flow-view-title', text: title }), body));
+    viewSection('Display', viewSwitches(redrawBoth));
+    const chips = groupChips(redrawBoth);
+    if (chips) viewSection('Groups', chips);
+    const controls = el('div');
     const links = folded.links;
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
+
+    if (modeSel.value === 'sunburst' || modeSel.value === 'treemap') {
+      if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
+      const viewOpts = {
+        units: graph.units || '',
+        onOpen: (id: string) => drill(id),
+        // Out one level: to what feeds the node drilled into, or to the whole diagram.
+        onOut: () => drill(drillTo ? ((whole.links || []).find((l: any) => l.target === drillTo)?.source || null) : null),
+        card: (id: string, place: any) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
+          { units: graph.units || '', metric: metricSel.value, nodes, links }),
+        host: sec,
+      };
+      const sunburst = modeSel.value === 'sunburst';
+      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
+        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
+      wrap.appendChild(stage);
+      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
+        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      zoom = null;
+      refit = false;
+      count.textContent = `${nodes.length} node(s)`;
+      wrap.style.minHeight = '';
+      return;
+    }
 
     const units = graph.units || '';
     // Which metric is actually on screen.
@@ -677,32 +741,24 @@ export function addFlowSection(nav: any, sections: any) {
       ]);
     };
 
-    /// Every ribbon crossing a corridor turns on the SAME vertical axis, and turns through the same width.
-    ///
-    /// Both halves of that are the rule, and neither works alone. Letting each band turn half of its own
-    /// thickness from the middle puts a thick ribbon's corners in a different place from a thin one's, and
-    /// their corners interlock — a row of notches reading as puzzle pieces. Giving each band a lane of its
-    /// own instead spreads the turns across the whole corridor, and the column of ribbons comes out as a
-    /// staircase. One axis and one width is the only arrangement where every vertical edge in a corridor
-    /// falls on one of two lines.
-    ///
-    /// A band thicker than the run narrows through the turn and widens again after it; a thinner one does
-    /// the reverse. That is the price of the rule, and it is the rule that was asked for.
-    const laneOf = new Map<any, { laneX: number; laneW: number }>();
-    {
-      const corridors = new Map<string, any[]>();
+    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath). The
+    // trunks of the sources sharing a corridor are spread across its middle, top source nearest the left,
+    // so a source's wires never run along another's trunk.
+    const wires = ribbonStyle !== 'curved';
+    const trunkOf = new Map<string, number>();
+    if (wires) {
+      const bySpan = new Map<string, Set<string>>();
       links.forEach((l: any) => {
         const s2 = pos[l.source], t2 = pos[l.target];
         if (!s2 || !t2) return;
         const key = `${s2.x + nodeW}|${t2.x}`;
-        (corridors.get(key) ?? corridors.set(key, []).get(key)!).push(l);
+        (bySpan.get(key) ?? bySpan.set(key, new Set()).get(key)!).add(l.source);
       });
-      for (const [key, list] of corridors) {
+      for (const [key, srcs] of bySpan) {
         const [left, right] = key.split('|').map(Number);
-        // A quarter of the corridor, bounded either side so it is neither a hairline nor a slab.
-        const laneW = Math.max(12, Math.min(40, (right - left) * 0.25));
-        const laneX = (left + right) / 2;
-        list.forEach((l: any) => laneOf.set(l, { laneX, laneW }));
+        const ordered = [...srcs].sort((a, b) => (pos[a]?.y ?? 0) - (pos[b]?.y ?? 0));
+        ordered.forEach((src, i) =>
+          trunkOf.set(`${src}|${key}`, left + (right - left) * (0.25 + 0.5 * (i + 0.5) / ordered.length)));
       }
     }
 
@@ -726,7 +782,31 @@ export function addFlowSection(nav: any, sections: any) {
       const x1 = s.x + nodeW, x2 = t.x;
       const sTop = s.y + s.outOff, tTop = t.y + t.inOff;
       const color = tintOf(l.source);
-      const band = { x1, sTop, x2, tTop, h, ...(laneOf.get(l) ?? {}) };
+      const band = { x1, sTop, x2, tTop, h };
+      if (wires) {
+        const d = wirePath(ribbonStyle, { x1, sy: sTop + h / 2, x2, ty: tTop + h / 2, trunkX: trunkOf.get(`${l.source}|${x1}|${x2}`) ?? (x1 + x2) / 2 });
+        const width = unknownLink || idleLink ? 1.5 : wireWidth(h);
+        svg.appendChild(svgEl('path', {
+          d, fill: 'none', 'fill-opacity': '0',
+          stroke: unknownLink ? 'var(--muted)' : color, 'stroke-width': width,
+          'stroke-opacity': unknownLink ? '0.5' : '0.85', 'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+          class: 'flow-ribbon flow-wire', 'data-src': l.source, 'data-dst': l.target,
+        }));
+        // A stream is a dash running along the wire itself.
+        if (animateFlow() && !unknownLink && !idleLink) {
+          const intensity = l.value / Math.max(1, maxTotal);
+          const duration = Math.max(0.9, Math.min(6, 3.2 - intensity * 9));
+          const stream = svgEl('path', {
+            d, fill: 'none', stroke: 'var(--fg)', 'stroke-opacity': '0.55',
+            'stroke-width': Math.max(1.2, width * 0.45), 'stroke-linecap': 'round', 'stroke-dasharray': '6 26',
+            class: 'flow-stream', 'data-src': l.source, 'data-dst': l.target,
+          });
+          stream.style.animationDuration = `${duration.toFixed(2)}s`;
+          svg.appendChild(stream);
+        }
+        s.outOff += h; t.inOff += h;
+        return;
+      }
       const ribbonPath = ribbonOutline(ribbonStyle, band);
       svg.appendChild(svgEl('path', {
         d: ribbonPath,
@@ -943,12 +1023,14 @@ export function addFlowSection(nav: any, sections: any) {
     const taggedById = new Map<string, any>(nodes.map((n: any) => [n.id, n]));
     const applyTag = (tag: string | null) => {
       if (tag) focusTag(svg, taggedById, tag); else clearFocus(svg);
+      syncPanels();
       const fresh = tagToggles(nodes, svg, applyTag);
       if (fresh && tagRow.parentNode) { tagRow.replaceWith(fresh); tagRow = fresh; }
     };
     let tagRow = tagToggles(nodes, svg, applyTag) as any;
     if (tagRow) {
       controls.appendChild(tagRow);
+      viewSection('Tags', controls);
       // Re-apply across the live repaint, so the selection survives a push.
       if (activeTag) focusTag(svg, taggedById, activeTag);
     }

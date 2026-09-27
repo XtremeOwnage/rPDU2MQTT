@@ -162,13 +162,11 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
   }
 }
 
-// --- Rule 3: every vertical run in a corridor is collinear ---------------------------------------------
+// --- Rule 3: in the wiring view, each source has one trunk per corridor, and no two sources share one ----
 //
-// Both halves of this are the rule. Letting each band turn half of its OWN thickness from the middle puts
-// a thick ribbon's corners in a different place from a thin one's and they interlock — a row of notches
-// that read as puzzle pieces. Giving each band a lane of its own instead spreads the turns across the
-// corridor and the column comes out as a staircase. One axis and one width is the only arrangement where
-// every vertical edge in a corridor falls on one of two lines.
+// Every wire from one source runs along the same vertical trunk, so a panel's circuits read as one bus.
+// Two sources in the same corridor get trunks of their own, or a wire would appear to come from the wrong
+// panel.
 {
   const { ribbons } = await render('ortho');
   const corridors = new Map();
@@ -176,21 +174,23 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
     const pts = [...r.d.matchAll(/[ML](-?[\d.]+),(-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
     const xs = pts.map(p => p[0]);
     const x1 = Math.min(...xs), x2 = Math.max(...xs);
-    const lane = [...new Set(xs.filter(x => Math.abs(x - x1) > 0.5 && Math.abs(x - x2) > 0.5))].sort((a, b) => a - b);
-    if (lane.length < 2) return;                        // a straight band has no turn to place
+    const trunk = [...new Set(xs.filter(x => Math.abs(x - x1) > 0.5 && Math.abs(x - x2) > 0.5))];
+    if (!trunk.length) return;                          // a level wire has no trunk to place
+    if (trunk.length > 1) fail(`the wire ${r.src}->${r.dst} has ${trunk.length} vertical runs: ${r.d}`);
     const key = `${Math.round(x1)}->${Math.round(x2)}`;
     if (!corridors.has(key)) corridors.set(key, []);
-    corridors.get(key).push({ src: r.src, dst: r.dst, from: lane[0], to: lane[lane.length - 1] });
+    corridors.get(key).push({ src: r.src, dst: r.dst, x: trunk[0] });
   });
-  if (!corridors.size) fail('no right-angle ribbon actually turned, so the rule went untested');
+  if (!corridors.size) fail('no wire turned, so the rule went untested');
   for (const [key, list] of corridors) {
-    const first = list[0];
-    list.forEach(r => {
-      if (Math.abs(r.from - first.from) > 0.5 || Math.abs(r.to - first.to) > 0.5)
-        fail(`in the corridor ${key}, "${first.src}->${first.dst}" turns at x ${first.from.toFixed(1)}..${first.to.toFixed(1)} `
-           + `but "${r.src}->${r.dst}" turns at ${r.from.toFixed(1)}..${r.to.toFixed(1)} — their vertical runs are not `
-           + `collinear, so the column reads as a staircase`);
-    });
+    const bySrc = new Map();
+    list.forEach(w => { if (!bySrc.has(w.src)) bySrc.set(w.src, new Set()); bySrc.get(w.src).add(Math.round(w.x * 10)); });
+    for (const [src, xs] of bySrc)
+      if (xs.size > 1) fail(`in the corridor ${key}, the wires from "${src}" run on ${xs.size} different trunks`);
+    const trunks = [...bySrc.entries()].map(([src, xs]) => [src, [...xs][0]]);
+    for (let a = 0; a < trunks.length; a++)
+      for (let b = a + 1; b < trunks.length; b++)
+        if (trunks[a][1] === trunks[b][1]) fail(`in the corridor ${key}, "${trunks[a][0]}" and "${trunks[b][0]}" share a trunk`);
   }
 }
 
@@ -210,7 +210,8 @@ for (const style of ['curved', 'ortho', 'ortho-round']) {
   // node below it receives, so the top edge has nothing to step around at any point along it.
   const chain = [['grid', 'inverter'], ['inverter', 'main_panel'], ['main_panel', 'livingroom'],
                  ['livingroom', 'pdu1']];
-  for (const style of ['curved', 'ortho', 'ortho-round']) {
+  // Bands only: a wire leaves the middle of its slot, so there is no top edge to keep flat.
+  for (const style of ['curved']) {
     const { ribbons } = await render(style);
     const tops = chain.map(([src, dst]) => {
       const r = ribbons.find(x => x.src === src && x.dst === dst);

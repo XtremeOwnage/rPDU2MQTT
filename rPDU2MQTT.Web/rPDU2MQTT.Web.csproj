@@ -116,6 +116,8 @@
 		<!-- A ribbon is a filled outline, so a routing that offsets both sides the same way does not merely
 		     look odd: the outline crosses itself and the band renders as a bow tie. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/ribbons.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sunburst.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/treemap.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<!-- Two rules the layout owes the eye: nothing in a column closer than a row of text, and no two
 		     ribbons crossing the same gap. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nocross.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
