@@ -24,8 +24,10 @@ const CHANNELS = [
   // A virtual node standing for what the panel does not meter: it moves with the load, but nothing is
   // plugged into it, so it is never the answer.
   ['untracked', 'Untracked remainder', 'node'],
+  // What is plugged in, not the circuit it is on: a PDU outlet and a metered appliance.
+  ['pdu_7', 'Proxmox: Kube04', 'outlet'], ['kettle', 'Kettle plug', 'load'],
 ];
-const power = { grid: 3000, main_panel: 2000, n30_1: 100, n30_2: 100, n30_3: 100, n30_4: 100, untracked: 200 };
+const power = { grid: 3000, main_panel: 2000, n30_1: 100, n30_2: 100, n30_3: 100, n30_4: 100, untracked: 200, pdu_7: 90, kettle: 0 };
 /// How much each channel wanders reading to reading; the bedroom circuit is a noisy one.
 const wander = { n30_1: 15 };
 let recorded = [];
@@ -107,7 +109,7 @@ if (!/Load OFF · held 20 s · [34] readings/.test(held())) fail(`the open state
 // --- Toggle 1: the load goes on. The kitchen circuit rises 1,500 W; the garage rises for its own reasons;
 // the noisy bedroom circuit drifts up 20 W, inside its ±15 W wander. Everything upstream carries the load.
 power.n30_2 = 1600; power.n30_3 = 500; power.n30_1 = 120;
-power.main_panel = 3500; power.grid = 4500; power.untracked = 1700;
+power.main_panel = 3500; power.grid = 4500; power.untracked = 1700; power.pdu_7 = 400; power.kettle = 1500;
 hold(5); fumble();                              // switched, a reading taken, then tapped
 await press();                                  // ON
 // The phone goes to sleep for half a minute: the server keeps recording, and nothing is lost.
@@ -119,19 +121,19 @@ if (!named('Garage Circuit')) fail('a channel that did rise was not listed as a 
 const bedroom = named('Bedroom Circuit');
 if (bedroom && !/followed 0 of/.test(query(bedroom, '.cf-meta').textContent)) fail(`a 20 W drift inside ±15 W of noise was counted as a step: ${bedroom.textContent}`);
 // The panel, the grid and the virtual node all stepped as well, being upstream — none of them is a circuit.
-for (const upstream of ['Main Panel', 'Grid', 'Untracked remainder'])
-  if (named(upstream)) fail(`${upstream} is not a circuit but was offered as one`);
+for (const other of ['Main Panel', 'Grid', 'Untracked remainder', 'Proxmox: Kube04', 'Kettle plug'])
+  if (named(other)) fail(`${other} is not a breaker but was offered as a circuit`);
 // …and they are one tick away for anyone who wants them.
 const everyBox = query(sec, 'input[type=checkbox]', true)[0];
 if (!everyBox || everyBox.checked) fail('the page does not default to circuits only');
 everyBox.checked = true; everyBox.onchange({});
-if (!named('Main Panel') || !named('Grid')) fail('showing every channel did not bring the upstream nodes back');
+if (!named('Main Panel') || !named('Grid') || !named('Kettle plug')) fail('showing every channel did not bring the other channels back');
 everyBox.checked = false; everyBox.onchange({});
 if (named('Main Panel')) fail('unticking the box did not go back to circuits only');
 if (/Kitchen Circuit —/.test(verdict())) fail(`one toggle named a channel outright: "${verdict()}"`);
 
 // --- Toggle 2: the load goes off. The kitchen falls back; the garage stays up. ------------------------------
-power.n30_2 = 100; power.n30_1 = 100; power.main_panel = 2000; power.grid = 3000; power.untracked = 200;
+power.n30_2 = 100; power.n30_1 = 100; power.main_panel = 2000; power.grid = 3000; power.untracked = 200; power.pdu_7 = 90; power.kettle = 0;
 hold(5); fumble();
 await press();                                  // OFF
 hold(20);

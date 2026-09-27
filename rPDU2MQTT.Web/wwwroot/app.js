@@ -3502,7 +3502,8 @@ function analyse(levels         , opts                                          
   const strong = (c            ) => !!c && c.matched >= Math.max(1, Math.ceil(toggles / 2));
   const legs = strong(first) && strong(second) && paired(first, second) && aheadOf(second, third);
   const found = legs ? [first, second] : strong(first) && aheadOf(first, second) ? [first] : [];
-  const done = toggles >= 2 && found.length > 0;
+  // One toggle followed is a lead, not an answer: it takes two to tell a load from something that moved.
+  const done = toggles >= 2 && found.length > 0 && found.every(c => c.matched >= 2);
   const why = toggles && !found.length ? whyNothing(candidates, all, levels, opts.watts) : null;
   return { toggles, candidates, found, done, why, verdict: verdictOf(toggles, candidates, found, done, legs, why) };
 }
@@ -11992,9 +11993,10 @@ function addNodeTrendsSection(nav     , sections     ) {
 // is nothing to wait for — and each state is every reading taken while it was held.
 // Built for a phone held in one hand at the panel: one big button, one list, no tables.
 
-/// What a load can actually sit on. A panel, the grid and an inverter all step with the load as well, being
-/// upstream of it, so offering them as answers only buries the circuit.
-const CIRCUIT_KINDS = ['breaker', 'outlet', 'load'];
+/// Circuits: the breakers. A panel, the grid and an inverter step with the load as well, being upstream of
+/// it; a PDU outlet or a metered appliance is what is plugged in, not the circuit it is on. All of them are
+/// one tick away under "Show every channel".
+const CIRCUIT_KINDS = ['breaker'];
 
 const clock = (ms        ) => {
   const s = Math.floor(ms / 1000);
@@ -12036,12 +12038,12 @@ function addCircuitFinderSection(nav     , sections     ) {
   draw.title = 'Roughly what the load draws, if you know it. Leave blank for an unknown load.';
   draw.onchange = () => render();
   const everything = el('input', { type: 'checkbox' })                    ;
-  everything.title = 'Also offer panels, the grid and other upstream nodes, which step with the load because they carry it.';
+  everything.title = 'Also offer PDU outlets, loads, panels, the grid and other nodes — not only breakers.';
   everything.onchange = () => render();
   const rate = el('div', { class: 'desc cf-rate' });
   sec.appendChild(el('div', { class: 'cf-settings' },
     el('label', { class: 'ld-inst' }, 'Load draws about ', draw, ' W'),
-    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just circuits'),
+    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just breakers'),
     instSel.wrap, rate));
 
   tap.onclick = () => { session.tap(); render(); };

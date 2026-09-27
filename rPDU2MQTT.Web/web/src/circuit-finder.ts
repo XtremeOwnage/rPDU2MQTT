@@ -151,7 +151,8 @@ export function analyse(levels: Level[], opts: { watts?: number | null; labels?:
   const strong = (c?: Candidate) => !!c && c.matched >= Math.max(1, Math.ceil(toggles / 2));
   const legs = strong(first) && strong(second) && paired(first, second) && aheadOf(second, third);
   const found = legs ? [first, second] : strong(first) && aheadOf(first, second) ? [first] : [];
-  const done = toggles >= 2 && found.length > 0;
+  // One toggle followed is a lead, not an answer: it takes two to tell a load from something that moved.
+  const done = toggles >= 2 && found.length > 0 && found.every(c => c.matched >= 2);
   const why = toggles && !found.length ? whyNothing(candidates, all, levels, opts.watts) : null;
   return { toggles, candidates, found, done, why, verdict: verdictOf(toggles, candidates, found, done, legs, why) };
 }

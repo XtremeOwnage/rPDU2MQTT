@@ -7,9 +7,10 @@ import { analyse } from '../circuit-finder.js';
 import { circuitSession } from '../circuit-session.js';
 import { editNodeOnNextOpen } from './nodes.js';
 
-/// What a load can actually sit on. A panel, the grid and an inverter all step with the load as well, being
-/// upstream of it, so offering them as answers only buries the circuit.
-const CIRCUIT_KINDS = ['breaker', 'outlet', 'load'];
+/// Circuits: the breakers. A panel, the grid and an inverter step with the load as well, being upstream of
+/// it; a PDU outlet or a metered appliance is what is plugged in, not the circuit it is on. All of them are
+/// one tick away under "Show every channel".
+const CIRCUIT_KINDS = ['breaker'];
 
 const clock = (ms: number) => {
   const s = Math.floor(ms / 1000);
@@ -51,12 +52,12 @@ export function addCircuitFinderSection(nav: any, sections: any) {
   draw.title = 'Roughly what the load draws, if you know it. Leave blank for an unknown load.';
   draw.onchange = () => render();
   const everything = el('input', { type: 'checkbox' }) as HTMLInputElement;
-  everything.title = 'Also offer panels, the grid and other upstream nodes, which step with the load because they carry it.';
+  everything.title = 'Also offer PDU outlets, loads, panels, the grid and other nodes — not only breakers.';
   everything.onchange = () => render();
   const rate = el('div', { class: 'desc cf-rate' });
   sec.appendChild(el('div', { class: 'cf-settings' },
     el('label', { class: 'ld-inst' }, 'Load draws about ', draw, ' W'),
-    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just circuits'),
+    el('label', { class: 'ld-inst' }, everything, ' Show every channel, not just breakers'),
     instSel.wrap, rate));
 
   tap.onclick = () => { session.tap(); render(); };
