@@ -866,9 +866,100 @@
 
   /* The node editor's own panel. Sized here rather than inline so a phone can be given other numbers. */
   .sheet-panel {
-    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:14px;
+    --sheet-pad:14px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:var(--sheet-pad);
     width:min(94vw,1900px); max-height:86vh; overflow:auto;
   }
+  /* The node editor has no wide table any more: a readable column, not the whole screen. */
+  .sheet-panel.node-sheet { width:min(94vw, 980px); }
+  /* Header and footer pinned to the panel's edges while its body scrolls between them. */
+  .sheet-head {
+    position:sticky; top:calc(-1 * var(--sheet-pad)); z-index:3;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    margin:calc(-1 * var(--sheet-pad)) calc(-1 * var(--sheet-pad)) 10px; padding:12px var(--sheet-pad) 10px;
+    background:var(--panel2); border-bottom:1px solid var(--line);
+  }
+  .sheet-titles { display:flex; align-items:baseline; gap:10px; min-width:0; }
+  .sheet-titles h4 { margin:0; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sheet-sub { font-size:11px; color:var(--faint); white-space:nowrap; }
+  .sheet-x {
+    flex:none; width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+    font-size:17px; line-height:1; background:transparent; border:1px solid transparent; border-radius:6px; color:var(--muted);
+  }
+  .sheet-x:hover { color:var(--fg); border-color:var(--line); }
+  .sheet-sticky-foot {
+    position:sticky; bottom:calc(-1 * var(--sheet-pad)); z-index:3;
+    margin:12px calc(-1 * var(--sheet-pad)) calc(-1 * var(--sheet-pad)); padding:10px var(--sheet-pad);
+    background:var(--panel2);
+  }
+  .sheet-foot-row { display:flex; align-items:center; gap:8px; width:100%; }
+  .sheet-dirty { margin-right:auto; font-size:12.5px; color:var(--muted); }
+  .sheet-dirty.is-dirty { color:var(--warn); font-weight:600; }
+  .sheet-dirty.is-dirty::before { content:'●'; margin-right:6px; }
+
+  /* The node editor: sections, one card per binding. */
+  .node-editor { display:flex; flex-direction:column; gap:14px; }
+  .ne-section { border:1px solid var(--line); border-radius:8px; padding:12px; background:var(--panel); }
+  .ne-section-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .ne-section-head h5 { margin:0; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .ne-count { font-size:11px; color:var(--faint); font-variant-numeric:tabular-nums; }
+  .ne-head-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+  .ne-status { font-size:11px; color:var(--faint); }
+  .ne-status.is-bad { color:var(--bad); }
+  .ne-desc { margin:-4px 0 10px; font-size:12px; }
+  .ne-empty { font-size:12.5px; color:var(--muted); padding:8px 0; }
+  .ne-add { margin-top:10px; }
+  .ne-bindings { display:flex; flex-direction:column; gap:10px; }
+  .ne-binding { border:1px solid var(--line); border-radius:6px; padding:10px; background:var(--panel2); }
+  .ne-bind-head { display:flex; align-items:center; gap:8px; }
+  .ne-bind-head select { width:auto; }
+  .ne-metric { font-weight:650; }
+  .ne-live {
+    margin-left:auto; font:600 15px/1 var(--mono); color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .ne-live.is-good { color:var(--good); }
+  .ne-live.is-bad { color:var(--bad); }
+  .ne-remove {
+    flex:none; width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+    font-size:14px; line-height:1; background:transparent; border:1px solid var(--line); border-radius:6px; color:var(--muted);
+  }
+  .ne-remove:hover { color:var(--bad); border-color:var(--bad); }
+  .ne-note { margin:4px 0 0; font-size:11px; }
+  .ne-bind-body { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; align-items:flex-end; }
+  .ne-slot select { width:auto; }
+  .ne-slot input.ne-narrow { width:96px; }
+  .ne-slot { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .ne-slot.ne-grow { flex:1 1 320px; }
+  .ne-slot-label { font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--faint); }
+  /* Cells the shared source editors hand back, laid out as blocks here rather than table cells. */
+  .ne-slot > td { display:block; padding:0; border:0; }
+  .ne-topic { display:flex; gap:6px; min-width:0; }
+  .ne-topic input { flex:1; min-width:0; max-width:none; }
+  .ne-narrow { width:110px; }
+  .ne-check { display:inline-flex; align-items:center; gap:6px; height:38px; font-size:12.5px; color:var(--muted); }
+  .ne-derived { font-size:12.5px; }
+  .ne-wire { display:grid; grid-template-columns:64px 1fr auto; gap:8px; align-items:center; padding:4px 0; }
+  .ne-wire + .ne-wire { border-top:1px solid var(--line); padding-top:8px; margin-top:4px; }
+  .ne-wire-label { font-size:12px; color:var(--muted); }
+  .ne-wire-chips { display:flex; flex-wrap:wrap; gap:6px; min-width:0; }
+  .ne-chip {
+    display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 10px; font-size:12.5px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:12px;
+  }
+  .ne-chip-x { width:20px; height:20px; padding:0; font-size:11px; line-height:1; background:transparent; border:0; color:var(--muted); border-radius:50%; }
+  .ne-chip-x:hover { color:var(--bad); background:rgba(127,127,127,.15); }
+  .ne-none { font-size:12px; color:var(--faint); }
+  .ne-wire-add { display:flex; gap:6px; }
+  .ne-wire-search { width:130px; }
+  .ne-wire-pick { width:auto; }
+  .ne-more { border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+  .ne-more-summary { display:flex; align-items:center; gap:8px; padding:12px; cursor:pointer; font-size:12px; font-weight:600;
+    letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .ne-more-summary::-webkit-details-marker { display:none; }
+  .ne-more-summary::before { content:'▸'; font-size:11px; transition:transform .12s; }
+  .ne-more[open] .ne-more-summary::before { transform:rotate(90deg); }
+  .ne-more[open] .ne-more-summary { border-bottom:1px solid var(--line); }
+  .ne-more .node-editor-fields { padding:12px; margin:0; }
   /* A table inside it scrolls on its own, so the head and the buttons stay put while the columns move.
      .bindings-scroll is the wrapper the bindings table has always been given; it carried no rule, so the
      widest table in the editor overflowed a panel that then clipped it. */
@@ -878,7 +969,7 @@
   .sheet-panel table.ld th, .bindings-scroll table.ld th { position:static; }
 
   /* The node editor's fields: as many columns as fit, one on a phone (below). */
-  .node-editor-fields { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:12px; }
+  .node-editor-fields { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px; }
   /* The Nodes table scrolls within itself rather than widening the page. Its header then sits in a scroll
      container, where sticky would park it over the first row. */
   .nodes-scroll { overflow-x:auto; }
@@ -967,7 +1058,17 @@
        the top. 94vw of a 390px screen spends 23px either side on scrim and 14px inside on padding — the
        panel takes the screen instead, and the room it gives back goes to the fields. */
     .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }
-    .sheet-panel { width:100%; max-height:92vh; padding:10px; border-radius:6px; }
+    .sheet-panel { --sheet-pad:10px; width:100%; max-height:92vh; padding:var(--sheet-pad); border-radius:6px; }
+    .sheet-panel.node-sheet { width:100%; max-height:calc(100dvh - 16px); }
+    .sheet-sub { display:none; }
+    .ne-section { padding:10px; }
+    .ne-slot.ne-grow { flex-basis:100%; }
+    .ne-bind-head { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+    .ne-bind-head select { width:100%; min-width:0; }
+    .ne-wire { grid-template-columns:1fr; gap:6px; }
+    .ne-wire-add { width:100%; }
+    .ne-wire-search { flex:1; width:auto; }
+    .sheet-foot-row button { min-height:40px; padding:0 18px; }
     .sheet { width:100%; max-height:92vh; }
     /* Two columns of label and control do not fit; one does. */
     .sheet-panel .grid { column-count:1; }

@@ -440,7 +440,9 @@ function discardAll() {
 function initShell() {
   const on = (id: string, fn: any) => { const e: any = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
-  on('btn-save', saveConfig);
+  // Not flow.ts's saveConfig, which this once named through the shared bundle: that one skips the
+  // restart offer and then calls the click event as its callback.
+  on('btn-save', saveConfigChanges);
   on('btn-review', reviewChanges);
   on('btn-discard', discardAll);
   on('btn-reload', () => {
