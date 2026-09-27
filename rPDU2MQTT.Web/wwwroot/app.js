@@ -9226,11 +9226,16 @@ function addOverviewSection(nav     , sections     ) {
   /// A count is not a diagnosis: "2 of 46 binding(s) withheld" says something is wrong and nothing about
   /// what, and the reason was already known — it just lived on another page. Where the card is a source
   /// holding readings back, it opens onto the bindings themselves, each with the reason it is being dropped.
-  const alertCard = (level        , title        , state        , detail        , id         ) => {
+  const alertCard = (level        , title        , state        , detail        , id         , onDismiss             ) => {
     const mine = withheld.filter((w     ) => !id || !w.integration || w.integration === id);
     const card = el('div', { class: 'ov-alert ' + level },
       el('span', { class: 'ov-alert-icon', text: level === 'bad' ? '⛔' : '⚠' }));
-    const body = el('div', {},
+    if (onDismiss) {
+      const x = el('button', { class: 'ov-alert-x', type: 'button', text: '×', title: 'Dismiss' })                     ;
+      x.onclick = onDismiss;
+      card.appendChild(x);
+    }
+    const body = el('div', { class: 'ov-alert-body' },
       el('div', { class: 'ov-alert-title', text: `${title} — ${state}` }),
       el('div', { class: 'desc', text: detail || '' }));
     card.appendChild(body);
@@ -9254,6 +9259,12 @@ function addOverviewSection(nav     , sections     ) {
     return card;
   };
 
+  /// Alerts this viewer dismissed, kept in the browser: a per-viewer choice, not a setting.
+  const DISMISS_KEY = 'rpdu-ov-dismissed';
+  const dismissed = new Set        ();
+  try { (JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]')            ).forEach(k => dismissed.add(k)); } catch { /* none */ }
+  const saveDismissed = () => { try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...dismissed])); } catch { /* this view only */ } };
+
   const drawStatus = (body     ) => {
     const cards = (body && body.cards) || [];
     alerts.innerHTML = '';
@@ -9268,7 +9279,33 @@ function addOverviewSection(nav     , sections     ) {
       return;
     }
     wrong.sort((a     , b     ) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
-    wrong.forEach((c     ) => alerts.appendChild(alertCard(c.level, c.title, c.state, c.detail, c.id)));
+
+    // A dismissal holds while the problem stays as it was. One that clears is forgotten, so it shows again
+    // if it comes back; one that changes state (warn -> bad, Stale -> Failing) is a new problem.
+    const keyOf = (c     ) => `${c.id || c.title}|${c.level}|${c.state}`;
+    const present = new Set(wrong.map(keyOf));
+    dismissed.forEach(k => { if (!present.has(k)) dismissed.delete(k); });
+    saveDismissed();
+    const shown = wrong.filter((c     ) => !dismissed.has(keyOf(c)));
+    const hidden = wrong.length - shown.length;
+
+    const head = el('div', { class: 'ov-alerts-head' });
+    const bad = shown.filter((c     ) => c.level === 'bad').length;
+    head.appendChild(el('span', { text: shown.length
+      ? `${shown.length} alert${shown.length === 1 ? '' : 's'}${bad ? ` · ${bad} failing` : ''}` : 'No alerts shown' }));
+    if (hidden) {
+      const back = el('button', { class: 'ov-alert-more', type: 'button', text: `Show ${hidden} dismissed` })                     ;
+      back.onclick = () => { wrong.forEach((c     ) => dismissed.delete(keyOf(c))); saveDismissed(); drawStatus(body); };
+      head.appendChild(back);
+    }
+    if (shown.length) {
+      const all = el('button', { class: 'ov-alert-more', type: 'button', text: 'Dismiss all' })                     ;
+      all.onclick = () => { shown.forEach((c     ) => dismissed.add(keyOf(c))); saveDismissed(); drawStatus(body); };
+      head.appendChild(all);
+    }
+    alerts.appendChild(head);
+    shown.forEach((c     ) => alerts.appendChild(alertCard(c.level, c.title, c.state, c.detail, c.id,
+      () => { dismissed.add(keyOf(c)); saveDismissed(); drawStatus(body); })));
   };
 
   let lastDay      = null;

@@ -161,7 +161,29 @@ if (/6\.1 kW/.test(text())) fail('the home figure survived the loss of the sourc
 const solarFigures = (text().match(/4\.8 kW/g) || []).length;
 if (solarFigures !== 1) fail(`solar's figure appears ${solarFigures} times — the home total is echoing it`);
 
+// --- Dismissing ---------------------------------------------------------------------------------------
+const refreshNow = async () => {
+  query(sec, 'button', true).find(b => b.textContent === 'Refresh').click();
+  await new Promise(r => setTimeout(r, 400));
+};
+const shownAlerts = () => query(sec, '.ov-alert', true);
+const headBtn = (re) => query(sec, '.ov-alerts-head button', true).find(b => re.test(b.textContent));
+query(shownAlerts()[0], '.ov-alert-x', false).click();
+if (shownAlerts().length !== 1 || /Rack-PDU-2/.test(shownAlerts()[0].textContent)) fail('dismissing the outage did not hide it alone');
+if (!headBtn(/Show 1 dismissed/)) fail('nothing offers the dismissed alert back');
+headBtn(/Dismiss all/).click();
+if (shownAlerts().length) fail('Dismiss all left alerts on the page');
+await refreshNow();
+if (shownAlerts().length) fail('a dismissed alert came back on the next refresh while nothing changed');
+// A problem that changes is a new problem: the warning turning into a failure shows again.
+board = { ok: true, cards: [...board.cards.filter(c => c.id !== 'emon'),
+  { id: 'emon', level: 'bad', title: 'EmonCMS', state: 'Failing', detail: 'HTTP 503' }] };
+await refreshNow();
+if (shownAlerts().length !== 1 || !/Failing/.test(shownAlerts()[0].textContent)) fail('a problem that got worse stayed dismissed');
+headBtn(/Show 1 dismissed/).click();
+if (shownAlerts().length !== 2) fail('Show dismissed did not bring the alert back');
+
 console.log('overview: the landing page is what the system is doing; home is the balance of what was '
   + 'measured; a measured zero is a zero and an unmeasured figure is a dash; the battery says how full it '
-  + 'is or why it cannot; health is one line until something is wrong, and then it is a card; and today\'s '
+  + 'is or why it cannot; health is one line until something is wrong, and then it is a card that can be dismissed until it changes; and today\'s '
   + 'figures say so when they cover only part of the day');
