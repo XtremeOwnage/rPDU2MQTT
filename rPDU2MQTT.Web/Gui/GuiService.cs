@@ -1177,6 +1177,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         MapLocationEndpoints(app);
+        MapCircuitFinderEndpoints(app);
 
         // A pasted panel directory, read as far as it can be (#455). Reading only: the page shows the preview,
         // and nothing is written until the operator applies it and saves.

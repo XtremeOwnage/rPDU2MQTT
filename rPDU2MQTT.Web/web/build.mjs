@@ -41,6 +41,7 @@ const MODULES = [
   'palette.ts',
   'overrides.ts',
   'circuit-finder.ts',
+  'circuit-session.ts',
   'plan-geometry.ts',
   'plan-units.ts',
   'plan-history.ts',
