@@ -6,7 +6,8 @@ import { activate, api, btn, closeSheet, el, ensure, navLink, openSheet, svgEl, 
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { sparkline } from '../charts.js';
-import { analyse, type Level } from '../circuit-finder.js';
+import { analyse } from '../circuit-finder.js';
+import { circuitSession } from '../circuit-session.js';
 import { type Pt, planDownstream, planProtectedBy, planRect, planArea, planCentroid, planShapeAt, planSnap, planMove, planClamp, planRound, planScaleMax, planNearestOnSegment, planNearestWall, planPathLength, planIsBox, planBounds, planContains } from '../plan-geometry.js';
 import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, planSnapStep, planScaleBar, planDefaultPlot } from '../plan-units.js';
 import { planHistory } from '../plan-history.js';
@@ -2467,43 +2468,30 @@ export function addFloorPlanSection(nav: any, sections: any) {
 
   // --- Trace from the outlet (#468) -----------------------------------------------------------------
   const traceItem = (it: any) => {
-    type Stage = { on: boolean; sum: Record<string, number>; n: Record<string, number> };
-    const stages: Stage[] = [];
-    const labels: Record<string, string> = {};
-    let busy = false;
     const body = el('div', { class: 'fp-sheet' });
-    body.appendChild(el('div', { class: 'desc', text: `Plug a lamp or kettle into ${it.Label || 'this outlet'} (or switch the fixture), then use the button: switch it, tap, and repeat. The channel that follows every switch is the circuit.` }));
+    body.appendChild(el('div', { class: 'desc', text: `Plug a lamp or kettle into ${it.Label || 'this outlet'} (or switch the fixture), then switch it and tap, and repeat. The channel that follows every switch is the circuit.` }));
     const tap = el('button', { class: 'cf-tap', type: 'button' }) as HTMLButtonElement;
+    const held = el('div', { class: 'cf-held' });
     const verdict = el('div', { class: 'cf-verdict' });
     const offer = el('div', { class: 'fp-actions' });
-    body.append(tap, verdict, offer);
+    body.append(tap, held, verdict, offer);
 
-    const sample = async () => {
-      const stage = stages[stages.length - 1];
-      let r: any;
-      try { r = await api('/api/flow'); } catch { return; }
-      (r?.body?.ok ? r.body.nodes || [] : []).forEach((n: any) => {
-        if (!n.id || String(n.id).includes('#') || typeof n.value !== 'number') return;
-        if (!['breaker', 'outlet', 'load', 'node'].includes(n.kind || 'node')) return;
-        labels[n.id] = n.label || n.id;
-        stage.sum[n.id] = (stage.sum[n.id] || 0) + n.value;
-        stage.n[n.id] = (stage.n[n.id] || 0) + 1;
-      });
-    };
-    const levels = (): Level[] => stages.filter(s => Object.keys(s.n).length).map(s => ({ on: s.on, mean: Object.fromEntries(Object.keys(s.sum).map(k => [k, s.sum[k] / s.n[k]])) }));
+    // The same session the Circuit Finder page runs: the server records, a tap is a timestamp.
+    const session = circuitSession({ alive: () => document.body.contains(tap), onChange: () => paint() });
+    const offered = (id: string) => ['breaker', 'outlet', 'load', 'node'].includes(session.kinds[id] || 'node');
     const paint = () => {
-      const next = !stages.length || stages[stages.length - 1].on ? 'OFF' : 'ON';
-      tap.textContent = busy ? 'Reading channels…' : `Switch it ${next}, then tap`;
-      tap.disabled = busy;
-      const found = analyse(levels(), { labels });
+      const now = session.current();
+      tap.textContent = now ? `Switched it ${now.on ? 'OFF' : 'ON'}? Tap` : 'Switch it OFF, then tap';
+      held.textContent = now ? `${now.on ? 'ON' : 'OFF'} · held ${Math.floor(now.heldMs / 1000)} s · ${now.readings} reading${now.readings === 1 ? '' : 's'}` : '';
+      const found = analyse(session.levels(), { labels: session.labels, offered });
       verdict.className = 'cf-verdict' + (found.done ? ' is-found' : '');
-      verdict.textContent = stages.length ? found.verdict : 'Switch the load off, then tap to take the first reading.';
+      verdict.textContent = session.taps ? found.verdict : 'Switch the load OFF, then tap to start.';
       offer.innerHTML = '';
       if (!found.done) return;
       const channels = found.found.map(f => f.node);
       const matches = (live?.circuits || []).filter(c => channels.some(ch => c.channels.includes(ch) || c.node === ch));
       if (!matches.length) {
-        offer.appendChild(el('div', { class: 'desc', text: `${channels.map(ch => labels[ch] || ch).join(' and ')} is not mapped to a breaker yet. Map it in the Panel Schedule, then link this outlet.` }));
+        offer.appendChild(el('div', { class: 'desc', text: `${channels.map(ch => session.labels[ch] || ch).join(' and ')} is not mapped to a breaker yet. Map it in the Panel Schedule, then link this outlet.` }));
         return;
       }
       matches.forEach(c => {
@@ -2512,14 +2500,8 @@ export function addFloorPlanSection(nav: any, sections: any) {
         offer.appendChild(b);
       });
     };
-    tap.onclick = async () => {
-      if (busy) return;
-      busy = true;
-      stages.push({ on: stages.length ? !stages[stages.length - 1].on : false, sum: {}, n: {} });
-      paint();
-      await sample();
-      setTimeout(async () => { await sample(); busy = false; paint(); }, 3000);
-    };
+    tap.onclick = () => { session.tap(); paint(); };
+    session.start();
     openSheet({ title: `Trace ${it.Label || it.Kind}`, body });
     paint();
   };

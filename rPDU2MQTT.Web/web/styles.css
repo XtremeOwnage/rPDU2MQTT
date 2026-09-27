@@ -1338,15 +1338,28 @@
   background: var(--accent); color: var(--accent-fg); border-color: transparent;
   position: relative; overflow: hidden;
 }
-/* The button is the progress bar: the fill sweeps across it, under its own label. */
-.cf-fill {
-  position: absolute; inset: 0; transform-origin: left; background: rgba(0, 0, 0, .28);
-  animation: cf-fill linear 1 forwards;
+/* Under the button: what the state open now has collected, and one chip per state so far. */
+.cf-held { width: 100%; font-size: 13px; color: var(--warn); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.cf-held.is-ready { color: var(--good); }
+.cf-strip { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+.cf-state {
+  padding: 2px 8px; border-radius: 10px; font: 600 11px/1.5 var(--mono);
+  background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
 }
-.cf-label { position: relative; }
-@keyframes cf-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) { .cf-fill { animation: none; } }
-.cf-tap:disabled { opacity: .6; }
+.cf-state.is-on { color: var(--accent); border-color: var(--accent-dim); }
+.cf-state.is-thin { border-style: dashed; color: var(--warn); }
+.cf-state.is-open { box-shadow: 0 0 0 1px var(--fg) inset; }
+.cf-minor { display: flex; gap: var(--sp-2); }
+.cf-settings { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); align-items: center; margin-top: var(--sp-4); max-width: 640px; }
+.cf-settings .cf-rate { flex: 1 1 100%; margin: 0; }
+.cf-row.is-lead { border-color: var(--accent); }
+.cf-now { font: 600 12px/1.4 var(--mono); color: var(--accent); white-space: nowrap; }
+/* A channel over the session: steps that line up with the shaded ON states are the load. */
+.cf-spark { flex: 1 1 100%; order: 4; width: 100%; height: 34px; display: block; }
+.cf-spark-on { fill: var(--accent); opacity: .12; }
+.cf-spark-tap { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.cf-spark-line { fill: none; stroke: var(--fg); stroke-width: 1.5; vector-effect: non-scaling-stroke; opacity: .85; }
+.cf-row.is-found .cf-spark-line { stroke: var(--good); }
 .cf-rate { margin: 0 0 var(--sp-3); }
 
 .cf-verdict {
