@@ -66,7 +66,7 @@ if (!alert) fail('the MQTT sources alert is not on the page');
 if (!alert.textContent.includes('2 of 46')) fail('the alert stopped reporting the count');
 
 // --- …and it can be opened, which is the whole point --------------------------------------------------
-const more = query(alert, 'button', true)[0];
+const more = query(alert, '.ov-alert-more', true)[0];
 if (!more) fail('the alert offers no way to see which bindings are being withheld');
 if (!/withheld binding/i.test(more.textContent || ''))
   fail(`the control does not say what it opens: "${more.textContent}"`);
@@ -98,7 +98,7 @@ if (!detail.hidden) fail('the detail cannot be closed again');
 
 // --- A healthy card is not given a control it has nothing to show behind -------------------------------
 const good = query(sec, '.ov-alert', true).find(a => (a.textContent || '').includes('Vertiv rPDU'));
-if (good && query(good, 'button', true).length) fail('a card with nothing withheld was given a disclosure control');
+if (good && query(good, '.ov-alert-more', true).length) fail('a card with nothing withheld was given a disclosure control');
 
 console.log('withheld-detail: the Overview alert keeps its count and opens onto the bindings behind it — '
   + 'each with its node, metric, topic and the reason it is being dropped — showing only the bindings '
