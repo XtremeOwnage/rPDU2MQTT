@@ -407,6 +407,9 @@
   /* Template-variable chips under a templated field. */
   /* A templated field: its placeholders as chips (token and an example), then the template filled in. */
   .tpl-help { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+  /* Placeholders only while the field is being edited; a blank, idle field shows nothing extra. */
+  .tpl-help:not(.is-open) .tpl-vars { display:none; }
+  .tpl-help.is-blank:not(.is-open) { display:none; }
   .tpl-vars { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   .tpl-chip {
     display:inline-flex; align-items:baseline; gap:6px; padding:3px 8px; border-radius:6px; cursor:grab;

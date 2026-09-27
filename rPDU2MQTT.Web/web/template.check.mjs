@@ -33,6 +33,11 @@ const open = async (label) => {
 const sec = await open('EmonCMS');
 const help = query(sec, '.tpl-help', true).find(h => query(h, '.tpl-chip', true).some(c => c.dataset.var === 'number'));
 if (!help) fail('the input-name template shows no placeholders');
+// Out of the way until the field is being edited.
+if (help.classList.contains('is-open')) fail('the placeholders are shown before the field is clicked into');
+const field = query(sec, 'input', true).find(i => String(i.value).startsWith('{device}_{nope}'));
+field.dispatch('focus', {});
+if (!help.classList.contains('is-open')) fail('clicking into the field does not show its placeholders');
 const chips = query(help, '.tpl-chip', true);
 const vars = chips.map(c => c.dataset.var);
 for (const v of ['device', 'source', 'name', 'number', 'type', 'units'])

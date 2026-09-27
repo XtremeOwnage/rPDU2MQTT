@@ -46,6 +46,7 @@ export type TemplateHelpOpts = {
 export function templateHelp(input: any, vars: string[], opts: TemplateHelpOpts = {}) {
   const exampleOf = (v: string) => opts.examples?.[v] ?? TEMPLATE_VARS[v]?.example() ?? v;
   const box = el('div', { class: 'tpl-help' });
+  let dragging = false;
 
   const chips = el('div', { class: 'tpl-vars' });
   vars.forEach(v => {
@@ -65,7 +66,12 @@ export function templateHelp(input: any, vars: string[], opts: TemplateHelpOpts 
       input.setSelectionRange?.(pos, pos);
       sync();
     };
-    chip.addEventListener('dragstart', (ev: any) => { ev.dataTransfer?.setData('text/plain', token); ev.dataTransfer && (ev.dataTransfer.effectAllowed = 'copy'); });
+    chip.addEventListener('dragstart', (ev: any) => {
+      dragging = true;
+      ev.dataTransfer?.setData('text/plain', token);
+      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy';
+    });
+    chip.addEventListener('dragend', () => { dragging = false; input.focus?.(); });
     chips.appendChild(chip);
   });
 
@@ -73,6 +79,7 @@ export function templateHelp(input: any, vars: string[], opts: TemplateHelpOpts 
   const draw = () => {
     preview.innerHTML = '';
     const typed = String(input.value || '');
+    box.classList.toggle('is-blank', !typed);
     const value = typed || opts.blankTemplate || '';
     preview.appendChild(el('span', { class: 'tpl-arrow', text: '→' }));
     if (!value) {
@@ -101,6 +108,29 @@ export function templateHelp(input: any, vars: string[], opts: TemplateHelpOpts 
   // A dropped placeholder lands where the pointer is; the browser inserts it, and it is kept from there.
   input.addEventListener('drop', () => setTimeout(sync, 0));
   draw();
+
+  // The placeholders are shown while the field is being edited; otherwise only the preview of what it
+  // holds. A click on a chip takes focus from the field for a moment, so closing waits to see where it went.
+  const open = () => {
+    box.classList.add('is-open');
+    // Opening near the foot of a dialog would put the chips under its pinned footer.
+    setTimeout(() => {
+      const panel = box.closest?.('.sheet-panel');
+      if (!panel?.getBoundingClientRect) return;
+      const foot = panel.querySelector('.sheet-sticky-foot');
+      const limit = (foot || panel).getBoundingClientRect().top - (foot ? 8 : 0);
+      const over = box.getBoundingClientRect().bottom - limit;
+      if (over > 0) panel.scrollTop += over;
+    }, 0);
+  };
+  const closeUnlessInside = () => setTimeout(() => {
+    const at = document.activeElement;
+    if (dragging || at === input || (at && box.contains(at))) return;
+    box.classList.remove('is-open');
+  }, 150);
+  input.addEventListener('focus', open);
+  input.addEventListener('blur', closeUnlessInside);
+  box.addEventListener('focusout', closeUnlessInside);
 
   box.append(chips, preview);
   return box;
