@@ -1,6 +1,7 @@
 // Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
 // nav, and the overall build() that wires every tab.
 import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel } from './helpers.js';
+import { templateHelp } from './template-field.js';
 import { state } from './state.js';
 import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
@@ -251,27 +252,9 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
   }
 }
 
-// Click-to-insert / draggable chips for a templated field's available {variables}.
-function templateVarChips(vars: string[], input: any, obj: any, node: any) {
-  const wrap = document.createElement('div'); wrap.className = 'tpl-vars';
-  const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
-  wrap.appendChild(label);
-  vars.forEach(v => {
-    const token = '{' + v + '}';
-    const chip = document.createElement('span'); chip.className = 'tpl-chip'; chip.textContent = token; chip.draggable = true;
-    chip.title = 'Click to insert at the cursor, or drag into the field';
-    chip.onclick = () => {
-      const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
-      input.value = input.value.slice(0, s) + token + input.value.slice(e);
-      const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
-      obj[node.key] = input.value === '' ? null : input.value;
-      refreshDirty();
-    };
-    // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
-    chip.ondragstart = (ev: any) => ev.dataTransfer.setData('text/plain', token);
-    wrap.appendChild(chip);
-  });
-  return wrap;
+// A templated field's placeholders: what each means, an example, and a preview of the result.
+function templateVarChips(vars: string[], input: any, _obj: any, node: any) {
+  return templateHelp(input, vars, { blankTemplate: typeof node.default === 'string' ? node.default : undefined });
 }
 
 /// The same schema minus the field that names the entry, which is shown as its heading instead.

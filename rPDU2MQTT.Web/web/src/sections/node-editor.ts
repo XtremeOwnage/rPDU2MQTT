@@ -5,6 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
+import { templateHelp } from '../template-field.js';
 import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
 import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
 import {
@@ -872,10 +873,18 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
   emonTag.onchange = () => { node.EmonCmsTag = emonTag.value.trim() || undefined; };
-  moreGrid.appendChild(field('EmonCMS tag', emonTag, 'Blank: EmonCMS page default. {node}, {label}, {kind} filled in.'));
+  // Previewed with this node's own id, label and kind: the tag it will actually get.
+  const nodeVars = { node: node.Id, label: node.Label || node.Id, kind: node.Kind || 'node' };
+  const emonTagField = field('EmonCMS tag', emonTag);
+  emonTagField.appendChild(templateHelp(emonTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonTagField.classList.add('ne-wide');
+  moreGrid.appendChild(emonTagField);
   const emonVirtualTag = el('input', { type: 'text', value: node.EmonCmsVirtualTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
   emonVirtualTag.onchange = () => { node.EmonCmsVirtualTag = emonVirtualTag.value.trim() || undefined; };
-  moreGrid.appendChild(field('EmonCMS virtual-feed tag', emonVirtualTag, 'Blank: EmonCMS page default.'));
+  const emonVirtualField = field('EmonCMS virtual-feed tag', emonVirtualTag);
+  emonVirtualField.appendChild(templateHelp(emonVirtualTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonVirtualField.classList.add('ne-wide');
+  moreGrid.appendChild(emonVirtualField);
   more.appendChild(moreGrid);
   box.appendChild(more);
 

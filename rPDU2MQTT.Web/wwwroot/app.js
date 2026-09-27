@@ -1070,6 +1070,101 @@ function tagInput(arr          , opts                  = {})              {
   return wrap;
 }
 
+// ── template-field.ts ───────────────────────────────────────────
+// Help for a templated text field: what each {placeholder} means, an example of what it becomes, and a
+// preview of the whole template filled in. Click a placeholder to insert it at the cursor, or drag it in.
+//
+// The placeholders a field takes come from the server ([TemplateVariables] on the setting, served as
+// `templateVars` in the schema), so any templated setting drawn from the schema gets this for nothing; a
+// hand-built field passes its list and, where it knows them, the real values (the node being edited).
+
+const firstPdu = () => Object.keys(state.data?.Pdus || {})[0];
+
+/// Every placeholder the server fills in, what it stands for, and a plausible value for the preview.
+const TEMPLATE_VARS                              = {
+  device: { what: 'PDU name', example: () => 'rack_pdu_1' },
+  instance: { what: 'PDU entry key (Pdus)', example: () => firstPdu() || 'default' },
+  serial: { what: 'PDU serial number', example: () => 'A1B2C3D4' },
+  source: { what: 'Outlet or source id', example: () => 'dell_md1200' },
+  outlet: { what: 'Outlet id (same as {source})', example: () => 'dell_md1200' },
+  name: { what: 'Display name', example: () => 'Dell MD1200' },
+  number: { what: 'Outlet number', example: () => '7' },
+  group: { what: 'Outlet group name', example: () => 'Rack A' },
+  type: { what: 'Measurement type', example: () => 'realpower' },
+  metric: { what: 'Metric', example: () => 'realpower' },
+  units: { what: 'Units', example: () => 'W' },
+  node: { what: 'Node id', example: () => 'solar' },
+  id: { what: 'Node id', example: () => 'solar' },
+  label: { what: 'Node label', example: () => 'Solar (PV)' },
+  kind: { what: 'Node kind', example: () => 'solar' },
+  parent: { what: 'MQTT parent topic', example: () => state.data?.MQTT?.ParentTopic || 'rPDU2MQTT' },
+  base: { what: 'EmonCMS MQTT base topic', example: () => state.data?.EmonCMS?.MqttBaseTopic || 'emon' },
+};
+
+/// The placeholder chips and the preview for `input`, which must sync its model in its `onchange`.
+function templateHelp(input     , vars          , opts                   = {}) {
+  const exampleOf = (v        ) => opts.examples?.[v] ?? TEMPLATE_VARS[v]?.example() ?? v;
+  const box = el('div', { class: 'tpl-help' });
+
+  const chips = el('div', { class: 'tpl-vars' });
+  vars.forEach(v => {
+    const token = '{' + v + '}';
+    const chip = el('button', { class: 'tpl-chip', type: 'button' },
+      el('code', { class: 'tpl-token', text: token }),
+      el('span', { class: 'tpl-eg', text: exampleOf(v) }))                     ;
+    chip.draggable = true;
+    chip.title = `${TEMPLATE_VARS[v]?.what || v} — e.g. ${exampleOf(v)}. Click to insert at the cursor, or drag into the field.`;
+    chip.dataset.var = v;
+    chip.onclick = () => {
+      const len = String(input.value || '').length;
+      const s = input.selectionStart ?? len, e = input.selectionEnd ?? len;
+      input.value = String(input.value || '').slice(0, s) + token + String(input.value || '').slice(e);
+      const pos = s + token.length;
+      input.focus?.();
+      input.setSelectionRange?.(pos, pos);
+      sync();
+    };
+    chip.addEventListener('dragstart', (ev     ) => { ev.dataTransfer?.setData('text/plain', token); ev.dataTransfer && (ev.dataTransfer.effectAllowed = 'copy'); });
+    chips.appendChild(chip);
+  });
+
+  const preview = el('div', { class: 'tpl-preview' });
+  const draw = () => {
+    preview.innerHTML = '';
+    const typed = String(input.value || '');
+    const value = typed || opts.blankTemplate || '';
+    preview.appendChild(el('span', { class: 'tpl-arrow', text: '→' }));
+    if (!value) {
+      preview.appendChild(el('span', { class: 'tpl-blank', text: opts.whenBlank || 'blank' }));
+      return;
+    }
+    if (!typed) preview.appendChild(el('span', { class: 'tpl-blank', text: 'default: ' }));
+    // Literal text as typed, each placeholder as the value it becomes, and anything in braces this field
+    // does not know as an error: it would be written out as-is.
+    value.split(/(\{[A-Za-z_]+\})/).forEach(part => {
+      if (!part) return;
+      const m = /^\{([A-Za-z_]+)\}$/.exec(part);
+      if (!m) { preview.appendChild(el('span', { class: 'tpl-lit', text: part })); return; }
+      if (vars.includes(m[1])) preview.appendChild(el('span', { class: 'tpl-val', text: exampleOf(m[1]), title: part }));
+      else preview.appendChild(el('span', { class: 'tpl-bad', text: part, title: `${part} is not a placeholder here; it is written as-is.` }));
+    });
+  };
+  /// Write the new text through the field's own handler, so the model and the save bar see it.
+  const sync = () => {
+    if (typeof input.onchange === 'function') input.onchange({ target: input });
+    refreshDirty();
+    draw();
+  };
+  input.addEventListener('input', draw);
+  input.addEventListener('change', draw);
+  // A dropped placeholder lands where the pointer is; the browser inserts it, and it is kept from there.
+  input.addEventListener('drop', () => setTimeout(sync, 0));
+  draw();
+
+  box.append(chips, preview);
+  return box;
+}
+
 // ── flow-vocabulary.ts ──────────────────────────────────────────
 // The shared vocabulary: metrics, node kinds, node modes, source types, Modbus shapes.
 const METRICS                                       = [
@@ -6358,6 +6453,7 @@ function addFlowSection(nav     , sections     ) {
     expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; refreshDirty(); };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     body.appendChild(exportRow);
+    body.appendChild(templateHelp(topicIn, ['parent', 'id', 'label', 'kind', 'metric', 'units'], { blankTemplate: '{parent}/energyflow/{id}' }));
 
     // How the energy roll-up is accumulated, and when the day ends.
     body.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
@@ -7620,10 +7716,18 @@ function renderNodeEditor(node     , links       , cand                  , reren
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' })                    ;
   emonTag.onchange = () => { node.EmonCmsTag = emonTag.value.trim() || undefined; };
-  moreGrid.appendChild(field('EmonCMS tag', emonTag, 'Blank: EmonCMS page default. {node}, {label}, {kind} filled in.'));
+  // Previewed with this node's own id, label and kind: the tag it will actually get.
+  const nodeVars = { node: node.Id, label: node.Label || node.Id, kind: node.Kind || 'node' };
+  const emonTagField = field('EmonCMS tag', emonTag);
+  emonTagField.appendChild(templateHelp(emonTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonTagField.classList.add('ne-wide');
+  moreGrid.appendChild(emonTagField);
   const emonVirtualTag = el('input', { type: 'text', value: node.EmonCmsVirtualTag || '', placeholder: 'EmonCMS default' })                    ;
   emonVirtualTag.onchange = () => { node.EmonCmsVirtualTag = emonVirtualTag.value.trim() || undefined; };
-  moreGrid.appendChild(field('EmonCMS virtual-feed tag', emonVirtualTag, 'Blank: EmonCMS page default.'));
+  const emonVirtualField = field('EmonCMS virtual-feed tag', emonVirtualTag);
+  emonVirtualField.appendChild(templateHelp(emonVirtualTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonVirtualField.classList.add('ne-wide');
+  moreGrid.appendChild(emonVirtualField);
   more.appendChild(moreGrid);
   box.appendChild(more);
 
@@ -16524,27 +16628,9 @@ function renderNode(node     , obj     , container     , path           = []) {
   }
 }
 
-// Click-to-insert / draggable chips for a templated field's available {variables}.
-function templateVarChips(vars          , input     , obj     , node     ) {
-  const wrap = document.createElement('div'); wrap.className = 'tpl-vars';
-  const label = document.createElement('span'); label.className = 'desc'; label.style.margin = '0'; label.textContent = 'Variables:';
-  wrap.appendChild(label);
-  vars.forEach(v => {
-    const token = '{' + v + '}';
-    const chip = document.createElement('span'); chip.className = 'tpl-chip'; chip.textContent = token; chip.draggable = true;
-    chip.title = 'Click to insert at the cursor, or drag into the field';
-    chip.onclick = () => {
-      const s = input.selectionStart ?? input.value.length, e = input.selectionEnd ?? input.value.length;
-      input.value = input.value.slice(0, s) + token + input.value.slice(e);
-      const pos = s + token.length; input.focus(); input.setSelectionRange(pos, pos);
-      obj[node.key] = input.value === '' ? null : input.value;
-      refreshDirty();
-    };
-    // Native text drop inserts at the drop point; the field's change handler syncs the model on blur.
-    chip.ondragstart = (ev     ) => ev.dataTransfer.setData('text/plain', token);
-    wrap.appendChild(chip);
-  });
-  return wrap;
+// A templated field's placeholders: what each means, an example, and a preview of the result.
+function templateVarChips(vars          , input     , _obj     , node     ) {
+  return templateHelp(input, vars, { blankTemplate: typeof node.default === 'string' ? node.default : undefined });
 }
 
 /// The same schema minus the field that names the entry, which is shown as its heading instead.
