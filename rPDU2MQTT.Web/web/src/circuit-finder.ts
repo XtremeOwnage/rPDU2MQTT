@@ -19,7 +19,7 @@ export type Level = {
   spread: Record<string, number | null>;
 };
 
-/// A channel that stepped with the load at least once, or came close.
+/// A channel, scored on how it moved with the load.
 export type Candidate = {
   node: string;
   label: string;
@@ -30,16 +30,22 @@ export type Candidate = {
   /// Its noise, in watts, when there were readings enough to tell.
   noise: number | null;
   missed: number;
+  /// How strongly it moved with the load, over every toggle: each toggle adds its step in noise widths
+  /// (capped), and a step the wrong way takes away. A load that misses a toggle loses some, not everything.
+  score: number;
+  /// Its typical step in noise widths.
+  clarity: number;
 };
 
 export type Finding = {
   toggles: number;
+  /// Every channel that moved with the load at all, strongest first.
   candidates: Candidate[];
-  /// The channels that followed every toggle — two of them when a 240 V load steps both legs.
+  /// The channel that stands out, or the two legs of a 240 V breaker; empty while none does.
   found: Candidate[];
   done: boolean;
   verdict: string;
-  /// Why nothing matched, in watts, when nothing did.
+  /// Why nothing stands out, in watts, when nothing does.
   why: string | null;
 };
 
@@ -96,6 +102,9 @@ const threshold = (noise: number | null, n1: number, n2: number) =>
 /// Two channels stepping by roughly the same amount are the two legs of one 240 V breaker.
 const paired = (a: Candidate, b: Candidate) => Math.abs(a.step - b.step) <= 0.3 * Math.max(a.step, b.step);
 
+/// How far ahead the leader has to be to be called: its score against the next one's.
+export const STANDS_OUT = 2;
+
 export function analyse(levels: Level[], opts: { watts?: number | null; labels?: Record<string, string>; offered?: (node: string) => boolean } = {}): Finding {
   const labels = opts.labels || {};
   const offered = opts.offered || (() => true);
@@ -104,79 +113,79 @@ export function analyse(levels: Level[], opts: { watts?: number | null; labels?:
   const nodes = new Set<string>();
   levels.forEach(l => Object.keys(l.mean).forEach(k => { if (offered(k)) nodes.add(k); }));
 
-  type Seen = { steps: number[]; matched: number; needs: number[] };
-  const seen: Record<string, Seen> = {};
+  const all: Candidate[] = [];
   nodes.forEach(node => {
     const noise = noiseOf(levels, node);
-    const s: Seen = { steps: [], matched: 0, needs: [] };
+    const steps: number[] = [], widths: number[] = [];
+    let matched = 0, score = 0;
     for (let i = 1; i < levels.length; i++) {
       const before = levels[i - 1].mean[node], after = levels[i].mean[node];
       if (before == null || after == null) continue;
       // On should raise a channel and off should lower it; a change the other way is not this load.
       const step = (levels[i].on ? 1 : -1) * (after - before);
-      const need = Math.max(least, threshold(noise, levels[i - 1].n[node], levels[i].n[node]));
-      s.steps.push(step);
-      s.needs.push(need);
-      if (step >= need && step <= most) s.matched++;
+      const need = threshold(noise, levels[i - 1].n[node], levels[i].n[node]);
+      // In noise widths: CLEAR_BY is the line between a step and a wobble.
+      const width = CLEAR_BY * step / need;
+      const plausible = step >= least && step <= most;
+      steps.push(step);
+      widths.push(width);
+      if (width >= CLEAR_BY && plausible) matched++;
+      // Capped, so one huge toggle cannot outvote several; a step of the wrong size for a known draw counts
+      // for nothing either way.
+      score += plausible ? Math.max(-10, Math.min(20, width)) : Math.min(0, width);
     }
-    if (s.steps.length) seen[node] = s;
+    if (!steps.length) return;
+    all.push({ node, label: labels[node] || node, matched, step: median(steps), noise, missed: steps.length - matched,
+      score, clarity: median(widths) });
   });
 
-  const all: Candidate[] = Object.entries(seen).map(([node, s]) => ({
-    node, label: labels[node] || node, matched: s.matched, step: median(s.steps),
-    noise: noiseOf(levels, node), missed: s.steps.length - s.matched,
-  }));
-  // Near-misses stay listed, ranked: a channel that moved the right way on most toggles, or by most of what
-  // it needed, is where to look when nothing has cleared the bar yet.
-  const closeness = (c: Candidate) => {
-    const s = seen[c.node];
-    return median(s.steps.map((st, i) => st / s.needs[i]));
-  };
-  const candidates = all
-    .filter(c => c.matched > 0 || (c.step > 0 && closeness(c) >= 0.5))
-    .sort((a, b) => b.matched - a.matched || closeness(b) - closeness(a) || b.step - a.step);
-
-  const found = candidates.filter(c => c.matched === toggles && toggles > 0);
-  const legs = found.length === 2 && paired(found[0], found[1]);
-  const done = toggles >= 2 && (found.length === 1 || legs);
-  const why = toggles && !found.length ? whyNothing(all, levels, opts.watts) : null;
+  const candidates = all.filter(c => c.score > 0).sort((a, b) => b.score - a.score || b.step - a.step);
+  const [first, second, third] = candidates;
+  // Ahead: it followed more toggles than the next channel, or as many and scored well above it. Channels
+  // that followed the same toggles by the same amount — the panel shifting together — are never ahead.
+  const aheadOf = (c: Candidate, next?: Candidate) => !next || next.score <= 0 || c.matched > next.matched
+    || c.score >= STANDS_OUT * next.score;
+  // Clear of the noise on half the toggles or more, and well ahead of everything else. A load need not show on every
+  // toggle — a slow poll or a load that cycles misses one — but it has to be the one that moves.
+  // Half the toggles: a load that fails to switch once misses two — the switch, and the one back.
+  const strong = (c?: Candidate) => !!c && c.matched >= Math.max(1, Math.ceil(toggles / 2));
+  const legs = strong(first) && strong(second) && paired(first, second) && aheadOf(second, third);
+  const found = legs ? [first, second] : strong(first) && aheadOf(first, second) ? [first] : [];
+  const done = toggles >= 2 && found.length > 0;
+  const why = toggles && !found.length ? whyNothing(candidates, all, levels, opts.watts) : null;
   return { toggles, candidates, found, done, why, verdict: verdictOf(toggles, candidates, found, done, legs, why) };
 }
 
 const watts = (w: number) => `${Math.round(w).toLocaleString('en-US')} W`;
 
-/// Nothing followed every toggle: say what the biggest step was against the noise, and what a load would
-/// have to draw to be seen on these channels.
-function whyNothing(all: Candidate[], levels: Level[], load?: number | null): string {
-  const biggest = [...all].sort((a, b) => b.step - a.step)[0];
-  const noises = all.map(c => c.noise).filter((x): x is number => x != null);
-  const typical = noises.length ? noises.sort((a, b) => a - b)[Math.floor(noises.length / 2)] : null;
-  const thin = levels.some(l => Math.max(0, ...Object.values(l.n)) < 2);
+/// Nothing stands out: say whether that is because everything moved a little together, or nothing moved, and
+/// what a load would have to draw to be seen on these channels.
+function whyNothing(candidates: Candidate[], all: Candidate[], levels: Level[], load?: number | null): string {
   const parts: string[] = [];
-  if (biggest && biggest.step > 0)
-    parts.push(`Largest step: ${biggest.label} ${biggest.step >= 0 ? '+' : ''}${watts(biggest.step)}`
-      + (biggest.noise != null ? `, against ±${watts(biggest.noise)} of noise on that channel.` : '.'));
+  const top = candidates.slice(0, 6);
+  // Several channels stepping by about the same small amount is the whole panel shifting, not one load.
+  const together = top.length >= 3 && top.every(c => Math.abs(c.step - top[0].step) <= Math.max(5, 0.3 * Math.abs(top[0].step)));
+  if (together) parts.push(`${top.length} channels moved about ${watts(top[0].step)} together — a shift across the panel, not one load.`);
+  else if (candidates[0]) parts.push(`Largest: ${candidates[0].label} ${candidates[0].step >= 0 ? '+' : ''}${watts(candidates[0].step)}`
+    + (candidates[0].noise != null ? `, against ±${watts(candidates[0].noise)} of noise.` : '.'));
   else parts.push('No channel moved the way the load did.');
-  if (typical != null) {
-    // What a step between two states of the size these ones have been has to clear.
+  const noises = all.map(c => c.noise).filter((x): x is number => x != null).sort((a, b) => a - b);
+  if (noises.length) {
     const held = median(levels.map(l => Math.max(1, ...Object.values(l.n))));
-    const needs = threshold(typical, held, held);
-    parts.push(`On these channels a load has to draw about ${watts(needs)} to be seen`
+    const needs = threshold(noises[Math.floor(noises.length / 2)], held, held);
+    parts.push(`A load has to draw about ${watts(needs)} to be seen on these channels`
       + (load && load < needs ? ` — ${watts(load)} is below that.` : '.'));
   }
-  if (thin) parts.push('A state held for under two readings says little: hold each one longer.');
+  if (levels.some(l => Math.max(0, ...Object.values(l.n)) < 2)) parts.push('Hold each state for two readings or more.');
   return parts.join(' ');
 }
 
 function verdictOf(toggles: number, candidates: Candidate[], found: Candidate[], done: boolean, legs: boolean, why: string | null): string {
   if (!toggles) return 'Now switch the load ON, then tap. There is nothing to compare against yet.';
-  if (done && legs) return `Both legs of a 240 V breaker: ${found[0].label} and ${found[1].label}, stepping ${watts(found[0].step)} each.`;
-  if (done) return `${found[0].label} — it followed all ${toggles} toggles, stepping ${watts(found[0].step)}.`;
-  if (!found.length) {
-    const lead = candidates[0] ? `Closest: ${candidates[0].label}, ${candidates[0].matched} of ${toggles}. ` : '';
-    return `Nothing has followed every toggle. ${lead}${why || ''}`.trim();
-  }
-  const more = toggles < 2 ? 1 : found.length > 2 ? 2 : 1;
-  return `${found.length} channels match all ${toggles} toggles: ${found.slice(0, 3).map(c => c.label).join(', ')}. `
-    + `${more} more toggle${more > 1 ? 's' : ''} should separate them.`;
+  const lead = found[0];
+  if (legs) return `${done ? '' : 'Leading: '}both legs of a 240 V breaker — ${found[0].label} and ${found[1].label}, stepping ${watts(found[0].step)} each.`
+    + (done ? '' : ' Toggle again to confirm.');
+  if (lead && done) return `${lead.label} — stepping ${watts(lead.step)} with the load, followed ${lead.matched} of ${toggles} toggles, well ahead of any other channel.`;
+  if (lead) return `Leading: ${lead.label}, ${lead.step >= 0 ? '+' : ''}${watts(lead.step)}. Toggle again to confirm.`;
+  return `No channel stands out yet. ${why || ''}`.trim();
 }

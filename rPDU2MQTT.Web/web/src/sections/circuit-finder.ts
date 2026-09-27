@@ -2,7 +2,7 @@
 // switch it back, tap. The server records every channel the whole time, so a tap is only a timestamp — there
 // is nothing to wait for — and each state is every reading taken while it was held.
 // Built for a phone held in one hand at the panel: one big button, one list, no tables.
-import { activate, btn, el, instanceSelector, navLink, withInstance } from '../helpers.js';
+import { activate, btn, el, instanceSelector, navLink, svgEl, withInstance } from '../helpers.js';
 import { analyse } from '../circuit-finder.js';
 import { circuitSession } from '../circuit-session.js';
 import { editNodeOnNextOpen } from './nodes.js';
@@ -98,15 +98,23 @@ export function addCircuitFinderSection(nav: any, sections: any) {
       : session.taps ? found.verdict : 'Switch the load OFF, then tap to start.';
 
     list.innerHTML = '';
+    const lv = session.levels();
+    const open = lv.length >= 2 ? lv[lv.length - 1] : null, prev = lv.length >= 2 ? lv[lv.length - 2] : null;
+    const w = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x)).toLocaleString('en-US')} W`;
     found.candidates.slice(0, 8).forEach(c => {
-      const hit = found.done && found.found.some(f => f.node === c.node);
-      const near = c.matched < found.toggles;
+      const hit = found.found.some(f => f.node === c.node);
+      // Since the last tap, as it comes in: this is where a channel that is moving shows first.
+      const now = open && prev && open.mean[c.node] != null && prev.mean[c.node] != null ? open.mean[c.node] - prev.mean[c.node] : null;
+      const meta = [w(c.step), c.noise != null ? `${Math.round(c.clarity)}× noise` : null, `followed ${c.matched} of ${found.toggles}`]
+        .filter(Boolean).join(' · ');
       // The point of finding a circuit is usually to name it, so each row opens that node's editor.
-      const row = el('button', { class: 'cf-row' + (hit ? ' is-found' : near ? ' is-near' : ''), type: 'button' },
+      const row = el('button', { class: 'cf-row' + (hit ? (found.done ? ' is-found' : ' is-lead') : ''), type: 'button' },
         el('span', { class: 'cf-name', text: c.label }),
-        el('span', { class: 'cf-meta', text: `${c.matched} of ${found.toggles} toggles · ${c.step >= 0 ? '+' : ''}${Math.round(c.step).toLocaleString('en-US')} W`
-          + (c.noise != null ? ` · ±${Math.round(c.noise).toLocaleString('en-US')} W noise` : '') }),
+        el('span', { class: 'cf-meta', text: meta }),
+        now != null ? el('span', { class: 'cf-now', text: `now ${w(now)}`, title: 'Change since the last tap, so far' }) : '',
+        spark(c.node),
         el('span', { class: 'cf-edit', text: 'Edit ›' }));
+      row.dataset.node = c.node;
       row.title = `Open ${c.label} in the node editor, to name it or set what feeds it.`;
       row.onclick = () => {
         editNodeOnNextOpen(c.node);
@@ -114,6 +122,31 @@ export function addCircuitFinderSection(nav: any, sections: any) {
       };
       list.appendChild(row);
     });
+  };
+
+  /// One channel over the session: its readings as a line, the ON states shaded, a tick at every tap. A
+  /// channel that moves with the load reads as steps lined up with the shading, whatever the numbers say.
+  const spark = (node: string) => {
+    const s = session.series(node);
+    const W = 300, H = 34, span = Math.max(1, s.to - s.from);
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'cf-spark' }) as any;
+    const x = (t: number) => Math.round(((t - s.from) / span) * W * 10) / 10;
+    s.taps.forEach((t, i) => {
+      const end = i + 1 < s.taps.length ? s.taps[i + 1].t : s.to;
+      if (t.on) svg.appendChild(svgEl('rect', { x: x(t.t), y: 0, width: Math.max(0, x(end) - x(t.t)), height: H, class: 'cf-spark-on' }));
+      svg.appendChild(svgEl('line', { x1: x(t.t), x2: x(t.t), y1: 0, y2: H, class: 'cf-spark-tap' }));
+    });
+    if (s.points.length > 1) {
+      const vs = s.points.map(p => p.v);
+      const lo = Math.min(...vs), hi = Math.max(...vs), pad = Math.max(1, (hi - lo) * 0.12);
+      const y = (v: number) => Math.round((H - 2 - ((v - lo + pad) / (hi - lo + 2 * pad)) * (H - 4)) * 10) / 10;
+      // Held level between readings: a reading stands until the next one.
+      let d = `M${x(s.points[0].t)},${y(s.points[0].v)}`;
+      for (let i = 1; i < s.points.length; i++) d += ` H${x(s.points[i].t)} V${y(s.points[i].v)}`;
+      d += ` H${W}`;
+      svg.appendChild(svgEl('path', { d, class: 'cf-spark-line' }));
+    }
+    return svg;
   };
 
   // The readings run from the moment the page is open, so the first state already has some.

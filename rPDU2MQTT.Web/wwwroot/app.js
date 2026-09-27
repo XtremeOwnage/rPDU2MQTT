@@ -3398,9 +3398,7 @@ function pruneEmpty(o     )      {
 /// One state of the load: what each channel read while it lasted — the median, how many readings, and how
 /// much they wandered (a robust standard deviation; null with fewer than three readings).
 
-/// A channel that stepped with the load at least once, or came close.
-
-                                               
+/// A channel, scored on how it moved with the load.
 
 /// The smallest step ever called a change, in watts, whatever a channel's noise.
 const NOISE_FLOOR = 5;
@@ -3455,6 +3453,9 @@ const threshold = (noise               , n1        , n2        ) =>
 /// Two channels stepping by roughly the same amount are the two legs of one 240 V breaker.
 const paired = (a           , b           ) => Math.abs(a.step - b.step) <= 0.3 * Math.max(a.step, b.step);
 
+/// How far ahead the leader has to be to be called: its score against the next one's.
+const STANDS_OUT = 2;
+
 function analyse(levels         , opts                                                                                                  = {})          {
   const labels = opts.labels || {};
   const offered = opts.offered || (() => true);
@@ -3463,80 +3464,81 @@ function analyse(levels         , opts                                          
   const nodes = new Set        ();
   levels.forEach(l => Object.keys(l.mean).forEach(k => { if (offered(k)) nodes.add(k); }));
 
-  const seen                       = {};
+  const all              = [];
   nodes.forEach(node => {
     const noise = noiseOf(levels, node);
-    const s       = { steps: [], matched: 0, needs: [] };
+    const steps           = [], widths           = [];
+    let matched = 0, score = 0;
     for (let i = 1; i < levels.length; i++) {
       const before = levels[i - 1].mean[node], after = levels[i].mean[node];
       if (before == null || after == null) continue;
       // On should raise a channel and off should lower it; a change the other way is not this load.
       const step = (levels[i].on ? 1 : -1) * (after - before);
-      const need = Math.max(least, threshold(noise, levels[i - 1].n[node], levels[i].n[node]));
-      s.steps.push(step);
-      s.needs.push(need);
-      if (step >= need && step <= most) s.matched++;
+      const need = threshold(noise, levels[i - 1].n[node], levels[i].n[node]);
+      // In noise widths: CLEAR_BY is the line between a step and a wobble.
+      const width = CLEAR_BY * step / need;
+      const plausible = step >= least && step <= most;
+      steps.push(step);
+      widths.push(width);
+      if (width >= CLEAR_BY && plausible) matched++;
+      // Capped, so one huge toggle cannot outvote several; a step of the wrong size for a known draw counts
+      // for nothing either way.
+      score += plausible ? Math.max(-10, Math.min(20, width)) : Math.min(0, width);
     }
-    if (s.steps.length) seen[node] = s;
+    if (!steps.length) return;
+    all.push({ node, label: labels[node] || node, matched, step: median(steps), noise, missed: steps.length - matched,
+      score, clarity: median(widths) });
   });
 
-  const all              = Object.entries(seen).map(([node, s]) => ({
-    node, label: labels[node] || node, matched: s.matched, step: median(s.steps),
-    noise: noiseOf(levels, node), missed: s.steps.length - s.matched,
-  }));
-  // Near-misses stay listed, ranked: a channel that moved the right way on most toggles, or by most of what
-  // it needed, is where to look when nothing has cleared the bar yet.
-  const closeness = (c           ) => {
-    const s = seen[c.node];
-    return median(s.steps.map((st, i) => st / s.needs[i]));
-  };
-  const candidates = all
-    .filter(c => c.matched > 0 || (c.step > 0 && closeness(c) >= 0.5))
-    .sort((a, b) => b.matched - a.matched || closeness(b) - closeness(a) || b.step - a.step);
-
-  const found = candidates.filter(c => c.matched === toggles && toggles > 0);
-  const legs = found.length === 2 && paired(found[0], found[1]);
-  const done = toggles >= 2 && (found.length === 1 || legs);
-  const why = toggles && !found.length ? whyNothing(all, levels, opts.watts) : null;
+  const candidates = all.filter(c => c.score > 0).sort((a, b) => b.score - a.score || b.step - a.step);
+  const [first, second, third] = candidates;
+  // Ahead: it followed more toggles than the next channel, or as many and scored well above it. Channels
+  // that followed the same toggles by the same amount — the panel shifting together — are never ahead.
+  const aheadOf = (c           , next            ) => !next || next.score <= 0 || c.matched > next.matched
+    || c.score >= STANDS_OUT * next.score;
+  // Clear of the noise on half the toggles or more, and well ahead of everything else. A load need not show on every
+  // toggle — a slow poll or a load that cycles misses one — but it has to be the one that moves.
+  // Half the toggles: a load that fails to switch once misses two — the switch, and the one back.
+  const strong = (c            ) => !!c && c.matched >= Math.max(1, Math.ceil(toggles / 2));
+  const legs = strong(first) && strong(second) && paired(first, second) && aheadOf(second, third);
+  const found = legs ? [first, second] : strong(first) && aheadOf(first, second) ? [first] : [];
+  const done = toggles >= 2 && found.length > 0;
+  const why = toggles && !found.length ? whyNothing(candidates, all, levels, opts.watts) : null;
   return { toggles, candidates, found, done, why, verdict: verdictOf(toggles, candidates, found, done, legs, why) };
 }
 
 const watts = (w        ) => `${Math.round(w).toLocaleString('en-US')} W`;
 
-/// Nothing followed every toggle: say what the biggest step was against the noise, and what a load would
-/// have to draw to be seen on these channels.
-function whyNothing(all             , levels         , load                )         {
-  const biggest = [...all].sort((a, b) => b.step - a.step)[0];
-  const noises = all.map(c => c.noise).filter((x)              => x != null);
-  const typical = noises.length ? noises.sort((a, b) => a - b)[Math.floor(noises.length / 2)] : null;
-  const thin = levels.some(l => Math.max(0, ...Object.values(l.n)) < 2);
+/// Nothing stands out: say whether that is because everything moved a little together, or nothing moved, and
+/// what a load would have to draw to be seen on these channels.
+function whyNothing(candidates             , all             , levels         , load                )         {
   const parts           = [];
-  if (biggest && biggest.step > 0)
-    parts.push(`Largest step: ${biggest.label} ${biggest.step >= 0 ? '+' : ''}${watts(biggest.step)}`
-      + (biggest.noise != null ? `, against ±${watts(biggest.noise)} of noise on that channel.` : '.'));
+  const top = candidates.slice(0, 6);
+  // Several channels stepping by about the same small amount is the whole panel shifting, not one load.
+  const together = top.length >= 3 && top.every(c => Math.abs(c.step - top[0].step) <= Math.max(5, 0.3 * Math.abs(top[0].step)));
+  if (together) parts.push(`${top.length} channels moved about ${watts(top[0].step)} together — a shift across the panel, not one load.`);
+  else if (candidates[0]) parts.push(`Largest: ${candidates[0].label} ${candidates[0].step >= 0 ? '+' : ''}${watts(candidates[0].step)}`
+    + (candidates[0].noise != null ? `, against ±${watts(candidates[0].noise)} of noise.` : '.'));
   else parts.push('No channel moved the way the load did.');
-  if (typical != null) {
-    // What a step between two states of the size these ones have been has to clear.
+  const noises = all.map(c => c.noise).filter((x)              => x != null).sort((a, b) => a - b);
+  if (noises.length) {
     const held = median(levels.map(l => Math.max(1, ...Object.values(l.n))));
-    const needs = threshold(typical, held, held);
-    parts.push(`On these channels a load has to draw about ${watts(needs)} to be seen`
+    const needs = threshold(noises[Math.floor(noises.length / 2)], held, held);
+    parts.push(`A load has to draw about ${watts(needs)} to be seen on these channels`
       + (load && load < needs ? ` — ${watts(load)} is below that.` : '.'));
   }
-  if (thin) parts.push('A state held for under two readings says little: hold each one longer.');
+  if (levels.some(l => Math.max(0, ...Object.values(l.n)) < 2)) parts.push('Hold each state for two readings or more.');
   return parts.join(' ');
 }
 
 function verdictOf(toggles        , candidates             , found             , done         , legs         , why               )         {
   if (!toggles) return 'Now switch the load ON, then tap. There is nothing to compare against yet.';
-  if (done && legs) return `Both legs of a 240 V breaker: ${found[0].label} and ${found[1].label}, stepping ${watts(found[0].step)} each.`;
-  if (done) return `${found[0].label} — it followed all ${toggles} toggles, stepping ${watts(found[0].step)}.`;
-  if (!found.length) {
-    const lead = candidates[0] ? `Closest: ${candidates[0].label}, ${candidates[0].matched} of ${toggles}. ` : '';
-    return `Nothing has followed every toggle. ${lead}${why || ''}`.trim();
-  }
-  const more = toggles < 2 ? 1 : found.length > 2 ? 2 : 1;
-  return `${found.length} channels match all ${toggles} toggles: ${found.slice(0, 3).map(c => c.label).join(', ')}. `
-    + `${more} more toggle${more > 1 ? 's' : ''} should separate them.`;
+  const lead = found[0];
+  if (legs) return `${done ? '' : 'Leading: '}both legs of a 240 V breaker — ${found[0].label} and ${found[1].label}, stepping ${watts(found[0].step)} each.`
+    + (done ? '' : ' Toggle again to confirm.');
+  if (lead && done) return `${lead.label} — stepping ${watts(lead.step)} with the load, followed ${lead.matched} of ${toggles} toggles, well ahead of any other channel.`;
+  if (lead) return `Leading: ${lead.label}, ${lead.step >= 0 ? '+' : ''}${watts(lead.step)}. Toggle again to confirm.`;
+  return `No channel stands out yet. ${why || ''}`.trim();
 }
 
 // ── circuit-session.ts ──────────────────────────────────────────
@@ -3612,11 +3614,22 @@ function circuitSession(opts                                                    
     return { on: last.on, heldMs: Math.max(0, serverNow() - last.t), readings };
   };
 
+  /// One channel's readings over the session (from a little before the first tap), and the taps, both on
+  /// the server's clock, for a row's chart.
+  const series = (node        ) => {
+    const t = tapsOnServer();
+    const from = t.length ? t[0].t - 20_000 : serverNow() - 60_000;
+    return {
+      from, to: serverNow(), taps: t,
+      points: samples.filter(s => s.t >= from && s.v[node] != null).map(s => ({ t: s.t, v: s.v[node] })),
+    };
+  };
+
   /// Readings per state, for the strip of states under the button.
   const perState = () => levels().map(l => ({ on: l.on, readings: Math.max(0, ...Object.values(l.n)) }));
 
   return {
-    start, stop, tap, undo, reset, levels, current, perState, labels, kinds,
+    start, stop, tap, undo, reset, levels, current, perState, series, labels, kinds,
     get taps() { return taps.length; },
     get pollSeconds() { return pollSeconds; },
     get failed() { return failed; },
@@ -12070,15 +12083,23 @@ function addCircuitFinderSection(nav     , sections     ) {
       : session.taps ? found.verdict : 'Switch the load OFF, then tap to start.';
 
     list.innerHTML = '';
+    const lv = session.levels();
+    const open = lv.length >= 2 ? lv[lv.length - 1] : null, prev = lv.length >= 2 ? lv[lv.length - 2] : null;
+    const w = (x        ) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x)).toLocaleString('en-US')} W`;
     found.candidates.slice(0, 8).forEach(c => {
-      const hit = found.done && found.found.some(f => f.node === c.node);
-      const near = c.matched < found.toggles;
+      const hit = found.found.some(f => f.node === c.node);
+      // Since the last tap, as it comes in: this is where a channel that is moving shows first.
+      const now = open && prev && open.mean[c.node] != null && prev.mean[c.node] != null ? open.mean[c.node] - prev.mean[c.node] : null;
+      const meta = [w(c.step), c.noise != null ? `${Math.round(c.clarity)}× noise` : null, `followed ${c.matched} of ${found.toggles}`]
+        .filter(Boolean).join(' · ');
       // The point of finding a circuit is usually to name it, so each row opens that node's editor.
-      const row = el('button', { class: 'cf-row' + (hit ? ' is-found' : near ? ' is-near' : ''), type: 'button' },
+      const row = el('button', { class: 'cf-row' + (hit ? (found.done ? ' is-found' : ' is-lead') : ''), type: 'button' },
         el('span', { class: 'cf-name', text: c.label }),
-        el('span', { class: 'cf-meta', text: `${c.matched} of ${found.toggles} toggles · ${c.step >= 0 ? '+' : ''}${Math.round(c.step).toLocaleString('en-US')} W`
-          + (c.noise != null ? ` · ±${Math.round(c.noise).toLocaleString('en-US')} W noise` : '') }),
+        el('span', { class: 'cf-meta', text: meta }),
+        now != null ? el('span', { class: 'cf-now', text: `now ${w(now)}`, title: 'Change since the last tap, so far' }) : '',
+        spark(c.node),
         el('span', { class: 'cf-edit', text: 'Edit ›' }));
+      row.dataset.node = c.node;
       row.title = `Open ${c.label} in the node editor, to name it or set what feeds it.`;
       row.onclick = () => {
         editNodeOnNextOpen(c.node);
@@ -12086,6 +12107,31 @@ function addCircuitFinderSection(nav     , sections     ) {
       };
       list.appendChild(row);
     });
+  };
+
+  /// One channel over the session: its readings as a line, the ON states shaded, a tick at every tap. A
+  /// channel that moves with the load reads as steps lined up with the shading, whatever the numbers say.
+  const spark = (node        ) => {
+    const s = session.series(node);
+    const W = 300, H = 34, span = Math.max(1, s.to - s.from);
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', class: 'cf-spark' })       ;
+    const x = (t        ) => Math.round(((t - s.from) / span) * W * 10) / 10;
+    s.taps.forEach((t, i) => {
+      const end = i + 1 < s.taps.length ? s.taps[i + 1].t : s.to;
+      if (t.on) svg.appendChild(svgEl('rect', { x: x(t.t), y: 0, width: Math.max(0, x(end) - x(t.t)), height: H, class: 'cf-spark-on' }));
+      svg.appendChild(svgEl('line', { x1: x(t.t), x2: x(t.t), y1: 0, y2: H, class: 'cf-spark-tap' }));
+    });
+    if (s.points.length > 1) {
+      const vs = s.points.map(p => p.v);
+      const lo = Math.min(...vs), hi = Math.max(...vs), pad = Math.max(1, (hi - lo) * 0.12);
+      const y = (v        ) => Math.round((H - 2 - ((v - lo + pad) / (hi - lo + 2 * pad)) * (H - 4)) * 10) / 10;
+      // Held level between readings: a reading stands until the next one.
+      let d = `M${x(s.points[0].t)},${y(s.points[0].v)}`;
+      for (let i = 1; i < s.points.length; i++) d += ` H${x(s.points[i].t)} V${y(s.points[i].v)}`;
+      d += ` H${W}`;
+      svg.appendChild(svgEl('path', { d, class: 'cf-spark-line' }));
+    }
+    return svg;
   };
 
   // The readings run from the moment the page is open, so the first state already has some.

@@ -117,7 +117,7 @@ if (!/Load ON · held 3\d s/.test(held())) fail(`time held while the phone was a
 if (!named('Kitchen Circuit')) fail(`the channel that stepped with the load is not listed: ${rows().map(r => r.textContent).join(' | ')}`);
 if (!named('Garage Circuit')) fail('a channel that did rise was not listed as a candidate');
 const bedroom = named('Bedroom Circuit');
-if (bedroom && !/^0 of/.test(query(bedroom, '.cf-meta').textContent)) fail(`a 20 W drift inside ±15 W of noise was counted as a step: ${bedroom.textContent}`);
+if (bedroom && !/followed 0 of/.test(query(bedroom, '.cf-meta').textContent)) fail(`a 20 W drift inside ±15 W of noise was counted as a step: ${bedroom.textContent}`);
 // The panel, the grid and the virtual node all stepped as well, being upstream — none of them is a circuit.
 for (const upstream of ['Main Panel', 'Grid', 'Untracked remainder'])
   if (named(upstream)) fail(`${upstream} is not a circuit but was offered as one`);
@@ -136,12 +136,14 @@ hold(5); fumble();
 await press();                                  // OFF
 hold(20);
 await look();
-if (!/2 of 2 toggles/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail('the kitchen circuit did not follow both toggles');
-if (!/1 of 2 toggles/.test(query(named('Garage Circuit'), '.cf-meta').textContent)) fail('the garage circuit did not drop out on the second toggle');
+if (!/followed 2 of 2/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail('the kitchen circuit did not follow both toggles');
+if (!/followed 1 of 2/.test(query(named('Garage Circuit'), '.cf-meta').textContent)) fail('the garage circuit is not marked down for the toggle it missed');
 if (rows()[0] !== named('Kitchen Circuit')) fail('the match is not at the top');
-if (!/Kitchen Circuit/.test(verdict()) || !/2 toggles/.test(verdict())) fail(`two toggles with one survivor did not name it: "${verdict()}"`);
-// A near-miss stays listed, marked as one.
-if (!named('Garage Circuit').classList.contains('is-near')) fail('a near-miss is not marked as one');
+if (!/^Kitchen Circuit —/.test(verdict())) fail(`two toggles with one clear leader did not name it: "${verdict()}"`);
+if (!named('Kitchen Circuit').classList.contains('is-found')) fail('the circuit found is not marked');
+// Every row charts its channel over the session: the eye finds the steps that line up with the taps.
+if (!query(named('Kitchen Circuit'), 'svg.cf-spark', false)) fail('a row has no chart of its channel');
+if (!query(named('Kitchen Circuit'), '.cf-spark-on', true).length) fail('the chart does not shade the ON states');
 if (!/noise/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail('a row does not say how noisy its channel is');
 // Three states, each with readings enough.
 const chips = query(sec, '.cf-state', true);
@@ -175,8 +177,8 @@ drawInput.value = '60'; drawInput.onchange({});
 hold(10); await press();
 power.n30_2 = 162; power.n30_3 = 2000;          // the lamp, and something large at the same moment
 hold(5); fumble(); await press(); hold(20); await look();
-if (!named('Kitchen Circuit') || !/^1 of 1/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail('a 62 W step was not matched against a 60 W load');
-if (named('Garage Circuit') && !/^0 of/.test(query(named('Garage Circuit'), '.cf-meta').textContent)) fail('a 1,500 W step was accepted for a 60 W load');
+if (!named('Kitchen Circuit') || !/followed 1 of 1/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail('a 62 W step was not matched against a 60 W load');
+if (named('Garage Circuit')) fail('a 1,500 W step was offered for a 60 W load');
 
 // --- A load too small to see: the page says why, in watts --------------------------------------------------
 button('Start over').onclick();
@@ -187,8 +189,32 @@ power.n30_1 = 108;                               // an 8 W night light on the no
 hold(5); fumble(); await press(); hold(20);
 power.n30_1 = 100;
 hold(5); fumble(); await press(); hold(20); await look();
-if (!/Nothing has followed every toggle/.test(verdict())) fail(`an 8 W load inside ±15 W of noise was found anyway: "${verdict()}"`);
-if (!/Largest step/.test(verdict()) || !/has to draw about \d+ W/.test(verdict())) fail(`a miss does not say why in watts: "${verdict()}"`);
+if (!/No channel stands out/.test(verdict())) fail(`an 8 W load inside ±15 W of noise was found anyway: "${verdict()}"`);
+if (!/has to draw about \d+ W/.test(verdict())) fail(`a miss does not say why in watts: "${verdict()}"`);
+
+// --- A load that does not show on every toggle is still found ------------------------------------------
+// A slow poll or a load that cycles misses a toggle. That costs it a little, not the verdict.
+button('Start over').onclick();
+power.n30_1 = 100; power.n30_2 = 100; power.n30_3 = 100; power.n30_4 = 100;
+hold(20); await press();
+power.n30_2 = 1100; hold(5); fumble(); await press(); hold(20);
+power.n30_2 = 100; hold(5); fumble(); await press(); hold(20);
+/* the third switch never showed: the load cycled off on its own before the reading */
+fumble(); await press(); hold(20);
+power.n30_2 = 1100; fumble(); /* back on for real */ hold(5);
+power.n30_2 = 100; hold(5); fumble(); await press(); hold(20); await look();
+if (!/^Kitchen Circuit —/.test(verdict())) fail(`a load that missed one toggle was not found: "${verdict()}"`);
+if (!/followed [234] of 4/.test(query(named('Kitchen Circuit'), '.cf-meta').textContent)) fail(`the missed toggle is not shown: ${named('Kitchen Circuit').textContent}`);
+
+// --- Several channels drifting a few watts together is not a load ---------------------------------------
+button('Start over').onclick();
+hold(20); await press();
+power.n30_1 += 7; power.n30_2 += 7; power.n30_3 += 7; power.n30_4 += 7;
+hold(5); fumble(); await press(); hold(20);
+power.n30_1 -= 7; power.n30_2 -= 7; power.n30_3 -= 7; power.n30_4 -= 7;
+hold(5); fumble(); await press(); hold(20); await look();
+if (!/No channel stands out/.test(verdict())) fail(`four channels shifting 7 W together produced a winner: "${verdict()}"`);
+if (!/together/.test(verdict())) fail(`a shift across the panel is not called one: "${verdict()}"`);
 
 // --- A 240 V load steps both legs, and both are reported ---------------------------------------------------
 button('Start over').onclick();

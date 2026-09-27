@@ -74,11 +74,22 @@ export function circuitSession(opts: { url?: () => string; alive: () => boolean;
     return { on: last.on, heldMs: Math.max(0, serverNow() - last.t), readings };
   };
 
+  /// One channel's readings over the session (from a little before the first tap), and the taps, both on
+  /// the server's clock, for a row's chart.
+  const series = (node: string) => {
+    const t = tapsOnServer();
+    const from = t.length ? t[0].t - 20_000 : serverNow() - 60_000;
+    return {
+      from, to: serverNow(), taps: t,
+      points: samples.filter(s => s.t >= from && s.v[node] != null).map(s => ({ t: s.t, v: s.v[node] })),
+    };
+  };
+
   /// Readings per state, for the strip of states under the button.
   const perState = () => levels().map(l => ({ on: l.on, readings: Math.max(0, ...Object.values(l.n)) }));
 
   return {
-    start, stop, tap, undo, reset, levels, current, perState, labels, kinds,
+    start, stop, tap, undo, reset, levels, current, perState, series, labels, kinds,
     get taps() { return taps.length; },
     get pollSeconds() { return pollSeconds; },
     get failed() { return failed; },
