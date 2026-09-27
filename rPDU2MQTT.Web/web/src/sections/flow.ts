@@ -13,6 +13,9 @@ import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, w
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
 import { openHistorySheet } from '../history-sheet.js';
+import { drawSunburst } from '../sunburst.js';
+import { drawTreemap } from '../treemap.js';
+import { flowCardRows } from '../flow-card.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 
@@ -95,10 +98,12 @@ export function addFlowSection(nav: any, sections: any) {
   metricSel.onchange = () => { load(); showDayNote(); };
   // Filled by draw(), which knows which nodes can be drilled into.
   const drillSlot = el('span', { class: 'flow-drill-slot' });
-  // Two ways to look at the same flow: which way it goes (Sankey), or what is using it (sunburst).
+  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it — as rings
+  // (sunburst) or as boxes sized to their share (treemap).
   const modeSel = el('select', { title: 'How the flow is drawn.' }) as HTMLSelectElement;
-  [['sankey', 'Sankey'], ['sunburst', 'Sunburst']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
-  try { modeSel.value = localStorage.getItem('rpdu-flow-mode') === 'sunburst' ? 'sunburst' : 'sankey'; } catch { modeSel.value = 'sankey'; }
+  const MODES = [['sankey', 'Sankey'], ['sunburst', 'Sunburst'], ['treemap', 'Treemap']];
+  MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
+  try { const m = localStorage.getItem('rpdu-flow-mode'); modeSel.value = MODES.some(([v]) => v === m) ? m! : 'sankey'; } catch { modeSel.value = 'sankey'; }
   modeSel.onchange = () => { try { localStorage.setItem('rpdu-flow-mode', modeSel.value); } catch { /* this session only */ } refit = true; redrawBoth(); };
   const historyBtn = btn('History ▾');
   const viewBtn = btn('View ▾');
@@ -357,18 +362,25 @@ export function addFlowSection(nav: any, sections: any) {
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
-    if (modeSel.value === 'sunburst') {
+    if (modeSel.value === 'sunburst' || modeSel.value === 'treemap') {
       if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
-      const sb = drawSunburst(nodes, links, {
+      const viewOpts = {
         units: graph.units || '',
         onOpen: (id: string) => drill(id),
         // Out one level: to what feeds the node drilled into, or to the whole diagram.
         onOut: () => drill(drillTo ? ((whole.links || []).find((l: any) => l.target === drillTo)?.source || null) : null),
-      });
-      stage = el('div', { class: 'flow-stage sunburst-stage' }, sb, menu.el);
+        card: (id: string, place: any) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
+          { units: graph.units || '', metric: metricSel.value, nodes, links }),
+        host: sec,
+      };
+      const sunburst = modeSel.value === 'sunburst';
+      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
+        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: 'Click an arc to centre on it · click the middle to go back out.' }));
+        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;

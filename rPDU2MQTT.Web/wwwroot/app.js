@@ -4860,21 +4860,15 @@ function addLiveDataSection(nav     , sections     ) {
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
-// ── sunburst.ts ─────────────────────────────────────────────────
-// The flow as a sunburst: where the power goes, as rings.
+// ── flow-tree.ts ────────────────────────────────────────────────
+// The flow as a tree, for the views that draw it as one: the sunburst and the treemap.
 //
-// The centre is the hub the supply converges on — an inverter, a main panel — with a thin inner ring for the
-// supply mix feeding it (solar against grid against battery). Each ring outward is one level of the
-// hierarchy, and each arc's angle is its share of what its parent passes on. The Sankey answers "which way
-// does it flow"; this answers "what is using it" at a glance, with the big consumers as the big arcs.
-
-const SIZE = 720, C = SIZE / 2;
-/// The supply ring by what feeds it, in the colours the Energy page uses.
-const SUPPLY_FILL                         = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
-const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
+// The root is the hub the supply converges on — an inverter, a main panel — or, with none, every root side
+// by side. Each node's children are what it feeds. A node fed from two parents is a child of each, carrying
+// that parent's share of it, so every level still adds up.
 
 /// Where the supply converges: follow the roots while everything they feed is one node. What was followed
-/// is the supply; the node it all meets at is the hub. With no such node the hub is a virtual "Total".
+/// is the supply; the node it all meets at is the hub. With no such node the hub is null.
 function findHub(nodes       , links       )                                           {
   const ids = new Set(nodes.map(n => n.id));
   const fed = new Set(links.map(l => l.target));
@@ -4893,50 +4887,150 @@ function findHub(nodes       , links       )                                    
   return { hub: null, supply: [] };
 }
 
-/// Every arc, laid out: a child's angle is its link's share of what its parent passes on. A node fed from two
-/// parents appears under each with that parent's share of it, so every ring still adds up.
-function layoutSunburst(nodes       , links       , hub               , supply          )                                                {
+/// The top-level branches, largest first, each with its subtree; and the total they add up to.
+function flowTree(nodes       , links       , hub               )                                                    {
   const byId = new Map(nodes.map(n => [n.id, n]));
   const out = new Map               ();
   links.forEach(l => { if ((l.value ?? 0) > 0) (out.get(l.source) ?? out.set(l.source, []).get(l.source) ).push(l); });
   const fed = new Set(links.map(l => l.target));
-  // The top ring: the hub's children, or, with no hub, every root.
-  const top                                  = hub
+  const firsts                                  = hub
     ? (out.get(hub) || []).map(l => ({ id: l.target, value: l.value }))
     : nodes.filter(n => !fed.has(n.id) && (n.value ?? 0) > 0).map(n => ({ id: n.id, value: n.value }));
-  const total = top.reduce((s, t) => s + t.value, 0);
-  const arcs        = [];
+  firsts.sort((x, y) => y.value - x.value);
+  const total = firsts.reduce((s, t) => s + t.value, 0);
   let depth = 0;
-  if (!(total > 0)) return { arcs, depth, total };
-  const walk = (id        , value        , d        , a0        , a1        , hue        , path             ) => {
+
+  const build = (id        , value        , d        , branch        , parent                 , path             )                  => {
     const n = byId.get(id);
-    if (!n || path.has(id) || a1 - a0 < 1e-4) return;
-    arcs.push({ id, label: n.label || id, value, depth: d, a0, a1, hue });
+    if (!n || path.has(id) || !(value > 0)) return null;
+    const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
+                          key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
-    const kids = out.get(id) || [];
-    // This arc may be only part of the node — one parent's share of something fed from two — so its
+    // This piece may be only part of the node — one parent's share of something fed from two — so its
     // children are that same share of the node's own links.
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
-    const parts = kids.map(l => ({ id: l.target, v: l.value * share }));
-    const passed = parts.reduce((sum, p) => sum + p.v, 0);
-    if (!(passed > 0)) return;
-    // Against the larger of the two: what a node passes on can be less than it takes (its own use shows as
-    // the gap at the end of the ring), and a reading short of its children must not overflow the parent.
-    const denom = Math.max(value, passed);
-    let a = a0;
     const next = new Set(path).add(id);
-    parts.forEach(p => {
-      const span = (a1 - a0) * p.v / denom;
-      walk(p.id, p.v, d + 1, a, a + span, hue, next);
-      a += span;
-    });
+    (out.get(id) || [])
+      .map(l => ({ id: l.target, v: l.value * share }))
+      .sort((a, b) => b.v - a.v)
+      .forEach(p => { const c = build(p.id, p.v, d + 1, branch, t, next); if (c) t.children.push(c); });
+    const passed = t.children.reduce((s, c) => s + c.value, 0);
+    t.scale = Math.max(value, passed);
+    return t;
+  };
+
+  const top = firsts
+    .map((f, i) => build(f.id, f.value, 1, i, null, new Set(hub ? [hub] : [])))
+    .filter((t)                => !!t);
+  return { top, total, depth };
+}
+
+/// Labels from the top of the drawing down to a node, the node itself excluded.
+function treePath(t          , rootLabel               )           {
+  const path           = [];
+  for (let p = t.parent; p; p = p.parent) path.unshift(p.label);
+  if (rootLabel) path.unshift(rootLabel);
+  return path;
+}
+
+/// A colour per top-level branch, lighter with each level down, the same in both views.
+const branchHue = (branch        ) => (branch * 57 + 205) % 360;
+const treeFill = (t          ) => `hsl(${branchHue(t.branch)} 62% ${Math.min(76, 44 + t.depth * 7)}%)`;
+
+// ── flow-card.ts ────────────────────────────────────────────────
+// The details card for one node in the sunburst and the treemap: the Sankey's hover card, plus where the
+// node sits in the tree those two views draw — its share of the whole and of its parent, and the path to it.
+
+/// Where a node sits in the drawn tree. A node fed from two parents is drawn once under each, so this is
+/// about the piece under the pointer, not the node as a whole.
+
+const pct = (part        , whole        ) => {
+  if (!(whole > 0)) return '—';
+  const p = 100 * part / whole;
+  return p >= 10 || p === 0 ? `${Math.round(p)}%` : `${p.toFixed(1)}%`;
+};
+
+function flowCardRows(n     , place           , ctx                                                               )        {
+  const { units } = ctx;
+  const fmt = (v        ) => formatMeasure(v, units);
+  const byId = new Map(ctx.nodes.map((x     ) => [x.id, x]));
+  const rows        = [];
+  rows.push(el('div', { class: 'nh-title', text: n.label || n.id }));
+  rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+  rows.push(el('div', { class: 'nh-value' }, fmt(n.value ?? place.value),
+    el('span', { class: 'nh-metric', text: ' ' + metricLabel(ctx.metric).toLowerCase() })));
+  if (n.value != null && Math.abs(place.value - n.value) > 1e-6)
+    rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' }, text: `${fmt(place.value)} of it through this branch` }));
+  if (n.derivation && n.derivation !== 'measured')
+    rows.push(el('div', { class: n.derivation === 'inferred' ? 'nh-warn' : 'desc', style: { margin: '2px 0 0' },
+      text: n.derivation === 'inferred' ? 'inferred — nothing measures it' : 'summed from what it feeds' }));
+  if (n.imbalance != null)
+    rows.push(el('div', { class: 'nh-warn', text: `${fmt(Math.abs(n.imbalance))} ${n.imbalance > 0 ? 'more leaves than arrives' : 'short of what it passes on'}` }));
+
+  // Shares: the question these two views answer.
+  rows.push(el('div', { class: 'nh-head', text: 'Share' }));
+  rows.push(el('div', { class: 'nh-row' }, el('span', { class: 'nh-name', text: 'of the total' }),
+    el('span', { class: 'nh-num', text: pct(place.value, place.total) })));
+  if (place.parentValue != null && place.path.length)
+    rows.push(el('div', { class: 'nh-row' }, el('span', { class: 'nh-name', text: `of ${place.path[place.path.length - 1]}` }),
+      el('span', { class: 'nh-num', text: pct(place.value, place.parentValue) })));
+  if (place.path.length)
+    rows.push(el('div', { class: 'nh-path', text: place.path.join(' › ') }));
+
+  // What it feeds, largest first; the tail folded into a count.
+  const out = ctx.links.filter((l     ) => l.source === n.id && (l.value ?? 0) > 0).sort((a     , b     ) => b.value - a.value);
+  if (out.length) {
+    rows.push(el('div', { class: 'nh-head', text: `Feeds ${out.length}` }));
+    out.slice(0, 6).forEach((l     ) => rows.push(el('div', { class: 'nh-row' },
+      el('span', { class: 'nh-name', text: byId.get(l.target)?.label || l.target }),
+      el('span', { class: 'nh-num', text: fmt(l.value) }))));
+    if (out.length > 6) rows.push(el('div', { class: 'desc', style: { margin: '0' }, text: `+ ${out.length - 6} more` }));
+    const passed = out.reduce((s        , l     ) => s + l.value, 0);
+    const own = (n.value ?? 0) - passed;
+    if (n.value != null && own > 0.5)
+      rows.push(el('div', { class: 'nh-row' }, el('span', { class: 'nh-name', text: 'not passed on' }),
+        el('span', { class: 'nh-num', text: fmt(own) })));
+  }
+
+  const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === n.id);
+  const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m     ) => ({ Type: 'mqtt', ...m })) : []);
+  if (bound.length) {
+    rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
+    bound.forEach((s     ) => rows.push(el('div', { class: 'nh-row' },
+      el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
+      el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
+  }
+  if ((n.tags || []).length) rows.push(el('div', { class: 'nh-sub', style: { margin: '6px 0 0' }, text: '#' + n.tags.join(' #') }));
+  return rows;
+}
+
+// ── sunburst.ts ─────────────────────────────────────────────────
+// The flow as a sunburst: where the power goes, as rings.
+//
+// The centre is the hub the supply converges on — an inverter, a main panel — with a thin inner ring for the
+// supply mix feeding it (solar against grid against battery). Each ring outward is one level of the
+// hierarchy, and each arc's angle is its share of what its parent passes on. The Sankey answers "which way
+// does it flow"; this answers "what is using it" at a glance, with the big consumers as the big arcs.
+
+const SIZE = 720, C = SIZE / 2;
+const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
+/// The supply ring by what feeds it, in the colours the Energy page uses.
+const SUPPLY_FILL                         = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
+
+/// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
+/// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
+function layoutSunburst(nodes       , links       , hub               , _supply           )                                                {
+  const { top, total, depth } = flowTree(nodes, links, hub);
+  const arcs        = [];
+  if (!(total > 0)) return { arcs, depth, total };
+  const place = (t          , a0        , a1        ) => {
+    if (a1 - a0 < 1e-4) return;
+    arcs.push({ id: t.id, label: t.label, value: t.value, depth: t.depth, a0, a1, hue: t.branch, key: t.key, node: t });
+    let a = a0;
+    t.children.forEach(c => { const span = (a1 - a0) * c.value / t.scale; place(c, a, a + span); a += span; });
   };
   let a = 0;
-  top.sort((x, y) => y.value - x.value).forEach((t, i) => {
-    const span = (2 * Math.PI) * t.value / total;
-    walk(t.id, t.value, 1, a, a + span, (i * 57 + 205) % 360, new Set(hub ? [hub] : []));
-    a += span;
-  });
+  top.forEach(t => { const span = 2 * Math.PI * t.value / total; place(t, a, a + span); a += span; });
   return { arcs, depth, total };
 }
 
@@ -4952,16 +5046,20 @@ function arcPath(r0        , r1        , a0        , a1        )         {
        + `A${r0},${r0} 0 ${large} 0 ${f2(x3)},${f2(y3)} Z`;
 }
 
+/// A node opens only when there is something beneath it; opening a leaf would draw an empty diagram.
+const opens = (links       , id        ) => links.some((l     ) => l.source === id && (l.value ?? 0) > 0);
+
 function drawSunburst(nodes       , links       , opts              )             {
   const { hub, supply } = findHub(nodes, links);
-  const { arcs, depth, total } = layoutSunburst(nodes, links, hub, supply);
+  const { arcs, depth, total } = layoutSunburst(nodes, links, hub);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' })       ;
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
   const fmt = (v        ) => formatMeasure(v, opts.units);
+  const hubNode = hub ? byId.get(hub) : null;
+  const rootLabel = hubNode ? (hubNode.label || hub) : null;
 
   // The hub: what it is and what it carries, or what the pointer is on. Clicking it backs out a level.
-  const hubNode = hub ? byId.get(hub) : null;
   const disc = svgEl('circle', { cx: C, cy: C, r: HUB_R, class: 'sunburst-hub' });
   disc.addEventListener('click', () => opts.onOut());
   disc.appendChild(svgEl('title', {})).textContent = 'Back out a level';
@@ -4972,12 +5070,24 @@ function drawSunburst(nodes       , links       , opts              )           
   const show = (label        , v        , note        ) => {
     name.textContent = clip(label); val.textContent = fmt(v); share.textContent = note;
   };
-  const rest = () => show(hubNode ? (hubNode.label || hub) : 'Total', hubNode?.value ?? total, '');
-  const readout = (p     , label        , v        , note        ) => {
-    p.addEventListener('mouseenter', () => show(label, v, note));
-    p.addEventListener('mouseleave', rest);
-  };
+  const rest = () => show(rootLabel || 'Total', hubNode?.value ?? total, '');
   rest();
+
+  const drawn                            = [];
+  /// Hovering lights the arc, what it came from and what it feeds; the rest of the rings dim.
+  const light = (key               ) => drawn.forEach(d => {
+    const off = !!key && d.key !== key && !key.startsWith(d.key + '>') && !d.key.startsWith(key + '>');
+    if (off) d.p.classList.add('is-dim'); else d.p.classList.remove('is-dim');
+  });
+  const hover = (p     , id        , key               , place           , note        ) => {
+    p.addEventListener('mouseenter', (e     ) => {
+      show(byId.get(id)?.label || id, place.value, note);
+      light(key);
+      if (opts.card) showNodeCard(opts.host, e, opts.card(id, place));
+    });
+    p.addEventListener('mousemove', (e     ) => moveNodeCard(e));
+    p.addEventListener('mouseleave', () => { rest(); light(null); hideNodeCard(); });
+  };
 
   // The supply mix: a thin ring just outside the hub.
   const supplyTotal = supply.reduce((s, id) => s + Math.max(0, byId.get(id)?.value ?? 0), 0);
@@ -4989,51 +5099,174 @@ function drawSunburst(nodes       , links       , opts              )           
       const span = 2 * Math.PI * v / supplyTotal;
       const kind = byId.get(id)?.kind;
       const p = svgEl('path', { d: arcPath(SUPPLY_R0, SUPPLY_R1, a, a + span), class: 'sunburst-supply', fill: SUPPLY_FILL[kind] || `hsl(${(i * 70 + 40) % 360} 75% 55%)` });
-      p.appendChild(svgEl('title', {})).textContent = `${byId.get(id)?.label || id} · ${fmt(v)} · ${Math.round(100 * v / supplyTotal)}% of the supply`;
       p.dataset.node = id;
-      readout(p, byId.get(id)?.label || id, v, `${Math.round(100 * v / supplyTotal)}% of supply`);
-      p.addEventListener('click', (e     ) => { e.stopPropagation?.(); opts.onOpen(id); });
+      p.addEventListener('click', (e     ) => { e.stopPropagation?.(); if (opens(links, id)) opts.onOpen(id); });
+      hover(p, id, null, { value: v, total: supplyTotal, path: [], parentValue: null }, `${Math.round(100 * v / supplyTotal)}% of supply`);
       svg.appendChild(p);
       a += span;
     });
   }
 
   arcs.forEach(arc => {
-    // Too thin to draw once the gap between arcs comes off: the tooltip on its parent still covers it.
-    if (arc.a1 - arc.a0 <= 0.006) return;
+    // Too thin to draw once the gap between arcs comes off: its parent's card lists it.
     const r0 = RING0 + (arc.depth - 1) * ringW, r1 = r0 + ringW - 2;
-    const light = Math.min(72, 44 + arc.depth * 7);
-    const p = svgEl('path', {
-      d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002),
-      fill: `hsl(${arc.hue} 62% ${light}%)`, class: 'sunburst-arc',
-    });
+    if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
+    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
     p.dataset.node = arc.id;
-    p.appendChild(svgEl('title', {})).textContent = `${arc.label} · ${fmt(arc.value)} · ${Math.round(100 * arc.value / total)}% of the total`;
-    p.addEventListener('click', (e     ) => { e.stopPropagation?.(); opts.onOpen(arc.id); });
-    readout(p, arc.label, arc.value, `${Math.round(100 * arc.value / total)}% of total`);
+    const leaf = !opens(links, arc.id);
+    if (leaf) p.classList.add('is-leaf');
+    p.addEventListener('click', (e     ) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(arc.id); });
+    hover(p, arc.id, arc.key, {
+      value: arc.value, total, path: treePath(arc.node, rootLabel),
+      parentValue: arc.node.parent ? arc.node.parent.value : (hubNode?.value ?? total),
+    }, `${Math.round(100 * arc.value / total)}% of total`);
     svg.appendChild(p);
+    drawn.push({ p, key: arc.key });
 
     // A label where it fits: along the ring's middle, turned to read outward, on the arcs big enough to hold it.
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
-    const room = (arc.a1 - arc.a0) * rm;
-    if (room < 16) return;
+    if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
     let deg = (mid * 180 / Math.PI) - 90;
     if (deg > 90) deg -= 180;
-    const t = svgEl('text', {
-      x: f2(x), y: f2(y), class: 'sunburst-label',
-      transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})`,
-    });
+    const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})` });
     // Radial text: the ring's width is the line's length.
     const maxChars = Math.floor((ringW - 8) / 6.2);
-    const name = arc.label.length > maxChars ? arc.label.slice(0, Math.max(3, maxChars - 1)) + '…' : arc.label;
-    t.textContent = name;
+    t.textContent = arc.label.length > maxChars ? arc.label.slice(0, Math.max(3, maxChars - 1)) + '…' : arc.label;
     svg.appendChild(t);
   });
 
   // The hub on top, so the arcs cannot cover it.
   svg.append(disc, name, val, share);
   return svg;
+}
+
+// ── treemap.ts ──────────────────────────────────────────────────
+// The flow as a treemap: every consumer a box, its area its share.
+//
+// The outer box is the hub the supply converges on; inside it each branch is a box, and inside each branch
+// the boxes it feeds, down to the leaves. A node that keeps some for itself leaves that much of its box
+// empty. Where the sunburst shows the hierarchy's shape, this is for comparing: forty loads side by side,
+// the big ones big, every label horizontal.
+
+/// Squarified treemap (Bruls, Huizing, van Wijk): lay the items, largest first, in rows along the shorter
+/// side, adding to a row while doing so keeps its boxes closer to square.
+function squarify   (items                             , r        )                           {
+  const out                           = [];
+  let rest = items.filter(i => i.area > 0).sort((a, b) => b.area - a.area);
+  let { x, y, w, h } = r;
+  const worst = (row                    , side        ) => {
+    const s = row.reduce((t, i) => t + i.area, 0);
+    const mx = Math.max(...row.map(i => i.area)), mn = Math.min(...row.map(i => i.area));
+    return Math.max(side * side * mx / (s * s), (s * s) / (side * side * mn));
+  };
+  while (rest.length && w > 0 && h > 0) {
+    const side = Math.min(w, h);
+    const row = [rest[0]];
+    let i = 1;
+    while (i < rest.length && worst([...row, rest[i]], side) <= worst(row, side)) row.push(rest[i++]);
+    rest = rest.slice(i);
+    const s = row.reduce((t, it) => t + it.area, 0);
+    if (w >= h) {
+      const cw = Math.min(w, s / h);
+      let yy = y;
+      row.forEach(it => { const hh = it.area / cw; out.push({ item: it.item, r: { x, y: yy, w: cw, h: hh } }); yy += hh; });
+      x += cw; w -= cw;
+    } else {
+      const rh = Math.min(h, s / w);
+      let xx = x;
+      row.forEach(it => { const ww = it.area / rh; out.push({ item: it.item, r: { x: xx, y, w: ww, h: rh } }); xx += ww; });
+      y += rh; h -= rh;
+    }
+  }
+  return out;
+}
+
+const TM_HEAD = 20, TM_PAD = 3;
+
+/// Every box, laid out in a W×H frame: the root, then each node inside its parent's box under its header.
+function layoutTreemap(nodes       , links       , W        , H        )
+                                                                                                                                                   {
+  const { hub } = findHub(nodes, links);
+  const { top, total } = flowTree(nodes, links, hub);
+  const cells                                                = [];
+  /// What a node keeps rather than passes on: the empty part of its box.
+  const rests                                 = [];
+  const root         = { x: 0, y: 0, w: W, h: H };
+  const inner = (r        )         => ({ x: r.x + TM_PAD, y: r.y + TM_HEAD, w: r.w - 2 * TM_PAD, h: r.h - TM_HEAD - TM_PAD });
+  /// A set of siblings in a box, measured against `scale`; what they leave over stays empty.
+  const fill = (kids            , scale        , r        ) => {
+    if (r.w < 4 || r.h < 4 || !(scale > 0)) return;
+    const area = r.w * r.h;
+    const passed = kids.reduce((s, k) => s + k.value, 0);
+    const items                                            = kids.map(k => ({ area: area * k.value / scale, item: k }));
+    if (scale - passed > 1e-9) items.push({ area: area * (scale - passed) / scale, item: null });
+    squarify(items, r).forEach(({ item, r: cr }) => {
+      if (!item) { if (cr.w >= 3 && cr.h >= 3) rests.push({ r: cr, value: scale - passed }); return; }
+      if (cr.w < 3 || cr.h < 3) return;
+      // Room for a header and something beneath it: nest. Otherwise the box is drawn whole, a leaf here.
+      const nested = item.children.length > 0 && cr.w > 56 && cr.h > TM_HEAD + 22;
+      cells.push({ t: item, r: cr, nested });
+      if (nested) fill(item.children, item.scale, inner(cr));
+    });
+  };
+  fill(top, total, inner(root));
+  return { root, hub, total, cells, rests };
+}
+
+function drawTreemap(nodes       , links       , opts                                  )              {
+  const W = Math.max(320, opts.width || 1000);
+  // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
+  const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
+  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H);
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const fmt = (v        ) => formatMeasure(v, opts.units);
+  const hubNode = hub ? byId.get(hub) : null;
+  const rootLabel = hubNode ? (hubNode.label || hub) : null;
+  const box = el('div', { class: 'treemap' })               ;
+  box.style.aspectRatio = `${W} / ${H}`;
+  const at = (c     , r        ) => {
+    c.style.left = `${(100 * r.x / W).toFixed(3)}%`; c.style.top = `${(100 * r.y / H).toFixed(3)}%`;
+    c.style.width = `${(100 * r.w / W).toFixed(3)}%`; c.style.height = `${(100 * r.h / H).toFixed(3)}%`;
+  };
+
+  // The root: the hub, whose header backs out a level.
+  const head = el('div', { class: 'treemap-root' },
+    el('span', { class: 'treemap-name', text: rootLabel || 'Total' }),
+    el('span', { class: 'treemap-val', text: fmt(hubNode?.value ?? total) }));
+  head.title = 'Back out a level';
+  head.onclick = () => opts.onOut();
+  at(head, root);
+  box.appendChild(head);
+
+  cells.forEach(({ t, r, nested }) => {
+    const leaf = !opens(links, t.id);
+    const c = el('div', { class: 'treemap-cell' + (nested ? ' is-nested' : '') + (leaf ? ' is-leaf' : '') });
+    c.dataset.node = t.id;
+    c.style.background = treeFill(t);
+    at(c, r);
+    // What fits: a name on one line, the value beneath it when there is height for it.
+    if (r.h >= 15 && r.w >= 28) {
+      c.appendChild(el('span', { class: 'treemap-name', text: t.label }));
+      if (nested || r.h >= 34) c.appendChild(el('span', { class: 'treemap-val', text: fmt(t.value) }));
+    }
+    c.addEventListener('click', (e     ) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(t.id); });
+    const place = { value: t.value, total, path: treePath(t, rootLabel), parentValue: t.parent ? t.parent.value : (hubNode?.value ?? total) };
+    c.addEventListener('mouseenter', (e     ) => { if (opts.card) showNodeCard(opts.host, e, opts.card(t.id, place)); });
+    c.addEventListener('mousemove', (e     ) => moveNodeCard(e));
+    c.addEventListener('mouseleave', () => hideNodeCard());
+    box.appendChild(c);
+  });
+  // Over their parents' boxes, which they sit inside.
+  rests.forEach(({ r, value }) => {
+    const c = el('div', { class: 'treemap-rest' });
+    at(c, r);
+    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: 'not passed on' }));
+    if (r.h >= 30 && r.w >= 40) c.appendChild(el('span', { class: 'treemap-val', text: fmt(value) }));
+    c.title = `${fmt(value)} not passed on to anything drawn here: the node's own use, or loads nothing measures`;
+    box.appendChild(c);
+  });
+  return box;
 }
 
 // ── sections/flow.ts ────────────────────────────────────────────
@@ -5120,10 +5353,12 @@ function addFlowSection(nav     , sections     ) {
   metricSel.onchange = () => { load(); showDayNote(); };
   // Filled by draw(), which knows which nodes can be drilled into.
   const drillSlot = el('span', { class: 'flow-drill-slot' });
-  // Two ways to look at the same flow: which way it goes (Sankey), or what is using it (sunburst).
+  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it — as rings
+  // (sunburst) or as boxes sized to their share (treemap).
   const modeSel = el('select', { title: 'How the flow is drawn.' })                     ;
-  [['sankey', 'Sankey'], ['sunburst', 'Sunburst']].forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
-  try { modeSel.value = localStorage.getItem('rpdu-flow-mode') === 'sunburst' ? 'sunburst' : 'sankey'; } catch { modeSel.value = 'sankey'; }
+  const MODES = [['sankey', 'Sankey'], ['sunburst', 'Sunburst'], ['treemap', 'Treemap']];
+  MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
+  try { const m = localStorage.getItem('rpdu-flow-mode'); modeSel.value = MODES.some(([v]) => v === m) ? m  : 'sankey'; } catch { modeSel.value = 'sankey'; }
   modeSel.onchange = () => { try { localStorage.setItem('rpdu-flow-mode', modeSel.value); } catch { /* this session only */ } refit = true; redrawBoth(); };
   const historyBtn = btn('History ▾');
   const viewBtn = btn('View ▾');
@@ -5382,18 +5617,25 @@ function addFlowSection(nav     , sections     ) {
     const nodes = folded.nodes;
     if (!links.length) { wrap.innerHTML = '<div class="desc" style="color:var(--muted)">No measured power flow to display. Define an EnergyFlow hierarchy, or check that outlets report power.</div>'; count.textContent = ''; return; }
 
-    if (modeSel.value === 'sunburst') {
+    if (modeSel.value === 'sunburst' || modeSel.value === 'treemap') {
       if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
-      const sb = drawSunburst(nodes, links, {
+      const viewOpts = {
         units: graph.units || '',
         onOpen: (id        ) => drill(id),
         // Out one level: to what feeds the node drilled into, or to the whole diagram.
         onOut: () => drill(drillTo ? ((whole.links || []).find((l     ) => l.target === drillTo)?.source || null) : null),
-      });
-      stage = el('div', { class: 'flow-stage sunburst-stage' }, sb, menu.el);
+        card: (id        , place     ) => flowCardRows(nodes.find((n     ) => n.id === id) || { id }, place,
+          { units: graph.units || '', metric: metricSel.value, nodes, links }),
+        host: sec,
+      };
+      const sunburst = modeSel.value === 'sunburst';
+      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
+        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: 'Click an arc to centre on it · click the middle to go back out.' }));
+        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;

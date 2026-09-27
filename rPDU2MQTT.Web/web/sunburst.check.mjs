@@ -80,6 +80,23 @@ if (query(sec, '.sunburst-supply', true).length !== 2) fail('the supply ring doe
 if (!query(sec, '.sunburst-hub', false)) fail('there is no hub');
 if (query(sec, '.flow-ribbon', true).length) fail('the Sankey was drawn as well');
 
+// Hovering an arc brings up its details: value, shares and the path down to it.
+const { root } = { root: sandbox.document.body };
+const rackArc = drawn.find(p => p.dataset.node === 'rack');
+rackArc.dispatch('mouseenter', { clientX: 10, clientY: 10 });
+const card = query(root, '.node-card', false);
+if (!card || !card.classList.contains('show')) fail('hovering an arc shows no details');
+for (const want of ['Share', 'of the total', 'inv', '300'])
+  if (!card.textContent.includes(want)) fail(`the hover card does not show "${want}": ${card.textContent}`);
+if (!drawn.some(p => p.classList.contains('is-dim'))) fail('hovering does not dim what is off the hovered path');
+rackArc.dispatch('mouseleave', {});
+if (card.classList.contains('show')) fail('the card stays up after the pointer leaves');
+
+// A leaf has nothing beneath it: clicking it must not drill into an empty diagram.
+drawn.find(p => p.dataset.node === 'ac').dispatch('click', { stopPropagation() { } });
+await new Promise(r => setTimeout(r, 100));
+if (query(sec, '.flow-drill', false)?.value) fail('clicking a leaf drilled into it');
+
 // Clicking an arc opens it: the drill picker follows, and the sunburst re-centres there.
 const sub = drawn.find(p => p.dataset.node === 'sub');
 sub.dispatch('click', { stopPropagation() { } });

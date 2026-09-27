@@ -1019,6 +1019,26 @@
   .sunburst-svg { width:100%; max-width:min(760px, calc(100vh - 180px)); height:auto; display:block; }
   .sunburst-arc, .sunburst-supply { stroke:var(--bg); stroke-width:1; cursor:pointer; transition:opacity .15s; }
   .sunburst-arc:hover, .sunburst-supply:hover { opacity:.8; }
+  .sunburst-arc.is-leaf { cursor:default; }
+  .sunburst-arc.is-dim { opacity:.28; }
+  .nh-path { margin-top:4px; font-size:11px; color:var(--faint); overflow-wrap:anywhere; }
+
+  /* The flow as a treemap: boxes positioned in % of a frame whose shape is fixed by aspect-ratio. */
+  .treemap-stage { display:block; }
+  .treemap { position:relative; width:100%; max-height:calc(100vh - 170px); min-height:320px; border-radius:var(--r); overflow:hidden; background:var(--panel2); }
+  .treemap-root, .treemap-cell { position:absolute; box-sizing:border-box; overflow:hidden; }
+  .treemap-root { display:flex; align-items:flex-start; gap:8px; padding:2px 8px; height:20px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }
+  .treemap-root .treemap-name, .treemap-root .treemap-val { color:var(--fg); line-height:16px; }
+  .treemap-cell { display:flex; flex-direction:column; padding:2px 6px; border:1px solid var(--bg); border-radius:3px; color:#10141b; cursor:pointer; transition:filter .12s; }
+  .treemap-cell.is-leaf { cursor:default; }
+  .treemap-rest { position:absolute; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; padding:2px 6px;
+    color:rgba(16, 20, 27, .7); border-radius:3px;
+    background:repeating-linear-gradient(135deg, rgba(0, 0, 0, .10) 0 6px, rgba(0, 0, 0, 0) 6px 12px); }
+  .treemap-cell:hover { filter:brightness(1.12); outline:2px solid var(--fg); outline-offset:-2px; z-index:1; }
+  .treemap-cell.is-nested { flex-direction:row; align-items:baseline; gap:8px; }
+  .treemap-name { font-size:11.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; line-height:15px; }
+  .treemap-val { font-size:11px; font-weight:600; opacity:.8; white-space:nowrap; font-variant-numeric:tabular-nums; line-height:15px; }
+  .treemap-cell:not(.is-nested) .treemap-val { font-size:12.5px; }
   .sunburst-label { font-size:10.5px; font-weight:600; fill:#10141b; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
   .sunburst-hub { fill:var(--panel); stroke:var(--line); stroke-width:1.5; cursor:pointer; }
   .sunburst-hub-name { font-size:13px; font-weight:650; fill:var(--fg); text-anchor:middle; pointer-events:none; }
