@@ -59,7 +59,8 @@ const rowsFor = async (sources) => {
   edit.click();
   await new Promise(r => setTimeout(r, 200));
 
-  const rows = query(sandbox.document.body, 'tr', true).map(r => r.textContent || '');
+  // Each binding card; a calculated one read by its sentence alone, not the options of every dropdown on it.
+  const rows = query(sandbox.document.body, '.ne-binding', true).map(r => query(r, '.ne-derived', false)?.textContent || r.textContent || '');
   if (process.env.DEBUG_DERIVED) console.log('ROWS', rows.length, JSON.stringify(rows.slice(0, 8)));
   return rows;
 };

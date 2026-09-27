@@ -117,7 +117,7 @@ const jsonDialog = sheet('Create node');
 const fieldSel = query(jsonDialog, 'select', true).find(s => (s.children || []).some(o => o.value === 'volts'));
 if (!fieldSel) fail('a JSON topic was offered no field to bind');
 if (!(fieldSel.children || []).some(o => o.value === 'amps')) fail('the field list is incomplete');
-query(jsonDialog, 'button', true).find(b => b.textContent === 'Close').onclick();
+query(jsonDialog, '.sheet-x', false).onclick();
 jsonBox.checked = false; jsonBox.onchange();
 
 // Collapsing a branch hides what is under it, and opening it again brings it back.

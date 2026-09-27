@@ -1,6 +1,9 @@
-// The node editor's bindings table. Eleven columns in a sheet sized for the page put the Remove button off
-// the right-hand edge, rendering as "Re…", and scrolling the sheet to reach it took the title and the Close
-// button along with it (#401).
+// The node editor's bindings, and saving from the editor.
+//
+// The bindings were a table of up to eleven columns, about 1,640px, which a phone could only show by
+// scrolling sideways (#401). Each binding is now a card of its own, carrying only the settings that mean
+// something for its metric. And the page's save bar sits under the dialog's backdrop, so saving meant
+// closing the editor first with nothing to say so: the dialog carries its own Save.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -12,17 +15,22 @@ const fail = (m) => { console.error('node-sheet check FAILED: ' + m); process.ex
 
 const mqtt = (metric, extra = {}) => ({ Type: 'mqtt', Metric: metric, Topic: `x/${metric}`, ...extra });
 
-/// Open the editor on a node with these bindings and report what the table looks like.
+/// Open the editor on a node with these bindings.
 const sheetFor = async (kind, sources) => {
   const config = {
     History: { Enabled: false },
     EnergyFlow: { Nodes: [{ Id: 'n', Label: 'N', Kind: kind, Sources: sources }], Links: [] },
   };
+  const posts = [];
   const { sandbox, getEl } = makeDom({
-    bodies: (url) => url.includes('/api/schema') ? schema
-      : url.includes('/api/config') ? config
-      : url.includes('/api/instances') ? { ok: true, instances: [] }
-      : { ok: true },
+    bodies: (url, opts) => {
+      if (url.includes('/api/config') && opts?.method === 'POST') { posts.push(JSON.parse(opts.body)); return { ok: true, message: 'Saved.' }; }
+      return url.includes('/api/schema') ? schema
+        : url.includes('/api/config') ? config
+        : url.includes('/api/status') ? { ok: true, configWritable: true }
+        : url.includes('/api/instances') ? { ok: true, instances: [] }
+        : { ok: true };
+    },
   });
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox, { filename: 'app.js' });
@@ -34,35 +42,61 @@ const sheetFor = async (kind, sources) => {
   await new Promise(r => setTimeout(r, 200));
 
   const body = sandbox.document.body;
-  const box = query(body, 'div', true).find(d => (d.attrs?.class || d.className || '') === 'bindings-scroll');
-  // Scoped to the bindings table: the Nodes table behind the sheet has headers of its own.
-  const scope = box || body;
-  const headers = query(scope, 'th', true).map(t => t.textContent);
-  const rows = query(scope, 'tr', true).filter(r => query(r, 'td', true).length);
-  return { box, headers, cells: rows.map(r => query(r, 'td', true).length) };
+  const editor = query(body, '.node-editor', false);
+  if (!editor) fail('the editor did not open');
+  const cards = query(editor, '.ne-binding', true).map(c => ({
+    metric: query(c, '.ne-metric', false)?.value,
+    fields: query(c, '.ne-slot', true).map(s => s.dataset.field),
+  }));
+  return { sandbox, body, editor, cards, posts };
 };
+const card = (s, metric) => s.cards.find(c => c.metric === metric) || fail(`no card for ${metric}`);
+const has = (c, f) => c.fields.includes(f);
 
-// The table manages its own width, so the sheet does not have to scroll sideways to reach a row's actions.
+// --- One card per binding, no table to scroll sideways ---------------------------------------------------
 let s = await sheetFor('grid', [mqtt('realpower', { Direction: 'split' }), mqtt('energy'), mqtt('voltage')]);
-if (!s.box) fail('the bindings table is not in its own scroll container — the whole sheet scrolls instead');
+if (query(s.editor, 'table', true).length) fail('the editor still lays its bindings out as a table');
+if (s.cards.length !== 3) fail(`3 bindings drew ${s.cards.length} cards`);
+for (const c of s.cards) if (!has(c, 'source')) fail(`the ${c.metric} card says nothing about where it reads from`);
 
-// A column every row fills with a dash is width spent saying "not applicable" once per row.
-if (!s.headers.includes('Counter')) fail(`a node with an energy binding has no Counter column: ${s.headers.join(', ')}`);
-if (!s.headers.includes('Invert')) fail(`a node with a signed metric has no Invert column: ${s.headers.join(', ')}`);
+// --- Each card carries only what means something for its metric ------------------------------------------
+if (!has(card(s, 'energy'), 'counter')) fail('an energy binding does not ask whether its counter resets daily');
+if (has(card(s, 'realpower'), 'counter') || has(card(s, 'voltage'), 'counter')) fail('Counter is offered where nothing accumulates');
+if (!has(card(s, 'realpower'), 'direction') || !has(card(s, 'energy'), 'direction')) fail('a grid binding with a direction is not asked for it');
+if (has(card(s, 'voltage'), 'direction')) fail('Direction is offered for voltage, which has none');
+if (!has(card(s, 'realpower'), 'invert')) fail('power has a sign, and Invert is missing');
+if (has(card(s, 'voltage'), 'invert') || has(card(s, 'energy'), 'invert')) fail('Invert is offered where a reading has no sign');
 
 s = await sheetFor('load', [mqtt('realpower'), mqtt('voltage')]);
-if (s.headers.includes('Counter')) fail(`Counter is shown where nothing accumulates: ${s.headers.join(', ')}`);
-if (s.headers.includes('Direction')) fail(`Direction is shown on a node that only flows one way: ${s.headers.join(', ')}`);
-if (!s.headers.includes('Invert')) fail('Invert was dropped where power is bound, and power has a sign');
+if (s.cards.some(c => has(c, 'direction'))) fail('Direction is offered on a node that only flows one way');
 
-s = await sheetFor('load', [mqtt('voltage'), mqtt('frequency')]);
-if (s.headers.includes('Invert')) fail(`Invert is shown where no metric has a sign: ${s.headers.join(', ')}`);
-if (s.headers.includes('Counter')) fail(`Counter is shown where nothing accumulates: ${s.headers.join(', ')}`);
+// --- Save from the editor -------------------------------------------------------------------------------
+const foot = query(s.body, '.sheet-sticky-foot', false);
+if (!foot) fail('the editor has no footer of its own');
+const save = query(foot, 'button', true).find(b => b.textContent === 'Save');
+const status = query(foot, '.sheet-dirty', false);
+if (!save || !status) fail('the footer has no Save, or does not say what is unsaved');
+if (!save.disabled) fail('Save is offered with nothing to save');
 
-// Whatever the columns are, every row has to have exactly that many cells.
-for (const n of s.cells)
-  if (n !== s.headers.length) fail(`a row has ${n} cells against ${s.headers.length} columns — they are misaligned`);
+const name = query(s.editor, 'input', true)[0];
+name.value = 'Renamed';
+name.dispatch('change', {});
+await new Promise(r => setTimeout(r, 20));
+if (!/1 unsaved change/.test(status.textContent)) fail(`an edit is not reported in the editor: "${status.textContent}"`);
+if (save.disabled) fail('Save stays disabled after an edit');
 
-console.log(`node-sheet: the bindings table carries its own width; Counter, Direction and Invert appear only `
-  + `where a binding on that node uses them (${s.headers.length} columns for a voltage/frequency node), and `
-  + `every row matches the header`);
+save.click();
+await new Promise(r => setTimeout(r, 60));
+if (!s.posts.length) fail('Save in the editor wrote nothing');
+if (s.posts[0].EnergyFlow.Nodes[0].Label !== 'Renamed') fail('Save wrote the configuration without the edit');
+if (!query(s.body, '.node-editor', false)) fail('saving closed the editor');
+if (!/saved/i.test(status.textContent) || !save.disabled) fail(`after saving the footer still reports: "${status.textContent}"`);
+
+// Done closes it.
+query(foot, 'button', true).find(b => b.textContent === 'Done').click();
+await new Promise(r => setTimeout(r, 20));
+if (query(s.body, '.node-editor', false)) fail('Done did not close the editor');
+
+console.log('node-sheet: each binding is a card with only the settings its metric uses (Direction, Counter, '
+  + 'Invert where they mean something), no table to scroll sideways, and the editor saves from its own '
+  + 'footer, which says what is unsaved, without closing');

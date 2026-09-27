@@ -5,6 +5,7 @@ import { refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
+import { templateHelp } from '../template-field.js';
 import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
 import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
 import {
@@ -18,7 +19,7 @@ import {
 let pickerSeq = 0;
 
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
-export function overlay(title: string, onClose?: () => void): { body: any, close: () => void } {
+export function overlay(title: string, onClose?: () => void, opts: { footer?: any, className?: string, sub?: string } = {}): { body: any, close: () => void } {
   const back = el('div', { class: 'sheet-backdrop' });
   // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
   // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
@@ -26,10 +27,14 @@ export function overlay(title: string, onClose?: () => void): { body: any, close
   // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
   // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
   // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
-  const panel = el('div', { class: 'sheet-panel' });
-  const head = el('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } });
-  head.appendChild(el('h4', { text: title, style: { margin: '0', fontSize: '14px' } }));
-  const x = btn('Close');
+  const panel = el('div', { class: 'sheet-panel' + (opts.className ? ' ' + opts.className : '') });
+  // Header and footer stay put while the body scrolls under them: Close and Save are always in reach.
+  const head = el('div', { class: 'sheet-head' });
+  const titles = el('div', { class: 'sheet-titles' }, el('h4', { text: title }));
+  if (opts.sub) titles.appendChild(el('code', { class: 'sheet-sub', text: opts.sub }));
+  head.appendChild(titles);
+  const x = el('button', { class: 'sheet-x', type: 'button', text: '✕', title: 'Close (Esc)' }) as HTMLButtonElement;
+  x.setAttribute('aria-label', 'Close');
   head.appendChild(x);
   const body = el('div');
   // Every edit inside a sheet reports itself, once, here.
@@ -44,6 +49,7 @@ export function overlay(title: string, onClose?: () => void): { body: any, close
   // read off the document rather than reported by the handler.
   body.addEventListener('change', () => refreshDirty());
   panel.append(head, body);
+  if (opts.footer) panel.appendChild(el('div', { class: 'sheet-foot sheet-sticky-foot' }, opts.footer));
   back.appendChild(panel);
   document.body.appendChild(back);
 
@@ -430,15 +436,25 @@ export function field(labelText: string, control: HTMLElement, hint?: string) {
   return f;
 }
 
-// Per-node editor (#129): name, kind, mode, fixed value, a battery's storage, and the live value bindings —
+// Per-node editor (#129): what the node is, where its readings come from, and how it is wired.
+//
+// Laid out as sections a phone can stack: the basics, then one card per live binding, then the wiring,
+// then the filing details (tags, place, EmonCMS) folded away until wanted. The bindings were a table of
+// up to eleven columns — about 1,640px — which a phone could only show by scrolling it sideways.
 export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, rerender: (close?: boolean) => void) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
   // No frame and no header of its own: this renders into a modal panel that already carries the node's name.
   const box = el('div', { class: 'node-editor' });
+  const section = (title: string, ...extra: any[]) => {
+    const s = el('section', { class: 'ne-section' });
+    s.appendChild(el('div', { class: 'ne-section-head' }, el('h5', { text: title }), ...extra));
+    box.appendChild(s);
+    return s;
+  };
 
-  // Laid out by class, so a phone can take it down to one column: two 150px columns of a label, a control
-  // and three lines of hint left each hint a word wide.
+  // --- What it is ---
+  const basics = section('Node');
   const grid = el('div', { class: 'node-editor-fields' });
 
   const labIn = el('input', { type: 'text', value: node.Label || '', placeholder: node.Id });
@@ -459,8 +475,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   BALANCE_ROLES.forEach(([role, , label]) => roleSel.appendChild(el('option', { value: role, text: label })));
   roleSel.value = balanceRoleOf(flowCfg, node.Id);
   roleSel.onchange = () => setBalanceRole(flowCfg, node.Id, roleSel.value);
-  grid.appendChild(field('Counts toward', roleSel,
-    'Site total this node is summed into (EnergyFlow.Balance).'));
+  grid.appendChild(field('Counts toward', roleSel, 'Site total it is summed into.'));
 
   const modeSel = el('select');
   NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
@@ -470,47 +485,20 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     if (node.Mode !== 'static') node.Value = undefined;  // a fixed value only belongs to a static node
     rerender();  // toggle the Fixed value field
   };
-  grid.appendChild(field('Mode', modeSel, 'How it’s valued with no measurement.'));
+  grid.appendChild(field('Mode', modeSel, 'Value with no measurement.'));
 
   // The fixed value only makes sense for a static leaf — show it only in that mode.
   if ((node.Mode || 'auto') === 'static') {
     const valIn = el('input', { type: 'number', step: 'any', value: node.Value ?? '', placeholder: '—' });
     valIn.onchange = () => { const v = +valIn.value; node.Value = (valIn.value !== '' && !isNaN(v)) ? v : undefined; };
-    grid.appendChild(field('Fixed value', valIn, 'Used unless a bound source reports.'));
+    grid.appendChild(field('Fixed value', valIn, 'Used unless a binding reports.'));
   }
-
-  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
-  // export filter names, and hanging this off the gauge kinds below meant those could not be tagged at all.
-  const tags = ensure(node, 'Tags', []);
-  grid.appendChild(field('Tags', tagInput(tags, {
-    placeholder: 'critical, rack-1',
-    onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
-  }), 'Labels for filtering the Energy page, highlighting the diagram and deciding what each destination '
-    + 'exports. Type to add one — existing tags complete as you type. A tag never changes a reading.'));
-
-  // Where it is and which circuit it is plugged into (#461, #465).
-  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
-  locSel.onchange = () => { node.Location = locSel.value || undefined; };
-  grid.appendChild(field('Location', locSel, 'The room, area, floor or site it is in. Its consumption counts there on the Floor Plans page.'));
-  const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
-  circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
-  grid.appendChild(field('Circuit', circSel, 'The breaker it is plugged into. The circuit then counts it among its metered devices and reports what is left unmetered.'));
-
-  // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
-  const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
-  emonTag.onchange = () => { node.EmonCmsTag = emonTag.value.trim() || undefined; };
-  grid.appendChild(field('EmonCMS tag', emonTag, 'Tag this node’s EmonCMS feeds are filed under. Blank uses the EmonCMS page’s. {node}, {label} and {kind} are filled in.'));
-  const emonVirtualTag = el('input', { type: 'text', value: node.EmonCmsVirtualTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
-  emonVirtualTag.onchange = () => { node.EmonCmsVirtualTag = emonVirtualTag.value.trim() || undefined; };
-  grid.appendChild(field('EmonCMS virtual-feed tag', emonVirtualTag, 'Tag this node’s EmonCMS virtual feeds are filed under. Blank uses the EmonCMS page’s.'));
 
   // The gauge's ceiling, for the kinds the Energy page draws a dial for.
   if (['solar', 'battery', 'grid', 'load', 'inverter'].includes(node.Kind || 'node')) {
     const maxIn = el('input', { type: 'number', step: 'any', min: '0', value: node.Max ?? '', placeholder: '—' });
     maxIn.onchange = () => { const v = +maxIn.value; node.Max = (maxIn.value !== '' && !isNaN(v) && v > 0) ? v : undefined; };
-    grid.appendChild(field('Gauge max (W)', maxIn,
-      'Full scale for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating. '
-      + 'Blank shows the plain reading; no ceiling is ever guessed.'));
+    grid.appendChild(field('Gauge max (W)', maxIn, 'Energy page gauge full scale. Blank: plain reading.'));
   }
 
   if ((node.Kind || 'node') === 'battery') {
@@ -518,360 +506,11 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
     grid.appendChild(field('Storage (kWh)', stoIn));
   }
-  box.appendChild(grid);
+  basics.appendChild(grid);
 
-  // --- Live value bindings ---
-  box.appendChild(el('h5', { text: 'Live value bindings', style: { margin: '6px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Bind a metric to a live source — an MQTT topic, or a register on a Modbus TCP connection (set those up in the Modbus section). One binding per metric drives that metric’s power/energy/… roll-up; a fresh reading supersedes the fixed value. Takes effect without a restart once saved — the Current column then fills in on the source’s next message or poll, no page reload needed.', style: { margin: '0 0 8px' } }));
-
-  // Battery and grid flow both ways.
-  const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
-  const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge', in: 'Charge', split: 'Split: + discharge / − charge' }
-    : node.Kind === 'grid' ? { out: 'Import', in: 'Export', split: 'Split: + import / − export' }
-    : { out: 'Out', in: 'In', split: 'Split: + out / − in' };
-
+  // --- Where its readings come from: one card per binding ---
   const sources: any[] = ensure(node, 'Sources', []);
-  // A column every row fills with an em dash is width spent saying "not applicable" eleven times. Counter
-  // means something only for energy, Invert only for a signed metric — so they appear when a binding on
-  // THIS node uses them.
-  const metricOf = (s: any) => String(s.Metric || 'realpower').toLowerCase();
-  const usesCounter = sources.some((s: any) => metricOf(s) === 'energy');
-  const usesInvert = sources.some((s: any) => SIGNED_METRICS.includes(metricOf(s)));
-  if (sources.length) {
-    const tbl = el('table', { class: 'ld' });
-    const head = el('tr');
-    const colHint: any = {
-      Direction: 'What this source measures: the node supplying (discharge / grid import / solar production) or drawing (battery charge / grid export). Charge and export are published as a second sensor HA’s Energy Dashboard can show. Split takes one signed power/current value and fans it into both at once — the positive part as the supply side, the magnitude of the negative part as the draw side. Hidden for metrics with no direction (voltage, frequency, power factor, state of charge).',
-      Invert: 'Flip the sign of a power or current reading — for a source that publishes export/discharge as positive when your hierarchy wants it negative (or vice versa).',
-      Current: LIVE_HINT,
-    };
-    ['Type', 'Metric', ...(bidirectional ? ['Direction'] : []), ...(usesCounter ? ['Counter'] : []),
-      'Unit', 'Source', 'Details', 'Scale', ...(usesInvert ? ['Invert'] : []), 'Current', ''].forEach(h => {
-      const th = el('th', { text: h });
-      if (colHint[h]) th.title = colHint[h];
-      head.appendChild(th);
-    });
-    tbl.appendChild(el('thead', {}, head));
-    const body = el('tbody');
-    // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
-    const liveCells: { src: any, cell: any }[] = [];
-    sources.forEach((src: any) => {
-      const tr = el('tr');
-
-      const typeSel = el('select', { style: { width: 'auto' } });
-      sourceTypes(state.schema).forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
-      typeSel.value = src.Type || 'mqtt';
-      typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the Source/Details fields differ per type
-      tr.appendChild(el('td', {}, typeSel));
-
-      // Offer this kind's metrics (friendly labels).
-      const metricSel = el('select', { style: { width: 'auto' } });
-      const metric = src.Metric || 'realpower';
-      const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
-      opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
-      metricSel.value = metric;
-      metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
-      // Say at the point of choosing that this one won't roll up.
-      const metricCell = el('td', {}, metricSel);
-      if (!isAdditiveMetric(metric)) {
-        metricCell.appendChild(el('div', {
-          class: 'desc', style: { margin: '2px 0 0', fontSize: '11px' },
-          text: 'per-node only — not summed',
-          title: `${metricLabel(metric)} describes a condition at a point, so it is never added up the tree.`
-          + ' The node you bind it to shows it; its parents show nothing rather than a total that was true nowhere.',
-        }));
-      }
-      tr.appendChild(metricCell);
-
-      // Direction: battery/grid only, and only for a directional metric.
-      if (bidirectional) {
-        const cell = el('td');
-        if (DIRECTIONAL_METRICS.includes(metric)) {
-          const opts = SIGNED_METRICS.includes(metric) ? ['out', 'in', 'split'] : ['out', 'in'];
-          const dirSel = el('select', { style: { width: 'auto' } });
-          opts.forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
-          dirSel.value = opts.includes(src.Direction) ? src.Direction : 'out';
-          // Split's sign convention lives in a tooltip so it doesn't add a line to every row.
-          if (SIGNED_METRICS.includes(metric))
-            dirSel.title = node.Kind === 'grid' ? 'Split fans one ± value into both directions: positive = import, negative = export. Tick Invert if your source is reversed.'
-              : node.Kind === 'battery' ? 'Split fans one ± value into both directions: positive = discharge, negative = charge. Tick Invert if your source is reversed.'
-              : 'Split fans one ± value into both directions: positive = out, negative = in. Tick Invert if reversed.';
-          dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : dirSel.value; rerender(); };
-          cell.appendChild(dirSel);
-        } else {
-          cell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Direction doesn’t apply to this metric.' }));
-        }
-        tr.appendChild(cell);
-      }
-
-      // Does this counter run forever, or does the device reset it every day?
-      if (usesCounter) {
-        const cell = el('td');
-        if (metric === 'energy') {
-          const accSel = el('select', { style: { width: 'auto' } });
-          [['lifetime', 'Lifetime'], ['period', 'Daily']].forEach(([v, t]) => accSel.appendChild(el('option', { value: v, text: t })));
-          accSel.value = src.Accumulation === 'period' ? 'period' : 'lifetime';
-          accSel.title = 'Lifetime: a cumulative total that only rises; its daily figure is its rise since midnight. '
-            + 'Daily: the device resets this counter itself, so the reading already is today\u2019s total and is used as-is.';
-          accSel.onchange = () => { src.Accumulation = accSel.value === 'lifetime' ? undefined : accSel.value; refreshDirty(); };
-          cell.appendChild(accSel);
-        } else {
-          cell.appendChild(el('span', { text: '\u2014', style: { color: 'var(--muted)' }, title: 'Only energy accumulates; this metric is instantaneous.' }));
-        }
-        tr.appendChild(cell);
-      }
-
-      // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.
-      const [, , canonical, units] = metricMeta(metric);
-      const unitSel = el('select', { style: { width: 'auto' } });
-      units.forEach((u: string) => unitSel.appendChild(el('option', { value: u, text: u || '—' })));
-      unitSel.value = src.Unit || canonical;
-      unitSel.disabled = units.length <= 1;
-      unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
-      tr.appendChild(el('td', {}, unitSel));
-
-      // The Source + Details columns are type-specific. A type this bundle has no bespoke editor for —
-      // every plugin-contributed one — gets the generic Settings editor instead of nothing at all.
-      const type = (src.Type || 'mqtt').toLowerCase();
-      if (type === 'derived') {
-        // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
-        // do, and what it still needs to do any of them, are the useful things to say.
-        const metric = (src.Metric || 'realpower').toLowerCase();
-        const rule = (state.derivations || []).find((d: any) => d.metric === metric);
-        const bound = (m: string) => sources.some((o: any) => o !== src
-          && (o.Type || 'mqtt').toLowerCase() !== 'derived'
-          && (o.Metric || 'realpower').toLowerCase() === m);
-        // An operand may itself be worked out, so "have I got it" is asked the same way the backend asks.
-        const have = (m: string, seen: Set<string> = new Set()): boolean => {
-          if (bound(m)) return true;
-          if (seen.has(m)) return false;
-          seen.add(m);
-          const r = (state.derivations || []).find((d: any) => d.metric === m);
-          return (r?.from || []).some((f: any) => have(f.a, seen) && have(f.b, seen));
-        };
-        // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
-        // itself — which would offer a sum the backend will not do.
-        const reach = (m: string) => have(m, new Set([metric]));
-        const usable = (rule?.from || []).find((f: any) => reach(f.a) && reach(f.b));
-
-        const cell = el('td', {});
-        // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
-        // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
-        if (!(state.derivations || []).length) {
-          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
-        }
-        else if (!rule) {
-          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `'${metricLabel(metric)}' cannot be calculated` }));
-          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
-            text: `These can: ${(state.derivations || []).map((d: any) => d.name).join(', ')}.` }));
-        }
-        else if (usable) {
-          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${usable.label}` }));
-          if (usable.assumes)
-            cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--warn)' },
-              text: `assumes ${usable.assumes}` }));
-        }
-        else {
-          cell.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${(rule.from[0] || {}).label || ''}` }));
-          cell.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
-            text: 'Needs ' + (rule.from || []).map((f: any) => `${metricLabel(f.a)} and ${metricLabel(f.b)}`).join(', or ')
-                + ' on this node.' }));
-        }
-        tr.appendChild(cell);
-        // The same em dash every other inapplicable cell in this table uses. "no source to read" read as a
-        // fault report sitting beside a working value.
-        tr.appendChild(el('td', {}, el('span', {
-          text: '—', style: { color: 'var(--muted)' },
-          title: 'A calculated value has no source of its own — it is worked out from this node’s other bindings.',
-        })));
-      }
-      else if (type === 'emoncms') {
-        // Source = which feed; Details = what that feed currently reads, so a mapping can be checked
-        // against the server before it is wired into the flow.
-        const [srcCell, detailCell] = emonCmsSourceEditor(src, () => refreshDirty());
-        tr.appendChild(srcCell);
-        tr.appendChild(detailCell);
-      }
-      else if (sourceEditorFor(type)) {
-        // A type that registered a bespoke editor. This used to fall through to the MQTT branch and draw a
-        // topic box, so registering one had no effect at all.
-        const [srcCell, detailCell] = sourceEditorFor(type)!(src, () => refreshDirty());
-        tr.appendChild(srcCell);
-        tr.appendChild(detailCell);
-      }
-      else if (type !== 'mqtt' && type !== 'modbus') {
-        const [srcCell, detailCell] = genericSourceEditor(src, () => refreshDirty());
-        tr.appendChild(srcCell);
-        tr.appendChild(detailCell);
-      }
-      else if (type === 'modbus') {
-        // Source = which configured Modbus connection; Details = the register spec.
-        const connections: any[] = (state.data?.Modbus?.Connections) || [];
-        const connSel = el('select', { style: { width: '160px' } });
-        connSel.appendChild(el('option', { value: '', text: connections.length ? '— pick a connection —' : 'none — add one in Modbus' }));
-        connections.forEach((c: any) => connSel.appendChild(el('option', { value: c.Id, text: c.Name || c.Id })));
-        connSel.value = src.Connection || '';
-        connSel.onchange = () => { src.Connection = connSel.value || undefined; };
-        tr.appendChild(el('td', {}, connSel));
-
-        const details = el('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } });
-        const regIn = el('input', { type: 'number', value: src.Register ?? 0, title: 'Register address', style: { width: '80px' } });
-        regIn.onchange = () => { const v = +regIn.value; src.Register = !isNaN(v) ? v : 0; };
-        const regTypeSel = el('select', { title: 'Register bank', style: { width: 'auto' } });
-        MODBUS_REGISTER_TYPES.forEach(t => regTypeSel.appendChild(el('option', { value: t, text: t })));
-        regTypeSel.value = src.RegisterType || 'holding';
-        regTypeSel.onchange = () => { src.RegisterType = regTypeSel.value === 'holding' ? undefined : regTypeSel.value; };
-        const dtSel = el('select', { title: 'Data type', style: { width: 'auto' } });
-        MODBUS_DATATYPES.forEach(t => dtSel.appendChild(el('option', { value: t, text: t })));
-        dtSel.value = src.DataType || 'uint16';
-        const woSel = el('select', { title: 'Word order (32-bit)', style: { width: 'auto' } });
-        MODBUS_WORDORDERS.forEach(t => woSel.appendChild(el('option', { value: t, text: t })));
-        woSel.value = src.WordOrder || 'big';
-        woSel.onchange = () => { src.WordOrder = woSel.value === 'big' ? undefined : woSel.value; };
-        // Word order only matters for 32-bit types; keep it enabled only then.
-        const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
-        woSel.disabled = !is32();
-        dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
-
-        // Rather than guessing a register from a PDF, read the device and pick the value that looks right.
-        const explore = btn('Browse…');
-        explore.title = 'Read a block of registers from the device and choose one.';
-        explore.onclick = () => openModbusExplorer(src, rerender);
-
-        details.append(regIn, regTypeSel, dtSel, woSel, explore);
-        tr.appendChild(el('td', {}, details));
-      } else {
-        // Source = the topic, with autocomplete off what the broker is actually carrying.
-        const topicCell = el('td');
-        const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state', style: { width: '300px' } }) as HTMLInputElement;
-        const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'JSON field (optional)', style: { width: '120px' } }) as HTMLInputElement;
-
-        const suggest = topicSuggester(topicIn, () => {
-          src.Topic = topicIn.value.trim();
-          applyTopicHint(src, topicIn.value.trim(), fieldIn, rerender);
-        });
-        topicIn.onchange = () => { src.Topic = topicIn.value.trim(); applyTopicHint(src, src.Topic, fieldIn, rerender); };
-
-        const browse = btn('Browse');
-        browse.title = 'Browse the topics currently on the broker and pick one.';
-        browse.onclick = () => openTopicPicker(topicIn.value.trim(), picked => {
-          topicIn.value = picked;
-          src.Topic = picked;
-          applyTopicHint(src, picked, fieldIn, rerender);
-        });
-
-        topicCell.append(topicIn, suggest.list, ' ', browse);
-        tr.appendChild(topicCell);
-
-        fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
-        const fieldCell = el('td');
-        fieldCell.append(fieldIn, jsonFieldSuggester(fieldIn, () => src.Topic || ''));
-        tr.appendChild(fieldCell);
-      }
-
-      // Scale carries the magnitude; Invert carries the sign.
-      const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), style: { width: '80px' } });
-      const setScale = (magnitude: number, invert: boolean) => {
-        const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
-        src.Scale = v === 1 ? undefined : v;
-      };
-      scaleIn.onchange = () => setScale(+scaleIn.value, (src.Scale ?? 1) < 0);
-      tr.appendChild(el('td', {}, scaleIn));
-
-      // Sign only means anything where the value has a direction — power and current, not voltage/energy.
-      const invCell = el('td', { style: { textAlign: 'center' } });
-      // Built either way so `setScale` keeps its reference; appended only when the column is there.
-      if (SIGNED_METRICS.includes(metric)) {
-        const inv = el('input', { type: 'checkbox' }) as HTMLInputElement;
-        inv.checked = (src.Scale ?? 1) < 0;
-        inv.title = 'Flip the sign of this reading (e.g. solar/battery power the source publishes as export).';
-        inv.onchange = () => setScale(+scaleIn.value, inv.checked);
-        invCell.appendChild(inv);
-      } else {
-        invCell.appendChild(el('span', { text: '—', style: { color: 'var(--muted)' }, title: 'Sign has no meaning for this metric.' }));
-      }
-      if (usesInvert) tr.appendChild(invCell);
-
-      // Live value for every binding type: Modbus is read from the device; the rest (MQTT, future types)
-      const liveCell = el('td', { class: 'num', style: { minWidth: '90px', color: 'var(--muted)' }, text: '…' });
-      liveCells.push({ src, cell: liveCell });
-      tr.appendChild(liveCell);
-
-      const rm = btn('Remove', 'danger');
-      rm.onclick = () => { sources.splice(sources.indexOf(src), 1); rerender(); };
-      tr.appendChild(el('td', {}, rm));
-      body.appendChild(tr);
-    });
-    tbl.appendChild(body);
-    // The table scrolls itself when it still cannot fit. Scrolling the whole sheet took the title and the
-    // Close button with it, and left the Remove buttons off the right-hand edge with nothing to say so.
-    box.appendChild(el('div', { class: 'bindings-scroll' }, tbl));
-
-    // Live "Current" value for every binding.
-    if (liveCells.length) {
-      const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
-      const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
-        if (value == null) { cell.textContent = err ? 'err' : '—'; cell.style.color = err ? 'var(--bad)' : 'var(--muted)'; cell.title = err || ('No live value yet. ' + LIVE_HINT); }
-        else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.style.color = 'var(--good)'; cell.title = ''; }
-      };
-      // A Modbus device is a shared serial resource — many gateways accept only one client at a time.
-      const refresh = async (probe = false) => {
-        let probeMsg = '';
-        if (probe) {
-          const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
-          const conns: any[] = (state.data?.Modbus?.Connections) || [];
-          const byConn = new Map<string, { src: any, cell: any }[]>();
-          modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id)!).push(lc); });
-          for (const [connId, cells] of byConn) {
-            const conn = conns.find(c => c.Id === connId);
-            if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
-            try {
-              const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs, Items: cells.map(lc => lc.src) }) });
-              if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
-              const readings = r.body.readings || [];
-              cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
-              const firstErr = readings.find((rd: any) => rd?.error)?.error;
-              if (firstErr) probeMsg = (r.body.message || '') + ' — ' + firstErr;
-            } catch (e: any) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = String(e?.message || e); }
-          }
-        }
-
-        // Every binding not just device-probed reads the shared live cache the running ingests fill.
-        const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
-        if (cached.length) {
-          try {
-            const reqs: any[] = [];
-            const plan = cached.map(lc => {
-              const m = lc.src.Metric || 'realpower';
-              if (lc.src.Direction === 'split') { const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: m }, { Node: node.Id, Metric: m + '#in' }); return { lc, split: true, i0 }; }
-              const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: sourceMetricKey(lc.src) }); return { lc, split: false, i0 };
-            });
-            const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqs) });
-            const vals = (r.body && r.body.values) || [];
-            plan.forEach(p => {
-              if (p.split) {
-                const o = vals[p.i0]?.value, iv = vals[p.i0 + 1]?.value;
-                setCell(p.lc.cell, (o == null && iv == null) ? null : (o || 0) - (iv || 0), undefined, p.lc.src.Metric);
-              } else setCell(p.lc.cell, vals[p.i0]?.value ?? null, undefined, p.lc.src.Metric);
-            });
-          } catch (e: any) { cached.forEach(lc => setCell(lc.cell, null, 'err')); }
-        }
-        status.textContent = probeMsg || `updated ${new Date().toLocaleTimeString()}`;
-        status.style.color = probeMsg ? 'var(--bad)' : 'var(--muted)';
-      };
-      const hasModbus = liveCells.some(lc => (lc.src.Type || 'mqtt') === 'modbus');
-      const refreshBtn = btn(hasModbus ? 'Test device read' : 'Refresh values');
-      if (hasModbus) refreshBtn.title = 'Open a one-off connection to the device to test these bindings. Normally the worker polls it and the value shows here automatically — avoid hammering a gateway that allows only one client.';
-      refreshBtn.onclick = () => refresh(true);
-      box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '6px' } }, refreshBtn, status));
-      refresh(false);
-      // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
-      const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 2000);
-    }
-  }
-
-  const addBind = btn('Add binding', 'primary');
+  const addBind = btn('+ Add binding', 'primary');
   addBind.onclick = () => {
     // Default to the first metric this kind offers that isn't bound yet, so a click rarely needs a re-pick.
     const used = new Set(sources.map((s: any) => s.Metric || 'realpower'));
@@ -879,11 +518,280 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     sources.push({ Type: 'mqtt', Metric: metric, Topic: '' });
     rerender();
   };
-  box.appendChild(el('div', { class: 'ld-toolbar', style: { marginTop: '8px' } }, addBind));
+  const liveStatus = el('span', { class: 'ne-status' });
+  const liveSlot = el('span', { class: 'ne-head-actions' });
+  const bindSec = section('Live value bindings', el('span', { class: 'ne-count', text: sources.length ? String(sources.length) : '' }), liveSlot);
+  bindSec.appendChild(el('div', { class: 'desc ne-desc', text: 'One binding per metric. MQTT topic, Modbus register or another source. Applies on save, no restart.' }));
+
+  // Battery and grid flow both ways.
+  const bidirectional = (node.Kind === 'battery' || node.Kind === 'grid');
+  const dirLabels: Record<string, string> = node.Kind === 'battery' ? { out: 'Discharge', in: 'Charge', split: 'Split: + discharge / − charge' }
+    : node.Kind === 'grid' ? { out: 'Import', in: 'Export', split: 'Split: + import / − export' }
+    : { out: 'Out', in: 'In', split: 'Split: + out / − in' };
+
+  /// A small labelled control inside a binding card. `name` marks what it is, for the page checks.
+  const slot = (label: string, name: string, ...controls: any[]) => {
+    const s = el('div', { class: 'ne-slot' });
+    s.dataset.field = name;
+    s.appendChild(el('span', { class: 'ne-slot-label', text: label }));
+    controls.forEach(c => s.appendChild(c));
+    return s;
+  };
+
+  const list = el('div', { class: 'ne-bindings' });
+  // Cells that a live probe fills in, keyed to their source so a refresh can update them in place.
+  const liveCells: { src: any, cell: any }[] = [];
+  sources.forEach((src: any) => {
+    const card = el('div', { class: 'ne-binding' });
+    const metric = src.Metric || 'realpower';
+    const type = (src.Type || 'mqtt').toLowerCase();
+
+    // Head: what is measured, from what kind of source, and what it reads now.
+    const head = el('div', { class: 'ne-bind-head' });
+    const metricSel = el('select', { class: 'ne-metric', title: 'Metric' });
+    const opts = allowed.includes(metric) ? allowed : [metric, ...allowed];
+    opts.forEach((m: string) => metricSel.appendChild(el('option', { value: m, text: metricLabel(m) })));
+    metricSel.value = metric;
+    metricSel.onchange = () => { src.Metric = metricSel.value; src.Unit = undefined; rerender(); };
+    const typeSel = el('select', { class: 'ne-type', title: 'Source type' });
+    sourceTypes(state.schema).forEach(([v, label]) => typeSel.appendChild(el('option', { value: v, text: label })));
+    typeSel.value = src.Type || 'mqtt';
+    typeSel.onchange = () => { src.Type = typeSel.value; rerender(); };  // the source fields differ per type
+    const liveCell = el('span', { class: 'ne-live', text: '…', title: LIVE_HINT });
+    liveCells.push({ src, cell: liveCell });
+    const rm = el('button', { class: 'ne-remove', type: 'button', text: '✕', title: 'Remove this binding' }) as HTMLButtonElement;
+    rm.setAttribute('aria-label', 'Remove');
+    rm.onclick = () => { sources.splice(sources.indexOf(src), 1); rerender(); };
+    head.append(metricSel, typeSel, liveCell, rm);
+    card.appendChild(head);
+    // Said at the point of choosing that this one won't roll up.
+    if (!isAdditiveMetric(metric))
+      card.appendChild(el('div', { class: 'desc ne-note', text: 'Per-node only — not summed up the tree.',
+        title: `${metricLabel(metric)} describes a condition at a point, so it is never added up the tree.` }));
+
+    // Body: where it reads from, then how the reading is taken.
+    const bodyRow = el('div', { class: 'ne-bind-body' });
+    if (type === 'derived') {
+      // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
+      // do, and what it still needs to do any of them, are the useful things to say.
+      const m = metric.toLowerCase();
+      const rule = (state.derivations || []).find((d: any) => d.metric === m);
+      const bound = (x: string) => sources.some((o: any) => o !== src
+        && (o.Type || 'mqtt').toLowerCase() !== 'derived'
+        && (o.Metric || 'realpower').toLowerCase() === x);
+      // An operand may itself be worked out, so "have I got it" is asked the same way the backend asks.
+      const have = (x: string, seen: Set<string> = new Set()): boolean => {
+        if (bound(x)) return true;
+        if (seen.has(x)) return false;
+        seen.add(x);
+        const r = (state.derivations || []).find((d: any) => d.metric === x);
+        return (r?.from || []).some((f: any) => have(f.a, seen) && have(f.b, seen));
+      };
+      // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
+      // itself — which would offer a sum the backend will not do.
+      const reach = (x: string) => have(x, new Set([m]));
+      const usable = (rule?.from || []).find((f: any) => reach(f.a) && reach(f.b));
+      const what = el('div', { class: 'ne-derived' });
+      // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
+      // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
+      if (!(state.derivations || []).length) {
+        what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
+      } else if (!rule) {
+        what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `'${metricLabel(m)}' cannot be calculated` }));
+        what.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+          text: `These can: ${(state.derivations || []).map((d: any) => d.name).join(', ')}.` }));
+      } else if (usable) {
+        what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${usable.label}` }));
+        if (usable.assumes)
+          what.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--warn)' }, text: `assumes ${usable.assumes}` }));
+      } else {
+        what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: `= ${(rule.from[0] || {}).label || ''}` }));
+        what.appendChild(el('div', { class: 'desc', style: { margin: '2px 0 0', color: 'var(--bad)' },
+          text: 'Needs ' + (rule.from || []).map((f: any) => `${metricLabel(f.a)} and ${metricLabel(f.b)}`).join(', or ') + ' on this node.' }));
+      }
+      bodyRow.appendChild(slot('Calculated', 'source', what));
+    }
+    else if (type === 'emoncms' || sourceEditorFor(type) || (type !== 'mqtt' && type !== 'modbus')) {
+      // Editors shared with other pages hand back two cells: which feed or setting, and what it reads.
+      const make = type === 'emoncms' ? emonCmsSourceEditor : (sourceEditorFor(type) || genericSourceEditor);
+      const [srcCell, detailCell] = make(src, () => refreshDirty());
+      bodyRow.append(slot(type === 'emoncms' ? 'Feed' : 'Source', 'source', srcCell), slot('Details', 'details', detailCell));
+    }
+    else if (type === 'modbus') {
+      const connections: any[] = (state.data?.Modbus?.Connections) || [];
+      const connSel = el('select');
+      connSel.appendChild(el('option', { value: '', text: connections.length ? '— pick a connection —' : 'none — add one in Modbus' }));
+      connections.forEach((c: any) => connSel.appendChild(el('option', { value: c.Id, text: c.Name || c.Id })));
+      connSel.value = src.Connection || '';
+      connSel.onchange = () => { src.Connection = connSel.value || undefined; };
+      const regIn = el('input', { type: 'number', value: src.Register ?? 0, class: 'ne-narrow' });
+      regIn.onchange = () => { const v = +regIn.value; src.Register = !isNaN(v) ? v : 0; };
+      const regTypeSel = el('select');
+      MODBUS_REGISTER_TYPES.forEach(t => regTypeSel.appendChild(el('option', { value: t, text: t })));
+      regTypeSel.value = src.RegisterType || 'holding';
+      regTypeSel.onchange = () => { src.RegisterType = regTypeSel.value === 'holding' ? undefined : regTypeSel.value; };
+      const dtSel = el('select');
+      MODBUS_DATATYPES.forEach(t => dtSel.appendChild(el('option', { value: t, text: t })));
+      dtSel.value = src.DataType || 'uint16';
+      const woSel = el('select');
+      MODBUS_WORDORDERS.forEach(t => woSel.appendChild(el('option', { value: t, text: t })));
+      woSel.value = src.WordOrder || 'big';
+      woSel.onchange = () => { src.WordOrder = woSel.value === 'big' ? undefined : woSel.value; };
+      // Word order only matters for 32-bit types; keep it enabled only then.
+      const is32 = () => ['uint32', 'int32', 'float32'].includes(dtSel.value);
+      woSel.disabled = !is32();
+      dtSel.onchange = () => { src.DataType = dtSel.value === 'uint16' ? undefined : dtSel.value; woSel.disabled = !is32(); };
+      // Rather than guessing a register from a PDF, read the device and pick the value that looks right.
+      const explore = btn('Browse…');
+      explore.title = 'Read a block of registers from the device and choose one.';
+      explore.onclick = () => openModbusExplorer(src, rerender);
+      bodyRow.append(slot('Connection', 'source', connSel), slot('Register', 'register', regIn), slot('Bank', 'bank', regTypeSel),
+        slot('Type', 'datatype', dtSel), slot('Word order', 'wordorder', woSel), slot(' ', 'browse', explore));
+    } else {
+      // The topic, with autocomplete off what the broker is actually carrying.
+      const topicIn = el('input', { type: 'text', value: src.Topic || '', placeholder: 'solar_assistant/inverter_1/pv_power/state' }) as HTMLInputElement;
+      const fieldIn = el('input', { type: 'text', value: src.JsonField || '', placeholder: 'optional', class: 'ne-narrow' }) as HTMLInputElement;
+      const suggest = topicSuggester(topicIn, () => {
+        src.Topic = topicIn.value.trim();
+        applyTopicHint(src, topicIn.value.trim(), fieldIn, rerender);
+      });
+      topicIn.onchange = () => { src.Topic = topicIn.value.trim(); applyTopicHint(src, src.Topic, fieldIn, rerender); };
+      const browse = btn('Browse');
+      browse.title = 'Browse the topics currently on the broker and pick one.';
+      browse.onclick = () => openTopicPicker(topicIn.value.trim(), picked => {
+        topicIn.value = picked;
+        src.Topic = picked;
+        applyTopicHint(src, picked, fieldIn, rerender);
+      });
+      const topicRow = el('div', { class: 'ne-topic' }, topicIn, browse);
+      const topicSlot = slot('Topic', 'source', topicRow, suggest.list);
+      topicSlot.classList.add('ne-grow');
+      fieldIn.onchange = () => { src.JsonField = fieldIn.value.trim() || undefined; };
+      bodyRow.append(topicSlot, slot('JSON field', 'details', fieldIn, jsonFieldSuggester(fieldIn, () => src.Topic || '')));
+    }
+    card.appendChild(bodyRow);
+
+    // How the reading is taken: only the settings that mean something for this metric.
+    const opt = el('div');
+    if (bidirectional && DIRECTIONAL_METRICS.includes(metric)) {
+      const dirs = SIGNED_METRICS.includes(metric) ? ['out', 'in', 'split'] : ['out', 'in'];
+      const dirSel = el('select');
+      dirs.forEach(d => dirSel.appendChild(el('option', { value: d, text: dirLabels[d] })));
+      dirSel.value = dirs.includes(src.Direction) ? src.Direction : 'out';
+      dirSel.title = 'What this source measures: the node supplying or drawing. Split takes one signed value and fans it into both.';
+      dirSel.onchange = () => { src.Direction = dirSel.value === 'out' ? undefined : dirSel.value; rerender(); };
+      opt.appendChild(slot('Direction', 'direction', dirSel));
+    }
+    // Does this counter run forever, or does the device reset it every day?
+    if (metric === 'energy') {
+      const accSel = el('select');
+      [['lifetime', 'Lifetime'], ['period', 'Daily']].forEach(([v, t]) => accSel.appendChild(el('option', { value: v, text: t })));
+      accSel.value = src.Accumulation === 'period' ? 'period' : 'lifetime';
+      accSel.title = 'Lifetime: a total that only rises; its daily figure is its rise since midnight. Daily: the device resets it itself.';
+      accSel.onchange = () => { src.Accumulation = accSel.value === 'lifetime' ? undefined : accSel.value; refreshDirty(); };
+      opt.appendChild(slot('Counter', 'counter', accSel));
+    }
+    // Input unit → converted to the metric's canonical unit on ingest. Store only a non-canonical choice.
+    const [, , canonical, units] = metricMeta(metric);
+    if (units.length > 1) {
+      const unitSel = el('select');
+      units.forEach((u: string) => unitSel.appendChild(el('option', { value: u, text: u || '—' })));
+      unitSel.value = src.Unit || canonical;
+      unitSel.onchange = () => { src.Unit = unitSel.value === canonical ? undefined : unitSel.value; };
+      opt.appendChild(slot('Unit', 'unit', unitSel));
+    }
+    if (type !== 'derived') {
+      // Scale carries the magnitude; Invert carries the sign.
+      const scaleIn = el('input', { type: 'number', step: 'any', value: Math.abs(src.Scale ?? 1), class: 'ne-narrow' });
+      const setScale = (magnitude: number, invert: boolean) => {
+        const v = (invert ? -1 : 1) * (isNaN(magnitude) || magnitude === 0 ? 1 : Math.abs(magnitude));
+        src.Scale = v === 1 ? undefined : v;
+      };
+      scaleIn.onchange = () => setScale(+scaleIn.value, (src.Scale ?? 1) < 0);
+      opt.appendChild(slot('Scale', 'scale', scaleIn));
+      // Sign only means anything where the value has a direction — power and current, not voltage/energy.
+      if (SIGNED_METRICS.includes(metric)) {
+        const inv = el('input', { type: 'checkbox' }) as HTMLInputElement;
+        inv.checked = (src.Scale ?? 1) < 0;
+        inv.onchange = () => setScale(+scaleIn.value, inv.checked);
+        const s = slot('Invert', 'invert', el('span', { class: 'ne-check' }, inv, el('span', { text: 'flip sign' })));
+        s.title = 'Flip the sign of this reading, for a source that publishes export or discharge the other way round.';
+        opt.appendChild(s);
+      }
+    }
+    // On one line with the source where there is room; a phone wraps it under.
+    [...opt.children].forEach((c: any) => bodyRow.appendChild(c));
+    list.appendChild(card);
+  });
+  if (sources.length) bindSec.appendChild(list);
+  else bindSec.appendChild(el('div', { class: 'ne-empty', text: 'No bindings. The node is valued by its mode and what it feeds.' }));
+  bindSec.appendChild(el('div', { class: 'ne-add' }, addBind));
+
+  // Live values for every binding.
+  if (liveCells.length) {
+    const setCell = (cell: any, value: number | null, err?: string, metric?: string) => {
+      cell.classList.remove('is-good', 'is-bad');
+      if (value == null) { cell.textContent = err ? 'err' : '—'; if (err) cell.classList.add('is-bad'); cell.title = err || ('No live value yet. ' + LIVE_HINT); }
+      else { const cu = metricMeta(metric)[2]; cell.textContent = `${formatNum(value)} ${cu}`.trim(); cell.classList.add('is-good'); cell.title = LIVE_HINT; }
+    };
+    // A Modbus device is a shared serial resource — many gateways accept only one client at a time.
+    const refresh = async (probe = false) => {
+      let probeMsg = '';
+      if (probe) {
+        const modbus = liveCells.filter(lc => (lc.src.Type || 'mqtt') === 'modbus');
+        const conns: any[] = (state.data?.Modbus?.Connections) || [];
+        const byConn = new Map<string, { src: any, cell: any }[]>();
+        modbus.forEach(lc => { const id = lc.src.Connection || ''; (byConn.get(id) || byConn.set(id, []).get(id)!).push(lc); });
+        for (const [connId, cells] of byConn) {
+          const conn = conns.find(c => c.Id === connId);
+          if (!conn) { cells.forEach(lc => setCell(lc.cell, null, 'pick a connection')); probeMsg = 'Pick a Modbus connection.'; continue; }
+          try {
+            const r = await api('/api/modbus/probe', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ Host: conn.Host, Port: conn.Port, UnitId: conn.UnitId, Framing: conn.Framing, TimeoutMs: conn.TimeoutMs, Items: cells.map(lc => lc.src) }) });
+            if (!r.body.ok) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = r.body.message || 'probe failed'; continue; }
+            const readings = r.body.readings || [];
+            cells.forEach((lc, i) => setCell(lc.cell, readings[i]?.value ?? null, readings[i]?.error, lc.src.Metric));
+            const firstErr = readings.find((rd: any) => rd?.error)?.error;
+            if (firstErr) probeMsg = (r.body.message || '') + ' — ' + firstErr;
+          } catch (e: any) { cells.forEach(lc => setCell(lc.cell, null, 'err')); probeMsg = String(e?.message || e); }
+        }
+      }
+      // Every binding not just device-probed reads the shared live cache the running ingests fill.
+      const cached = probe ? liveCells.filter(lc => (lc.src.Type || 'mqtt') !== 'modbus') : liveCells;
+      if (cached.length) {
+        try {
+          const reqs: any[] = [];
+          const plan = cached.map(lc => {
+            const m = lc.src.Metric || 'realpower';
+            if (lc.src.Direction === 'split') { const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: m }, { Node: node.Id, Metric: m + '#in' }); return { lc, split: true, i0 }; }
+            const i0 = reqs.length; reqs.push({ Node: node.Id, Metric: sourceMetricKey(lc.src) }); return { lc, split: false, i0 };
+          });
+          const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqs) });
+          const vals = (r.body && r.body.values) || [];
+          plan.forEach(p => {
+            if (p.split) {
+              const o = vals[p.i0]?.value, iv = vals[p.i0 + 1]?.value;
+              setCell(p.lc.cell, (o == null && iv == null) ? null : (o || 0) - (iv || 0), undefined, p.lc.src.Metric);
+            } else setCell(p.lc.cell, vals[p.i0]?.value ?? null, undefined, p.lc.src.Metric);
+          });
+        } catch (e: any) { cached.forEach(lc => setCell(lc.cell, null, 'err')); }
+      }
+      liveStatus.textContent = probeMsg || `live · ${new Date().toLocaleTimeString()}`;
+      liveStatus.classList.toggle('is-bad', !!probeMsg);
+    };
+    const hasModbus = liveCells.some(lc => (lc.src.Type || 'mqtt') === 'modbus');
+    const refreshBtn = btn(hasModbus ? 'Test device read' : 'Refresh values', 'small');
+    if (hasModbus) refreshBtn.title = 'Open a one-off connection to the device to test these bindings. The worker polls it anyway — avoid hammering a gateway that allows only one client.';
+    refreshBtn.onclick = () => refresh(true);
+    liveSlot.append(liveStatus, refreshBtn);
+    refresh(false);
+    // Self-cleaning: once this editor is replaced/closed its box leaves the DOM and the poll stops.
+    const timer = setInterval(() => { if (!document.body.contains(box)) { clearInterval(timer); return; } refresh(false); }, 2000);
+  }
 
   // --- Feeders & children (wiring) — the parent/child specification, alongside the visual Flow tab. ---
-  box.appendChild(el('h5', { text: 'Feeders & children', style: { margin: '12px 0 2px', fontSize: '12px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Which nodes feed this one, and which it feeds. The same wiring you can drag on the Flow tab. Loads are not offered as feeders: a load uses power rather than passing it on, and a circuit that feeds other nodes is a Breaker.', style: { margin: '0 0 6px' } }));
+  const wireSec = section('Feeders & children');
+  wireSec.appendChild(el('div', { class: 'desc ne-desc', text: 'Same wiring as the Flow tab. A load cannot feed anything.' }));
 
   const nm = (id: string) => (cand.get(id) || {}).label || id;
   const addLink = (from: string, to: string) => {
@@ -897,18 +805,20 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   };
   const removeLink = (from: string, to: string) => { const i = links.findIndex(l => l.From === from && l.To === to); if (i >= 0) links.splice(i, 1); };
   const wireRow = (title: string, current: string[], onAdd: (o: string) => void, onRemove: (o: string) => void, offer: (id: string) => boolean = () => true) => {
-    const row = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '3px 0' } });
-    row.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: title }));
+    const row = el('div', { class: 'ne-wire' });
+    row.appendChild(el('span', { class: 'ne-wire-label', text: title }));
+    const chips = el('div', { class: 'ne-wire-chips' });
     current.forEach(other => {
-      const chip = el('span', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '1px 8px', fontSize: '12px' } });
-      const x = el('span', { text: '✕', style: { cursor: 'pointer', color: 'var(--bad)' } });
+      const chip = el('span', { class: 'ne-chip' });
+      const x = el('button', { class: 'ne-chip-x', type: 'button', text: '✕', title: `Remove ${nm(other)}` });
       x.onclick = () => { onRemove(other); rerender(); };
-      chip.append(nm(other), x); row.appendChild(chip);
+      chip.append(nm(other), x); chips.appendChild(chip);
     });
+    if (!current.length) chips.appendChild(el('span', { class: 'ne-none', text: 'none' }));
     // The picker lists every node in the hierarchy, which on a real install is hundreds of outlets.
     const options = [...cand.keys()].filter(id => id !== node.Id && !current.includes(id) && offer(id)).sort((a, b) => nm(a).localeCompare(nm(b)));
-    const search = el('input', { type: 'search', placeholder: 'search…', style: { width: '130px' } }) as HTMLInputElement;
-    const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
+    const search = el('input', { type: 'search', placeholder: 'search…', class: 'ne-wire-search' }) as HTMLInputElement;
+    const sel = el('select', { class: 'ne-wire-pick' }) as HTMLSelectElement;
     const matches = () => {
       const f = (search.value || '').trim().toLowerCase();
       return f ? options.filter(id => (id + ' ' + nm(id)).toLowerCase().includes(f)) : options;
@@ -927,12 +837,59 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     };
     fill();
     sel.onchange = () => { if (sel.value) { onAdd(sel.value); rerender(); } };
-    row.append(search, sel);
+    row.append(chips, el('div', { class: 'ne-wire-add' }, search, sel));
     return row;
   };
-  box.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
+  wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
-  box.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+  wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+
+  // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
+  const more = el('details', { class: 'ne-more' }) as HTMLDetailsElement;
+  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag].filter(Boolean).length;
+  more.open = filed > 0 || nodeEditorFilingOpen;
+  more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
+  more.appendChild(el('summary', { class: 'ne-more-summary' },
+    el('span', { text: 'Tags, location & EmonCMS' }),
+    el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
+  const moreGrid = el('div', { class: 'node-editor-fields' });
+
+  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
+  // export filter names.
+  const tags = ensure(node, 'Tags', []);
+  moreGrid.appendChild(field('Tags', tagInput(tags, {
+    placeholder: 'critical, rack-1',
+    onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
+  }), 'Filter, highlight and export by tag. Never changes a reading.'));
+
+  // Where it is and which circuit it is plugged into (#461, #465).
+  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
+  locSel.onchange = () => { node.Location = locSel.value || undefined; };
+  moreGrid.appendChild(field('Location', locSel, 'Counted there on Floor Plans.'));
+  const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
+  circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
+  moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
+
+  // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
+  const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
+  emonTag.onchange = () => { node.EmonCmsTag = emonTag.value.trim() || undefined; };
+  // Previewed with this node's own id, label and kind: the tag it will actually get.
+  const nodeVars = { node: node.Id, label: node.Label || node.Id, kind: node.Kind || 'node' };
+  const emonTagField = field('EmonCMS tag', emonTag);
+  emonTagField.appendChild(templateHelp(emonTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonTagField.classList.add('ne-wide');
+  moreGrid.appendChild(emonTagField);
+  const emonVirtualTag = el('input', { type: 'text', value: node.EmonCmsVirtualTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
+  emonVirtualTag.onchange = () => { node.EmonCmsVirtualTag = emonVirtualTag.value.trim() || undefined; };
+  const emonVirtualField = field('EmonCMS virtual-feed tag', emonVirtualTag);
+  emonVirtualField.appendChild(templateHelp(emonVirtualTag, ['node', 'label', 'kind'], { examples: nodeVars, whenBlank: 'EmonCMS page default' }));
+  emonVirtualField.classList.add('ne-wide');
+  moreGrid.appendChild(emonVirtualField);
+  more.appendChild(moreGrid);
+  box.appendChild(more);
 
   return box;
 }
+
+/// Whether the filing section was left open, so a redraw after an edit inside it does not fold it away.
+let nodeEditorFilingOpen = false;

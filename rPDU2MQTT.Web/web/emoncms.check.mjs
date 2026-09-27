@@ -56,7 +56,7 @@ const openEditor = async (sources) => {
 };
 
 const binding = (feed, metric = 'realpower') => ({ Type: 'emoncms', Metric: metric, Feed: feed });
-const sheetText = (sandbox) => query(sandbox.document.body, 'tr', true).map(r => r.textContent || '').join('\n');
+const sheetText = (sandbox) => query(sandbox.document.body, '.ne-binding', true).map(r => r.textContent || '').join('\n');
 
 // --- The type is on offer at all --------------------------------------------------------------------
 {

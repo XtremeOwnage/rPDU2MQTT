@@ -1,7 +1,7 @@
 // The Nodes page: the virtual-node table, node groups, and the tag rules for PDUs and outlets.
 import { api, btn, el, ensure, activate, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
-import { refreshDirty } from '../dirty.js';
+import { refreshDirty, onDirty } from '../dirty.js';
 import { feedsNothing, kindMeta, NODE_KINDS } from '../flow-vocabulary.js';
 import { flowGroups } from '../flow-view.js';
 import { renderImportPanel } from '../node-templates.js';
@@ -161,18 +161,36 @@ export let nodeModal: { id: string, body: any, close: () => void } | null = null
 let editOnOpen: string | null = null;
 export function editNodeOnNextOpen(id: string) { editOnOpen = id; }
 
-export function closeNodeModal() {
+/// Close the editor. `andDeselect` is a person closing it (Done), which also clears the row they were on.
+export function closeNodeModal(andDeselect = false) {
   const m = nodeModal;
   nodeModal = null;
   if (m) m.close();
+  if (andDeselect) nodeModalDone?.();
 }
+let nodeModalDone: (() => void) | null = null;
 
 export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: () => void) {
   if (!node) { closeNodeModal(); return; }
+  nodeModalDone = () => { editing.id = null; rerender(); };
   if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
   if (!nodeModal) {
-    const o = overlay(`Edit node — ${node.Label || node.Id}`, () => { nodeModal = null; editing.id = null; rerender(); });
-    nodeModal = { id: node.Id, body: o.body, close: o.close };
+    // The page's save bar is under the backdrop, so the dialog carries its own: what is unsaved, and Save.
+    // Closing first to reach the bar was the only way to save, and nothing said so.
+    const status = el('span', { class: 'sheet-dirty' });
+    const save = el('button', { class: 'primary', type: 'button', text: 'Save' }) as HTMLButtonElement;
+    const done = el('button', { type: 'button', text: 'Done' }) as HTMLButtonElement;
+    save.onclick = () => (document.getElementById('btn-save') as any)?.click();
+    const unwatch = onDirty((list: any[]) => {
+      const n = list.length;
+      status.textContent = n ? `${n} unsaved change${n === 1 ? '' : 's'}` : 'All changes saved';
+      status.classList.toggle('is-dirty', n > 0);
+      save.disabled = n === 0;
+    });
+    const o = overlay(`Edit node — ${node.Label || node.Id}`, () => { unwatch(); nodeModal = null; editing.id = null; rerender(); },
+      { footer: el('div', { class: 'sheet-foot-row' }, status, save, done), className: 'node-sheet', sub: node.Id });
+    done.onclick = () => closeNodeModal(true);
+    nodeModal = { id: node.Id, body: o.body, close: () => { unwatch(); o.close(); } };
   }
   nodeModal.body.innerHTML = '';
   nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close?: boolean) => { if (close) editing.id = null; rerender(); }));

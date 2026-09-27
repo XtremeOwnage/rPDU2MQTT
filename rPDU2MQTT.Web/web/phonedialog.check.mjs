@@ -102,14 +102,14 @@ if (!query(body, '.sheet-panel', true).length)
 const styleOf = (x) => JSON.stringify((x.attrs && x.attrs.style) || x.style || '');
 if (query(body, '.sheet-panel', true).some(x => /overflow/i.test(styleOf(x))))
   fail('the panel still sets its overflow inline, which no breakpoint can override');
-// The widest table — the bindings, eleven columns and about 1,640px of them — carries its own scroller, so
-// the columns move without taking the Close button off the side with them. The panel scrolling covers the
-// rest; a table narrower than the panel needs nothing.
-const wrappers = query(body, '.sheet-scroll', true).concat(query(body, '.bindings-scroll', true));
-if (!wrappers.length)
-  fail('no table in the dialog has a scroller, so reaching a wide row scrolls the whole panel');
-if (!wrappers.some(w => query(w, 'table', true).length))
-  fail('the scroller in the dialog wraps no table');
+// The widest table was the bindings — eleven columns, about 1,640px. They are cards now, so nothing in the
+// editor is wider than a phone; what must hold is that Close and Save stay in reach while the body scrolls.
+if (query(body, '.node-editor table', true).length)
+  fail('the node editor lays something out as a table again, which a phone can only scroll sideways');
+if (!query(body, '.sheet-head', true).length || !query(body, '.sheet-sticky-foot', true).length)
+  fail('the dialog has no pinned header or footer');
+for (const sel of ['.sheet-head', '.sheet-sticky-foot'])
+  if (!/position\s*:\s*sticky/.test(rule(sel) || '')) fail(`${sel} scrolls away with the body`);
 
 // --- The save bar leaves the bottom of the page reachable -------------------------------------------------
 // On a phone it wraps to several rows and covered the last thing on every page — the Balance page's Home

@@ -24,6 +24,7 @@ const MODULES = [
   'realtime.ts',
   'dirty.ts',
   'tags.ts',
+  'template-field.ts',
   'flow-vocabulary.ts',
   'source-editors.ts',
   'energy.ts',

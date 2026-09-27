@@ -16,6 +16,7 @@ import { openHistorySheet } from '../history-sheet.js';
 import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
 import { flowCardRows } from '../flow-card.js';
+import { templateHelp } from '../template-field.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 
@@ -1104,6 +1105,7 @@ export function addFlowSection(nav: any, sections: any) {
     expChk.onchange = () => { flow.MqttExport = expChk.checked; topicIn.disabled = !expChk.checked; refreshDirty(); };
     exportRow.append(el('label', {}, expChk, ' Export tiers to MQTT'), el('span', { class: 'desc', style: { margin: '0' }, text: 'Topic:' }), topicIn);
     body.appendChild(exportRow);
+    body.appendChild(templateHelp(topicIn, ['parent', 'id', 'label', 'kind', 'metric', 'units'], { blankTemplate: '{parent}/energyflow/{id}' }));
 
     // How the energy roll-up is accumulated, and when the day ends.
     body.appendChild(el('h3', { text: 'Energy roll-up', style: { margin: '14px 0 4px' } }));
