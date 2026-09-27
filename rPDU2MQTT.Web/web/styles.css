@@ -887,7 +887,7 @@
     width:min(94vw,1900px); max-height:86vh; overflow:auto;
   }
   /* The node editor has no wide table any more: a readable column, not the whole screen. */
-  .sheet-panel.node-sheet { width:min(94vw, 980px); }
+  .sheet-panel.node-sheet { width:min(94vw, 1320px); }
   /* Header and footer pinned to the panel's edges while its body scrolls between them. */
   .sheet-head {
     position:sticky; top:calc(-1 * var(--sheet-pad)); z-index:3;
@@ -1076,7 +1076,21 @@
        panel takes the screen instead, and the room it gives back goes to the fields. */
     .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }
     .sheet-panel { --sheet-pad:10px; width:100%; max-height:92vh; padding:var(--sheet-pad); border-radius:6px; }
-    .sheet-panel.node-sheet { width:100%; max-height:calc(100dvh - 16px); }
+    /* The editor takes the whole phone: no scrim margin, and its sections are flat groups divided by a
+       rule rather than boxes inside a box inside a box, each spending its own padding and border. */
+    .sheet-backdrop:has(.node-sheet) { padding:0; }
+    .sheet-panel.node-sheet { --sheet-pad:12px; width:100%; height:100dvh; max-height:100dvh; border:0; border-radius:0; }
+    .node-sheet .node-editor { gap:0; }
+    .node-sheet .ne-section, .node-sheet .ne-more { padding:14px 0; border:0; border-radius:0; background:none; border-bottom:1px solid var(--line); }
+    .node-sheet .ne-more { padding:0; }
+    .node-sheet .ne-more-summary { padding:14px 0; }
+    .node-sheet .ne-more .node-editor-fields { padding:12px 0 14px; }
+    .node-sheet .ne-binding { padding:10px; }
+    /* The source on a line of its own; the small settings share the next as an even grid. */
+    .node-sheet .ne-bind-body { display:grid; grid-template-columns:repeat(auto-fill, minmax(66px, 1fr)); gap:8px; }
+    .node-sheet .ne-bind-body > .ne-grow { grid-column:1 / -1; }
+    .node-sheet .ne-bind-body select, .node-sheet .ne-bind-body input.ne-narrow { width:100%; min-width:0; }
+    .node-sheet .ne-check { font-size:11.5px; }
     .sheet-sub { display:none; }
     .ne-section { padding:10px; }
     .ne-slot.ne-grow { flex-basis:100%; }
