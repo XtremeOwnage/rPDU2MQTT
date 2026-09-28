@@ -65,8 +65,6 @@ export function addFlowSection(nav: any, sections: any) {
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' }) as HTMLSelectElement;
-  // Energy is the day's (or the days picked under History): lifetime counters started at different times and
-  // do not add up across nodes, so they are not offered here.
   [['realpower', 'Power (W)'], ['energy_d', 'Energy (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));

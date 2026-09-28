@@ -72,7 +72,7 @@ const open = async (gui) => {
   if (!cells.includes('3.75') || !cells.includes('0.5')) fail(`the day is not priced: ${cells.join('|')}`);
 }
 
-// The Flow view: Cost, read as the day's energy it prices and drawn in the currency. No lifetime option.
+// The Flow view: Cost, read as the energy it prices and drawn in the currency.
 {
   const graph = {
     ok: true, metric: 'energy_d', units: 'kWh',
