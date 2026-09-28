@@ -15,6 +15,20 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.
     private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
     private readonly Integrations.HomeAssistant.HomeAssistantHistory homeAssistant = new(http, cfg);
 
+    /// <summary>Every backend by id, whichever is chosen, so history can be copied between them.</summary>
+    public IReadOnlyDictionary<string, IMeasurementHistory> Backends
+    {
+        get
+        {
+            var all = new Dictionary<string, IMeasurementHistory>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["emoncms"] = emoncms, ["prometheus"] = prometheus, ["homeassistant"] = homeAssistant,
+            };
+            if (local is not null) all["local"] = local;
+            return all;
+        }
+    }
+
     // Chosen by id from live config, so adding a backend is one more line here and nothing else — the
     // property that made IMeasurementHistory the template the rest of the contracts were copied from.
     private IMeasurementHistory Current => cfg.History.Provider?.ToLowerInvariant() switch

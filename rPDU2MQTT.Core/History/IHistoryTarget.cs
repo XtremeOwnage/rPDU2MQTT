@@ -1,0 +1,18 @@
+namespace rPDU2MQTT.Core.History;
+
+/// <summary>A history backend that past readings can be written into, so history can be copied to it from another.</summary>
+public interface IHistoryTarget
+{
+    /// <summary>The backend's id, as named in History.Provider.</summary>
+    string Id { get; }
+
+    /// <summary>Why nothing can be written to it now, or null when it can.</summary>
+    string? Unavailable { get; }
+
+    /// <summary>Called once before a copy starts, for anything worth looking up once rather than per series.</summary>
+    Task PrepareAsync(CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>Write one series' readings where it holds none; returns how many were written.</summary>
+    Task<int> WriteAsync(string node, string label, string kind, string metric,
+                         IReadOnlyList<(DateTime At, double Value)> readings, int intervalSeconds, DateTime nowUtc, CancellationToken ct);
+}

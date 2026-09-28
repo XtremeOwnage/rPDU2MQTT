@@ -27,6 +27,10 @@ internal static class PrometheusWire
     public static string NodeQuery(string metricName, IReadOnlyCollection<string> nodeIds)
         => $"max by (node) ({metricName}{{node=~\"{NodeMatcher(nodeIds)}\"}})";
 
+    /// <summary>The last sample of each node within each `seconds` window, so a step with no sample of its own is empty.</summary>
+    public static string NodeQueryLast(string metricName, IReadOnlyCollection<string> nodeIds, int seconds)
+        => $"max by (node) (last_over_time({metricName}{{node=~\"{NodeMatcher(nodeIds)}\"}}[{Math.Max(1, seconds)}s]))";
+
     /// <summary>
     /// A Prometheus range answer: one series per node, each a list of [timestamp, value] pairs, folded onto
     /// the step boundaries the caller asked for.

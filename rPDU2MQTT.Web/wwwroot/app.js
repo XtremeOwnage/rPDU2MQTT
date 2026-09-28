@@ -17055,6 +17055,47 @@ function wireHistoryProvider(sec     ) {
       + ` — ${b.series} series, ${size}. Retention: `
       + (b.tiers || []).map((t     ) => `${t.name} ${t.keepDays}d`).join(', ') + '.';
   }).catch(() => { where.hidden = true; });
+
+  sec.appendChild(historyCopyPanel());
+}
+
+// Copy every node's history from one backend into another; only what the destination lacks is written.
+function historyCopyPanel() {
+  const wrap = el('div', { class: 'desc feature-pointer' });
+  const from = el('select', { style: { width: 'auto' } })                     ;
+  const to = el('select', { style: { width: 'auto' } })                     ;
+  const days = el('input', { type: 'number', min: '0', step: '1', placeholder: 'all', style: { width: '6em' } })                    ;
+  const go = btn('Copy history', 'primary');
+  const status = el('div');
+  wrap.append(el('div', { text: 'Copy history from one backend to another. Only gaps in the destination are filled, so it is safe to run again.' }),
+    el('div', { class: 'ld-toolbar' }, 'From ', from, ' to ', to, ' days back ', days, go), status);
+
+  let timer      = null;
+  const show = (s     ) => {
+    if (!s) return;
+    status.textContent = (s.from ? `${s.from} → ${s.to}: ` : '') + s.message;
+    go.disabled = !!s.running;
+    clearTimeout(timer);
+    if (s.running && wrap.isConnected) timer = setTimeout(refresh, 3000);
+  };
+  const refresh = () => api('/api/history/copy').then((r     ) => {
+    const b = r?.body;
+    if (!b?.ok) { wrap.hidden = true; return; }
+    if (!from.options.length) for (const x of b.backends || []) {
+      from.append(el('option', { value: x.id, text: x.id + (x.read ? ` (${x.read})` : ''), disabled: !!x.read }));
+      to.append(el('option', { value: x.id, text: x.id + (x.write ? ' (read only)' : ''), disabled: !!x.write, title: x.write || '' }));
+    }
+    show(b.status);
+  }).catch(() => { wrap.hidden = true; });
+
+  go.onclick = async () => {
+    const q = `from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}&days=${encodeURIComponent(days.value || '0')}`;
+    const r      = await api(`/api/history/copy?${q}`, { method: 'POST' });
+    toast(r?.body?.message || 'Copy failed.', !!r?.body?.ok);
+    refresh();
+  };
+  refresh();
+  return wrap;
 }
 
 // A settings page for a capability that is switched off is a page of settings for something that is not

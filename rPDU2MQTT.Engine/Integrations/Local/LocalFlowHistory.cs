@@ -49,6 +49,19 @@ public sealed class LocalFlowHistory(Config cfg, LocalSeriesStore store) : IMeas
             perStep.Cast<IReadOnlyDictionary<string, double>>().ToList());
     }
 
+    public Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
+    {
+        var found = new Dictionary<string, IReadOnlyList<(DateTime, double)>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodeIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            var points = Store.Readings(node, metric, fromUtc, toUtc, intervalSeconds);
+            if (points.Count > 0) found[node] = points;
+        }
+        return Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<(DateTime, double)>>>(found);
+    }
+
     /// <summary>Is the directory there, writable, and holding anything yet?</summary>
     public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
     {

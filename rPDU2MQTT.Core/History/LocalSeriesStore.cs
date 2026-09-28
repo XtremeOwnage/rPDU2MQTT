@@ -263,6 +263,31 @@ public sealed class LocalSeriesStore
         return values;
     }
 
+    /// <summary>The readings a series holds in [from, to), from the tier stored at `intervalSeconds` if there is one, else the finest.</summary>
+    public List<(DateTime At, double Value)> Readings(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds)
+    {
+        var found = Read(Tiers.FirstOrDefault(t => t.IntervalSeconds == intervalSeconds) ?? Raw);
+        // A coarser tier is filled by roll-ups; until one has run, the readings are only in the finest.
+        return found.Count > 0 || Tiers.All(t => t.IntervalSeconds != intervalSeconds) ? found : Read(Raw);
+
+        List<(DateTime, double)> Read(SeriesTier tier)
+        {
+            var points = new List<(DateTime, double)>();
+            for (var chunkAt = ChunkStart(tier.Chunk, fromUtc); chunkAt < toUtc; chunkAt = Next(tier.Chunk, chunkAt))
+            {
+                var chunk = ExistingChunk(node, metric, tier, chunkAt);
+                if (chunk is null) continue;
+                var first = Math.Max(0, chunk.SlotOf(fromUtc));
+                var last = Math.Min(chunk.Slots() - 1, chunk.SlotOf(toUtc.AddTicks(-1)));
+                if (last < first) continue;
+                var window = chunk.Read(first, (int)(last - first + 1));
+                for (var i = 0; i < window.Length; i++)
+                    if (!double.IsNaN(window[i])) points.Add((chunk.TimeOf(first + i), window[i]));
+            }
+            return points;
+        }
+    }
+
     // --- Keeping it small ----------------------------------------------------------------------------
 
     /// <summary>Every series the store holds, as (node, metric) cannot be recovered from a folder name.</summary>

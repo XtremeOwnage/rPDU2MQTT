@@ -128,6 +128,30 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
         return perStep.Cast<IReadOnlyDictionary<string, double>>().ToList();
     }
 
+    /// <summary>The points each feed holds in the window, one per interval; a gap stays a gap rather than holding the last point.</summary>
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
+    {
+        var found = new Dictionary<string, IReadOnlyList<(DateTime, double)>>(StringComparer.OrdinalIgnoreCase);
+        var baseUrl = (cfg.EmonCMS.Url ?? "").TrimEnd('/');
+        var key = cfg.EmonCMS.ApiKey ?? "";
+        if (baseUrl.Length == 0 || nodeIds.Count == 0 || toUtc <= fromUtc) return found;
+
+        var list = await FeedsAsync(baseUrl, key, ct);
+        var wanted = nodeIds.Select(node => (Node: node, Feed: FeedFor(list, node, metric))).Where(x => x.Feed is not null).ToList();
+        static long Ms(DateTime at) => new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+
+        await ReadEachAsync(wanted,
+            x => $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(x.Feed!)}&start={Ms(fromUtc)}&end={Ms(toUtc) - 1}"
+               + $"&interval={Math.Max(1, intervalSeconds)}&apikey={Uri.EscapeDataString(key)}",
+            (x, body) =>
+            {
+                var points = EmonCmsWire.Points(body).Select(p => (DateTimeOffset.FromUnixTimeMilliseconds(p.At).UtcDateTime, p.Value)).ToList();
+                if (points.Count > 0) found[x.Node] = points;
+            }, ct);
+        return found;
+    }
+
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {

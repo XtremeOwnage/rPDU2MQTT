@@ -522,12 +522,15 @@ with the container at the next restart. `LocalPath` overrides it when set — le
 says which directory is in use, how many series are in it and how large it is. A read-only
 mount is reported by the backend test rather than discovered at the first sweep.
 
-**Importing from EmonCMS.** The EmonCMS integration's **Import history into local storage** action copies each
-node's feed history into the store in the background; **Import progress** reports how far it has got. It reads
-the feed the export writes each node's metric to, at each tier's resolution over the span that tier keeps, and
-fills only empty slots, so what the bridge recorded itself is never replaced and a second run changes nothing.
-Only the leader imports. Pass `days` to the action's API (`POST /api/integrations/emoncms/import-history?days=45`)
-to read back no further than that.
+**Copying history between backends.** The History page's **Copy history** panel copies every node's history
+from one backend to another in the background, and shows how far it has got. Any backend can be read: `local`,
+`emoncms`, `prometheus`, `homeassistant`. Only `local` and `emoncms` can be written: Prometheus takes past
+samples only through a remote-write receiver, and Home Assistant only as hourly statistics. The copy reads each
+local tier's span at that tier's interval (the last `LocalRawKeepDays` at the raw interval, then a minute, an
+hour, a day), and writes only where the destination holds nothing: readings already there are kept, and a second
+run writes nothing. A gap in the source stays a gap. EmonCMS is written only into feeds provisioning has already
+created. Only the leader writes to `local`. `days` limits how far back it reads (empty means ten years), and the
+API is `POST /api/history/copy?from=emoncms&to=local&days=45`, with `GET` for progress.
 
 The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
 unchanged: they answer for whatever was exported to them, including readings from before this bridge existed.
