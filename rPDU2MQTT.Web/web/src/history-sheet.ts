@@ -20,7 +20,7 @@ export const HISTORY_METRICS: [string, string][] = [
   ['realpower', 'Power (W)'],
   ['current', 'Current (A)'],
   ['apparentpower', 'Apparent (VA)'],
-  ['energy_d', 'Energy today (kWh)'],
+  ['energy_d', 'Energy (kWh)'],
 ];
 /// The last window picked, kept per browser: the same question tends to be asked over the same span.
 const WINDOW_KEY = 'rpdu2mqtt.history.window';
