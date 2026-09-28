@@ -523,27 +523,27 @@ function historyCopyPanel() {
   const replace = el('option', { value: 'replace', text: 'Replace with the source\'s reading' });
   conflicts.append(keep, replace);
   const conflictNote = el('div', { class: 'desc' });
+  conflictNote.hidden = true;
   let backends: any[] = [];
   // Replacing is only offered where the destination can actually replace a reading.
   const syncConflicts = () => {
     const why = backends.find((x: any) => x.id === to.value)?.replace;
     replace.disabled = !!why;
     if (why) conflicts.value = 'keep';
-    conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.`
-      : conflicts.value === 'replace' ? 'Where both have a reading, the source\'s overwrites the destination\'s. Readings only the destination has are left alone.'
-      : 'Where both have a reading, the destination\'s is kept; only its blanks are filled from the source.';
+    // Said only when replacing is not on offer, and why.
+    conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.` : '';
+    conflictNote.hidden = !why;
   };
   to.onchange = syncConflicts;
   conflicts.onchange = syncConflicts;
   const go = btn('Copy history', 'primary');
-  const field = (label: string, control: any, note: string) =>
-    el('div', { class: 'field' }, el('label', { text: label }), el('div', { class: 'desc', text: note }), control);
+  const field = (label: string, control: any, note = '') =>
+    el('div', { class: 'field' }, el('label', { text: label }), note ? el('div', { class: 'desc', text: note }) : null, control);
   wrap.append(
-    el('div', { class: 'desc', text: 'Copies every node\'s history from one backend to another, in the background. Only gaps in the destination are filled, so it is safe to run again.' }),
     el('div', { class: 'grid' },
-      field('From', from, 'The backend to read.'),
+      field('From', from),
       field('To', to, 'Only local and EmonCMS can be written.'),
-      field('Days back', days, 'Empty copies everything, up to ten years.'),
+      field('Days back', days, 'Empty is ten years.'),
       el('div', { class: 'field' }, el('label', { text: 'When both have a reading' }), conflictNote, conflicts)),
     el('div', { class: 'ld-toolbar' }, go));
 
@@ -571,12 +571,12 @@ function historyCopyPanel() {
     bar.style.width = `${s.running ? pct : total ? pct : 0}%`;
     facts.replaceChildren(
       fact('Progress', total ? `${pct.toFixed(1)}%` : 'starting', total ? `${done.toLocaleString()} of ${total.toLocaleString()} reads` : ''),
-      s.running && s.window ? fact('Reading now', `${when(s.window.from)} → ${when(s.window.to)}`, `one reading ${every(s.window.intervalSeconds)}; newest first`) : null,
+      s.running && s.window ? fact('Reading now', `${when(s.window.from)} → ${when(s.window.to)}`, `every ${every(s.window.intervalSeconds)}`) : null,
       fact('Copied back to', s.oldestCopied ? when(s.oldestCopied) : 'nothing yet', s.newestCopied ? `newest ${when(s.newestCopied)}` : ''),
       fact('Readings copied', (s.readingsCopied || 0).toLocaleString()),
-      fact('Written', (s.slotsWritten || 0).toLocaleString(), 'new; readings already there are kept'),
+      fact('Written', (s.slotsWritten || 0).toLocaleString()),
       fact('Already complete', s.seriesChecked ? `${(100 * (s.seriesComplete || 0) / s.seriesChecked).toFixed(0)}%` : '—',
-        `${(s.seriesComplete || 0).toLocaleString()} of ${(s.seriesChecked || 0).toLocaleString()} series and spans checked needed nothing`),
+        `${(s.seriesComplete || 0).toLocaleString()} of ${(s.seriesChecked || 0).toLocaleString()}`),
       fact('Incomplete reads', (s.readsFailed || 0).toLocaleString(), s.feedsFailed ? `${s.feedsFailed.toLocaleString()} feed reads failed after 3 tries; run it again to fill them` : ''),
       fact(s.running ? 'Elapsed' : 'Took', started ? duration(ended - started) : '—'),
       s.running && done > 0 && total > done ? fact('Remaining', `about ${duration((ended - started) / done * (total - done))}`) : null);

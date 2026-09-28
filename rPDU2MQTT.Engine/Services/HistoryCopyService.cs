@@ -132,20 +132,19 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                         // Filling gaps, only the stretches the destination lacks are read, and a stretch every node lacks
                         // (a restart, when nothing was recorded) is one read for all of them.
                         var spans = new Dictionary<(DateTime From, DateTime To), List<(string Id, string Label, string Kind)>>();
-                        var complete = 0;
+                        // A series needed nothing when nothing is written for it: no gap, or none the source can fill.
+                        var wrote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var node in group)
                         {
                             var gaps = replacing ? [(start, end)] : target.Missing(node.Id, metric, start, end, interval);
-                            if (gaps.Count == 0) complete++;
                             // Past a handful, one read of the whole stretch costs less than a read per gap.
                             if (gaps.Count > MaxGapsPerRead) gaps = [(gaps[0].From, gaps[^1].To)];
                             foreach (var gap in gaps)
                                 (spans.TryGetValue(gap, out var sharing) ? sharing : spans[gap] = []).Add(node);
                         }
-                        lock (sync) { seriesChecked += group.Length; seriesComplete += complete; }
                         if (spans.Count == 0)
                         {
-                            lock (sync) { readsDone++; skipped++; }
+                            lock (sync) { readsDone++; skipped++; seriesChecked += group.Length; seriesComplete += group.Length; }
                             continue;
                         }
 
@@ -181,12 +180,15 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                                         if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
                                         if (newestCopied is null || last > newestCopied) newestCopied = last;
                                     }
-                                    put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
+                                    var slots = await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
+                                    if (slots > 0) wrote.Add(node.Id);
+                                    put += slots;
                                 }
                         }
                         lock (sync)
                         {
                             readsDone++; copied += got; written += put; feedsFailed += failedFeeds;
+                            seriesChecked += group.Length; seriesComplete += group.Length - wrote.Count;
                             if (incomplete) failed++;
                             message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written.";
                         }

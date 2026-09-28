@@ -233,9 +233,13 @@ public class HistoryCopyTests : IDisposable
             store.Import(node, "realpower", Enumerable.Range(-5, 8650).Select(i => (At: dayAgo.AddSeconds(10 * i), Value: 1d))
                                                   .Where(r => restarts.All(x => r.At < x || r.At >= x.AddMinutes(2))), now);
         var source = new Spans();
+        var copier = Copier(cfg, store, source);
 
-        await Copier(cfg, store, source).RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
+        await copier.RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
 
+        // The source had nothing for the restarts either, so nothing needed copying.
+        var status = copier.Status();
+        Assert.Equal(status.GetType().GetProperty("seriesChecked")!.GetValue(status), status.GetType().GetProperty("seriesComplete")!.GetValue(status));
         var reads = source.Reads.Where(r => r.Metric == "realpower" && r.Nodes.Contains("grid")).ToList();
         Assert.Equal(2, reads.Count);
         Assert.All(reads, read =>
