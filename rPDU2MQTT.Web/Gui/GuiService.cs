@@ -1664,6 +1664,28 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 var reqs = await System.Text.Json.JsonSerializer.DeserializeAsync<List<LiveValueQuery>>(
                     ctx.Request.Body, ProbeJson, ctx.RequestAborted) ?? new();
+
+                // ?at=<ISO-8601> answers from history instead: what each was at that moment (#514).
+                if (DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var at))
+                {
+                    if (!config.History.Enabled || history is null)
+                        return Results.Json(new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." }, ConfigSchema.Json);
+                    var past = new List<object>();
+                    foreach (var group in reqs.Where(q => !string.IsNullOrEmpty(q.Node) && !string.IsNullOrEmpty(q.Metric))
+                                 .GroupBy(q => q.Metric!, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var ids = group.Select(q => q.Node!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        var found = await history.ValuesAtAsync(ids, group.Key, at, ctx.RequestAborted);
+                        past.AddRange(ids.Select(node => (object)new
+                        {
+                            node, metric = group.Key,
+                            value = found.TryGetValue(node, out var v) ? (double?)v : null,
+                        }));
+                    }
+                    return Results.Json(new { ok = true, historical = true, at, source = history.Id, values = past }, ConfigSchema.Json);
+                }
+
                 // `value` keeps its meaning exactly: the reading only if it can still be believed.
                 var diag = live as Core.Flow.IFlowValueDiagnostics;
                 var values = reqs.Select(q =>

@@ -321,8 +321,10 @@ await new Promise(r => setTimeout(r, 50));
 const dataSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
 if (!dataSec) fail('clicking Node Data activated no section');
 const dataText = dataSec.textContent;
-if (!dataText.includes('solar_assistant/inverter_1/pv_power/state'))
-  fail('the Node Data page did not list the bound MQTT source');
+// The source is no longer a column (#514); it is on the metric cell's hover.
+if (!query(dataSec, 'td', true).some(td => String(td.title || td.attrs?.title || '').includes('solar_assistant/inverter_1/pv_power/state')))
+  fail('the Node Data page did not name the bound MQTT source');
+if (query(dataSec, 'th', true).some(th => th.textContent === 'Source')) fail('the Node Data page still has a Source column');
 const dots = query(dataSec, '.dot', true);
 if (!dots.some(d => d.classList.contains('bad'))) fail('a stale reading was not flagged on the Node Data page');
 if (!dots.some(d => d.classList.contains('good'))) fail('a fresh reading was not marked fresh on the Node Data page');
