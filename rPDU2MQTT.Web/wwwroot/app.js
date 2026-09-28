@@ -17141,7 +17141,8 @@ function historyCopyPanel() {
       fact('Copied back to', s.oldestCopied ? when(s.oldestCopied) : 'nothing yet', s.newestCopied ? `newest ${when(s.newestCopied)}` : ''),
       fact('Readings copied', (s.readingsCopied || 0).toLocaleString()),
       fact('Written', (s.slotsWritten || 0).toLocaleString(), 'new; readings already there are kept'),
-      fact('Failed reads', (s.readsFailed || 0).toLocaleString(), s.readsFailed ? 'see the log' : ''),
+      fact('Already there', (s.readsSkipped || 0).toLocaleString(), 'reads skipped: the destination had them'),
+      fact('Incomplete reads', (s.readsFailed || 0).toLocaleString(), s.feedsFailed ? `${s.feedsFailed.toLocaleString()} feed reads failed after 3 tries; run it again to fill them` : ''),
       fact(s.running ? 'Elapsed' : 'Took', started ? duration(ended - started) : '—'),
       s.running && done > 0 && total > done ? fact('Remaining', `about ${duration((ended - started) / done * (total - done))}`) : null);
     note.textContent = s.running ? '' : s.message || '';

@@ -290,6 +290,40 @@ public sealed class LocalSeriesStore
         }
     }
 
+    /// <summary>
+    /// The part of [from, to) the tier stored at `intervalSeconds` holds nothing for, from its first empty stretch to its last,
+    /// or null when it is complete. A raw stretch shorter than `minimumRawGap` slots — a missed sweep — does not count.
+    /// </summary>
+    public (DateTime From, DateTime To)? Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, int minimumRawGap = 3)
+    {
+        var tier = Tiers.FirstOrDefault(t => t.IntervalSeconds == intervalSeconds);
+        if (tier is null) return (fromUtc, toUtc);
+        var shortest = tier == Raw ? Math.Max(1, minimumRawGap) : 1;
+        DateTime? first = null, last = null;
+        for (var chunkAt = ChunkStart(tier.Chunk, fromUtc); chunkAt < toUtc; chunkAt = Next(tier.Chunk, chunkAt))
+        {
+            var start = chunkAt < fromUtc ? fromUtc : chunkAt;
+            var end = Next(tier.Chunk, chunkAt) < toUtc ? Next(tier.Chunk, chunkAt) : toUtc;
+            var chunk = ExistingChunk(node, metric, tier, chunkAt);
+            if (chunk is null) { first ??= start; last = end; continue; }
+            var from = chunk.SlotOf(start);
+            var count = (int)Math.Ceiling((end - chunk.TimeOf(from)).TotalSeconds / tier.IntervalSeconds);
+            var values = chunk.Read(from, count);
+            for (var i = 0; i < values.Length;)
+            {
+                if (!double.IsNaN(values[i])) { i++; continue; }
+                var run = i;
+                while (i < values.Length && double.IsNaN(values[i])) i++;
+                if (i - run < shortest) continue;
+                var gapFrom = chunk.TimeOf(from + run);
+                first ??= gapFrom < start ? start : gapFrom;
+                var gapTo = chunk.TimeOf(from + i);
+                last = gapTo > end ? end : gapTo;
+            }
+        }
+        return first is { } f && last is { } l && l > f ? (f, l) : null;
+    }
+
     // --- Keeping it small ----------------------------------------------------------------------------
 
     /// <summary>Every series the store holds, as (node, metric) cannot be recovered from a folder name.</summary>

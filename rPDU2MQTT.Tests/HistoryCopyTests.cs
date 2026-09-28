@@ -37,18 +37,25 @@ public class HistoryCopyTests : IDisposable
         }
     }
 
-    /// <summary>A source that answers every read from a fixed set of readings.</summary>
-    private sealed class Fixed(Dictionary<string, List<(DateTime At, double Value)>> readings) : IMeasurementHistory
+    /// <summary>A source that answers every read from a fixed set of readings, and remembers which nodes it was asked for.</summary>
+    private sealed class Fixed(Dictionary<string, List<(DateTime At, double Value)>> readings, int failEvery = 0) : IMeasurementHistory
     {
+        public List<string> Asked { get; } = [];
         public string Id => "fixed";
         public Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
             => Task.FromResult<IReadOnlyDictionary<string, double>>(new Dictionary<string, double>());
         public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct) => Task.FromResult((true, ""));
         public Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
             IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
-            => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>>(nodeIds
+        {
+            lock (Asked) Asked.AddRange(nodeIds.Select(n => $"{n}|{metric}"));
+            var found = nodeIds
                 .Where(n => readings.ContainsKey($"{n}|{metric}"))
-                .ToDictionary(n => n, n => (IReadOnlyList<(DateTime, double)>)readings[$"{n}|{metric}"].Where(r => r.At >= fromUtc && r.At < toUtc).ToList()));
+                .ToDictionary(n => n, n => (IReadOnlyList<(DateTime, double)>)readings[$"{n}|{metric}"].Where(r => r.At >= fromUtc && r.At < toUtc).ToList());
+            // Some feeds failing: what arrived comes with the failure.
+            if (failEvery > 0 && found.Count > 0) throw new PartialReadException("a feed failed", found, 1);
+            return Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>>(found);
+        }
     }
 
     private Config Configured()
@@ -163,6 +170,66 @@ public class HistoryCopyTests : IDisposable
 
         Assert.Contains("no way to delete", Message(copier.Start("local", "emoncms", replace: true)));
         Assert.False(copier.Running);
+    }
+
+    [Fact]
+    public void TheStoreSaysWhatPartOfAWindowItLacks()
+    {
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var at = new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Utc);
+        store.Import("grid", "realpower", Enumerable.Range(0, 360).Select(i => (at.AddSeconds(10 * i), 1d)), at.AddDays(1));
+
+        Assert.Null(store.Missing("grid", "realpower", at, at.AddHours(1), 10));
+        Assert.Equal((at.AddHours(1), at.AddHours(2)), store.Missing("grid", "realpower", at, at.AddHours(2), 10));
+        Assert.Equal((at, at.AddHours(1)), store.Missing("nobody", "realpower", at, at.AddHours(1), 10));
+    }
+
+    [Fact]
+    public void AMissedSweepIsNotWorthARead_AStretchIs()
+    {
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var at = new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Utc);
+        var all = Enumerable.Range(0, 360).Select(i => (At: at.AddSeconds(10 * i), Value: 1d)).ToList();
+        store.Import("a", "realpower", all.Where((_, i) => i is not (100 or 101)), at.AddDays(1));
+        store.Import("b", "realpower", all.Where((_, i) => i is < 100 or >= 110), at.AddDays(1));
+
+        Assert.Null(store.Missing("a", "realpower", at, at.AddHours(1), 10));
+        Assert.Equal((at.AddSeconds(1000), at.AddSeconds(1100)), store.Missing("b", "realpower", at, at.AddHours(1), 10));
+    }
+
+    [Fact]
+    public async Task ARerunDoesNotReadWhatTheDestinationAlreadyHas()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var now = DateTime.UtcNow;
+        var dayAgo = now.AddDays(-1);
+        // The destination already holds every raw reading of the last day for grid.
+        store.Import("grid", "realpower", Enumerable.Range(0, 8640 + 10).Select(i => (dayAgo.AddSeconds(10 * i - 50), 1d)), now);
+        var source = new Fixed([]);
+
+        await Copier(cfg, store, source).RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
+
+        Assert.DoesNotContain("grid|realpower", source.Asked);
+        Assert.Contains("main|realpower", source.Asked);
+    }
+
+    [Fact]
+    public async Task WhatArrivesIsWrittenEvenWhenSomeFeedsFail()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var now = DateTime.UtcNow;
+        var at = now.AddHours(-1);
+        var source = new Fixed(new() { ["grid|realpower"] = [(at, 42)] }, failEvery: 1);
+        var copier = Copier(cfg, store, source);
+
+        await copier.RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
+
+        Assert.Equal(42, store.ValueAt("grid", "realpower", at, now));
+        var status = copier.Status();
+        Assert.True((int)status.GetType().GetProperty("feedsFailed")!.GetValue(status)! > 0);
+        Assert.Contains("run it again", (string)status.GetType().GetProperty("message")!.GetValue(status)!);
     }
 
     [Fact]

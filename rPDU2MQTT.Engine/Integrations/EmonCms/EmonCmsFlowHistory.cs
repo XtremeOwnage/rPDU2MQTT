@@ -24,24 +24,34 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
     private const int AtOnce = 8;
 
     /// <summary>Read the feeds of `ids` together, `AtOnce` at a time, and give each one's answer to `take`.</summary>
-    private async Task ReadEachAsync<T>(IEnumerable<T> ids, Func<T, string> urlOf, Action<T, string> take, CancellationToken ct)
+    /// <returns>The reads that failed, with why; a page shows what arrived, a copy retries each `tries` times first.</returns>
+    private async Task<List<string>> ReadEachAsync<T>(IEnumerable<T> ids, Func<T, string> urlOf, Action<T, string> take, CancellationToken ct, int tries = 1)
     {
         var answers = new ConcurrentBag<(T Id, string Body)>();
+        var failed = new ConcurrentBag<string>();
         await Parallel.ForEachAsync(ids, new ParallelOptions { MaxDegreeOfParallelism = AtOnce, CancellationToken = ct }, async (id, token) =>
         {
-            try
+            for (var attempt = 1; ; attempt++)
             {
-                var response = await http.GetAsync(urlOf(id), token);
-                if (!response.IsSuccessStatusCode) return;
-                answers.Add((id, await response.Content.ReadAsStringAsync(token)));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Log.Debug($"Flow history: EmonCMS read for '{id}' — {ex.Message}");
+                try
+                {
+                    var response = await http.GetAsync(urlOf(id), token);
+                    if (!response.IsSuccessStatusCode) throw new HttpRequestException($"HTTP {(int)response.StatusCode}");
+                    answers.Add((id, await response.Content.ReadAsStringAsync(token)));
+                    return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
+                {
+                    if (attempt < tries) { await Task.Delay(TimeSpan.FromSeconds(2 * attempt), token); continue; }
+                    Log.Debug($"Flow history: EmonCMS read for '{id}' — {ex.Message}");
+                    failed.Add($"{id}: {ex.Message}");
+                    return;
+                }
             }
         });
         // Parsed on one thread: what the readers share is the answers, not the dictionaries they fill.
         foreach (var (id, body) in answers) take(id, body);
+        return failed.ToList();
     }
 
     public string Id => "emoncms";
@@ -141,14 +151,15 @@ public sealed class EmonCmsFlowHistory(HttpClient http, Config cfg) : IMeasureme
         var wanted = nodeIds.Select(node => (Node: node, Feed: FeedFor(list, node, metric))).Where(x => x.Feed is not null).ToList();
         static long Ms(DateTime at) => new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
-        await ReadEachAsync(wanted,
+        var failed = await ReadEachAsync(wanted,
             x => $"{baseUrl}/feed/data.json?id={Uri.EscapeDataString(x.Feed!)}&start={Ms(fromUtc)}&end={Ms(toUtc) - 1}"
                + $"&interval={Math.Max(1, intervalSeconds)}&apikey={Uri.EscapeDataString(key)}",
             (x, body) =>
             {
                 var points = EmonCmsWire.Points(body).Select(p => (DateTimeOffset.FromUnixTimeMilliseconds(p.At).UtcDateTime, p.Value)).ToList();
                 if (points.Count > 0) found[x.Node] = points;
-            }, ct);
+            }, ct, tries: 3);
+        if (failed.Count > 0) throw new Core.History.PartialReadException($"{failed.Count} feed read(s) failed, e.g. {failed[0]}", found, failed.Count);
         return found;
     }
 

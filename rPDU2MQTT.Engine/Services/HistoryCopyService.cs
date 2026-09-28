@@ -22,7 +22,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     private Task? running;
     private string? from, to;
     private DateTime? startedUtc, finishedUtc;
-    private int reads, readsDone, failed;
+    private int reads, readsDone, failed, skipped, feedsFailed;
     private long copied, written;
     private DateTime? oldestCopied, newestCopied, readingFrom, readingTo;
     private int readingInterval;
@@ -84,7 +84,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
             replacing = replace;
             startedUtc = DateTime.UtcNow;
             finishedUtc = null;
-            reads = readsDone = failed = 0;
+            reads = readsDone = failed = skipped = feedsFailed = 0;
             copied = written = 0;
             oldestCopied = newestCopied = readingFrom = readingTo = null;
             readingInterval = 0;
@@ -99,7 +99,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         lock (sync)
             return new
             {
-                ok = true, running = Running, from, to, conflicts = replacing ? "replace" : "keep", message, reads, readsDone, readsFailed = failed,
+                ok = true, running = Running, from, to, conflicts = replacing ? "replace" : "keep", message, reads, readsDone, readsFailed = failed, readsSkipped = skipped, feedsFailed,
                 readingsCopied = copied, slotsWritten = written, started = startedUtc, finished = finishedUtc,
                 oldestCopied, newestCopied,
                 // The span being read now; the copy works newest first, so its start is how far back it has got.
@@ -127,34 +127,59 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                     foreach (var group in groups)
                     {
                         ct.ThrowIfCancellationRequested();
-                        try
+                        // Filling gaps, only what the destination lacks is read: a re-run skips everything already copied.
+                        var wanted = group.Select(n => (Node: n, Span: replacing ? (start, end) : target.Missing(n.Id, metric, start, end, interval)))
+                                          .Where(x => x.Span is not null).ToList();
+                        if (wanted.Count == 0)
                         {
-                            var found = await source.ReadingsAsync(group.Select(n => n.Id).ToList(), metric, start, end, interval, ct);
-                            long got = 0, put = 0;
-                            foreach (var node in group)
-                                if (found.TryGetValue(node.Id, out var readings) && readings.Count > 0)
-                                {
-                                    got += readings.Count;
-                                    var (first, last) = (readings.Min(r => r.At), readings.Max(r => r.At));
-                                    lock (sync)
-                                    {
-                                        if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
-                                        if (newestCopied is null || last > newestCopied) newestCopied = last;
-                                    }
-                                    put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
-                                }
-                            lock (sync) { readsDone++; copied += got; written += put; message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written."; }
+                            lock (sync) { readsDone++; skipped++; }
+                            continue;
+                        }
+                        var from = wanted.Min(x => x.Span!.Value.From);
+                        var to = wanted.Max(x => x.Span!.Value.To);
+
+                        IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>> found;
+                        var failedFeeds = 0;
+                        try { found = await source.ReadingsAsync(wanted.Select(x => x.Node.Id).ToList(), metric, from, to, interval, ct); }
+                        catch (PartialReadException partial)
+                        {
+                            // What did arrive is still written; the rest is counted, and a re-run fills it.
+                            found = partial.Found;
+                            failedFeeds = partial.Failed;
+                            Log.Warning($"History copy: {metric} {from:u}–{to:u}: {partial.Message}");
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {
                             lock (sync) { readsDone++; failed++; }
-                            Log.Warning($"History copy: {metric} {start:u}–{end:u} failed ({ex.Message}).");
+                            Log.Warning($"History copy: {metric} {from:u}–{to:u} failed ({ex.Message}).");
+                            continue;
+                        }
+
+                        long got = 0, put = 0;
+                        foreach (var (node, _) in wanted)
+                            if (found.TryGetValue(node.Id, out var readings) && readings.Count > 0)
+                            {
+                                got += readings.Count;
+                                var (first, last) = (readings.Min(r => r.At), readings.Max(r => r.At));
+                                lock (sync)
+                                {
+                                    if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
+                                    if (newestCopied is null || last > newestCopied) newestCopied = last;
+                                }
+                                put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
+                            }
+                        lock (sync)
+                        {
+                            readsDone++; copied += got; written += put; feedsFailed += failedFeeds;
+                            if (failedFeeds > 0) failed++;
+                            message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written.";
                         }
                     }
             }
 
             lock (sync) message = $"Finished: {copied:N0} readings copied from {source.Id}, {written:N0} written to {target.Id}"
-                                + (failed > 0 ? $"; {failed} of {reads} reads failed (see the log)." : ".");
+                                + (skipped > 0 ? $"; {skipped} of {reads} reads skipped, the destination already had them" : "")
+                                + (failed > 0 ? $"; {failed} reads were incomplete ({feedsFailed} feed reads failed after retries) — run it again to fill them." : ".");
         }
         catch (Exception ex)
         {
