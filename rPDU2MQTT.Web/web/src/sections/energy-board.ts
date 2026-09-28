@@ -25,7 +25,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   // Power now, or energy for the day so far (#371).
   const showSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
-  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
+  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy (kWh)' }));
   // The day's energy by default; a viewer who picks power keeps power.
   try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
