@@ -72,7 +72,7 @@ const open = async (gui) => {
   if (!cells.includes('3.75') || !cells.includes('0.5')) fail(`the day is not priced: ${cells.join('|')}`);
 }
 
-// The Flow view: Cost Daily and Cost, lifetime, read as the energy they price and drawn in the currency.
+// The Flow view: Cost, read as the energy it prices and drawn in the currency.
 {
   const graph = {
     ok: true, metric: 'energy_d', units: 'kWh',
@@ -110,12 +110,13 @@ const open = async (gui) => {
 
   const { sec, metricSel, asked } = await openFlow({ EnergyPrice: 0.5, Currency: '€' });
   const labels = metricSel.children.map(o => o.textContent);
-  if (!labels.includes('Cost Daily (€)') || !labels.includes('Cost, lifetime (€)')) fail(`Flow does not offer cost: ${labels.join(' | ')}`);
+  if (!labels.includes('Cost (€)')) fail(`Flow does not offer cost: ${labels.join(' | ')}`);
+  if (metricSel.children.some(o => o.value === 'energy' || o.value === 'cost')) fail(`Flow still offers lifetime: ${labels.join(' | ')}`);
   metricSel.value = 'cost_d';
   metricSel.onchange({});
   await new Promise(r => setTimeout(r, 100));
   const flowAsk = asked.filter(u => /\/api\/flow(\?|$)/.test(u)).at(-1) || '';
-  if (!/metric=energy_d(&|$)/.test(flowAsk)) fail(`Cost Daily was not read as the daily energy: ${flowAsk}`);
+  if (!/metric=energy_d(&|$)/.test(flowAsk)) fail(`Cost was not read as the daily energy: ${flowAsk}`);
   // The rack's 6 kWh at 0.5 a kWh.
   const text = query(sec, 'text', true).map(t => t.textContent).join(' ') + ' '
     + query(sec, 'title', true).map(t => t.textContent).join(' ');

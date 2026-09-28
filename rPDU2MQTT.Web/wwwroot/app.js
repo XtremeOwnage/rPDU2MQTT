@@ -1218,7 +1218,7 @@ const isAdditiveMetric = (key         ) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
 // Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS.
-const DERIVED_METRIC_LABELS                         = { energy_d: 'Energy Daily', cost_d: 'Cost Daily', cost: 'Cost, lifetime' };
+const DERIVED_METRIC_LABELS                         = { energy_d: 'Energy', cost_d: 'Cost', cost: 'Cost' };
 const metricLabel = (key         ) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction.
 const sourceMetricKey = (src     ) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
@@ -2153,7 +2153,7 @@ const HISTORY_METRICS                     = [
   ['realpower', 'Power (W)'],
   ['current', 'Current (A)'],
   ['apparentpower', 'Apparent (VA)'],
-  ['energy_d', 'Energy today (kWh)'],
+  ['energy_d', 'Energy (kWh)'],
 ];
 /// The last window picked, kept per browser: the same question tends to be asked over the same span.
 const WINDOW_KEY = 'rpdu2mqtt.history.window';
@@ -5660,7 +5660,7 @@ function addFlowSection(nav     , sections     ) {
   const instSel = instanceSelector(() => load());
   // Which measurement the flow is drawn by — link widths follow it.
   const metricSel = el('select', { title: 'Draw the flow by this measurement.' })                     ;
-  [['realpower', 'Power (W)'], ['energy_d', 'Energy Daily (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
+  [['realpower', 'Power (W)'], ['energy_d', 'Energy (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   // Energy priced, offered once a price per kWh is set (#515).
@@ -5669,9 +5669,8 @@ function addFlowSection(nav     , sections     ) {
     Array.from(metricSel.children).forEach((o     ) => { if (COST_OF[o.value]) o.remove(); });
     // With no price, a cost view falls back to the energy it priced.
     if (!energyPrice()) { metricSel.value = COST_OF[was] || was; return; }
-    const lifetime = Array.from(metricSel.children).find((o     ) => o.value === 'energy')       ;
-    [['cost_d', `Cost Daily (${currency()})`], ['cost', `Cost, lifetime (${currency()})`]]
-      .forEach(([v, t]) => metricSel.insertBefore(el('option', { value: v, text: t }), lifetime?.nextSibling || null));
+    const energy = Array.from(metricSel.children).find((o     ) => o.value === 'energy_d')       ;
+    metricSel.insertBefore(el('option', { value: 'cost_d', text: `Cost (${currency()})` }), energy?.nextSibling || null);
     metricSel.value = was;
   };
   syncCostOptions();
@@ -6534,7 +6533,7 @@ function addFlowSection(nav     , sections     ) {
             + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
             + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
             + (measured() === 'energy'
-              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy Daily", where every figure covers the same window.'
+              ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
       }
       labGroup.appendChild(lab);
@@ -6722,7 +6721,7 @@ function addFlowSection(nav     , sections     ) {
     body.appendChild(el('div', { class: 'desc' },
       'Daily totals re-base every node and outlet at the same moment, so the figures can be compared and summed. '
       + 'Lifetime counters can’t: a PDU’s has run since it was commissioned, a node’s since you bound it. '
-      + 'Draw the diagram with Show → “Energy Daily”.'));
+      + 'Draw the diagram with Show → “Energy”.'));
 
     const aggRow = el('div', { class: 'ld-toolbar' });
 
@@ -6765,7 +6764,7 @@ function addFlowSection(nav     , sections     ) {
       clock.textContent = `Server clock: ${String(t.host.time).replace('T', ' ').slice(0, 19)} (${t.host.zone}). `
         + (p.tracked
           ? `Current day ${p.key}, next rollover ${String(p.nextRolloverLocal).replace('T', ' ').slice(0, 16)} ${p.zone}.`
-          : 'Daily totals are off, so “Energy Daily” has nothing to draw.');
+          : 'Daily totals are off, so “Energy” has nothing to draw.');
       if (p.tracked && !p.resolved) {
         clock.textContent += ` The saved zone "${p.configured}" does not exist on the server — it is using ${p.zone}.`;
         clock.style.color = 'var(--bad, #d05a5a)';
@@ -9222,7 +9221,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   // Power now, or energy for the day so far (#371).
   const showSel = el('select', { style: { width: 'auto' } })                     ;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
-  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy Daily (kWh)' }));
+  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy (kWh)' }));
   // The day's energy by default; a viewer who picks power keeps power.
   try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
