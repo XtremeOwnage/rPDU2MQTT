@@ -61,12 +61,25 @@ if (!strip || !strip.hidden) fail('the timeline shows before a past moment was a
 toggle.checked = true;
 toggle.dispatch('change');
 await tick();
-if (!asked.some(u => u.includes('/api/flow/series') && u.includes('metric=realpower'))) fail('the timeline was not loaded');
+if (!asked.some(u => u.includes('/api/flow/series?from=') && u.includes('metric=realpower'))) fail('the timeline was not loaded');
 if (strip.hidden) fail('the timeline is hidden in point-in-time mode: ' + JSON.stringify(asked) + ' / ' + sec.textContent.slice(-300));
 const last = asked.filter(u => u.includes('/api/flow/live')).pop();
 if (!last.includes('at=' + encodeURIComponent(new Date(at[2]).toISOString()))) fail(`opened on the wrong moment: ${last}`);
 if (!sec.textContent.includes('333')) fail('the value at the newest moment is not shown');
 if (heads().includes('Updated')) fail('a past moment still shows an age column');
+
+// Any day can be picked: the timeline then ends on it.
+const dayIn = query(sec, 'input', true).find(i => i.attrs?.type === 'date' || i.type === 'date');
+if (!dayIn) fail('no day picker in point-in-time mode');
+dayIn.value = '2025-04-21';
+dayIn.dispatch('change');
+await tick();
+const asked4 = asked.filter(u => u.includes('/api/flow/series?from=')).pop();
+const to4 = new Date(decodeURIComponent(/to=([^&]+)/.exec(asked4)[1]));
+if (to4.getTime() !== new Date('2025-04-21T23:59:59').getTime()) fail(`picking 2025-04-21 asked for a timeline ending ${to4.toISOString()}`);
+dayIn.value = '';
+dayIn.dispatch('change');
+await tick();
 
 // A click on the timeline's left edge picks the oldest reading.
 const svg = query(strip, 'svg', false);

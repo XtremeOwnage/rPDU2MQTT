@@ -10475,7 +10475,7 @@ const metricName = (m        ) => (UNITS[m] || [m, ''])[0];
 const metricUnit = (m        ) => (UNITS[m] || [m, ''])[1];
 
 /// How far back the timeline reaches.
-const NODE_DATA_WINDOWS                     = [[60, 'last hour'], [360, 'last 6 hours'], [1440, 'last 24 hours'], [10080, 'last 7 days']];
+const NODE_DATA_WINDOWS                     = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
 /// Samples drawn across the timeline.
 const STRIP_POINTS = 300;
 const STRIP_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)'];
@@ -10505,7 +10505,10 @@ function addNodeDataSection(nav     , sections     ) {
   const windowSel = el('select', { title: 'How far back the timeline reaches.' })                     ;
   NODE_DATA_WINDOWS.forEach(([m, t]) => windowSel.appendChild(el('option', { value: String(m), text: t })));
   windowSel.value = '1440';
-  bar.append(refresh, filter, problemsLab, pastLab, windowSel, count);
+  // The day the timeline ends on; blank is now.
+  const dayIn = el('input', { type: 'date', title: 'The day the timeline ends on. Blank for now.' })                    ;
+  const pastTools = el('span', { style: { display: 'contents' } }, windowSel, el('span', { class: 'desc', style: { margin: '0' }, text: 'ending' }), dayIn);
+  bar.append(refresh, filter, problemsLab, pastLab, pastTools, count);
   sec.appendChild(bar);
   const strip = timelineStrip(span => { if (span) { at = span.from; load(); } }, undefined, { moment: true });
   sec.appendChild(strip.el);
@@ -10517,7 +10520,7 @@ function addNodeDataSection(nav     , sections     ) {
   const past = () => historyOn() && pastOn.checked;
   const syncPast = () => {
     pastLab.classList[historyOn() ? 'remove' : 'add']('is-hidden');
-    windowSel.classList[past() ? 'remove' : 'add']('is-hidden');
+    pastTools.classList[past() ? 'remove' : 'add']('is-hidden');
     strip.el.hidden = !past();
     problemsLab.classList[past() ? 'add' : 'remove']('is-hidden');
   };
@@ -10643,7 +10646,10 @@ function addNodeDataSection(nav     , sections     ) {
   const loadStrip = async () => {
     const minutes = Number(windowSel.value) || 1440;
     const step = stepToFit(minutes * 60, STRIP_POINTS);
-    const r = await api(`/api/flow/series?minutes=${minutes}&step=${step}&metric=realpower`);
+    const now = Date.now();
+    const end = dayIn.value ? Math.min(now, new Date(`${dayIn.value}T23:59:59`).getTime()) : now;
+    const r = await api(`/api/flow/series?from=${encodeURIComponent(new Date(end - minutes * 60_000).toISOString())}`
+      + `&to=${encodeURIComponent(new Date(end).toISOString())}&step=${step}&metric=realpower`);
     const b = r.body;
     const points = ((b?.at || [])            ).map(iso => new Date(iso).getTime());
     if (!b?.ok || points.length < 2) {
@@ -10671,6 +10677,7 @@ function addNodeDataSection(nav     , sections     ) {
   onlyProblems.onchange = draw;
   pastOn.onchange = () => { at = null; syncPast(); refreshAll(); };
   windowSel.onchange = () => loadStrip();
+  dayIn.onchange = () => { at = null; loadStrip(); };
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
   liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
   setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
