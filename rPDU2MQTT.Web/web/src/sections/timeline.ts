@@ -46,7 +46,9 @@ function snapped(t: number, size: number) {
 /// A longer range the page can load when zooming out past the whole of this one.
 export type Widen = { can: () => boolean; go: () => void; zoomTo?: (s: Span) => void };
 
-export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen) {
+/// `moment` picks one instant rather than a stretch: the span it reports starts and ends there (#514).
+export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen, opts: { moment?: boolean } = {}) {
+  const moment = !!opts.moment;
   const box = el('div', { class: 'trend-timeline' });
   const head = el('div', { class: 'trend-timeline-head' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
@@ -112,7 +114,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
 
   /// What a pointer at `px` would do: resize an edge, move the window, or draw a new one.
   const modeAt = (px: number): 'left' | 'right' | 'move' | 'create' => {
-    if (!span) return 'create';
+    if (!span || moment) return 'create';
     const xl = xOf(span.from), xr = xOf(span.to), grab = EDGE_PX * unit();
     // Nearest edge first, so a narrow window still offers both.
     const dl = Math.abs(px - xl), dr = Math.abs(px - xr);
@@ -122,7 +124,9 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
   const CURSOR = { left: 'ew-resize', right: 'ew-resize', move: 'grab', create: 'crosshair' };
 
   const paint = () => {
-    note.textContent = span
+    note.textContent = moment
+      ? (span ? `Showing ${when(span.from)}. Click or drag along the timeline to move it.` : 'Click or drag along the timeline to pick a moment.')
+      : span
       ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
       : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
     if (zoomOut) zoomOut.disabled = !span && !widen?.can();
@@ -137,12 +141,15 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     const u = unit();
     const set = (e: any, attrs: Record<string, any>) => Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
     const shown = on ? 'visible' : 'hidden';
-    set(shadeL, { x: 0, width: on ? Math.max(0, xl) : 0 });
-    set(shadeR, { x: xr, width: on ? Math.max(0, width() - xr) : 0 });
-    set(frame, { x: xl, width: Math.max(0, xr - xl), visibility: shown });
+    const band = on && !moment;
+    set(shadeL, { x: 0, width: band ? Math.max(0, xl) : 0 });
+    set(shadeR, { x: xr, width: band ? Math.max(0, width() - xr) : 0 });
+    set(frame, { x: xl, width: Math.max(0, xr - xl), visibility: band ? 'visible' : 'hidden' });
     // The edges and their grips are sized in screen pixels, so they read the same however far the strip stretches.
     [[edgeL, xl], [edgeR, xr]].forEach(([e, x]) => set(e, { x: x - 1.5 * u, width: 3 * u, visibility: shown }));
     [[gripL, xl], [gripR, xr]].forEach(([g, x]) => set(g, { x: x - (GRIP_W / 2) * u, width: GRIP_W * u, visibility: shown }));
+    // One instant is one edge.
+    if (moment) [edgeR, gripR].forEach(e => set(e, { visibility: 'hidden' }));
   };
 
   const settle = () => { paint(); onPick(span); };
@@ -165,7 +172,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
       if (!data) return;
       const px = pxOf(ev);
       fingers.set(ev.pointerId ?? 0, px);
-      if (fingers.size === 2) {
+      if (fingers.size === 2 && !moment) {
         const [a, b] = [...fingers.values()];
         pinch = { apart: Math.abs(a - b) || 1, was: span ?? { from: t0(), to: t1() }, at: tOf((a + b) / 2) };
         press = null;
@@ -173,12 +180,13 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
       }
       const mode = modeAt(px);
       press = { mode, px, was: span ? { ...span } : null, moved: false };
+      if (moment) { const t = tOf(px); span = { from: t, to: t }; paint(); }
       s.style.cursor = mode === 'move' ? 'grabbing' : CURSOR[mode];
       ev.preventDefault?.();
     });
 
     s.addEventListener('wheel', (ev: any) => {
-      if (!data) return;
+      if (!data || moment) return;
       ev.preventDefault?.();
       const sideways = ev.shiftKey || Math.abs(ev.deltaX || 0) > Math.abs(ev.deltaY || 0);
       if (sideways) {
@@ -203,7 +211,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     // Double-click zooms in about the pointer, as a map does. Outside the window it zooms into that part of the
     // whole range instead, so any section is two clicks away.
     s.addEventListener('dblclick', (ev: any) => {
-      if (!data) return;
+      if (!data || moment) return;
       const at = tOf(pxOf(ev));
       const base = span && at >= span.from && at <= span.to ? span : { from: t0(), to: t1() };
       span = zoomed(base, at, 1 / 3);
@@ -226,6 +234,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     const px = pxOf(ev);
     if (!press.moved && Math.abs(px - press.px) <= SLOP_PX * unit()) return;
     press.moved = true;
+    if (moment) { const t = tOf(px); span = { from: t, to: t }; paint(); return; }
     const dt = tOf(px) - tOf(press.px);
     const was = press.was;
     if (press.mode === 'create') span = inRange({ from: tOf(press.px), to: tOf(px) });
@@ -245,8 +254,8 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     const moved = press.moved;
     press = null;
     if (svg) svg.style.cursor = 'crosshair';
-    // A press that never moved is a click, and a click picks nothing.
-    if (moved) settle();
+    // A press that never moved is a click, and a click picks nothing — except the moment it lands on.
+    if (moved || moment) settle();
   });
 
   /// The axis under the lines: labels at a step that leaves each its room, each one a period that can be picked.
@@ -274,7 +283,10 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
       const length = midnight || step >= DAY ? DAY : step;
       label.title = `Show ${lengthText(length)} from ${d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
       const from = t;
-      label.onclick = () => { const s = bounded({ from, to: from + length }); if (s) { span = s; settle(); } };
+      label.onclick = () => {
+        if (moment) { span = { from, to: from }; settle(); return; }
+        const s = bounded({ from, to: from + length }); if (s) { span = s; settle(); }
+      };
       axis.appendChild(label);
       if (midnight && svg) svg.appendChild(svgTag('line', {
         class: 'trend-timeline-gridline', x1: xOf(t), x2: xOf(t), y1: 0, y2: HEIGHT, 'vector-effect': 'non-scaling-stroke',
@@ -292,6 +304,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
 
   const drawTools = () => {
     tools.innerHTML = '';
+    if (moment) return drawMomentTools();
     earlier = btn('◀');
     earlier.title = 'Move the window back by its own length';
     earlier.onclick = () => { if (span) { span = shifted(span, -(span.to - span.from)); settle(); } };
@@ -329,10 +342,31 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     tools.appendChild(whole);
   };
 
+  /// A moment steps from one reading to the next.
+  const drawMomentTools = () => {
+    const stepTo = (dir: number) => {
+      if (!span || !data) return;
+      const at = span.from;
+      const pts = data.points.filter(p => p != null);
+      const t = dir < 0 ? [...pts].reverse().find(p => p < at - 1) : pts.find(p => p > at + 1);
+      if (t != null) { span = { from: t, to: t }; settle(); }
+    };
+    earlier = btn('◀');
+    earlier.title = 'The reading before';
+    earlier.onclick = () => stepTo(-1);
+    later = btn('▶');
+    later.title = 'The reading after';
+    later.onclick = () => stepTo(1);
+    tools.append(earlier, later);
+    zoomOut = whole = toRange = null;
+  };
+
   const draw = (d: TimelineData) => {
     data = d;
     // A window from before is kept as far as it still falls inside the range, however narrow it is.
-    if (span) span = bounded(span);
+    if (span) span = moment
+      ? { from: Math.min(t1(), Math.max(t0(), span.from)), to: Math.min(t1(), Math.max(t0(), span.from)) }
+      : bounded(span);
     if (svg) svg.remove();
     axis.remove();
     svg = svgTag('svg', {
@@ -381,5 +415,7 @@ export function timelineStrip(onPick: (span: Span | null) => void, widen?: Widen
     draw,
     span: () => span,
     clear: () => { span = null; paint(); },
+    /// Place the window (or the moment) without reporting it as picked.
+    set: (s: Span | null) => { span = s; paint(); },
   };
 }

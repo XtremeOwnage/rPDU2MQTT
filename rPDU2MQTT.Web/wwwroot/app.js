@@ -10461,6 +10461,8 @@ function addMqttImportSection(nav     , sections     ) {
 // The column that matters is Updated. A dead publisher and a topic that was never right both show an
 // empty chart, and they need completely different fixes; the API reports a reading even after it has
 // expired (flagged, not hidden) precisely so the two can be told apart here.
+//
+// With history on, the same table can show a past moment instead, picked on a timeline (#514).
 
 // Mirrors FlowUnits.cs — the canonical unit each metric is stored in, and its display name.
 const UNITS                                   = {
@@ -10471,6 +10473,12 @@ const UNITS                                   = {
 };
 const metricName = (m        ) => (UNITS[m] || [m, ''])[0];
 const metricUnit = (m        ) => (UNITS[m] || [m, ''])[1];
+
+/// How far back the timeline reaches.
+const NODE_DATA_WINDOWS                     = [[60, 'last hour'], [360, 'last 6 hours'], [1440, 'last 24 hours'], [10080, 'last 7 days']];
+/// Samples drawn across the timeline.
+const STRIP_POINTS = 300;
+const STRIP_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)'];
 
 const ago = (s        ) => s < 1 ? 'just now'
   : s < 90 ? Math.round(s) + 's ago'
@@ -10491,9 +10499,28 @@ function addNodeDataSection(nav     , sections     ) {
   const problemsLab = el('label', { title: 'Show only rows with no reading, or one that has gone stale.' },
     onlyProblems, ' Problems only');
   const count = el('span', { class: 'ld-count' });
-  bar.append(refresh, filter, problemsLab, count);
+  const pastOn = el('input', { type: 'checkbox', class: 'switch' });
+  const pastLab = el('label', { title: 'Show what each reading was at a moment picked on a timeline, from history.' },
+    pastOn, ' Point in time');
+  const windowSel = el('select', { title: 'How far back the timeline reaches.' })                     ;
+  NODE_DATA_WINDOWS.forEach(([m, t]) => windowSel.appendChild(el('option', { value: String(m), text: t })));
+  windowSel.value = '1440';
+  bar.append(refresh, filter, problemsLab, pastLab, windowSel, count);
   sec.appendChild(bar);
+  const strip = timelineStrip(span => { if (span) { at = span.from; load(); } }, undefined, { moment: true });
+  sec.appendChild(strip.el);
   const wrap = el('div'); sec.appendChild(wrap);
+
+  // The moment shown, in epoch ms, or null for now.
+  let at                = null;
+  const historyOn = () => !!(state.data?.History || {}).Enabled;
+  const past = () => historyOn() && pastOn.checked;
+  const syncPast = () => {
+    pastLab.classList[historyOn() ? 'remove' : 'add']('is-hidden');
+    windowSel.classList[past() ? 'remove' : 'add']('is-hidden');
+    strip.el.hidden = !past();
+    problemsLab.classList[past() ? 'add' : 'remove']('is-hidden');
+  };
 
   // One row per (node, bound metric), from the configured hierarchy — so a binding that has never
   // delivered still appears, which is exactly the case worth seeing.
@@ -10522,7 +10549,7 @@ function addNodeDataSection(nav     , sections     ) {
     const f = (filter.value || '').trim().toLowerCase();
     let list = rows();
     list = list.filter(r => !f || `${r.node.Label || ''} ${r.node.Id} ${metricName(r.metric)} ${describe(r.src)}`.toLowerCase().includes(f));
-    if (onlyProblems.checked) list = list.filter(r => {
+    if (onlyProblems.checked && !past()) list = list.filter(r => {
       const v = live[keyOf(r)];
       // A reading with no timestamp is not a problem — it is in use. Only nothing at all, or something stale.
       return r.fixed == null && (!v || (v.reported == null && v.value == null) || v.fresh === false);
@@ -10530,13 +10557,15 @@ function addNodeDataSection(nav     , sections     ) {
 
     wrap.innerHTML = '';
     if (!list.length) {
-      wrap.appendChild(el('div', { class: 'desc', text: onlyProblems.checked ? 'Nothing stale or missing — every bound source is reporting.' : 'No nodes have sources bound yet. Bind one on the Nodes tab.' }));
+      wrap.appendChild(el('div', { class: 'desc', text: onlyProblems.checked && !past() ? 'Nothing stale or missing — every bound source is reporting.' : 'No nodes have sources bound yet. Bind one on the Nodes tab.' }));
       return;
     }
 
     const t = el('table', { class: 'ld' });
     const head = el('tr');
-    ['Node', 'Metric', 'Value', 'Updated', 'Source'].forEach((h, i) => head.appendChild(el('th', { class: i === 2 ? 'num' : '', text: h })));
+    // A past moment has no age to show: the reading is whatever history held then.
+    (past() ? ['Node', 'Metric', 'Value'] : ['Node', 'Metric', 'Value', 'Updated'])
+      .forEach((h, i) => head.appendChild(el('th', { class: i === 2 ? 'num' : '', text: h })));
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
 
@@ -10546,7 +10575,8 @@ function addNodeDataSection(nav     , sections     ) {
       const tr = el('tr');
       tr.appendChild(el('td', {}, el('span', { text: r.node.Label || r.node.Id }),
         el('div', { class: 'desc', style: { fontSize: '11px', margin: '0' }, text: r.node.Id })));
-      tr.appendChild(el('td', { text: metricName(r.metric) }));
+      // Where the reading comes from, on hover rather than a column of its own.
+      tr.appendChild(el('td', { text: metricName(r.metric), title: describe(r.src) }));
 
       // `reported` is the reading including one that has expired, and it only exists where the ingest can
       // date its readings. `value` is the live figure the roll-up is using. Reading the first alone meant a
@@ -10557,6 +10587,7 @@ function addNodeDataSection(nav     , sections     ) {
       else if (shown != null) val.append(el('span', { text: `${formatNum(shown)} ${metricUnit(r.metric)}`.trim() }));
       else { val.append(el('span', { style: { color: 'var(--muted)' }, text: '—' })); missing++; }
       tr.appendChild(val);
+      if (past()) { tb.appendChild(tr); return; }
 
       const upd = el('td');
       if (r.fixed != null) upd.append(el('span', { class: 'desc', text: 'fixed' }));
@@ -10574,12 +10605,16 @@ function addNodeDataSection(nav     , sections     ) {
           + (fresh ? '' : '\nStale — this value is no longer used by the flow or the exports.');
       }
       tr.appendChild(upd);
-      tr.appendChild(el('td', {}, el('span', { class: 'ov-sub', text: describe(r.src) })));
       tb.appendChild(tr);
     });
     t.appendChild(tb);
     wrap.appendChild(t);
 
+    if (past()) {
+      count.textContent = `${list.length} reading(s)` + (missing ? ` · ${missing} with no history then` : '');
+      count.title = at != null ? `As of ${new Date(at).toLocaleString()}` : '';
+      return;
+    }
     count.textContent = `${list.length} reading(s)`
       + (stale ? ` · ${stale} stale` : '') + (missing ? ` · ${missing} never reported` : '');
     count.title = stale || missing
@@ -10588,22 +10623,59 @@ function addNodeDataSection(nav     , sections     ) {
   };
 
   const load = async () => {
+    syncPast();
+    const when = past() ? at : null;
+    if (past() && when == null) { live = {}; draw(); return; }
     const q = rows().filter(r => !r.fixed).map(r => ({ Node: r.node.Id, Metric: r.metric }));
     if (q.length) {
-      const r = await api('/api/flow/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+      const path = '/api/flow/live' + (when != null ? '?at=' + encodeURIComponent(new Date(when).toISOString()) : '');
+      const r = await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) });
+      // A moment picked since this was asked for is already on its way.
+      if ((past() ? at : null) !== when) return;
       live = {};
       (r.body?.values || []).forEach((v     ) => { live[`${v.node}|${v.metric}`] = v; });
+      if (r.body?.ok === false) count.textContent = r.body.message || '';
     }
     draw();
   };
 
-  refresh.onclick = load;
+  /// The timeline: the busiest few nodes' power over the window, so the moment can be picked by its shape.
+  const loadStrip = async () => {
+    const minutes = Number(windowSel.value) || 1440;
+    const step = stepToFit(minutes * 60, STRIP_POINTS);
+    const r = await api(`/api/flow/series?minutes=${minutes}&step=${step}&metric=realpower`);
+    const b = r.body;
+    const points = ((b?.at || [])            ).map(iso => new Date(iso).getTime());
+    if (!b?.ok || points.length < 2) {
+      strip.el.hidden = true;
+      at = null;
+      wrap.innerHTML = '';
+      wrap.appendChild(el('div', { class: 'desc', style: { color: 'var(--bad)' }, text: b?.message || 'No history for that window.' }));
+      return;
+    }
+    const peak = (s     ) => Math.max(0, ...s.values.filter((v     ) => v != null).map((v        ) => Math.abs(v)));
+    const lines         = (b.series || []).filter((s     ) => !String(s.node).endsWith('#in'))
+      .sort((x     , y     ) => peak(y) - peak(x)).slice(0, STRIP_COLOURS.length)
+      .map((s     , i        ) => ({ label: s.label || s.node, color: STRIP_COLOURS[i], values: s.values }));
+    strip.el.hidden = false;
+    strip.draw({ lines, points, bounds: { from: points[0], to: points[points.length - 1] }, width: 1200 });
+    // Opens on the newest reading; a moment still inside the window is kept.
+    if (at == null || at < points[0] || at > points[points.length - 1]) at = points[points.length - 1];
+    strip.set({ from: at, to: at });
+    load();
+  };
+
+  const refreshAll = () => (past() ? loadStrip() : load());
+  refresh.onclick = refreshAll;
   filter.oninput = draw;
   onlyProblems.onchange = draw;
+  pastOn.onchange = () => { at = null; syncPast(); refreshAll(); };
+  windowSel.onchange = () => loadStrip();
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
-  liveWhileActive(sec, () => 'flow:realpower', () => load());
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 10000);
-  link.onclick = () => { activate(link, sec); load(); };
+  liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
+  setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
+  syncPast();
+  link.onclick = () => { activate(link, sec); refreshAll(); };
   return link;
 }
 
@@ -10651,7 +10723,9 @@ function snapped(t        , size        ) {
 
 /// A longer range the page can load when zooming out past the whole of this one.
 
-function timelineStrip(onPick                             , widen        ) {
+/// `moment` picks one instant rather than a stretch: the span it reports starts and ends there (#514).
+function timelineStrip(onPick                             , widen        , opts                       = {}) {
+  const moment = !!opts.moment;
   const box = el('div', { class: 'trend-timeline' });
   const head = el('div', { class: 'trend-timeline-head' });
   const note = el('span', { class: 'desc', style: { margin: '0' } });
@@ -10717,7 +10791,7 @@ function timelineStrip(onPick                             , widen        ) {
 
   /// What a pointer at `px` would do: resize an edge, move the window, or draw a new one.
   const modeAt = (px        )                                       => {
-    if (!span) return 'create';
+    if (!span || moment) return 'create';
     const xl = xOf(span.from), xr = xOf(span.to), grab = EDGE_PX * unit();
     // Nearest edge first, so a narrow window still offers both.
     const dl = Math.abs(px - xl), dr = Math.abs(px - xr);
@@ -10727,7 +10801,9 @@ function timelineStrip(onPick                             , widen        ) {
   const CURSOR = { left: 'ew-resize', right: 'ew-resize', move: 'grab', create: 'crosshair' };
 
   const paint = () => {
-    note.textContent = span
+    note.textContent = moment
+      ? (span ? `Showing ${when(span.from)}. Click or drag along the timeline to move it.` : 'Click or drag along the timeline to pick a moment.')
+      : span
       ? `Showing ${when(span.from)} → ${when(span.to)} (${lengthText(span.to - span.from)}). Double-click to zoom in further.`
       : 'The whole range. Double-click or drag across it to zoom in, click a date or time below it, or pick a length.';
     if (zoomOut) zoomOut.disabled = !span && !widen?.can();
@@ -10742,12 +10818,15 @@ function timelineStrip(onPick                             , widen        ) {
     const u = unit();
     const set = (e     , attrs                     ) => Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, String(v)));
     const shown = on ? 'visible' : 'hidden';
-    set(shadeL, { x: 0, width: on ? Math.max(0, xl) : 0 });
-    set(shadeR, { x: xr, width: on ? Math.max(0, width() - xr) : 0 });
-    set(frame, { x: xl, width: Math.max(0, xr - xl), visibility: shown });
+    const band = on && !moment;
+    set(shadeL, { x: 0, width: band ? Math.max(0, xl) : 0 });
+    set(shadeR, { x: xr, width: band ? Math.max(0, width() - xr) : 0 });
+    set(frame, { x: xl, width: Math.max(0, xr - xl), visibility: band ? 'visible' : 'hidden' });
     // The edges and their grips are sized in screen pixels, so they read the same however far the strip stretches.
     [[edgeL, xl], [edgeR, xr]].forEach(([e, x]) => set(e, { x: x - 1.5 * u, width: 3 * u, visibility: shown }));
     [[gripL, xl], [gripR, xr]].forEach(([g, x]) => set(g, { x: x - (GRIP_W / 2) * u, width: GRIP_W * u, visibility: shown }));
+    // One instant is one edge.
+    if (moment) [edgeR, gripR].forEach(e => set(e, { visibility: 'hidden' }));
   };
 
   const settle = () => { paint(); onPick(span); };
@@ -10770,7 +10849,7 @@ function timelineStrip(onPick                             , widen        ) {
       if (!data) return;
       const px = pxOf(ev);
       fingers.set(ev.pointerId ?? 0, px);
-      if (fingers.size === 2) {
+      if (fingers.size === 2 && !moment) {
         const [a, b] = [...fingers.values()];
         pinch = { apart: Math.abs(a - b) || 1, was: span ?? { from: t0(), to: t1() }, at: tOf((a + b) / 2) };
         press = null;
@@ -10778,12 +10857,13 @@ function timelineStrip(onPick                             , widen        ) {
       }
       const mode = modeAt(px);
       press = { mode, px, was: span ? { ...span } : null, moved: false };
+      if (moment) { const t = tOf(px); span = { from: t, to: t }; paint(); }
       s.style.cursor = mode === 'move' ? 'grabbing' : CURSOR[mode];
       ev.preventDefault?.();
     });
 
     s.addEventListener('wheel', (ev     ) => {
-      if (!data) return;
+      if (!data || moment) return;
       ev.preventDefault?.();
       const sideways = ev.shiftKey || Math.abs(ev.deltaX || 0) > Math.abs(ev.deltaY || 0);
       if (sideways) {
@@ -10808,7 +10888,7 @@ function timelineStrip(onPick                             , widen        ) {
     // Double-click zooms in about the pointer, as a map does. Outside the window it zooms into that part of the
     // whole range instead, so any section is two clicks away.
     s.addEventListener('dblclick', (ev     ) => {
-      if (!data) return;
+      if (!data || moment) return;
       const at = tOf(pxOf(ev));
       const base = span && at >= span.from && at <= span.to ? span : { from: t0(), to: t1() };
       span = zoomed(base, at, 1 / 3);
@@ -10831,6 +10911,7 @@ function timelineStrip(onPick                             , widen        ) {
     const px = pxOf(ev);
     if (!press.moved && Math.abs(px - press.px) <= SLOP_PX * unit()) return;
     press.moved = true;
+    if (moment) { const t = tOf(px); span = { from: t, to: t }; paint(); return; }
     const dt = tOf(px) - tOf(press.px);
     const was = press.was;
     if (press.mode === 'create') span = inRange({ from: tOf(press.px), to: tOf(px) });
@@ -10850,8 +10931,8 @@ function timelineStrip(onPick                             , widen        ) {
     const moved = press.moved;
     press = null;
     if (svg) svg.style.cursor = 'crosshair';
-    // A press that never moved is a click, and a click picks nothing.
-    if (moved) settle();
+    // A press that never moved is a click, and a click picks nothing — except the moment it lands on.
+    if (moved || moment) settle();
   });
 
   /// The axis under the lines: labels at a step that leaves each its room, each one a period that can be picked.
@@ -10879,7 +10960,10 @@ function timelineStrip(onPick                             , widen        ) {
       const length = midnight || step >= DAY ? DAY : step;
       label.title = `Show ${lengthText(length)} from ${d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
       const from = t;
-      label.onclick = () => { const s = bounded({ from, to: from + length }); if (s) { span = s; settle(); } };
+      label.onclick = () => {
+        if (moment) { span = { from, to: from }; settle(); return; }
+        const s = bounded({ from, to: from + length }); if (s) { span = s; settle(); }
+      };
       axis.appendChild(label);
       if (midnight && svg) svg.appendChild(svgTag('line', {
         class: 'trend-timeline-gridline', x1: xOf(t), x2: xOf(t), y1: 0, y2: HEIGHT, 'vector-effect': 'non-scaling-stroke',
@@ -10897,6 +10981,7 @@ function timelineStrip(onPick                             , widen        ) {
 
   const drawTools = () => {
     tools.innerHTML = '';
+    if (moment) return drawMomentTools();
     earlier = btn('◀');
     earlier.title = 'Move the window back by its own length';
     earlier.onclick = () => { if (span) { span = shifted(span, -(span.to - span.from)); settle(); } };
@@ -10934,10 +11019,31 @@ function timelineStrip(onPick                             , widen        ) {
     tools.appendChild(whole);
   };
 
+  /// A moment steps from one reading to the next.
+  const drawMomentTools = () => {
+    const stepTo = (dir        ) => {
+      if (!span || !data) return;
+      const at = span.from;
+      const pts = data.points.filter(p => p != null);
+      const t = dir < 0 ? [...pts].reverse().find(p => p < at - 1) : pts.find(p => p > at + 1);
+      if (t != null) { span = { from: t, to: t }; settle(); }
+    };
+    earlier = btn('◀');
+    earlier.title = 'The reading before';
+    earlier.onclick = () => stepTo(-1);
+    later = btn('▶');
+    later.title = 'The reading after';
+    later.onclick = () => stepTo(1);
+    tools.append(earlier, later);
+    zoomOut = whole = toRange = null;
+  };
+
   const draw = (d              ) => {
     data = d;
     // A window from before is kept as far as it still falls inside the range, however narrow it is.
-    if (span) span = bounded(span);
+    if (span) span = moment
+      ? { from: Math.min(t1(), Math.max(t0(), span.from)), to: Math.min(t1(), Math.max(t0(), span.from)) }
+      : bounded(span);
     if (svg) svg.remove();
     axis.remove();
     svg = svgTag('svg', {
@@ -10986,6 +11092,8 @@ function timelineStrip(onPick                             , widen        ) {
     draw,
     span: () => span,
     clear: () => { span = null; paint(); },
+    /// Place the window (or the moment) without reporting it as picked.
+    set: (s             ) => { span = s; paint(); },
   };
 }
 
