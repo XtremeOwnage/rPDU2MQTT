@@ -88,6 +88,27 @@ public class HistoryCopyTests : IDisposable
     }
 
     [Fact]
+    public async Task TheStatusSaysHowFarBackTheCopyReached()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var now = DateTime.UtcNow;
+        var oldest = now.AddDays(-40).AddSeconds(-now.Second);
+        var source = new Fixed(new() { ["grid|realpower"] = [(oldest, 1), (now.AddHours(-1), 2)] });
+        var copier = Copier(cfg, store, source);
+
+        await copier.RunAsync(source, new LocalHistoryTarget(cfg, store), 3650, CancellationToken.None);
+
+        var status = copier.Status();
+        Assert.Equal(oldest, (DateTime?)status.GetType().GetProperty("oldestCopied")!.GetValue(status));
+        // Forty days back is past the raw tier, so the minute tier holds it: the time is known to the minute, not the day.
+        Assert.Equal(oldest.AddTicks(-(oldest.Ticks % TimeSpan.TicksPerMinute)), store.Oldest());
+    }
+
+    [Fact]
+    public void AnEmptyStoreHasNoOldestReading() => Assert.Null(new LocalSeriesStore(root).Oldest());
+
+    [Fact]
     public void TheSpansCoverEveryTierOnce_NewestFirst()
     {
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10, rawKeepDays: 7, minuteKeepDays: 90);

@@ -235,10 +235,19 @@ const keepFields = ['LocalRawKeepDays', 'LocalMinuteKeepDays', 'LocalHourKeepDay
     return field;
   });
 // …drawn together in a box of their own, named for what they are.
-const box = query(historySection, '.setting-group');
-if (!box) fail('the retention settings are not grouped');
-if ((query(box, 'legend')?.textContent || '') !== 'Retention') fail(`the retention box is named "${query(box, 'legend')?.textContent}"`);
+const boxes = query(historySection, '.setting-group', true);
+const boxNamed = name => boxes.find(b => (query(b, 'legend')?.textContent || '') === name);
+const box = boxNamed('Retention');
+if (!box) fail(`the retention settings are not in a Retention box; the boxes are: ${boxes.map(b => query(b, 'legend')?.textContent).join(' | ')}`);
 if (keepFields.some(f => !box.contains(f))) fail('a retention setting is outside the retention box');
+// Every setting on the page sits in a box with the settings it belongs with.
+for (const [name, keys] of [['Reading', ['Provider', 'PrometheusUrl', 'ToleranceSeconds', 'ValueFallback']], ['Local storage', ['LocalEnabled', 'LocalPath']]]) {
+  const group = boxNamed(name);
+  if (!group) fail(`the History page has no ${name} box`);
+  for (const key of keys) if (fieldFor(key) && !group.contains(fieldFor(key))) fail(`${key} is outside the ${name} box`);
+}
+if (!boxNamed('Copy history')) fail('copying history has no box of its own');
+if (!boxNamed('Reading').contains(emonPointer)) fail('the EmonCMS pointer is not beside the provider it explains');
 // The labels are words, not property names.
 const keepLabels = keepFields.map(f => (query(f, 'label')?.textContent || ''));
 for (const want of ['Raw retention (days)', 'Minutely retention (days)', 'Hourly retention (days)', 'Daily retention (days)'])
@@ -258,11 +267,11 @@ if (!fieldFor('LocalEnabled')) fail('there is no way to say whether the bridge k
 
 // An empty LocalPath resolves at runtime, so the page says what it resolved to rather than showing a blank
 // box on a bridge that is writing readings somewhere.
-const whereText = query(historySection, '.feature-pointer', true).map(d => d.textContent || '').join(' | ');
-if (!/\/data\/history/.test(whereText)) fail(`the page does not say where the readings are being written: ${whereText}`);
+const where = query(boxNamed('Local storage'), '.history-facts');
+const whereText = where?.textContent || '';
+if (!/\/data\/history/.test(whereText)) fail(`the Local storage box does not say where the readings are being written: ${whereText}`);
 if (!/RPDU2MQTT_HISTORY_DIRECTORY/.test(whereText)) fail('the page does not say the directory came from the deployment');
-if (!/42 series/.test(whereText) || !/28\.0 MB/.test(whereText)) fail(`the page does not say how much is stored: ${whereText}`);
-if (!/raw 7d/.test(whereText)) fail(`the page does not say what is kept: ${whereText}`);
+if (!/Series\s*42/.test(whereText) || !/28\.0 MB/.test(whereText)) fail(`the page does not say how much is stored: ${whereText}`);
 
 const provider = query(historySection, 'select', true)[0];
 if (!provider) fail('no provider control on the History page');

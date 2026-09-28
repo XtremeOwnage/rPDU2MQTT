@@ -1737,6 +1737,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 series,
                 bytes,
                 tiers = localHistory.Tiers.Select(t => new { t.Name, t.IntervalSeconds, t.KeepDays }).ToList(),
+                oldest = localHistory.Oldest(),
             }, ConfigSchema.Json);
         });
 

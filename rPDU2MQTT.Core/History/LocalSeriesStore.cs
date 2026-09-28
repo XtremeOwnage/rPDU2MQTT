@@ -302,6 +302,38 @@ public sealed class LocalSeriesStore
         catch (IOException) { return []; }
     }
 
+    /// <summary>The oldest reading any series holds, at the finest time known for it, or null when the store is empty.</summary>
+    public DateTime? Oldest()
+    {
+        DateTime? oldest = null;
+        foreach (var tier in Tiers)
+        {
+            var inTier = OldestIn(tier);
+            // A coarser bucket starts before the reading it holds, so it only counts when it ends before what a finer tier has.
+            if (inTier is { } t && (oldest is null || t.AddSeconds(tier.IntervalSeconds) <= oldest)) oldest = t;
+        }
+        return oldest;
+    }
+
+    private DateTime? OldestIn(SeriesTier tier)
+    {
+        DateTime? oldest = null;
+        // The earliest chunk of each series, by name, then its first reading.
+        var chunks = Folders().Select(f => Path.Combine(Root, f, tier.Name))
+            .Where(Directory.Exists)
+            .Select(d => Directory.GetFiles(d, "*.rts").Order(StringComparer.Ordinal).FirstOrDefault())
+            .OfType<string>();
+        foreach (var path in chunks)
+        {
+            var chunk = SeriesFile.Open(path);
+            if (chunk is null || (oldest is not null && chunk.Start >= oldest)) continue;
+            var values = chunk.Read(0, (int)Math.Min(chunk.Slots(), int.MaxValue));
+            var first = Array.FindIndex(values, v => !double.IsNaN(v));
+            if (first >= 0 && (oldest is null || chunk.TimeOf(first) < oldest)) oldest = chunk.TimeOf(first);
+        }
+        return oldest;
+    }
+
     /// <summary>
     /// Fill the coarser tiers from the finer ones, for the recent buckets only. Re-running it changes
     /// nothing: a bucket's value is the last reading in it, whenever it is worked out.

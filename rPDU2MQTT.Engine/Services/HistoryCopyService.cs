@@ -24,6 +24,8 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     private DateTime? startedUtc, finishedUtc;
     private int reads, readsDone, failed;
     private long copied, written;
+    private DateTime? oldestCopied, newestCopied, readingFrom, readingTo;
+    private int readingInterval;
     private string message = "No copy has run.";
 
     public bool Running => running is { IsCompleted: false };
@@ -78,6 +80,8 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
             finishedUtc = null;
             reads = readsDone = failed = 0;
             copied = written = 0;
+            oldestCopied = newestCopied = readingFrom = readingTo = null;
+            readingInterval = 0;
             message = "Starting…";
             running = Task.Run(() => RunAsync(sources[source], sink, days <= 0 ? 3650 : days, CancellationToken.None));
         }
@@ -87,7 +91,14 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     public object Status()
     {
         lock (sync)
-            return new { ok = true, running = Running, from, to, message, reads, readsDone, readsFailed = failed, readingsCopied = copied, slotsWritten = written, started = startedUtc, finished = finishedUtc };
+            return new
+            {
+                ok = true, running = Running, from, to, message, reads, readsDone, readsFailed = failed,
+                readingsCopied = copied, slotsWritten = written, started = startedUtc, finished = finishedUtc,
+                oldestCopied, newestCopied,
+                // The span being read now; the copy works newest first, so its start is how far back it has got.
+                window = readingFrom is null ? null : new { from = readingFrom, to = readingTo, intervalSeconds = readingInterval },
+            };
     }
 
     /// <summary>The copy itself: each tier's span at that tier's interval, a window of steps and a group of nodes at a time.</summary>
@@ -104,6 +115,8 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
             Log.Information($"History copy: {source.Id} to {target.Id}, {nodes.Count} nodes, {windows.Count} windows, {days} days.");
 
             foreach (var (start, end, interval) in windows)
+            {
+                lock (sync) { readingFrom = start; readingTo = end; readingInterval = interval; }
                 foreach (var metric in FlowUnits.Metrics)
                     foreach (var group in groups)
                     {
@@ -116,6 +129,12 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                                 if (found.TryGetValue(node.Id, out var readings) && readings.Count > 0)
                                 {
                                     got += readings.Count;
+                                    var (first, last) = (readings.Min(r => r.At), readings.Max(r => r.At));
+                                    lock (sync)
+                                    {
+                                        if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
+                                        if (newestCopied is null || last > newestCopied) newestCopied = last;
+                                    }
                                     put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, ct);
                                 }
                             lock (sync) { readsDone++; copied += got; written += put; message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written."; }
@@ -126,6 +145,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                             Log.Warning($"History copy: {metric} {start:u}–{end:u} failed ({ex.Message}).");
                         }
                     }
+            }
 
             lock (sync) message = $"Finished: {copied:N0} readings copied from {source.Id}, {written:N0} written to {target.Id}"
                                 + (failed > 0 ? $"; {failed} of {reads} reads failed (see the log)." : ".");
