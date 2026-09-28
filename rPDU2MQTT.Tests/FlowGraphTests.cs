@@ -227,9 +227,8 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void Build_ProducerFeedingConsumersWithNoDemand_SplitsEqually()
+    public void Build_ProducerFeedingConsumersWithNoDemand_DoesNotGuessASplit()
     {
-        // No downstream load yet (modelling before sensors bind): fall back to an even split of generation.
         var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
         var flow = new EnergyFlowConfig
         {
@@ -250,7 +249,36 @@ public class FlowGraphTests
 
         var graph = FlowGraphBuilder.Build(data, flow);
 
-        Assert.All(new[] { "a", "b", "c" }, t => Assert.Equal(300, graph.Links.Single(l => l.Source == "solar" && l.Target == t).Value));
+        Assert.All(new[] { "a", "b", "c" }, t => Assert.Null(graph.Nodes.Single(n => n.Id == t).Value));
+        Assert.Equal(900, graph.Nodes.Single(n => n.Id == "solar").Value);
+    }
+
+    [Fact]
+    public void Build_PanelLeftover_IsNotSplitAcrossUnmeteredCircuits()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Panel", Kind = "panel", Value = 1000 },
+                new EnergyFlowNode { Id = "m", Label = "M", Kind = "breaker", Value = 200 },
+                new EnergyFlowNode { Id = "x", Label = "X", Kind = "breaker" },
+                new EnergyFlowNode { Id = "y", Label = "Y", Kind = "breaker" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "m" },
+                new EnergyFlowLink { From = "panel", To = "x" },
+                new EnergyFlowLink { From = "panel", To = "y" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Null(graph.Nodes.Single(n => n.Id == "x").Value);
+        Assert.Null(graph.Nodes.Single(n => n.Id == "y").Value);
+        Assert.Equal(800, graph.Links.Single(l => l.Source == "panel" && l.Target == "panel#unmeasured").Value);
     }
 
     [Fact]

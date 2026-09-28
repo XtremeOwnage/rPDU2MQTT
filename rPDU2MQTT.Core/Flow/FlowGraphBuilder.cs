@@ -325,7 +325,7 @@ public static class FlowGraphBuilder
             // An intensive metric — voltage, frequency, power factor, state of charge, temperature.
             if (!FlowUnits.IsAdditive(metric)) return false;
 
-            if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
+            if (leaf.ContainsKey(from)) return !GuessedSplit(from, to);   // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
             // A feeder whose own source has stopped reporting carries an unknowable amount — not zero.
@@ -340,6 +340,19 @@ public static class FlowGraphBuilder
             // One unmeasured path is determined by conservation. Several is a real unknown.
             if (HasAlternatives(to) && !flow.InferFromConservation) return false;
             return unmeasured.Count <= 1;
+        }
+
+        // A measured parent's leftover shared evenly among several children nothing measures is a guess.
+        bool GuessedSplit(string from, string to)
+        {
+            if (leaf.ContainsKey(to) || Inert(Mode(to))) return false;
+            var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
+            if (kids.Any(c => Mode(c) == "untracked")) return false;
+            var metered = kids.Count > 1 || Distributes(from) ? kids.Where(leaf.ContainsKey).ToList() : new List<string>();
+            var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
+            if (estimated.Count <= 1 || estimated.Any(c => Mode(c) == "residual")) return false;
+            var path = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            return estimated.Sum(c => Need(c, path)) <= 0;
         }
 
         // EdgeFlow(from -> to): how much flows along one link.
