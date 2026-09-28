@@ -17091,6 +17091,23 @@ function historyCopyPanel() {
   const from = el('select')                     ;
   const to = el('select')                     ;
   const days = el('input', { type: 'number', min: '0', step: '1', placeholder: 'all (ten years)' })                    ;
+  const conflicts = el('select')                     ;
+  const keep = el('option', { value: 'keep', text: 'Fill gaps only — keep what the destination has' });
+  const replace = el('option', { value: 'replace', text: 'Replace with the source\'s reading' });
+  conflicts.append(keep, replace);
+  const conflictNote = el('div', { class: 'desc' });
+  let backends        = [];
+  // Replacing is only offered where the destination can actually replace a reading.
+  const syncConflicts = () => {
+    const why = backends.find((x     ) => x.id === to.value)?.replace;
+    replace.disabled = !!why;
+    if (why) conflicts.value = 'keep';
+    conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.`
+      : conflicts.value === 'replace' ? 'Where both have a reading, the source\'s overwrites the destination\'s. Readings only the destination has are left alone.'
+      : 'Where both have a reading, the destination\'s is kept; only its blanks are filled from the source.';
+  };
+  to.onchange = syncConflicts;
+  conflicts.onchange = syncConflicts;
   const go = btn('Copy history', 'primary');
   const field = (label        , control     , note        ) =>
     el('div', { class: 'field' }, el('label', { text: label }), el('div', { class: 'desc', text: note }), control);
@@ -17099,7 +17116,8 @@ function historyCopyPanel() {
     el('div', { class: 'grid' },
       field('From', from, 'The backend to read.'),
       field('To', to, 'Only local and EmonCMS can be written.'),
-      field('Days back', days, 'Empty copies everything, up to ten years.')),
+      field('Days back', days, 'Empty copies everything, up to ten years.'),
+      el('div', { class: 'field' }, el('label', { text: 'When both have a reading' }), conflictNote, conflicts)),
     el('div', { class: 'ld-toolbar' }, go));
 
   // The run itself: what it is doing, how far through, and how long is left.
@@ -17121,7 +17139,7 @@ function historyCopyPanel() {
     status.hidden = !started;
     pill.className = 'pill ' + (s.running ? 'warn' : stopped || s.readsFailed ? 'bad' : 'good');
     pill.textContent = s.running ? 'Running' : stopped ? 'Stopped' : 'Finished';
-    route.textContent = s.from ? `${s.from} → ${s.to}` : '';
+    route.textContent = s.from ? `${s.from} → ${s.to}, ${s.conflicts === 'replace' ? 'replacing' : 'filling gaps'}` : '';
     const pct = total ? Math.min(100, (done / total) * 100) : 0;
     bar.style.width = `${s.running ? pct : total ? pct : 0}%`;
     facts.replaceChildren(
@@ -17142,6 +17160,7 @@ function historyCopyPanel() {
     const b = r?.body;
     if (!b?.ok) { wrap.replaceChildren(el('div', { class: 'desc', text: b?.message || 'History copying is not available.' })); return; }
     if (!from.options.length) {
+      backends = b.backends || [];
       for (const x of b.backends || []) {
         from.append(el('option', { value: x.id, text: x.id + (x.read ? ` (${x.read})` : ''), disabled: !!x.read }));
         to.append(el('option', { value: x.id, text: x.id + (x.write ? ' (read only)' : ''), disabled: !!x.write, title: x.write || '' }));
@@ -17150,12 +17169,15 @@ function historyCopyPanel() {
       const readable = (b.backends || []).find((x     ) => !x.read && x.id !== 'local');
       if (readable) from.value = readable.id;
       if ((b.backends || []).some((x     ) => x.id === 'local' && !x.write)) to.value = 'local';
+      syncConflicts();
     }
     render(b.status);
   }).catch(() => { status.hidden = true; });
 
   go.onclick = async () => {
-    const q = `from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}&days=${encodeURIComponent(days.value || '0')}`;
+    if (conflicts.value === 'replace'
+      && !confirm(`Replace readings in ${to.value} with ${from.value}'s wherever both have one? What ${to.value} held there is overwritten.`)) return;
+    const q = `from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}&days=${encodeURIComponent(days.value || '0')}&conflicts=${conflicts.value}`;
     const r      = await api(`/api/history/copy?${q}`, { method: 'POST' });
     toast(r?.body?.message || 'Copy failed.', !!r?.body?.ok);
     refresh();

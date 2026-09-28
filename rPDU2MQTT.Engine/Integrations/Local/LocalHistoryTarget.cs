@@ -11,6 +11,6 @@ public sealed class LocalHistoryTarget(Config cfg, LocalSeriesStore store) : IHi
     public string? Unavailable => cfg.History.LocalEnabled ? null : "local history is off (History.LocalEnabled)";
 
     public Task<int> WriteAsync(string node, string label, string kind, string metric,
-                                IReadOnlyList<(DateTime At, double Value)> readings, int intervalSeconds, DateTime nowUtc, CancellationToken ct)
-        => Task.FromResult(store.Import(node, metric, readings, nowUtc));
+                                IReadOnlyList<(DateTime At, double Value)> readings, int intervalSeconds, DateTime nowUtc, bool replace, CancellationToken ct)
+        => Task.FromResult(store.Import(node, metric, readings, nowUtc, replace));
 }

@@ -135,6 +135,37 @@ public class HistoryCopyTests : IDisposable
     private static string Message(object result) => (string)result.GetType().GetProperty("message")!.GetValue(result)!;
 
     [Fact]
+    public async Task ReplacingOverwritesWhatTheDestinationHeld_OnlyWhereTheSourceHasAReading()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var now = DateTime.UtcNow;
+        var at = now.AddHours(-2).AddTicks(-(now.Ticks % TimeSpan.TicksPerMinute));
+        store.Write("grid", "realpower", at, 100);
+        store.Write("grid", "realpower", at.AddSeconds(10), 200);
+        var source = new Fixed(new() { ["grid|realpower"] = [(at, 999)] });
+        var copier = Copier(cfg, store, source);
+
+        Assert.Contains("replacing", Message(copier.Start("fixed", "local", 1, replace: true)));
+        for (var i = 0; copier.Running && i < 100; i++) await Task.Delay(50);
+
+        Assert.Equal(999, store.ValueAt("grid", "realpower", at, now));
+        Assert.Equal(200, store.ValueAt("grid", "realpower", at.AddSeconds(10), now));
+    }
+
+    [Fact]
+    public void EmonCmsCannotBeAskedToReplace()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root);
+        var copier = new HistoryCopyService(cfg, new Dictionary<string, IMeasurementHistory> { ["local"] = new LocalFlowHistory(cfg, store), ["emoncms"] = new Fixed([]) },
+            [new LocalHistoryTarget(cfg, store), new EmonCmsHistoryTarget(new HttpClient(), cfg)], store, new NoLive());
+
+        Assert.Contains("no way to delete", Message(copier.Start("local", "emoncms", replace: true)));
+        Assert.False(copier.Running);
+    }
+
+    [Fact]
     public void TheLocalStoreGivesBackOnlyWhatItHolds()
     {
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
@@ -177,14 +208,14 @@ public class HistoryCopyTests : IDisposable
         await target.PrepareAsync(CancellationToken.None);
         var at = DateTimeOffset.FromUnixTimeSeconds(1790000000).UtcDateTime;
 
-        var written = await target.WriteAsync("grid", "grid", "grid", "realpower", [(at, 99), (at.AddSeconds(10), 6)], 10, DateTime.UtcNow, CancellationToken.None);
+        var written = await target.WriteAsync("grid", "grid", "grid", "realpower", [(at, 99), (at.AddSeconds(10), 6)], 10, DateTime.UtcNow, false, CancellationToken.None);
 
         Assert.Equal(1, written);
         var post = Assert.Single(handler.Requests, r => r.Body is not null);
         Assert.Contains("insert.json?id=7", post.Url);
         Assert.Equal("data=" + Uri.EscapeDataString("[[1790000010,6]]"), post.Body);
         // A series with no feed is not written, and no feed is created for it.
-        Assert.Equal(0, await target.WriteAsync("main", "main", "panel", "realpower", [(at, 1)], 10, DateTime.UtcNow, CancellationToken.None));
+        Assert.Equal(0, await target.WriteAsync("main", "main", "panel", "realpower", [(at, 1)], 10, DateTime.UtcNow, false, CancellationToken.None));
     }
 
     [Fact]

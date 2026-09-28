@@ -136,8 +136,8 @@ public sealed class LocalSeriesStore
         }
     }
 
-    /// <summary>Store another system's readings in every tier that keeps them, filling only empty slots; returns the slots written.</summary>
-    public int Import(string node, string metric, IEnumerable<(DateTime At, double Value)> readings, DateTime nowUtc)
+    /// <summary>Store another system's readings in every tier that keeps them, filling only empty slots unless `replace`; returns the slots written.</summary>
+    public int Import(string node, string metric, IEnumerable<(DateTime At, double Value)> readings, DateTime nowUtc, bool replace = false)
     {
         if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(metric)) return 0;
         var points = readings.Where(r => double.IsFinite(r.Value) && r.At <= nowUtc)
@@ -155,7 +155,9 @@ public sealed class LocalSeriesStore
                 foreach (var group in buckets.GroupBy(b => ChunkStart(tier.Chunk, b.Key)))
                 {
                     var chunk = Chunk(node, metric, tier, group.Key);
-                    written += chunk.WriteGaps(group.Select(b => (chunk.SlotOf(b.Key), b.Value)));
+                    var slots = group.Select(b => (chunk.SlotOf(b.Key), b.Value)).ToList();
+                    if (replace) { chunk.WriteMany(slots); written += slots.Count; }
+                    else written += chunk.WriteGaps(slots);
                 }
             }
         return written;

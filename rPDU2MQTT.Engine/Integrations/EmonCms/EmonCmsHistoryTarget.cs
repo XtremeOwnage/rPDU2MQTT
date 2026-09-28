@@ -14,6 +14,8 @@ public sealed class EmonCmsHistoryTarget(HttpClient http, Config cfg) : IHistory
 
     public string Id => "emoncms";
 
+    public string? CannotReplace => "EmonCMS has no way to delete a range of points, so replacing would be a delete request for every stored point";
+
     public string? Unavailable => string.IsNullOrWhiteSpace(cfg.EmonCMS.Url) ? "EmonCMS.Url is not set" : null;
 
     private string BaseUrl => (cfg.EmonCMS.Url ?? "").TrimEnd('/');
@@ -23,8 +25,9 @@ public sealed class EmonCmsHistoryTarget(HttpClient http, Config cfg) : IHistory
         => feeds = EmonCmsWire.Feeds(await http.GetStringAsync($"{BaseUrl}/feed/list.json?apikey={Key}", ct));
 
     public async Task<int> WriteAsync(string node, string label, string kind, string metric,
-                                      IReadOnlyList<(DateTime At, double Value)> readings, int intervalSeconds, DateTime nowUtc, CancellationToken ct)
+                                      IReadOnlyList<(DateTime At, double Value)> readings, int intervalSeconds, DateTime nowUtc, bool replace, CancellationToken ct)
     {
+        if (replace) throw new NotSupportedException(CannotReplace);
         // Feeds are created by provisioning, not here: a series with no feed is not written.
         if (readings.Count == 0 || !feeds.TryGetValue(MetricsHelper.EmonCmsFlowInputName(node, label, kind, metric, cfg), out var id)) return 0;
 

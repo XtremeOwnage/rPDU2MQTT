@@ -1751,7 +1751,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             if (historyCopy is null) return Results.Json(new { ok = false, message = "History copying is not available in this process." }, ConfigSchema.Json);
             var q = ctx.Request.Query;
             var days = int.TryParse(q["days"], out var d) ? d : 0;
-            return Results.Json(historyCopy.Start(q["from"].ToString(), q["to"].ToString(), days), ConfigSchema.Json);
+            var replace = string.Equals(q["conflicts"], "replace", StringComparison.OrdinalIgnoreCase);
+            return Results.Json(historyCopy.Start(q["from"].ToString(), q["to"].ToString(), days, replace), ConfigSchema.Json);
         });
 
         app.MapPost("/api/test/history", async (HttpContext ctx) =>

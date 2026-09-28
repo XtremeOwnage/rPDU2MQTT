@@ -26,6 +26,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     private long copied, written;
     private DateTime? oldestCopied, newestCopied, readingFrom, readingTo;
     private int readingInterval;
+    private bool replacing;
     private string message = "No copy has run.";
 
     public bool Running => running is { IsCompleted: false };
@@ -57,10 +58,13 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         id,
         read = SourceUnavailable(id),
         write = TargetUnavailable(id),
+        replace = Target(id)?.CannotReplace,
     }).ToList();
 
-    /// <summary>Start a copy unless one is running. `days` limits how far back it reads; 0 reads ten years.</summary>
-    public object Start(string source, string target, int days = 0)
+    private IHistoryTarget? Target(string id) => targets.FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Start a copy unless one is running. `days` limits how far back it reads (0 reads ten years); `replace` overwrites what the destination holds.</summary>
+    public object Start(string source, string target, int days = 0, bool replace = false)
     {
         source = (source ?? "").Trim().ToLowerInvariant();
         target = (target ?? "").Trim().ToLowerInvariant();
@@ -70,12 +74,14 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         // The recorder owns the local store's files; a second process writing them is corruption.
         if (target == "local" && leader is not null && !leader.IsLeader)
             return new { ok = false, message = "Only the instance that records history can write to it; this one is not the leader." };
-        var sink = targets.First(t => string.Equals(t.Id, target, StringComparison.OrdinalIgnoreCase));
+        var sink = Target(target)!;
+        if (replace && sink.CannotReplace is { } noReplace) return new { ok = false, message = $"Cannot replace readings in {target}: {noReplace}. Fill the gaps instead." };
 
         lock (sync)
         {
             if (Running) return new { ok = false, message = $"A copy is already running: {message}" };
             (from, to) = (source, target);
+            replacing = replace;
             startedUtc = DateTime.UtcNow;
             finishedUtc = null;
             reads = readsDone = failed = 0;
@@ -85,7 +91,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
             message = "Starting…";
             running = Task.Run(() => RunAsync(sources[source], sink, days <= 0 ? 3650 : days, CancellationToken.None));
         }
-        return new { ok = true, message = $"Copying history from {source} to {target}." };
+        return new { ok = true, message = $"Copying history from {source} to {target}, {(replace ? "replacing what is there" : "filling gaps only")}." };
     }
 
     public object Status()
@@ -93,7 +99,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         lock (sync)
             return new
             {
-                ok = true, running = Running, from, to, message, reads, readsDone, readsFailed = failed,
+                ok = true, running = Running, from, to, conflicts = replacing ? "replace" : "keep", message, reads, readsDone, readsFailed = failed,
                 readingsCopied = copied, slotsWritten = written, started = startedUtc, finished = finishedUtc,
                 oldestCopied, newestCopied,
                 // The span being read now; the copy works newest first, so its start is how far back it has got.
@@ -135,7 +141,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                                         if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
                                         if (newestCopied is null || last > newestCopied) newestCopied = last;
                                     }
-                                    put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, ct);
+                                    put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
                                 }
                             lock (sync) { readsDone++; copied += got; written += put; message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written."; }
                         }
