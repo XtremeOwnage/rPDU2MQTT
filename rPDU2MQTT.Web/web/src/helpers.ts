@@ -1,5 +1,6 @@
-// Generic, dependency-free helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
+// Generic helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
 // zoom helper, and the multi-PDU instance selector.
+import { energyPrice, currency } from './cost.js';
 
 // `status` is carried so a caller can say *why* a call failed when the response had no message of its
 // own — an empty or non-JSON body reads as a bare "couldn't load it" otherwise, which says nothing.
@@ -43,6 +44,9 @@ const UNIT_STEPS: string[][] = [
 /// keeping them is what made the labels wide enough to crowd the diagram.
 export function formatMeasure(value: any, units?: string): string {
   const u = (units || '').trim();
+  // Cost reads as money: the symbol first, to the cent.
+  if (u && typeof value === 'number' && Number.isFinite(value) && energyPrice() && u === currency())
+    return `${value < 0 ? '-' : ''}${u}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (typeof value !== 'number' || !Number.isFinite(value)) return `${formatNum(value)} ${u}`.trim();
 
   const ladder = UNIT_STEPS.find(l => l.some(x => x === u));

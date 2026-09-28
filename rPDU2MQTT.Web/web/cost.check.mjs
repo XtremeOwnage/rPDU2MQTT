@@ -72,4 +72,55 @@ const open = async (gui) => {
   if (!cells.includes('3.75') || !cells.includes('0.5')) fail(`the day is not priced: ${cells.join('|')}`);
 }
 
-console.log('cost: offered on Trends only once a price per kWh is set, labelled with the currency, read as the energy counter and priced to the cent');
+// The Flow view: Cost Daily and Cost, lifetime, read as the energy they price and drawn in the currency.
+{
+  const graph = {
+    ok: true, metric: 'energy_d', units: 'kWh',
+    nodes: [{ id: 'grid', label: 'Grid', kind: 'grid', value: 10, derivation: 'measured' },
+            { id: 'dryer', label: 'Dryer', kind: 'load', value: 4, derivation: 'measured' },
+            { id: 'rack', label: 'Rack', kind: 'load', value: 6, derivation: 'measured' }],
+    links: [{ source: 'grid', target: 'dryer', value: 4 }, { source: 'grid', target: 'rack', value: 6 }],
+  };
+  const openFlow = async (gui) => {
+    const asked = [];
+    const { sandbox, getEl } = makeDom({
+      bodies: (url) => {
+        if (url.includes('/api/flow')) { asked.push(url); return structuredClone(graph); }
+        return url.includes('/api/schema') ? schema
+          : url.includes('/api/instances') ? { ok: true, instances: [] }
+          : url.includes('/api/config') ? { EnergyFlow: { Nodes: [], Links: [] }, Gui: gui }
+          : { ok: true };
+      },
+    });
+    vm.createContext(sandbox);
+    vm.runInContext(code, sandbox, { filename: 'app.js' });
+    await new Promise(r => setTimeout(r, 50));
+    const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Flow');
+    if (!link) fail('no Flow page');
+    link.click();
+    await new Promise(r => setTimeout(r, 100));
+    const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
+    const metricSel = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'energy_d'));
+    if (!metricSel) fail('no metric control on Flow');
+    return { sec, metricSel, asked };
+  };
+
+  const plain = await openFlow({});
+  if (plain.metricSel.children.some(o => o.value === 'cost_d' || o.value === 'cost')) fail('Flow offers cost with no price set');
+
+  const { sec, metricSel, asked } = await openFlow({ EnergyPrice: 0.5, Currency: '€' });
+  const labels = metricSel.children.map(o => o.textContent);
+  if (!labels.includes('Cost Daily (€)') || !labels.includes('Cost, lifetime (€)')) fail(`Flow does not offer cost: ${labels.join(' | ')}`);
+  metricSel.value = 'cost_d';
+  metricSel.onchange({});
+  await new Promise(r => setTimeout(r, 100));
+  const flowAsk = asked.filter(u => /\/api\/flow(\?|$)/.test(u)).at(-1) || '';
+  if (!/metric=energy_d(&|$)/.test(flowAsk)) fail(`Cost Daily was not read as the daily energy: ${flowAsk}`);
+  // The rack's 6 kWh at 0.5 a kWh.
+  const text = query(sec, 'text', true).map(t => t.textContent).join(' ') + ' '
+    + query(sec, 'title', true).map(t => t.textContent).join(' ');
+  if (!text.includes('€3.00')) fail(`the rack is not drawn as cost: ${text.slice(0, 400)}`);
+  if (/kWh/.test(text)) fail('a cost diagram still reads kWh');
+}
+
+console.log('cost: offered on Trends and Flow only once a price per kWh is set, labelled with the currency, read as the energy it prices and drawn to the cent');

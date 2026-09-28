@@ -3,7 +3,7 @@ import { api, btn, el, activate, navLink, instanceSelector, withInstance } from 
 import { hideCard, type Line } from '../charts.js';
 import { periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { timelineStrip, type Span } from './timeline.js';
-import { state } from '../state.js';
+import { energyPrice, currency, toCost } from '../cost.js';
 
 export type Metric = { metric: string; units: string; epoch?: string };
 
@@ -44,24 +44,6 @@ export const LABELS: Record<string, string> = {
   frequency: 'frequency', energy: 'energy', cost: 'cost',
 };
 export const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
-
-/// The price of a kWh from the GUI settings (#515), or null when none is set.
-export function energyPrice(): number | null {
-  const v = Number(state.data?.Gui?.EnergyPrice);
-  return Number.isFinite(v) && v > 0 ? v : null;
-}
-
-export const currency = () => String(state.data?.Gui?.Currency || '').trim() || '$';
-
-/// kWh per unit of an energy metric.
-const KWH_PER: Record<string, number> = { Wh: 0.001, kWh: 1, MWh: 1000 };
-
-/// Energy as cost: every series times the price, in the currency. Linear, so it holds for deltas and totals alike.
-export function toCost(b: any, price: number) {
-  const factor = price * (KWH_PER[b.units] ?? 1);
-  (b.series || []).forEach((s: any) => { s.values = s.values.map((v: any) => (v == null ? null : v * factor)); });
-  b.units = currency();
-}
 
 /// The smallest offered step that fits `seconds` into `points` samples.
 export function stepToFit(seconds: number, points: number) {
