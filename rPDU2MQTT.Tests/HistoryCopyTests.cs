@@ -210,10 +210,14 @@ public class HistoryCopyTests : IDisposable
         store.Import("grid", "realpower", Enumerable.Range(0, 8640 + 10).Select(i => (dayAgo.AddSeconds(10 * i - 50), 1d)), now);
         var source = new Fixed([]);
 
-        await Copier(cfg, store, source).RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
+        var copier = Copier(cfg, store, source);
+        await copier.RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
 
         Assert.DoesNotContain("grid|realpower", source.Asked);
         Assert.Contains("main|realpower", source.Asked);
+        // …and the status says so, by series, even though grid shares its read with nodes that lacked data.
+        var status = copier.Status();
+        Assert.True((long)status.GetType().GetProperty("seriesComplete")!.GetValue(status)! >= 1);
     }
 
     [Fact]

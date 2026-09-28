@@ -25,7 +25,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     private string? from, to;
     private DateTime? startedUtc, finishedUtc;
     private int reads, readsDone, failed, skipped, feedsFailed;
-    private long copied, written;
+    private long copied, written, seriesChecked, seriesComplete;
     private DateTime? oldestCopied, newestCopied, readingFrom, readingTo;
     private int readingInterval;
     private bool replacing;
@@ -87,7 +87,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
             startedUtc = DateTime.UtcNow;
             finishedUtc = null;
             reads = readsDone = failed = skipped = feedsFailed = 0;
-            copied = written = 0;
+            copied = written = seriesChecked = seriesComplete = 0;
             oldestCopied = newestCopied = readingFrom = readingTo = null;
             readingInterval = 0;
             message = "Starting…";
@@ -101,7 +101,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         lock (sync)
             return new
             {
-                ok = true, running = Running, from, to, conflicts = replacing ? "replace" : "keep", message, reads, readsDone, readsFailed = failed, readsSkipped = skipped, feedsFailed,
+                ok = true, running = Running, from, to, conflicts = replacing ? "replace" : "keep", message, reads, readsDone, readsFailed = failed, readsSkipped = skipped, feedsFailed, seriesChecked, seriesComplete,
                 readingsCopied = copied, slotsWritten = written, started = startedUtc, finished = finishedUtc,
                 oldestCopied, newestCopied,
                 // The span being read now; the copy works newest first, so its start is how far back it has got.
@@ -132,14 +132,17 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                         // Filling gaps, only the stretches the destination lacks are read, and a stretch every node lacks
                         // (a restart, when nothing was recorded) is one read for all of them.
                         var spans = new Dictionary<(DateTime From, DateTime To), List<(string Id, string Label, string Kind)>>();
+                        var complete = 0;
                         foreach (var node in group)
                         {
                             var gaps = replacing ? [(start, end)] : target.Missing(node.Id, metric, start, end, interval);
+                            if (gaps.Count == 0) complete++;
                             // Past a handful, one read of the whole stretch costs less than a read per gap.
                             if (gaps.Count > MaxGapsPerRead) gaps = [(gaps[0].From, gaps[^1].To)];
                             foreach (var gap in gaps)
                                 (spans.TryGetValue(gap, out var sharing) ? sharing : spans[gap] = []).Add(node);
                         }
+                        lock (sync) { seriesChecked += group.Length; seriesComplete += complete; }
                         if (spans.Count == 0)
                         {
                             lock (sync) { readsDone++; skipped++; }
