@@ -28,6 +28,7 @@ const MODULES = [
   'flow-vocabulary.ts',
   'source-editors.ts',
   'energy.ts',
+  'cost.ts',
   'history-control.ts',
   'charts.ts',
   'context-menu.ts',

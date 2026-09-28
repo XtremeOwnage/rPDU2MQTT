@@ -30,7 +30,7 @@ function takeFocus() {
 }
 
 // ── helpers.ts ──────────────────────────────────────────────────
-// Generic, dependency-free helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
+// Generic helpers: fetch wrapper, DOM builders, the toast, tab activation, the SVG
 // zoom helper, and the multi-PDU instance selector.
 
 // `status` is carried so a caller can say *why* a call failed when the response had no message of its
@@ -75,6 +75,9 @@ const UNIT_STEPS             = [
 /// keeping them is what made the labels wide enough to crowd the diagram.
 function formatMeasure(value     , units         )         {
   const u = (units || '').trim();
+  // Cost reads as money: the symbol first, to the cent.
+  if (u && typeof value === 'number' && Number.isFinite(value) && energyPrice() && u === currency())
+    return `${value < 0 ? '-' : ''}${u}${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (typeof value !== 'number' || !Number.isFinite(value)) return `${formatNum(value)} ${u}`.trim();
 
   const ladder = UNIT_STEPS.find(l => l.some(x => x === u));
@@ -1215,7 +1218,7 @@ const isAdditiveMetric = (key         ) => ADDITIVE_METRICS.has(key || '');
 const SOURCE_METRICS = METRICS.map(m => m[0]);
 const metricMeta = (key         ) => METRICS.find(m => m[0] === key) || METRICS[0];
 // Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS.
-const DERIVED_METRIC_LABELS                         = { energy_d: 'Energy Daily' };
+const DERIVED_METRIC_LABELS                         = { energy_d: 'Energy Daily', cost_d: 'Cost Daily', cost: 'Cost, lifetime' };
 const metricLabel = (key         ) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction.
 const sourceMetricKey = (src     ) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
@@ -1395,6 +1398,44 @@ function coveredEnergy(home               , gridImport               )          
 function sumKnown(values                               )                {
   const known = values.filter(v => v != null)            ;
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
+}
+
+// ── cost.ts ─────────────────────────────────────────────────────
+// Energy as cost (#515): readings in kWh times the price per kWh from the GUI settings.
+
+/// The price of a kWh from the GUI settings, or null when none is set.
+function energyPrice()                {
+  const v = Number(state.data?.Gui?.EnergyPrice);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+const currency = () => String(state.data?.Gui?.Currency || '').trim() || '$';
+
+/// The energy metric each cost metric prices.
+const COST_OF                         = { cost_d: 'energy_d', cost: 'energy' };
+
+/// kWh per unit of an energy metric.
+const KWH_PER                         = { Wh: 0.001, kWh: 1, MWh: 1000 };
+
+const costFactor = (units        , price        ) => price * (KWH_PER[units] ?? 1);
+
+/// Energy series as cost. Linear, so it holds for deltas and totals alike.
+function toCost(b     , price        ) {
+  const factor = costFactor(b.units, price);
+  (b.series || []).forEach((s     ) => { s.values = s.values.map((v     ) => (v == null ? null : v * factor)); });
+  b.units = currency();
+}
+
+/// An energy flow graph as cost: a copy, since a live body may be shared.
+function priceGraph(g     , price        ) {
+  const factor = costFactor(g.units, price);
+  const times = (v     ) => (typeof v === 'number' ? v * factor : v);
+  return {
+    ...g,
+    units: currency(),
+    nodes: (g.nodes || []).map((n     ) => ({ ...n, value: times(n.value), imbalance: times(n.imbalance), throughput: times(n.throughput) })),
+    links: (g.links || []).map((l     ) => ({ ...l, value: times(l.value) })),
+  };
 }
 
 // ── history-control.ts ──────────────────────────────────────────
@@ -5622,6 +5663,21 @@ function addFlowSection(nav     , sections     ) {
   [['realpower', 'Power (W)'], ['energy_d', 'Energy Daily (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  // Energy priced, offered once a price per kWh is set (#515).
+  const syncCostOptions = () => {
+    const was = metricSel.value;
+    Array.from(metricSel.children).forEach((o     ) => { if (COST_OF[o.value]) o.remove(); });
+    // With no price, a cost view falls back to the energy it priced.
+    if (!energyPrice()) { metricSel.value = COST_OF[was] || was; return; }
+    const lifetime = Array.from(metricSel.children).find((o     ) => o.value === 'energy')       ;
+    [['cost_d', `Cost Daily (${currency()})`], ['cost', `Cost, lifetime (${currency()})`]]
+      .forEach(([v, t]) => metricSel.insertBefore(el('option', { value: v, text: t }), lifetime?.nextSibling || null));
+    metricSel.value = was;
+  };
+  syncCostOptions();
+  /// What the bridge is asked for: cost is read as the energy it prices.
+  const measured = () => COST_OF[metricSel.value] || metricSel.value;
+  const priced = (g     ) => { const price = energyPrice(); return COST_OF[metricSel.value] && price && g?.ok ? priceGraph(g, price) : g; };
   const count = document.createElement('span'); count.className = 'ld-count';
   // What window "today" actually means, next to the selector that chose it.
   const animKey = 'rpdu2mqtt.flow.animate';
@@ -5632,7 +5688,7 @@ function addFlowSection(nav     , sections     ) {
   const showDayNote = async () => {
     dayNote.textContent = '';
     dayNote.removeAttribute('title');
-    if (metricSel.value !== 'energy_d') return;
+    if (measured() !== 'energy_d') return;
     let p     ;
     try { p = (await api('/api/time')).body?.period; } catch { return; }
     if (!p) return;
@@ -5675,7 +5731,7 @@ function addFlowSection(nav     , sections     ) {
     hadDay = !!hist.day();
     // Only the daily total can be added across days, so asking for a span asks for that metric.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
-      if (metricSel.value !== 'energy_d') metricSel.value = 'energy_d';
+      if (measured() !== 'energy_d') metricSel.value = 'energy_d';
       showDayNote();
     }
     load();
@@ -5686,7 +5742,7 @@ function addFlowSection(nav     , sections     ) {
   const periods = periodRow((key           ) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    if (metricSel.value !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
+    if (measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     periods.mark(key);
     hadDay = true;
     load();
@@ -6265,7 +6321,7 @@ function addFlowSection(nav     , sections     ) {
             nodes: [n.id],
             lineLabel: named,
             labelOf: (id        ) => byId[id]?.label || id,
-            metric: metricSel.value,
+            metric: measured(),
             empty: 'Nothing is measuring this node, so there is nothing to chart.',
             // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
             parts: (outgoing[n.id] || []).map((l     ) => l.target),
@@ -6477,7 +6533,7 @@ function addFlowSection(nav     , sections     ) {
           : `This node passes ${formatMeasure(reading, units)} to what it feeds, but only `
             + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
             + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
-            + (metricSel.value === 'energy'
+            + (measured() === 'energy'
               ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy Daily", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
       }
@@ -6997,7 +7053,7 @@ function addFlowSection(nav     , sections     ) {
 
   const load = async () => {
     let path = withInstance('/api/flow', instSel);
-    if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
+    if (measured() && measured() !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + measured();
     const past = historyQuery(hist);
     if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
     const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
@@ -7005,8 +7061,8 @@ function addFlowSection(nav     , sections     ) {
     if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; redrawSubPages(); return; }
     // Say plainly that this is not now. A past diagram that looks like the live one is the worst outcome.
     hist.setNote(historyNote(r.body));
-    lastGraph = r.body;
-    draw(r.body);
+    lastGraph = priced(r.body);
+    draw(lastGraph);
     redrawSubPages();
   };
   refresh.onclick = load;
@@ -7029,9 +7085,10 @@ function addFlowSection(nav     , sections     ) {
 
   // The Sankey follows the readings while the tab is open (#281).
   const syncLive = liveWhileActive(sec,
-    () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body     ) => {
-      if (hist.day() || !body || !body.ok) return;
+    () => 'flow:' + (measured() || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
+    (live     ) => {
+      if (hist.day() || !live || !live.ok) return;
+      const body = priced(live);
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
@@ -7057,7 +7114,7 @@ function addFlowSection(nav     , sections     ) {
   };
   metricSel.addEventListener('change', () => syncLive());
 
-  link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
+  link.onclick = () => { activate(link, sec); syncCostOptions(); syncLive(); load(); showDayNote(); };
 }
 
 // ── sections/node-editor.ts ─────────────────────────────────────
@@ -10968,7 +11025,7 @@ const MIN_BAR_PX = 6;
 
 const LABELS                         = {
   realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-  frequency: 'frequency', energy: 'energy',
+  frequency: 'frequency', energy: 'energy', cost: 'cost',
 };
 const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
 
@@ -11090,13 +11147,22 @@ function trendsPage(nav     , sections     , spec            ) {
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
-  const unitsOf = (m        ) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
-  const epochOf = (m        ) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
+  const unitsOf = (m        ) => (chartable().find(x => x.metric === m) || { units: '' }).units;
+  const epochOf = (m        ) => (chartable().find(x => x.metric === m) || {}).epoch || '';
   const rate = () => RATES.includes(unitsOf(metricSel.value));
   const metricName = () => LABELS[metricSel.value] || metricSel.value;
+  const cost = () => metricSel.value === 'cost';
   // Only power and the energy counter are offered; a per-day bar is the counter's rise across that day.
-  const chartable = () => METRICS.filter(m => epochOf(m.metric) !== 'period');
-  const energyFor = (_range        ) => chartable().find(m => !RATES.includes(m.units));
+  const measured = () => METRICS.filter(m => m.metric !== 'cost' && (m.epoch || '') !== 'period');
+  const energyFor = (_range        ) => measured().find(m => !RATES.includes(m.units));
+  // Cost is the energy counter priced, offered once a price is set.
+  const chartable = ()           => {
+    const energy = energyFor(''), price = energyPrice();
+    return energy && price ? [...measured(), { metric: 'cost', units: currency(), epoch: energy.epoch }] : measured();
+  };
+  // What the history backend is asked for: cost is read as the energy it prices.
+  const asked = () => cost() ? (energyFor('')?.metric || 'energy') : metricSel.value;
+  const priced = (b     ) => { const price = energyPrice(); if (cost() && b?.ok && price) toCost(b, price); };
   const impliedMetric = () => {
     const found = rangeOf().wants === 'power' ? chartable().find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
     return (found || chartable()[0]).metric;
@@ -11286,7 +11352,7 @@ function trendsPage(nav     , sections     , spec            ) {
     const step = choice === 'auto' || choice === 'day' ? fit : Math.max(Number(choice), fit);
     const query = `from=${encodeURIComponent(new Date(span.from).toISOString())}`
       + `&to=${encodeURIComponent(new Date(span.to).toISOString())}`
-      + `&step=${step}&metric=${encodeURIComponent(metricSel.value)}`;
+      + `&step=${step}&metric=${encodeURIComponent(asked())}`;
     let r     ;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
@@ -11295,6 +11361,7 @@ function trendsPage(nav     , sections     , spec            ) {
     const b = r.body;
     const epoch = epochOf(metricSel.value);
     if (b?.ok && (epoch === 'lifetime' || epoch === 'period')) toDeltas(b);
+    priced(b);
     body = b?.ok ? b : whole;
     draw();
     if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
@@ -11307,12 +11374,13 @@ function trendsPage(nav     , sections     , spec            ) {
     // A counter's first day needs the reading before it, so one more day-end is asked for and dropped after differencing.
     const lead = p.used == null && counterEpoch === 'lifetime';
     const range = lead ? rangeSel.value.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : rangeSel.value;
-    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(metricSel.value);
+    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(asked());
     let r     ;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
     if (body?.ok && (counterEpoch === 'lifetime' || (!body.days && counterEpoch === 'period'))) toDeltas(body);
+    priced(body);
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
@@ -11336,7 +11404,7 @@ function trendsPage(nav     , sections     , spec            ) {
   };
 
   const page             = {
-    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName,
+    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName, cost,
     stacked: () => stackBox.checked && chartSel.value !== 'line',
     kind: () => chartSel.value                           , fitTo, leadHeight, section, statusLine, showRange,
   };
@@ -11507,7 +11575,9 @@ function addTrendsSection(nav     , sections     ) {
       }));
       const shown = columns.filter(([, v]) => v && v.some(x => x != null))                                 ;
       if (p.summable() && shown.length) {
-        const num = (v               ) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
+        // Cost reads to the cent.
+        const scale = p.cost() ? 100 : 10;
+        const num = (v               ) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
         const why                         = {
           Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',

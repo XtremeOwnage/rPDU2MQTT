@@ -813,6 +813,12 @@ spec:
                     - imperial
                     - metric
                     description: "How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language."
+                  EnergyPrice:
+                    type: number
+                    description: What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost.
+                  Currency:
+                    type: string
+                    description: The currency symbol cost is shown with, e.g. $, €, £.
                   AuthType:
                     type: string
                     enum:

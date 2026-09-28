@@ -132,7 +132,9 @@ export function addTrendsSection(nav: any, sections: any) {
       }));
       const shown = columns.filter(([, v]) => v && v.some(x => x != null)) as [string, (number | null)[]][];
       if (p.summable() && shown.length) {
-        const num = (v: number | null) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
+        // Cost reads to the cent.
+        const scale = p.cost() ? 100 : 10;
+        const num = (v: number | null) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
         const why: Record<string, string> = {
           Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',

@@ -17,6 +17,7 @@ import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
 import { flowCardRows } from '../flow-card.js';
 import { templateHelp } from '../template-field.js';
+import { COST_OF, currency, energyPrice, priceGraph } from '../cost.js';
 
 // The vocabulary — metrics, node kinds, modes, source types, Modbus shapes — is in flow-vocabulary.ts.
 
@@ -67,6 +68,21 @@ export function addFlowSection(nav: any, sections: any) {
   [['realpower', 'Power (W)'], ['energy_d', 'Energy Daily (kWh)'], ['energy', 'Energy, lifetime (kWh)'],
    ['apparentpower', 'Apparent (VA)'], ['current', 'Current (A)']]
     .forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  // Energy priced, offered once a price per kWh is set (#515).
+  const syncCostOptions = () => {
+    const was = metricSel.value;
+    Array.from(metricSel.children).forEach((o: any) => { if (COST_OF[o.value]) o.remove(); });
+    // With no price, a cost view falls back to the energy it priced.
+    if (!energyPrice()) { metricSel.value = COST_OF[was] || was; return; }
+    const lifetime = Array.from(metricSel.children).find((o: any) => o.value === 'energy') as any;
+    [['cost_d', `Cost Daily (${currency()})`], ['cost', `Cost, lifetime (${currency()})`]]
+      .forEach(([v, t]) => metricSel.insertBefore(el('option', { value: v, text: t }), lifetime?.nextSibling || null));
+    metricSel.value = was;
+  };
+  syncCostOptions();
+  /// What the bridge is asked for: cost is read as the energy it prices.
+  const measured = () => COST_OF[metricSel.value] || metricSel.value;
+  const priced = (g: any) => { const price = energyPrice(); return COST_OF[metricSel.value] && price && g?.ok ? priceGraph(g, price) : g; };
   const count = document.createElement('span'); count.className = 'ld-count';
   // What window "today" actually means, next to the selector that chose it.
   const animKey = 'rpdu2mqtt.flow.animate';
@@ -77,7 +93,7 @@ export function addFlowSection(nav: any, sections: any) {
   const showDayNote = async () => {
     dayNote.textContent = '';
     dayNote.removeAttribute('title');
-    if (metricSel.value !== 'energy_d') return;
+    if (measured() !== 'energy_d') return;
     let p: any;
     try { p = (await api('/api/time')).body?.period; } catch { return; }
     if (!p) return;
@@ -120,7 +136,7 @@ export function addFlowSection(nav: any, sections: any) {
     hadDay = !!hist.day();
     // Only the daily total can be added across days, so asking for a span asks for that metric.
     if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
-      if (metricSel.value !== 'energy_d') metricSel.value = 'energy_d';
+      if (measured() !== 'energy_d') metricSel.value = 'energy_d';
       showDayNote();
     }
     load();
@@ -131,7 +147,7 @@ export function addFlowSection(nav: any, sections: any) {
   const periods = periodRow((key: PeriodKey) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
-    if (metricSel.value !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
+    if (measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     periods.mark(key);
     hadDay = true;
     load();
@@ -711,7 +727,7 @@ export function addFlowSection(nav: any, sections: any) {
             nodes: [n.id],
             lineLabel: named,
             labelOf: (id: string) => byId[id]?.label || id,
-            metric: metricSel.value,
+            metric: measured(),
             empty: 'Nothing is measuring this node, so there is nothing to chart.',
             // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
             parts: (outgoing[n.id] || []).map((l: any) => l.target),
@@ -923,7 +939,7 @@ export function addFlowSection(nav: any, sections: any) {
           : `This node passes ${formatMeasure(reading, units)} to what it feeds, but only `
             + `${formatMeasure(reading - n.imbalance, units)} arrives from its feeders — a shortfall of `
             + `${formatMeasure(n.imbalance, units)}, which no supply accounts for.`
-            + (metricSel.value === 'energy'
+            + (measured() === 'energy'
               ? ' On lifetime energy this is expected: these counters started at different times and cannot be compared. Switch to "Energy Daily", where every figure covers the same window.'
               : ' Check that the feeders into this node are all wired and reporting.'));
       }
@@ -1443,7 +1459,7 @@ export function addFlowSection(nav: any, sections: any) {
 
   const load = async () => {
     let path = withInstance('/api/flow', instSel);
-    if (metricSel.value && metricSel.value !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + metricSel.value;
+    if (measured() && measured() !== 'realpower') path += (path.includes('?') ? '&' : '?') + 'metric=' + measured();
     const past = historyQuery(hist);
     if (past) path += (path.includes('?') ? '&' : '?') + past.slice(1);
     const [r, w] = await Promise.all([api(path), api('/api/flow/withheld')]);
@@ -1451,8 +1467,8 @@ export function addFlowSection(nav: any, sections: any) {
     if (!r.body.ok) { wrap.innerHTML = '<div class="desc" style="color:var(--bad)">' + (r.body.message || 'Could not load flow data.') + '</div>'; count.textContent = ''; lastGraph = null; redrawSubPages(); return; }
     // Say plainly that this is not now. A past diagram that looks like the live one is the worst outcome.
     hist.setNote(historyNote(r.body));
-    lastGraph = r.body;
-    draw(r.body);
+    lastGraph = priced(r.body);
+    draw(lastGraph);
     redrawSubPages();
   };
   refresh.onclick = load;
@@ -1475,9 +1491,10 @@ export function addFlowSection(nav: any, sections: any) {
 
   // The Sankey follows the readings while the tab is open (#281).
   const syncLive = liveWhileActive(sec,
-    () => 'flow:' + (metricSel.value || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
-    (body: any) => {
-      if (hist.day() || !body || !body.ok) return;
+    () => 'flow:' + (measured() || 'realpower') + (instSel.get() ? '|' + instSel.get() : ''),
+    (live: any) => {
+      if (hist.day() || !live || !live.ok) return;
+      const body = priced(live);
       // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
       // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
@@ -1503,5 +1520,5 @@ export function addFlowSection(nav: any, sections: any) {
   };
   metricSel.addEventListener('change', () => syncLive());
 
-  link.onclick = () => { activate(link, sec); syncLive(); load(); showDayNote(); };
+  link.onclick = () => { activate(link, sec); syncCostOptions(); syncLive(); load(); showDayNote(); };
 }

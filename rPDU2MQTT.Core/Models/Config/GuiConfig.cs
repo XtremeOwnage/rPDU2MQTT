@@ -25,6 +25,14 @@ public class GuiConfig
     [Description("How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language.")]
     public string DistanceUnits { get; set; } = "auto";
 
+    [Display(Name = "Price per kWh")]
+    [Description("What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost.")]
+    public double? EnergyPrice { get; set; }
+
+    [DefaultValue("$")]
+    [Description("The currency symbol cost is shown with, e.g. $, €, £.")]
+    public string Currency { get; set; } = "$";
+
     [DefaultValue(GuiAuthType.Basic)]
     [Display(Name = "Authentication")]
     [Description("How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).")]

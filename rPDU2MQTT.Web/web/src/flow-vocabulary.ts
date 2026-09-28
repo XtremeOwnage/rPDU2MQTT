@@ -17,7 +17,7 @@ export const isAdditiveMetric = (key?: string) => ADDITIVE_METRICS.has(key || ''
 export const SOURCE_METRICS = METRICS.map(m => m[0]);
 export const metricMeta = (key?: string) => METRICS.find(m => m[0] === key) || METRICS[0];
 // Metrics the diagram can be drawn by but nothing can be *bound* to, so they stay out of METRICS.
-export const DERIVED_METRIC_LABELS: Record<string, string> = { energy_d: 'Energy Daily' };
+export const DERIVED_METRIC_LABELS: Record<string, string> = { energy_d: 'Energy Daily', cost_d: 'Cost Daily', cost: 'Cost, lifetime' };
 export const metricLabel = (key?: string) => DERIVED_METRIC_LABELS[key || ''] || metricMeta(key)[1];
 // The live-cache key a source reads under, given its direction.
 export const sourceMetricKey = (src: any) => { const m = src.Metric || 'realpower'; return src.Direction === 'in' ? m + '#in' : m; };
