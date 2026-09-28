@@ -15,8 +15,8 @@ public interface IHistoryTarget
     /// <summary>Called once before a copy starts, for anything worth looking up once rather than per series.</summary>
     Task PrepareAsync(CancellationToken ct) => Task.CompletedTask;
 
-    /// <summary>The part of a window a series has nothing for, so a copy reads only that; null when it is complete. By default, all of it.</summary>
-    (DateTime From, DateTime To)? Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds) => (fromUtc, toUtc);
+    /// <summary>The stretches of a window a series has nothing for, so a copy reads only those; empty when it is complete. By default, all of it.</summary>
+    IReadOnlyList<(DateTime From, DateTime To)> Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds) => [(fromUtc, toUtc)];
 
     /// <summary>Write one series' readings where it holds none, or over what it holds when `replace`; returns how many were written.</summary>
     Task<int> WriteAsync(string node, string label, string kind, string metric,

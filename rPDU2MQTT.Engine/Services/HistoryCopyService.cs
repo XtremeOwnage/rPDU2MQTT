@@ -16,6 +16,8 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     private const int StepsPerRead = 8000;
     // Nodes per read, which keeps a Prometheus node matcher or a Home Assistant entity list to a sane URL.
     private const int NodesPerRead = 40;
+    // More separate gaps than this in one series and window are read as one stretch.
+    private const int MaxGapsPerRead = 12;
 
     private readonly IReadOnlyList<IHistoryTarget> targets = targets.ToList();
     private readonly object sync = new();
@@ -127,51 +129,62 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                     foreach (var group in groups)
                     {
                         ct.ThrowIfCancellationRequested();
-                        // Filling gaps, only what the destination lacks is read: a re-run skips everything already copied.
-                        var wanted = group.Select(n => (Node: n, Span: replacing ? (start, end) : target.Missing(n.Id, metric, start, end, interval)))
-                                          .Where(x => x.Span is not null).ToList();
-                        if (wanted.Count == 0)
+                        // Filling gaps, only the stretches the destination lacks are read, and a stretch every node lacks
+                        // (a restart, when nothing was recorded) is one read for all of them.
+                        var spans = new Dictionary<(DateTime From, DateTime To), List<(string Id, string Label, string Kind)>>();
+                        foreach (var node in group)
+                        {
+                            var gaps = replacing ? [(start, end)] : target.Missing(node.Id, metric, start, end, interval);
+                            // Past a handful, one read of the whole stretch costs less than a read per gap.
+                            if (gaps.Count > MaxGapsPerRead) gaps = [(gaps[0].From, gaps[^1].To)];
+                            foreach (var gap in gaps)
+                                (spans.TryGetValue(gap, out var sharing) ? sharing : spans[gap] = []).Add(node);
+                        }
+                        if (spans.Count == 0)
                         {
                             lock (sync) { readsDone++; skipped++; }
                             continue;
                         }
-                        var from = wanted.Min(x => x.Span!.Value.From);
-                        var to = wanted.Max(x => x.Span!.Value.To);
-
-                        IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>> found;
-                        var failedFeeds = 0;
-                        try { found = await source.ReadingsAsync(wanted.Select(x => x.Node.Id).ToList(), metric, from, to, interval, ct); }
-                        catch (PartialReadException partial)
-                        {
-                            // What did arrive is still written; the rest is counted, and a re-run fills it.
-                            found = partial.Found;
-                            failedFeeds = partial.Failed;
-                            Log.Warning($"History copy: {metric} {from:u}–{to:u}: {partial.Message}");
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            lock (sync) { readsDone++; failed++; }
-                            Log.Warning($"History copy: {metric} {from:u}–{to:u} failed ({ex.Message}).");
-                            continue;
-                        }
 
                         long got = 0, put = 0;
-                        foreach (var (node, _) in wanted)
-                            if (found.TryGetValue(node.Id, out var readings) && readings.Count > 0)
+                        var failedFeeds = 0;
+                        var incomplete = false;
+                        foreach (var ((from, to), lacking) in spans)
+                        {
+                            IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>> found;
+                            try { found = await source.ReadingsAsync(lacking.Select(n => n.Id).ToList(), metric, from, to, interval, ct); }
+                            catch (PartialReadException partial)
                             {
-                                got += readings.Count;
-                                var (first, last) = (readings.Min(r => r.At), readings.Max(r => r.At));
-                                lock (sync)
-                                {
-                                    if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
-                                    if (newestCopied is null || last > newestCopied) newestCopied = last;
-                                }
-                                put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
+                                // What did arrive is still written; the rest is counted, and a re-run fills it.
+                                found = partial.Found;
+                                failedFeeds += partial.Failed;
+                                incomplete = true;
+                                Log.Warning($"History copy: {metric} {from:u}–{to:u}: {partial.Message}");
                             }
+                            catch (Exception ex) when (ex is not OperationCanceledException)
+                            {
+                                incomplete = true;
+                                Log.Warning($"History copy: {metric} {from:u}–{to:u} failed ({ex.Message}).");
+                                continue;
+                            }
+
+                            foreach (var node in lacking)
+                                if (found.TryGetValue(node.Id, out var readings) && readings.Count > 0)
+                                {
+                                    got += readings.Count;
+                                    var (first, last) = (readings.Min(r => r.At), readings.Max(r => r.At));
+                                    lock (sync)
+                                    {
+                                        if (oldestCopied is null || first < oldestCopied) oldestCopied = first;
+                                        if (newestCopied is null || last > newestCopied) newestCopied = last;
+                                    }
+                                    put += await target.WriteAsync(node.Id, node.Label, node.Kind, metric, readings, interval, now, replacing, ct);
+                                }
+                        }
                         lock (sync)
                         {
                             readsDone++; copied += got; written += put; feedsFailed += failedFeeds;
-                            if (failedFeeds > 0) failed++;
+                            if (incomplete) failed++;
                             message = $"{readsDone} of {reads} reads, {copied:N0} readings copied, {written:N0} written.";
                         }
                     }

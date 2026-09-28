@@ -173,28 +173,30 @@ public class HistoryCopyTests : IDisposable
     }
 
     [Fact]
-    public void TheStoreSaysWhatPartOfAWindowItLacks()
+    public void TheStoreSaysWhichStretchesOfAWindowItLacks()
     {
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
         var at = new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Utc);
         store.Import("grid", "realpower", Enumerable.Range(0, 360).Select(i => (at.AddSeconds(10 * i), 1d)), at.AddDays(1));
 
-        Assert.Null(store.Missing("grid", "realpower", at, at.AddHours(1), 10));
-        Assert.Equal((at.AddHours(1), at.AddHours(2)), store.Missing("grid", "realpower", at, at.AddHours(2), 10));
-        Assert.Equal((at, at.AddHours(1)), store.Missing("nobody", "realpower", at, at.AddHours(1), 10));
+        Assert.Empty(store.Missing("grid", "realpower", at, at.AddHours(1), 10));
+        Assert.Equal([(at.AddHours(1), at.AddHours(2))], store.Missing("grid", "realpower", at, at.AddHours(2), 10));
+        Assert.Equal([(at, at.AddHours(1))], store.Missing("nobody", "realpower", at, at.AddHours(1), 10));
     }
 
     [Fact]
-    public void AMissedSweepIsNotWorthARead_AStretchIs()
+    public void OnlyTheGapsAreMissing_NotEverythingBetweenThem()
     {
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
         var at = new DateTime(2026, 9, 20, 10, 0, 0, DateTimeKind.Utc);
-        var all = Enumerable.Range(0, 360).Select(i => (At: at.AddSeconds(10 * i), Value: 1d)).ToList();
+        var all = Enumerable.Range(0, 1080).Select(i => (At: at.AddSeconds(10 * i), Value: 1d)).ToList();
+        // A missed sweep (2 slots), and two restarts (10 slots each) two hours apart.
         store.Import("a", "realpower", all.Where((_, i) => i is not (100 or 101)), at.AddDays(1));
-        store.Import("b", "realpower", all.Where((_, i) => i is < 100 or >= 110), at.AddDays(1));
+        store.Import("b", "realpower", all.Where((_, i) => i is (< 100 or >= 110) and (< 900 or >= 910)), at.AddDays(1));
 
-        Assert.Null(store.Missing("a", "realpower", at, at.AddHours(1), 10));
-        Assert.Equal((at.AddSeconds(1000), at.AddSeconds(1100)), store.Missing("b", "realpower", at, at.AddHours(1), 10));
+        Assert.Empty(store.Missing("a", "realpower", at, at.AddHours(3), 10));
+        Assert.Equal([(at.AddSeconds(1000), at.AddSeconds(1100)), (at.AddSeconds(9000), at.AddSeconds(9100))],
+                     store.Missing("b", "realpower", at, at.AddHours(3), 10));
     }
 
     [Fact]
@@ -212,6 +214,47 @@ public class HistoryCopyTests : IDisposable
 
         Assert.DoesNotContain("grid|realpower", source.Asked);
         Assert.Contains("main|realpower", source.Asked);
+    }
+
+    [Fact]
+    public async Task ARestartGapIsOneSmallReadForEveryNode()
+    {
+        var cfg = Configured();
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        var now = DateTime.UtcNow;
+        var dayAgo = now.AddDays(-1);
+        // Two restarts, twelve hours apart, when nothing was recorded for two minutes.
+        var restarts = new[] { now.AddHours(-18), now.AddHours(-6) };
+        foreach (var node in new[] { "grid", "main" })
+            store.Import(node, "realpower", Enumerable.Range(-5, 8650).Select(i => (At: dayAgo.AddSeconds(10 * i), Value: 1d))
+                                                  .Where(r => restarts.All(x => r.At < x || r.At >= x.AddMinutes(2))), now);
+        var source = new Spans();
+
+        await Copier(cfg, store, source).RunAsync(source, new LocalHistoryTarget(cfg, store), 1, CancellationToken.None);
+
+        var reads = source.Reads.Where(r => r.Metric == "realpower" && r.Nodes.Contains("grid")).ToList();
+        Assert.Equal(2, reads.Count);
+        Assert.All(reads, read =>
+        {
+            Assert.Contains("main", read.Nodes);
+            Assert.True(read.To - read.From <= TimeSpan.FromMinutes(3), $"read {read.From:u}–{read.To:u} for a two-minute gap");
+        });
+    }
+
+    /// <summary>A source that has nothing, and remembers each read's nodes and span.</summary>
+    private sealed class Spans : IMeasurementHistory
+    {
+        public List<(string Metric, List<string> Nodes, DateTime From, DateTime To)> Reads { get; } = [];
+        public string Id => "spans";
+        public Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
+            => Task.FromResult<IReadOnlyDictionary<string, double>>(new Dictionary<string, double>());
+        public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct) => Task.FromResult((true, ""));
+        public Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
+            IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
+        {
+            lock (Reads) Reads.Add((metric, nodeIds.ToList(), fromUtc, toUtc));
+            return Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>>(new Dictionary<string, IReadOnlyList<(DateTime, double)>>());
+        }
     }
 
     [Fact]

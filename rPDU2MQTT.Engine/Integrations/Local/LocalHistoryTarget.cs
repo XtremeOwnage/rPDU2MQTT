@@ -10,7 +10,7 @@ public sealed class LocalHistoryTarget(Config cfg, LocalSeriesStore store) : IHi
 
     public string? Unavailable => cfg.History.LocalEnabled ? null : "local history is off (History.LocalEnabled)";
 
-    public (DateTime From, DateTime To)? Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds)
+    public IReadOnlyList<(DateTime From, DateTime To)> Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds)
         => store.Missing(node, metric, fromUtc, toUtc, intervalSeconds);
 
     public Task<int> WriteAsync(string node, string label, string kind, string metric,
