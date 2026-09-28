@@ -197,10 +197,8 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void Build_ProducerFeedingMultipleConsumers_SplitsGenerationByDemand()
+    public void Build_ProducerFeedingMultipleConsumers_CarriesWhatEachDraws()
     {
-        // Solar powers two PDUs drawing 100W and 300W. Its 800W generation must split 1:3 across the two
-        // links (200 / 600), not show 800 on each — i.e. the producer isn't counted once per consumer.
         var d1 = new Device { Key = "pdu1", Entity_Name = "pdu1", Entity_DisplayName = "PDU 1" };
         d1.Outlets.Add(Outlet(0, "LoadA", "realpower", "100"));
         var d2 = new Device { Key = "pdu2", Entity_Name = "pdu2", Entity_DisplayName = "PDU 2" };
@@ -221,9 +219,9 @@ public class FlowGraphTests
 
         var graph = FlowGraphBuilder.Build(data, flow);
 
-        Assert.Equal(200, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu1").Value);
-        Assert.Equal(600, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu2").Value);
-        Assert.Equal(800, graph.Links.Where(l => l.Source == "solar").Sum(l => l.Value)); // total generation preserved
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu1").Value);
+        Assert.Equal(300, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu2").Value);
+        Assert.Equal(400, graph.Links.Single(l => l.Source == "solar" && l.Target == "solar#unmeasured").Value);
     }
 
     [Fact]

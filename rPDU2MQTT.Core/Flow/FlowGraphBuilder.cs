@@ -325,7 +325,7 @@ public static class FlowGraphBuilder
             // An intensive metric — voltage, frequency, power factor, state of charge, temperature.
             if (!FlowUnits.IsAdditive(metric)) return false;
 
-            if (leaf.ContainsKey(from)) return !GuessedSplit(from, to);   // a measured producer supplies a real figure
+            if (leaf.ContainsKey(from)) return !Undetermined(from, to);   // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
             // A feeder whose own source has stopped reporting carries an unknowable amount — not zero.
@@ -342,17 +342,20 @@ public static class FlowGraphBuilder
             return unmeasured.Count <= 1;
         }
 
-        // A measured parent's leftover shared evenly among several children nothing measures is a guess.
-        bool GuessedSplit(string from, string to)
+        // A child's share of a measured parent that nothing determines: more than one child left to apportion
+        // among, and nothing measured beneath this one.
+        bool Undetermined(string from, string to)
         {
             if (leaf.ContainsKey(to) || Inert(Mode(to))) return false;
             var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
-            if (kids.Any(c => Mode(c) == "untracked")) return false;
+            var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
+            if (untracked.Count > 0) return Mode(to) == "untracked" && untracked.Count > 1;
             var metered = kids.Count > 1 || Distributes(from) ? kids.Where(leaf.ContainsKey).ToList() : new List<string>();
             var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
-            if (estimated.Count <= 1 || estimated.Any(c => Mode(c) == "residual")) return false;
-            var path = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            return estimated.Sum(c => Need(c, path)) <= 0;
+            if (metered.Count == 0 && kids.Count <= 1) return false;
+            if (estimated.Count <= 1) return false;
+            if (estimated.Count(c => Mode(c) == "residual") == 1 && Mode(to) == "residual") return false;
+            return Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
         }
 
         // EdgeFlow(from -> to): how much flows along one link.
@@ -368,7 +371,7 @@ public static class FlowGraphBuilder
                 {
                     var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
                     var spare = Math.Max(0, produced - trackedDraw);
-                    return Mode(to) == "untracked" ? spare / untracked.Count : DemandShare(to, path);
+                    return Mode(to) == "untracked" ? spare : DemandShare(to, path);
                 }
 
                 // A metered circuit draws what its own clamp says, not a share of its parent scaled to
@@ -399,24 +402,25 @@ public static class FlowGraphBuilder
                 if (metered.Count > 0)
                 {
                     var meteredDraw = metered.Sum(c => DemandShare(c, path));
-                    // What the parent emits is still the ceiling: a link cannot carry more than its source
-                    // produces, so meters asking for more than there is are scaled to fit.
-                    var fit = meteredDraw > produced && meteredDraw > 0 ? produced / meteredDraw : 1.0;
-
-                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path) * fit;
+                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path);
                     if (Inert(Mode(to))) return 0;
 
-                    // Whatever the metered children leave is divided among the ones nothing measures.
+                    // What the metered children leave goes to the one child nothing measures; with several, each
+                    // carries only what is measured beneath it.
                     var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
                     if (estimated.Count == 0) return 0;
-                    var spare = Math.Max(0, produced - meteredDraw * fit);
-                    var demand = estimated.Sum(c => Need(c, path));
-                    return demand > 0 ? spare * Need(to, path) / demand : spare / estimated.Count;
+                    var spare = Math.Max(0, produced - meteredDraw);
+                    if (estimated.Count == 1) return spare;
+                    var residual = estimated.Where(c => Mode(c) == "residual").ToList();
+                    if (residual.Count == 1)
+                        return Mode(to) == "residual"
+                            ? Math.Max(0, spare - estimated.Where(c => Mode(c) != "residual").Sum(c => Need(c, path)))
+                            : Need(to, path);
+                    return Need(to, path);
                 }
 
                 if (kids.Count <= 1) return produced;
-                var totalDemand = kids.Sum(c => Need(c, path));
-                return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
+                return Need(to, path);
             }
 
             if (Inert(Mode(from))) return 0;
