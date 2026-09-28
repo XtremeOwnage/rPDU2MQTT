@@ -61,7 +61,6 @@ const counter = {
     { node: 'solar', label: 'Solar', kind: 'solar', values: [10, 12, 14, 16] },
     // This one's counter re-based partway through the window.
     { node: 'grid', label: 'Grid', kind: 'grid', values: [8, 9, 1, 3] },
-    // One stray zero between two ordinary readings: noise, not a reset.
     { node: 'battery', label: 'Battery', kind: 'battery', values: [40, 0, 41, 42] },
   ],
 };
@@ -338,7 +337,6 @@ const gridCells = query(query(sec, 'tr', true).find(r => r.textContent.includes(
 if (gridCells.some(c => /-/.test(c))) fail(`a counter re-base was charted as negative energy: ${gridCells.join(' | ')}`);
 // 8 → 9 is 1, the re-base to 1 counts as 1, and 1 → 3 is 2: 4 over three of the four readings.
 if (!gridCells.includes('4') || !gridCells.some(c => /3 of 4/.test(c))) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
-// A stray zero is held rather than read as a reset: 40 → 42 is 2, not the whole counter.
 const battCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Battery')), 'td', true).map(t => t.textContent);
 if (!battCells.includes('2') || battCells.some(c => /^4[12]$/.test(c))) fail(`a stray low reading booked the whole counter: ${battCells.join(' | ')}`);
 // …and the page says how much of what it drew came from a counter that had been re-based.

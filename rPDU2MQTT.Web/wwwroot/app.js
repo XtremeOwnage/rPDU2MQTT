@@ -11332,12 +11332,10 @@ function trendsPage(nav     , sections     , spec            ) {
 
   // A counter's readings are not a per-bar quantity; the differences between them are.
   //
-  // A reading below the last one is either noise or a reset. Noise — a publisher restarting, an empty payload
-  // read as zero — is followed by the usual reading again, so it counts nothing and the next bar is measured
-  // from the reading before it; otherwise the lowest reading would turn the whole lifetime counter into one
-  // interval's use. A reset — some counters re-base weekly, some when the device restarts — stays low, and
-  // the reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran
-  // before the reset is gone, so the figure may be short of the whole bar.
+  // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
+  // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
+  // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
+  // A single low reading followed by a normal one is noise, not a reset.
   const toDeltas = (b     ) => {
     let resets = 0;
     (b.series || []).forEach((s     ) => {
