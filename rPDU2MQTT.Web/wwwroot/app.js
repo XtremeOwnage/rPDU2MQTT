@@ -17020,13 +17020,6 @@ function revealWrap(input     ) {
   return wrap;
 }
 
-// Says where a section's on/off switch is. A control that simply vanishes reads as a missing feature and
-// sends the operator hunting for it; what turns it on is the config file, or the chart's values.
-function featurePointer(label        ) {
-  return el('div', { class: 'desc feature-pointer' },
-    el('span', { text: `${label} is turned on in the configuration file, or in the deployment's values — not here.` }));
-}
-
 // The History page's extras, each in the box its settings are in: where EmonCMS history comes from beside the
 // provider, where the store is beside its directory, and copying between backends in a box of its own.
 function historyBox(sec     , name        ) {
@@ -17246,7 +17239,6 @@ function renderConfigSection(node     , nav     , sections     ) {
       const feature = featureToggle(node);
       if (feature) {
         props = (props || []).filter((p     ) => p !== feature);
-        sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
       // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
