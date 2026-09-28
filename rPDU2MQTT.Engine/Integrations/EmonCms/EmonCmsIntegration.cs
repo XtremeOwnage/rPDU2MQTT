@@ -33,12 +33,14 @@ public sealed class EmonCmsIntegration
     // Provisioning writes to EmonCMS, so exactly one process may do it — two racing each other create
     // duplicate feeds. The lease is what makes it once.
     private readonly ISingleOwnerLease lease;
+    private readonly EmonCmsHistoryImport? import;
 
     public EmonCmsIntegration(
         Config cfg, EmonCmsStatus status, EmonCmsFeedSync feeds,
         Core.Flow.IFlowValueSource? live = null, IMessagePublisher? publisher = null,
-        ISingleOwnerLease? lease = null)
+        ISingleOwnerLease? lease = null, EmonCmsHistoryImport? import = null)
     {
+        this.import = import;
         this.lease = lease ?? new SoleOwnerLease();
         this.cfg = cfg;
         this.status = status;
@@ -184,6 +186,17 @@ public sealed class EmonCmsIntegration
 
     public IReadOnlyList<IntegrationAction> Actions =>
     [
+        .. import is null ? Array.Empty<IntegrationAction>() : new IntegrationAction[]
+        {
+            new("import-history", "Import history into local storage",
+                "Copy the history of every node's feeds into the bridge's own history, in the background. Only gaps are filled, so it is safe to run again.",
+                ActionEffect.Write,
+                (ctx, _) => Task.FromResult<object?>(import.Start(ctx.Int("days")))),
+            new("import-status", "Import progress",
+                "How far the history import has got.",
+                ActionEffect.Read,
+                (_, _) => Task.FromResult<object?>(import.Status())),
+        },
         new("stale", "Find old inputs and feeds",
             "List the inputs under this bridge's node that it no longer sends, and the feeds under its tags that the current configuration no longer provisions.",
             ActionEffect.Read,

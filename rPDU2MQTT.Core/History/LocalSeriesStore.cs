@@ -58,6 +58,9 @@ public sealed class LocalSeriesStore
 
     private SeriesTier Raw => Tiers[0];
 
+    // Writes, roll-ups, imports and trimming each take this, so two of them never grow the same file at once.
+    private readonly object gate = new();
+
     // --- Where a series lives ------------------------------------------------------------------------
 
     /// <summary>
@@ -110,8 +113,11 @@ public sealed class LocalSeriesStore
     public void Write(string node, string metric, DateTime atUtc, double value)
     {
         if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(metric) || !double.IsFinite(value)) return;
-        var chunk = Chunk(node, metric, Raw, atUtc);
-        chunk.Write(chunk.SlotOf(atUtc), value);
+        lock (gate)
+        {
+            var chunk = Chunk(node, metric, Raw, atUtc);
+            chunk.Write(chunk.SlotOf(atUtc), value);
+        }
     }
 
     /// <summary>
@@ -120,6 +126,7 @@ public sealed class LocalSeriesStore
     /// </summary>
     public void WriteSweep(DateTime atUtc, IEnumerable<(string Node, string Metric, double Value)> readings)
     {
+        lock (gate)
         foreach (var series in readings.Where(r => double.IsFinite(r.Value))
                                        .GroupBy(r => (r.Node, r.Metric)))
         {
@@ -127,6 +134,31 @@ public sealed class LocalSeriesStore
             var slot = chunk.SlotOf(atUtc);
             chunk.WriteMany(series.Select(r => (slot, r.Value)));
         }
+    }
+
+    /// <summary>Store another system's readings in every tier that keeps them, filling only empty slots; returns the slots written.</summary>
+    public int Import(string node, string metric, IEnumerable<(DateTime At, double Value)> readings, DateTime nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(metric)) return 0;
+        var points = readings.Where(r => double.IsFinite(r.Value) && r.At <= nowUtc)
+                             .Select(r => (At: DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.Value))
+                             .OrderBy(r => r.At).ToList();
+        var written = 0;
+        lock (gate)
+            foreach (var tier in Tiers)
+            {
+                var kept = nowUtc.AddDays(-tier.KeepDays);
+                // The last reading of each bucket, as a roll-up would have stored it.
+                var buckets = new Dictionary<DateTime, double>();
+                foreach (var (at, value) in points)
+                    if (at >= kept) buckets[Floor(at, tier.IntervalSeconds)] = value;
+                foreach (var group in buckets.GroupBy(b => ChunkStart(tier.Chunk, b.Key)))
+                {
+                    var chunk = Chunk(node, metric, tier, group.Key);
+                    written += chunk.WriteGaps(group.Select(b => (chunk.SlotOf(b.Key), b.Value)));
+                }
+            }
+        return written;
     }
 
     // --- Reading -------------------------------------------------------------------------------------
@@ -251,6 +283,7 @@ public sealed class LocalSeriesStore
     /// </summary>
     public void Rollup(string node, string metric, DateTime nowUtc, int? buckets = null)
     {
+        lock (gate)
         for (var i = 1; i < Tiers.Count; i++)
         {
             var coarse = Tiers[i];
@@ -310,6 +343,7 @@ public sealed class LocalSeriesStore
     public int Trim(DateTime nowUtc)
     {
         var gone = 0;
+        lock (gate)
         foreach (var folder in Folders())
             foreach (var tier in Tiers)
             {

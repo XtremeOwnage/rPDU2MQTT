@@ -484,6 +484,10 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Flow.IMeasurementHistory>(sp =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg,
                                            sp.GetRequiredService<Core.History.LocalSeriesStore>()));
+        services.AddSingleton(sp => new Integrations.EmonCms.EmonCmsHistoryImport(
+            cfg, sp.GetRequiredService<Core.History.LocalSeriesStore>(),
+            sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
+            sp.GetService<Core.ISnapshotCache>(), sp.GetService<LeaderState>()));
         services.AddHostedService(sp => new Services.LocalHistoryWriterService(
             cfg, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
             sp.GetRequiredService<Core.History.LocalSeriesStore>(),
