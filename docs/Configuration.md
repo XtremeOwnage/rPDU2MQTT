@@ -522,6 +522,18 @@ with the container at the next restart. `LocalPath` overrides it when set — le
 says which directory is in use, how many series are in it and how large it is. A read-only
 mount is reported by the backend test rather than discovered at the first sweep.
 
+**Copying history between backends.** The History page's **Copy history** panel copies every node's history
+from one backend to another in the background, and shows how far it has got. Any backend can be read: `local`,
+`emoncms`, `prometheus`, `homeassistant`. Only `local` and `emoncms` can be written: Prometheus takes past
+samples only through a remote-write receiver, and Home Assistant only as hourly statistics. The copy reads each
+local tier's span at that tier's interval (the last `LocalRawKeepDays` at the raw interval, then a minute, an
+hour, a day), and by default writes only where the destination holds nothing: readings already there are kept, and a second
+run writes nothing. **When both have a reading** can instead be set to replace the destination's with the
+source's (`conflicts=replace`); readings only the destination has are left alone. Replacing is available for
+`local` only, since EmonCMS has no way to delete a range of points. A gap in the source stays a gap. EmonCMS is written only into feeds provisioning has already
+created. Only the leader writes to `local`. `days` limits how far back it reads (empty means ten years), and the
+API is `POST /api/history/copy?from=emoncms&to=local&days=45&conflicts=keep`, with `GET` for progress.
+
 The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
 unchanged: they answer for whatever was exported to them, including readings from before this bridge existed.
 

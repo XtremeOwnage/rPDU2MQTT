@@ -484,6 +484,16 @@ public static class ServiceConfiguration
         services.AddSingleton<Core.Flow.IMeasurementHistory>(sp =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg,
                                            sp.GetRequiredService<Core.History.LocalSeriesStore>()));
+        // A copy reads weeks at a time, so its backends wait longer than a page's reads do.
+        services.AddSingleton(sp =>
+        {
+            var store = sp.GetRequiredService<Core.History.LocalSeriesStore>();
+            var slow = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            return new Services.HistoryCopyService(cfg, new Services.FlowHistoryRouter(slow, cfg, store).Backends,
+                [new Integrations.Local.LocalHistoryTarget(cfg, store), new Integrations.EmonCms.EmonCmsHistoryTarget(slow, cfg)],
+                store, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
+                sp.GetService<Core.ISnapshotCache>(), sp.GetService<LeaderState>());
+        });
         services.AddHostedService(sp => new Services.LocalHistoryWriterService(
             cfg, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
             sp.GetRequiredService<Core.History.LocalSeriesStore>(),

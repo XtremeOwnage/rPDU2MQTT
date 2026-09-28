@@ -172,19 +172,19 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
                 var entity = series[0].TryGetProperty("entity_id", out var e) ? e.GetString() : null;
                 if (entity is null || !entityOf.TryGetValue(entity, out var node)) continue;
 
-                var points = new List<(DateTime At, double Value)>();
+                // A state that is not a number ("unavailable") is kept as null: it ends the reading before it.
+                var points = new List<(DateTime At, double? Value)>();
                 foreach (var point in series.EnumerateArray())
                 {
-                    if (!point.TryGetProperty("state", out var st)
-                        || !double.TryParse(st.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
-                        || !double.IsFinite(v)) continue;
+                    if (!point.TryGetProperty("state", out var st)) continue;
+                    double? v = double.TryParse(st.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && double.IsFinite(d) ? d : null;
                     var when = point.TryGetProperty("last_changed", out var lc) ? lc.GetString()
                              : point.TryGetProperty("last_updated", out var lu) ? lu.GetString() : null;
                     if (!DateTime.TryParse(when, CultureInfo.InvariantCulture,
                             DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var ts)) continue;
                     points.Add((ts, v));
                 }
-                if (points.Count == 0) continue;
+                if (points.All(p => p.Value is null)) continue;
                 points.Sort((a, b) => a.At.CompareTo(b.At));
 
                 // Both walked once, in time order, rather than searching the points per step.

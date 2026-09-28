@@ -27,6 +27,7 @@ public class HistoryConfig
     /// </summary>
     [DefaultValue(false)]
     [Description("Let the history backend supply a value for any node nothing live is reporting. Off by default: a stored value is older than a live one, and for a node whose source has stopped it replaces an honest \"no data\" with a figure that looks current.")]
+    [SettingGroup("Reading")]
     public bool ValueFallback { get; set; }
 
     [DefaultValue(false)]
@@ -37,6 +38,7 @@ public class HistoryConfig
     [DefaultValue("local")]
     [Description("Where past readings come from: 'local' (kept by the bridge itself, no other service needed), 'prometheus', 'emoncms' or 'homeassistant'.")]
     [AllowedValues("local", "prometheus", "emoncms", "homeassistant")]
+    [SettingGroup("Reading")]
     public string Provider { get; set; } = "local";
 
     /// <summary>
@@ -44,6 +46,7 @@ public class HistoryConfig
     /// </summary>
     [Description("Prometheus base URL to query, e.g. http://prometheus:9090 . This is the server that scrapes this bridge, not the /metrics endpoint it exposes.")]
     [VisibleWhen(nameof(Provider), "prometheus")]
+    [SettingGroup("Reading")]
     public string? PrometheusUrl { get; set; }
 
     /// <summary>
@@ -55,11 +58,13 @@ public class HistoryConfig
     [Display(Name = "Keep a local copy of every reading")]
     [Description("Keep a copy of every reading in the bridge's own store, whether or not it is the backend the pages read from. On by default: a store nothing wrote to is empty on the day you want it.")]
     [FeatureToggle]
+    [SettingGroup("Local storage")]
     public bool LocalEnabled { get; set; } = true;
 
     [Display(Name = "Local history directory")]
     [Description("Where the bridge keeps its own history: a directory of fixed-interval files, one per series. Left empty it uses the directory the deployment mounted for it (RPDU2MQTT_HISTORY_DIRECTORY), else one beside the program — which goes with the container when it restarts.")]
     [DefaultValue("")]
+    [SettingGroup("Local storage")]
     public string LocalPath { get; set; } = "";
 
     [DefaultValue(7)]
@@ -93,5 +98,6 @@ public class HistoryConfig
     [DefaultValue(30)]
     [Range(1, 600)]
     [Description("How far either side of the requested moment to look for a sample, in seconds. A scrape or feed interval longer than this returns nothing rather than a value from a different time.")]
+    [SettingGroup("Reading")]
     public int ToleranceSeconds { get; set; } = 30;
 }

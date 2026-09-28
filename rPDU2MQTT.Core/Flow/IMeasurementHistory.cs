@@ -23,6 +23,20 @@ public interface IMeasurementHistory
         return out_;
     }
 
+    /// <summary>The readings each node has in [from, to), at most one per interval, and none where the backend holds none.</summary>
+    async Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
+    {
+        var steps = new List<DateTime>();
+        for (var at = fromUtc; at < toUtc; at = at.AddSeconds(Math.Max(1, intervalSeconds))) steps.Add(at);
+        var series = await SeriesAsync(nodeIds, metric, steps, ct);
+        var found = new Dictionary<string, List<(DateTime, double)>>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < steps.Count && i < series.Count; i++)
+            foreach (var (node, value) in series[i])
+                (found.TryGetValue(node, out var list) ? list : found[node] = []).Add((steps[i], value));
+        return found.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<(DateTime, double)>)kv.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>The value each node held at <paramref name="atUtc"/>; nodes with no data are omitted.</summary>
     Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct);

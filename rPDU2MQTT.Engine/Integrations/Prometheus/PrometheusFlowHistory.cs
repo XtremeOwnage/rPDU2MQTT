@@ -115,6 +115,37 @@ public sealed class PrometheusFlowHistory(HttpClient http, Config cfg) : IMeasur
         }
     }
 
+    /// <summary>The samples of each node in the window, at most one per interval; Prometheus's five-minute look-back is not used to fill gaps.</summary>
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<(DateTime At, double Value)>>> ReadingsAsync(
+        IReadOnlyCollection<string> nodeIds, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds, CancellationToken ct)
+    {
+        var found = new Dictionary<string, IReadOnlyList<(DateTime, double)>>(StringComparer.OrdinalIgnoreCase);
+        var baseUrl = (cfg.History.PrometheusUrl ?? "").TrimEnd('/');
+        var interval = Math.Max(1, intervalSeconds);
+        if (baseUrl.Length == 0 || nodeIds.Count == 0 || toUtc <= fromUtc) return found;
+
+        // Each step answers for the interval that ends at it, so the steps sit at the end of each interval.
+        var unix = new List<long>();
+        var start = new DateTimeOffset(DateTime.SpecifyKind(fromUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
+        var end = new DateTimeOffset(DateTime.SpecifyKind(toUtc, DateTimeKind.Utc)).ToUnixTimeSeconds();
+        for (var at = start + interval; at <= end; at += interval) unix.Add(at);
+        if (unix.Count == 0) return found;
+
+        var query = PrometheusWire.NodeQueryLast(MetricsHelper.PrometheusFlowMetricName(metric, cfg), nodeIds, interval);
+        var url = $"{baseUrl}/api/v1/query_range?query={Uri.EscapeDataString(query)}&start={unix[0]}&end={unix[^1]}&step={interval}s";
+        var response = await http.GetAsync(url, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Prometheus answered {(int)response.StatusCode}: {Trim(body)}");
+
+        var steps = PrometheusWire.Range(body, unix);
+        var lists = new Dictionary<string, List<(DateTime, double)>>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < steps.Count; i++)
+            foreach (var (node, value) in steps[i])
+                (lists.TryGetValue(node, out var l) ? l : lists[node] = []).Add((DateTimeOffset.FromUnixTimeSeconds(unix[i] - interval).UtcDateTime, value));
+        foreach (var (node, l) in lists) found[node] = l;
+        return found;
+    }
+
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {

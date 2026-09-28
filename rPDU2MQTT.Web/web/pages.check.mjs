@@ -47,13 +47,12 @@ for (const kept of ['MQTT', 'History', 'Diagnostics', 'GUI', 'Status'])
 for (const section of ['Health', 'PlanStorage', 'Debug', 'Api', 'Cache'])
   if (!schema.some(n => n.key === section)) fail(`${section} is missing from the schema, so nothing can set it`);
 
-// A page whose feature is switched elsewhere says where, and offers no switch of its own.
+// A page whose feature is switched elsewhere offers no switch of its own, and no sentence about it either.
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'GUI').click();
 await wait(100);
 const gui = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
-const pointer = query(gui, '.feature-pointer')?.textContent || '';
-if (!/configuration file/.test(pointer) || !/values/.test(pointer))
-  fail(`the page does not say where its switch is: "${pointer}"`);
+if (/configuration file/.test(gui.textContent || ''))
+  fail('the page still narrates where its on/off switch is');
 if (query(gui, '.field', true).some(f => f.dataset?.key === 'Enabled'))
   fail('the feature switch is still rendered on the page');
 

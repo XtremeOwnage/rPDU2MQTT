@@ -63,6 +63,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.Discovery.TopicIndex topicIndex;
     private readonly Core.Flow.IMeasurementHistory? history;
     private readonly Core.History.LocalSeriesStore? localHistory;
+    private readonly HistoryCopyService? historyCopy;
     // What the last save could not apply to this process. Reported on the status card and in the header.
     private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -76,7 +77,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // What each Modbus device last did, for the diagnostics page.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null)
+    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -88,6 +89,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.topicIndex = topicIndex ?? new Core.Discovery.TopicIndex();
         this.history = history;
         this.localHistory = localHistory;
+        this.historyCopy = historyCopy;
         this.pending = pending ?? new Core.RestartPending();
         this.deployOperator = deployOperator;
         this.modbusDevices = modbusDevices;
@@ -1735,7 +1737,22 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 series,
                 bytes,
                 tiers = localHistory.Tiers.Select(t => new { t.Name, t.IntervalSeconds, t.KeepDays }).ToList(),
+                oldest = localHistory.Oldest(),
             }, ConfigSchema.Json);
+        });
+
+        // Copying history between backends: which can be read and written, how far a copy has got, and starting one.
+        app.MapGet("/api/history/copy", () => historyCopy is null
+            ? Results.Json(new { ok = false, message = "History copying is not available in this process." }, ConfigSchema.Json)
+            : Results.Json(new { ok = true, backends = historyCopy.Backends(), status = historyCopy.Status() }, ConfigSchema.Json));
+
+        app.MapPost("/api/history/copy", (HttpContext ctx) =>
+        {
+            if (historyCopy is null) return Results.Json(new { ok = false, message = "History copying is not available in this process." }, ConfigSchema.Json);
+            var q = ctx.Request.Query;
+            var days = int.TryParse(q["days"], out var d) ? d : 0;
+            var replace = string.Equals(q["conflicts"], "replace", StringComparison.OrdinalIgnoreCase);
+            return Results.Json(historyCopy.Start(q["from"].ToString(), q["to"].ToString(), days, replace), ConfigSchema.Json);
         });
 
         app.MapPost("/api/test/history", async (HttpContext ctx) =>

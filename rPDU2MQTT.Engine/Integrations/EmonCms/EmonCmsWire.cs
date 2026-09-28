@@ -113,13 +113,30 @@ internal static class EmonCmsWire
     public static double?[] Series(string json, IReadOnlyList<long> atUnixMs)
     {
         var answers = new double?[atUnixMs.Count];
+        var points = Points(json);
+        if (points.Count == 0) return answers;
+
+        // The instants are asked for in order too, so both are walked once rather than searched per step.
+        var order = Enumerable.Range(0, atUnixMs.Count).OrderBy(i => atUnixMs[i]).ToList();
+        var cursor = 0;
+        double? held = null;
+        foreach (var i in order)
+        {
+            while (cursor < points.Count && points[cursor].At <= atUnixMs[i]) held = points[cursor++].Value;
+            answers[i] = held;
+        }
+        return answers;
+    }
+
+    /// <summary>Every real point of a <c>/feed/data.json</c> answer, ascending; the nulls EmonCMS puts in gaps are left out.</summary>
+    public static List<(long At, double Value)> Points(string json)
+    {
+        // The payload is ascending, but a feed is not a contract: sorted here so a walk is safe.
+        var points = new List<(long At, double Value)>();
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return answers;
-
-            // The payload is ascending, but a feed is not a contract: sorted here so a walk is safe.
-            var points = new List<(long At, double Value)>();
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return points;
             foreach (var point in doc.RootElement.EnumerateArray())
             {
                 if (point.ValueKind != JsonValueKind.Array) continue;
@@ -132,21 +149,10 @@ internal static class EmonCmsWire
                 if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || !double.IsFinite(v)) continue;
                 points.Add((ts, v));
             }
-            points.Sort((a, b) => a.At.CompareTo(b.At));
-            if (points.Count == 0) return answers;
-
-            // The instants are asked for in order too, so both are walked once rather than searched per step.
-            var order = Enumerable.Range(0, atUnixMs.Count).OrderBy(i => atUnixMs[i]).ToList();
-            var cursor = 0;
-            double? held = null;
-            foreach (var i in order)
-            {
-                while (cursor < points.Count && points[cursor].At <= atUnixMs[i]) held = points[cursor++].Value;
-                answers[i] = held;
-            }
-            return answers;
         }
-        catch (JsonException) { return answers; }
+        catch (JsonException) { /* an unreadable answer holds no points */ }
+        points.Sort((a, b) => a.At.CompareTo(b.At));
+        return points;
     }
 
     public static double? PointAt(string json, long atUnixMs)

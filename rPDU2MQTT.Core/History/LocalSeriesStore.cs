@@ -58,6 +58,9 @@ public sealed class LocalSeriesStore
 
     private SeriesTier Raw => Tiers[0];
 
+    // Writes, roll-ups, imports and trimming each take this, so two of them never grow the same file at once.
+    private readonly object gate = new();
+
     // --- Where a series lives ------------------------------------------------------------------------
 
     /// <summary>
@@ -110,8 +113,11 @@ public sealed class LocalSeriesStore
     public void Write(string node, string metric, DateTime atUtc, double value)
     {
         if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(metric) || !double.IsFinite(value)) return;
-        var chunk = Chunk(node, metric, Raw, atUtc);
-        chunk.Write(chunk.SlotOf(atUtc), value);
+        lock (gate)
+        {
+            var chunk = Chunk(node, metric, Raw, atUtc);
+            chunk.Write(chunk.SlotOf(atUtc), value);
+        }
     }
 
     /// <summary>
@@ -120,6 +126,7 @@ public sealed class LocalSeriesStore
     /// </summary>
     public void WriteSweep(DateTime atUtc, IEnumerable<(string Node, string Metric, double Value)> readings)
     {
+        lock (gate)
         foreach (var series in readings.Where(r => double.IsFinite(r.Value))
                                        .GroupBy(r => (r.Node, r.Metric)))
         {
@@ -127,6 +134,33 @@ public sealed class LocalSeriesStore
             var slot = chunk.SlotOf(atUtc);
             chunk.WriteMany(series.Select(r => (slot, r.Value)));
         }
+    }
+
+    /// <summary>Store another system's readings in every tier that keeps them, filling only empty slots unless `replace`; returns the slots written.</summary>
+    public int Import(string node, string metric, IEnumerable<(DateTime At, double Value)> readings, DateTime nowUtc, bool replace = false)
+    {
+        if (string.IsNullOrWhiteSpace(node) || string.IsNullOrWhiteSpace(metric)) return 0;
+        var points = readings.Where(r => double.IsFinite(r.Value) && r.At <= nowUtc)
+                             .Select(r => (At: DateTime.SpecifyKind(r.At, DateTimeKind.Utc), r.Value))
+                             .OrderBy(r => r.At).ToList();
+        var written = 0;
+        lock (gate)
+            foreach (var tier in Tiers)
+            {
+                var kept = nowUtc.AddDays(-tier.KeepDays);
+                // The last reading of each bucket, as a roll-up would have stored it.
+                var buckets = new Dictionary<DateTime, double>();
+                foreach (var (at, value) in points)
+                    if (at >= kept) buckets[Floor(at, tier.IntervalSeconds)] = value;
+                foreach (var group in buckets.GroupBy(b => ChunkStart(tier.Chunk, b.Key)))
+                {
+                    var chunk = Chunk(node, metric, tier, group.Key);
+                    var slots = group.Select(b => (chunk.SlotOf(b.Key), b.Value)).ToList();
+                    if (replace) { chunk.WriteMany(slots); written += slots.Count; }
+                    else written += chunk.WriteGaps(slots);
+                }
+            }
+        return written;
     }
 
     // --- Reading -------------------------------------------------------------------------------------
@@ -231,6 +265,74 @@ public sealed class LocalSeriesStore
         return values;
     }
 
+    /// <summary>The readings a series holds in [from, to), from the tier stored at `intervalSeconds` if there is one, else the finest.</summary>
+    public List<(DateTime At, double Value)> Readings(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds)
+    {
+        var found = Read(Tiers.FirstOrDefault(t => t.IntervalSeconds == intervalSeconds) ?? Raw);
+        // A coarser tier is filled by roll-ups; until one has run, the readings are only in the finest.
+        return found.Count > 0 || Tiers.All(t => t.IntervalSeconds != intervalSeconds) ? found : Read(Raw);
+
+        List<(DateTime, double)> Read(SeriesTier tier)
+        {
+            var points = new List<(DateTime, double)>();
+            for (var chunkAt = ChunkStart(tier.Chunk, fromUtc); chunkAt < toUtc; chunkAt = Next(tier.Chunk, chunkAt))
+            {
+                var chunk = ExistingChunk(node, metric, tier, chunkAt);
+                if (chunk is null) continue;
+                var first = Math.Max(0, chunk.SlotOf(fromUtc));
+                var last = Math.Min(chunk.Slots() - 1, chunk.SlotOf(toUtc.AddTicks(-1)));
+                if (last < first) continue;
+                var window = chunk.Read(first, (int)(last - first + 1));
+                for (var i = 0; i < window.Length; i++)
+                    if (!double.IsNaN(window[i])) points.Add((chunk.TimeOf(first + i), window[i]));
+            }
+            return points;
+        }
+    }
+
+    /// <summary>
+    /// The stretches of [from, to) the tier stored at `intervalSeconds` holds nothing for; empty when it is complete. A raw
+    /// stretch shorter than `minimumRawGap` slots (a missed sweep) does not count, and stretches within `mergeWithin` slots of
+    /// each other are one, so a scatter of gaps is a few reads rather than hundreds.
+    /// </summary>
+    public List<(DateTime From, DateTime To)> Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds,
+                                                      int minimumRawGap = 3, int mergeWithin = 30)
+    {
+        var tier = Tiers.FirstOrDefault(t => t.IntervalSeconds == intervalSeconds);
+        if (tier is null) return [(fromUtc, toUtc)];
+        var shortest = tier == Raw ? Math.Max(1, minimumRawGap) : 1;
+        var joinGap = TimeSpan.FromSeconds((double)tier.IntervalSeconds * Math.Max(0, mergeWithin));
+        var runs = new List<(DateTime From, DateTime To)>();
+        void Add(DateTime from, DateTime to)
+        {
+            if (to <= from) return;
+            if (runs.Count > 0 && from - runs[^1].To <= joinGap) runs[^1] = (runs[^1].From, to);
+            else runs.Add((from, to));
+        }
+
+        for (var chunkAt = ChunkStart(tier.Chunk, fromUtc); chunkAt < toUtc; chunkAt = Next(tier.Chunk, chunkAt))
+        {
+            var start = chunkAt < fromUtc ? fromUtc : chunkAt;
+            var end = Next(tier.Chunk, chunkAt) < toUtc ? Next(tier.Chunk, chunkAt) : toUtc;
+            var chunk = ExistingChunk(node, metric, tier, chunkAt);
+            if (chunk is null) { Add(start, end); continue; }
+            var first = chunk.SlotOf(start);
+            var count = (int)Math.Ceiling((end - chunk.TimeOf(first)).TotalSeconds / tier.IntervalSeconds);
+            var values = chunk.Read(first, count);
+            for (var i = 0; i < values.Length;)
+            {
+                if (!double.IsNaN(values[i])) { i++; continue; }
+                var run = i;
+                while (i < values.Length && double.IsNaN(values[i])) i++;
+                if (i - run < shortest) continue;
+                var gapFrom = chunk.TimeOf(first + run);
+                var gapTo = chunk.TimeOf(first + i);
+                Add(gapFrom < start ? start : gapFrom, gapTo > end ? end : gapTo);
+            }
+        }
+        return runs;
+    }
+
     // --- Keeping it small ----------------------------------------------------------------------------
 
     /// <summary>Every series the store holds, as (node, metric) cannot be recovered from a folder name.</summary>
@@ -245,12 +347,45 @@ public sealed class LocalSeriesStore
         catch (IOException) { return []; }
     }
 
+    /// <summary>The oldest reading any series holds, at the finest time known for it, or null when the store is empty.</summary>
+    public DateTime? Oldest()
+    {
+        DateTime? oldest = null;
+        foreach (var tier in Tiers)
+        {
+            var inTier = OldestIn(tier);
+            // A coarser bucket starts before the reading it holds, so it only counts when it ends before what a finer tier has.
+            if (inTier is { } t && (oldest is null || t.AddSeconds(tier.IntervalSeconds) <= oldest)) oldest = t;
+        }
+        return oldest;
+    }
+
+    private DateTime? OldestIn(SeriesTier tier)
+    {
+        DateTime? oldest = null;
+        // The earliest chunk of each series, by name, then its first reading.
+        var chunks = Folders().Select(f => Path.Combine(Root, f, tier.Name))
+            .Where(Directory.Exists)
+            .Select(d => Directory.GetFiles(d, "*.rts").Order(StringComparer.Ordinal).FirstOrDefault())
+            .OfType<string>();
+        foreach (var path in chunks)
+        {
+            var chunk = SeriesFile.Open(path);
+            if (chunk is null || (oldest is not null && chunk.Start >= oldest)) continue;
+            var values = chunk.Read(0, (int)Math.Min(chunk.Slots(), int.MaxValue));
+            var first = Array.FindIndex(values, v => !double.IsNaN(v));
+            if (first >= 0 && (oldest is null || chunk.TimeOf(first) < oldest)) oldest = chunk.TimeOf(first);
+        }
+        return oldest;
+    }
+
     /// <summary>
     /// Fill the coarser tiers from the finer ones, for the recent buckets only. Re-running it changes
     /// nothing: a bucket's value is the last reading in it, whenever it is worked out.
     /// </summary>
     public void Rollup(string node, string metric, DateTime nowUtc, int? buckets = null)
     {
+        lock (gate)
         for (var i = 1; i < Tiers.Count; i++)
         {
             var coarse = Tiers[i];
@@ -310,6 +445,7 @@ public sealed class LocalSeriesStore
     public int Trim(DateTime nowUtc)
     {
         var gone = 0;
+        lock (gate)
         foreach (var folder in Folders())
             foreach (var tier in Tiers)
             {

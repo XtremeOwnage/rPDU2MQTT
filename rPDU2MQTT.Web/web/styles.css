@@ -1999,6 +1999,14 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 
 /* Settings the schema groups: drawn together, with the group's name on the border. */
 .setting-group { margin: 14px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.setting-group > .grid > .field:first-child { margin-top:0; }
+.setting-group > .grid { padding-top:var(--sp-2); }
+.history-facts { display:flex; flex-wrap:wrap; gap:var(--sp-2) var(--sp-6); margin:var(--sp-3) 0 var(--sp-2); }
+.history-fact { display:flex; flex-direction:column; gap:2px; min-width:120px; }
+.history-fact strong { font-size:14px; font-variant-numeric:tabular-nums; word-break:break-all; }
+.history-copy-status { margin-top:var(--sp-3); padding:var(--sp-3); border:1px solid var(--line-soft); border-radius:var(--r-sm); background:var(--panel2); }
+.history-copy-status .progress { max-width:none; height:8px; margin:var(--sp-2) 0 0; }
+.history-copy-head { display:flex; align-items:center; gap:var(--sp-2); }
 .setting-group > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
 
 /* Diagnostics: the directories this process writes to. */

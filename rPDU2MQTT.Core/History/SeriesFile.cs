@@ -129,6 +129,32 @@ public sealed class SeriesFile
         stream.Flush();
     }
 
+    /// <summary>Write readings only into slots that hold none, so what is already stored is never replaced. Returns how many were written.</summary>
+    public int WriteGaps(IEnumerable<(long Slot, double Value)> readings)
+    {
+        var written = 0;
+        using var stream = new FileStream(Path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        Span<byte> slotBytes = stackalloc byte[SlotBytes];
+        foreach (var (slot, value) in readings.OrderBy(r => r.Slot))
+        {
+            if (slot < 0 || !double.IsFinite(value)) continue;
+            var want = HeaderBytes + slot * SlotBytes;
+            if (stream.Length < want) Fill(stream, Math.Max(stream.Length, HeaderBytes), want);
+            else if (stream.Length >= want + SlotBytes)
+            {
+                stream.Position = want;
+                stream.ReadExactly(slotBytes);
+                if (!double.IsNaN(BinaryPrimitives.ReadDoubleLittleEndian(slotBytes))) continue;
+            }
+            stream.Position = want;
+            BinaryPrimitives.WriteDoubleLittleEndian(slotBytes, value);
+            stream.Write(slotBytes);
+            written++;
+        }
+        stream.Flush();
+        return written;
+    }
+
     /// <summary>`count` readings from `slot`, with NaN wherever nothing was written — including past the end.</summary>
     public double[] Read(long slot, int count)
     {

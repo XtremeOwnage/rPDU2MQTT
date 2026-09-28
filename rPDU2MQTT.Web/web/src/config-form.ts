@@ -454,41 +454,166 @@ function revealWrap(input: any) {
   return wrap;
 }
 
-// Says where a section's on/off switch is. A control that simply vanishes reads as a missing feature and
-// sends the operator hunting for it; what turns it on is the config file, or the chart's values.
-function featurePointer(label: string) {
-  return el('div', { class: 'desc feature-pointer' },
-    el('span', { text: `${label} is turned on in the configuration file, or in the deployment's values — not here.` }));
+// The History page's extras, each in the box its settings are in: where EmonCMS history comes from beside the
+// provider, where the store is beside its directory, and copying between backends in a box of its own.
+function historyBox(sec: any, name: string) {
+  const found = [...sec.querySelectorAll('fieldset.setting-group')].find((f: any) => f.querySelector('legend')?.textContent === name);
+  if (found) return found;
+  const box = el('fieldset', { class: 'setting-group' }, el('legend', { text: name }));
+  sec.appendChild(box);
+  return box;
 }
 
-// Reading history from EmonCMS reads the feeds the EmonCMS export writes — same server, same key, same feed
-// names — so there is nothing to configure for it here. Point at the page that does configure it rather
-// than leave the page looking empty, or worse, duplicate the server and key into a second place to edit.
+// Reading history from EmonCMS reads the feeds the EmonCMS export writes, so point at the page that configures it.
 function wireHistoryProvider(sec: any) {
   const wrap = el('div', { class: 'desc feature-pointer' });
   wrap.appendChild(el('span', { text: 'EmonCMS history reads the feeds the EmonCMS export writes. Its server, API key and feed names are configured on the EmonCMS page. ' }));
   const go = btn('EmonCMS');
   go.onclick = () => jumpToSection('EmonCMS');
   wrap.appendChild(go);
-  sec.appendChild(wrap);
+  historyBox(sec, 'Reading').appendChild(wrap);
 
   const sync = () => show(wrap, (state.data.History || {}).Provider === 'emoncms');
   sync();
   visibilitySyncs.push(sync);
 
-  // LocalPath left empty resolves at runtime — to the directory the deployment mounted, else one beside the
-  // program. The box is then blank on a page that is in fact writing somewhere, so say where.
-  const where = el('div', { class: 'desc feature-pointer' });
-  sec.appendChild(where);
+  // LocalPath left empty resolves at runtime, so say where the readings are actually going.
+  const where = el('div', { class: 'history-facts' });
+  historyBox(sec, 'Local storage').appendChild(where);
   api('/api/history/store').then((r: any) => {
     const b = r?.body;
     if (!b?.ok) { where.hidden = true; return; }
     const size = b.bytes > 1024 * 1024 ? `${(b.bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b.bytes / 1024)} KB`;
-    where.textContent = `${b.recording ? 'Writing to' : 'Not writing; the store is'} ${b.path}`
-      + `${b.fromEnvironment ? ' (from RPDU2MQTT_HISTORY_DIRECTORY, because LocalPath is empty)' : ''}`
-      + ` — ${b.series} series, ${size}. Retention: `
-      + (b.tiers || []).map((t: any) => `${t.name} ${t.keepDays}d`).join(', ') + '.';
+    where.append(
+      fact(b.recording ? 'Writing to' : 'Not writing; stored in', b.path, b.fromEnvironment ? 'from RPDU2MQTT_HISTORY_DIRECTORY, because the directory setting is empty' : ''),
+      fact('Oldest reading', b.oldest ? when(b.oldest) : 'none yet'),
+      fact('Series', String(b.series)),
+      fact('Size', size));
   }).catch(() => { where.hidden = true; });
+
+  historyBox(sec, 'Copy history').appendChild(historyCopyPanel());
+}
+
+function fact(label: string, value: string, note = '') {
+  return el('div', { class: 'history-fact' }, el('span', { class: 'desc', text: label }), el('strong', { text: value }),
+    note ? el('span', { class: 'desc', text: note }) : null);
+}
+
+function when(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function every(seconds: number) {
+  return seconds >= 86400 ? 'a day' : seconds >= 3600 ? 'an hour' : seconds >= 60 ? 'a minute' : `${seconds}s`;
+}
+
+function duration(ms: number) {
+  const m = Math.round(ms / 60000);
+  return m < 1 ? 'under a minute' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+// Copy every node's history from one backend into another; only what the destination lacks is written.
+function historyCopyPanel() {
+  const wrap = el('div');
+  const from = el('select') as HTMLSelectElement;
+  const to = el('select') as HTMLSelectElement;
+  const days = el('input', { type: 'number', min: '0', step: '1', placeholder: 'all (ten years)' }) as HTMLInputElement;
+  const conflicts = el('select') as HTMLSelectElement;
+  const keep = el('option', { value: 'keep', text: 'Fill gaps only — keep what the destination has' });
+  const replace = el('option', { value: 'replace', text: 'Replace with the source\'s reading' });
+  conflicts.append(keep, replace);
+  const conflictNote = el('div', { class: 'desc' });
+  conflictNote.hidden = true;
+  let backends: any[] = [];
+  // Replacing is only offered where the destination can actually replace a reading.
+  const syncConflicts = () => {
+    const why = backends.find((x: any) => x.id === to.value)?.replace;
+    replace.disabled = !!why;
+    if (why) conflicts.value = 'keep';
+    // Said only when replacing is not on offer, and why.
+    conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.` : '';
+    conflictNote.hidden = !why;
+  };
+  to.onchange = syncConflicts;
+  conflicts.onchange = syncConflicts;
+  const go = btn('Copy history', 'primary');
+  const field = (label: string, control: any, note = '') =>
+    el('div', { class: 'field' }, el('label', { text: label }), note ? el('div', { class: 'desc', text: note }) : null, control);
+  wrap.append(
+    el('div', { class: 'grid' },
+      field('From', from),
+      field('To', to, 'Only local and EmonCMS can be written.'),
+      field('Days back', days, 'Empty is ten years.'),
+      el('div', { class: 'field' }, el('label', { text: 'When both have a reading' }), conflictNote, conflicts)),
+    el('div', { class: 'ld-toolbar' }, go));
+
+  // The run itself: what it is doing, how far through, and how long is left.
+  const pill = el('span', { class: 'pill' });
+  const route = el('strong');
+  const bar = el('span', { style: { width: '0%' } });
+  const facts = el('div', { class: 'history-facts' });
+  const note = el('div', { class: 'desc' });
+  const status = el('div', { class: 'history-copy-status' }, el('div', { class: 'history-copy-head' }, pill, route), el('div', { class: 'progress' }, bar), facts, note);
+  wrap.appendChild(status);
+
+  let timer: any = null;
+  const render = (s: any) => {
+    if (!s) return;
+    const started = s.started ? new Date(s.started).getTime() : 0;
+    const ended = s.finished ? new Date(s.finished).getTime() : Date.now();
+    const done = s.readsDone || 0, total = s.reads || 0;
+    const stopped = !s.running && typeof s.message === 'string' && s.message.startsWith('Copy stopped');
+    status.hidden = !started;
+    pill.className = 'pill ' + (s.running ? 'warn' : stopped || s.readsFailed ? 'bad' : 'good');
+    pill.textContent = s.running ? 'Running' : stopped ? 'Stopped' : 'Finished';
+    route.textContent = s.from ? `${s.from} → ${s.to}, ${s.conflicts === 'replace' ? 'replacing' : 'filling gaps'}` : '';
+    const pct = total ? Math.min(100, (done / total) * 100) : 0;
+    bar.style.width = `${s.running ? pct : total ? pct : 0}%`;
+    facts.replaceChildren(
+      fact('Progress', total ? `${pct.toFixed(1)}%` : 'starting', total ? `${done.toLocaleString()} of ${total.toLocaleString()} reads` : ''),
+      s.running && s.window ? fact('Reading now', `${when(s.window.from)} → ${when(s.window.to)}`, `every ${every(s.window.intervalSeconds)}`) : null,
+      fact('Copied back to', s.oldestCopied ? when(s.oldestCopied) : 'nothing yet', s.newestCopied ? `newest ${when(s.newestCopied)}` : ''),
+      fact('Readings copied', (s.readingsCopied || 0).toLocaleString()),
+      fact('Written', (s.slotsWritten || 0).toLocaleString()),
+      fact('Already complete', s.seriesChecked ? `${(100 * (s.seriesComplete || 0) / s.seriesChecked).toFixed(0)}%` : '—',
+        `${(s.seriesComplete || 0).toLocaleString()} of ${(s.seriesChecked || 0).toLocaleString()}`),
+      fact('Incomplete reads', (s.readsFailed || 0).toLocaleString(), s.feedsFailed ? `${s.feedsFailed.toLocaleString()} feed reads failed after 3 tries; run it again to fill them` : ''),
+      fact(s.running ? 'Elapsed' : 'Took', started ? duration(ended - started) : '—'),
+      s.running && done > 0 && total > done ? fact('Remaining', `about ${duration((ended - started) / done * (total - done))}`) : null);
+    note.textContent = s.running ? '' : s.message || '';
+    go.disabled = !!s.running;
+    clearTimeout(timer);
+    if (s.running && wrap.isConnected) timer = setTimeout(refresh, 3000);
+  };
+  const refresh = () => api('/api/history/copy').then((r: any) => {
+    const b = r?.body;
+    if (!b?.ok) { wrap.replaceChildren(el('div', { class: 'desc', text: b?.message || 'History copying is not available.' })); return; }
+    if (!from.options.length) {
+      backends = b.backends || [];
+      for (const x of b.backends || []) {
+        from.append(el('option', { value: x.id, text: x.id + (x.read ? ` (${x.read})` : ''), disabled: !!x.read }));
+        to.append(el('option', { value: x.id, text: x.id + (x.write ? ' (read only)' : ''), disabled: !!x.write, title: x.write || '' }));
+      }
+      // A copy needs two different backends: start with the first readable one into local.
+      const readable = (b.backends || []).find((x: any) => !x.read && x.id !== 'local');
+      if (readable) from.value = readable.id;
+      if ((b.backends || []).some((x: any) => x.id === 'local' && !x.write)) to.value = 'local';
+      syncConflicts();
+    }
+    render(b.status);
+  }).catch(() => { status.hidden = true; });
+
+  go.onclick = async () => {
+    if (conflicts.value === 'replace'
+      && !confirm(`Replace readings in ${to.value} with ${from.value}'s wherever both have one? What ${to.value} held there is overwritten.`)) return;
+    const q = `from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}&days=${encodeURIComponent(days.value || '0')}&conflicts=${conflicts.value}`;
+    const r: any = await api(`/api/history/copy?${q}`, { method: 'POST' });
+    toast(r?.body?.message || 'Copy failed.', !!r?.body?.ok);
+    refresh();
+  };
+  status.hidden = true;
+  refresh();
+  return wrap;
 }
 
 // A settings page for a capability that is switched off is a page of settings for something that is not
@@ -550,7 +675,6 @@ function renderConfigSection(node: any, nav: any, sections: any) {
       const feature = featureToggle(node);
       if (feature) {
         props = (props || []).filter((p: any) => p !== feature);
-        sec.appendChild(featurePointer(label));
         hideWhileOff(link, node.key, feature);
       }
       // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
