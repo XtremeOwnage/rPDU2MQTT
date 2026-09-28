@@ -3,6 +3,7 @@ import { api, btn, el, activate, navLink, instanceSelector, withInstance } from 
 import { hideCard, type Line } from '../charts.js';
 import { periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { timelineStrip, type Span } from './timeline.js';
+import { state } from '../state.js';
 
 export type Metric = { metric: string; units: string; epoch?: string };
 
@@ -40,9 +41,27 @@ export const MIN_BAR_PX = 6;
 
 export const LABELS: Record<string, string> = {
   realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-  frequency: 'frequency', energy: 'energy',
+  frequency: 'frequency', energy: 'energy', cost: 'cost',
 };
 export const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
+
+/// The price of a kWh from the GUI settings (#515), or null when none is set.
+export function energyPrice(): number | null {
+  const v = Number(state.data?.Gui?.EnergyPrice);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export const currency = () => String(state.data?.Gui?.Currency || '').trim() || '$';
+
+/// kWh per unit of an energy metric.
+const KWH_PER: Record<string, number> = { Wh: 0.001, kWh: 1, MWh: 1000 };
+
+/// Energy as cost: every series times the price, in the currency. Linear, so it holds for deltas and totals alike.
+export function toCost(b: any, price: number) {
+  const factor = price * (KWH_PER[b.units] ?? 1);
+  (b.series || []).forEach((s: any) => { s.values = s.values.map((v: any) => (v == null ? null : v * factor)); });
+  b.units = currency();
+}
 
 /// The smallest offered step that fits `seconds` into `points` samples.
 export function stepToFit(seconds: number, points: number) {
@@ -74,6 +93,8 @@ export type TrendsPage = {
   summable: () => boolean;
   rate: () => boolean;
   metricName: () => string;
+  /// Energy charted as cost.
+  cost: () => boolean;
   stacked: () => boolean;
   kind: () => 'bar' | 'line' | 'area';
   fitTo: () => number;
@@ -197,13 +218,22 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
   let metricChosen = false;
-  const unitsOf = (m: string) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
-  const epochOf = (m: string) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
+  const unitsOf = (m: string) => (chartable().find(x => x.metric === m) || { units: '' }).units;
+  const epochOf = (m: string) => (chartable().find(x => x.metric === m) || {}).epoch || '';
   const rate = () => RATES.includes(unitsOf(metricSel.value));
   const metricName = () => LABELS[metricSel.value] || metricSel.value;
+  const cost = () => metricSel.value === 'cost';
   // Only power and the energy counter are offered; a per-day bar is the counter's rise across that day.
-  const chartable = () => METRICS.filter(m => epochOf(m.metric) !== 'period');
-  const energyFor = (_range: string) => chartable().find(m => !RATES.includes(m.units));
+  const measured = () => METRICS.filter(m => m.metric !== 'cost' && (m.epoch || '') !== 'period');
+  const energyFor = (_range: string) => measured().find(m => !RATES.includes(m.units));
+  // Cost is the energy counter priced, offered once a price is set.
+  const chartable = (): Metric[] => {
+    const energy = energyFor(''), price = energyPrice();
+    return energy && price ? [...measured(), { metric: 'cost', units: currency(), epoch: energy.epoch }] : measured();
+  };
+  // What the history backend is asked for: cost is read as the energy it prices.
+  const asked = () => cost() ? (energyFor('')?.metric || 'energy') : metricSel.value;
+  const priced = (b: any) => { const price = energyPrice(); if (cost() && b?.ok && price) toCost(b, price); };
   const impliedMetric = () => {
     const found = rangeOf().wants === 'power' ? chartable().find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
     return (found || chartable()[0]).metric;
@@ -393,7 +423,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     const step = choice === 'auto' || choice === 'day' ? fit : Math.max(Number(choice), fit);
     const query = `from=${encodeURIComponent(new Date(span.from).toISOString())}`
       + `&to=${encodeURIComponent(new Date(span.to).toISOString())}`
-      + `&step=${step}&metric=${encodeURIComponent(metricSel.value)}`;
+      + `&step=${step}&metric=${encodeURIComponent(asked())}`;
     let r: any;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
@@ -402,6 +432,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     const b = r.body;
     const epoch = epochOf(metricSel.value);
     if (b?.ok && (epoch === 'lifetime' || epoch === 'period')) toDeltas(b);
+    priced(b);
     body = b?.ok ? b : whole;
     draw();
     if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
@@ -414,12 +445,13 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     // A counter's first day needs the reading before it, so one more day-end is asked for and dropped after differencing.
     const lead = p.used == null && counterEpoch === 'lifetime';
     const range = lead ? rangeSel.value.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : rangeSel.value;
-    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(metricSel.value);
+    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(asked());
     let r: any;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e: any) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
     if (body?.ok && (counterEpoch === 'lifetime' || (!body.days && counterEpoch === 'period'))) toDeltas(body);
+    priced(body);
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
@@ -443,7 +475,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   };
 
   const page: TrendsPage = {
-    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName,
+    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName, cost,
     stacked: () => stackBox.checked && chartSel.value !== 'line',
     kind: () => chartSel.value as 'bar' | 'line' | 'area', fitTo, leadHeight, section, statusLine, showRange,
   };

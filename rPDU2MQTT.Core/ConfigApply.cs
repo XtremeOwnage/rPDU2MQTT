@@ -29,6 +29,9 @@ public static class ConfigApply
         "PlanStorage",
         // Only the floor plan page reads it, from the saved document.
         "Gui.DistanceUnits",
+        // Only the Trends pages read these, from the saved document.
+        "Gui.EnergyPrice",
+        "Gui.Currency",
     ];
 
     /// <summary>Does a change to this setting take effect without a restart?</summary>

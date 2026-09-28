@@ -10968,9 +10968,27 @@ const MIN_BAR_PX = 6;
 
 const LABELS                         = {
   realpower: 'power', apparentpower: 'apparent power', current: 'current', voltage: 'voltage',
-  frequency: 'frequency', energy: 'energy',
+  frequency: 'frequency', energy: 'energy', cost: 'cost',
 };
 const RATES = ['W', 'VA', 'A', 'V', 'Hz'];
+
+/// The price of a kWh from the GUI settings (#515), or null when none is set.
+function energyPrice()                {
+  const v = Number(state.data?.Gui?.EnergyPrice);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+const currency = () => String(state.data?.Gui?.Currency || '').trim() || '$';
+
+/// kWh per unit of an energy metric.
+const KWH_PER                         = { Wh: 0.001, kWh: 1, MWh: 1000 };
+
+/// Energy as cost: every series times the price, in the currency. Linear, so it holds for deltas and totals alike.
+function toCost(b     , price        ) {
+  const factor = price * (KWH_PER[b.units] ?? 1);
+  (b.series || []).forEach((s     ) => { s.values = s.values.map((v     ) => (v == null ? null : v * factor)); });
+  b.units = currency();
+}
 
 /// The smallest offered step that fits `seconds` into `points` samples.
 function stepToFit(seconds        , points        ) {
@@ -11090,13 +11108,22 @@ function trendsPage(nav     , sections     , spec            ) {
   ];
   const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
   let metricChosen = false;
-  const unitsOf = (m        ) => (METRICS.find(x => x.metric === m) || { units: '' }).units;
-  const epochOf = (m        ) => (METRICS.find(x => x.metric === m) || {}).epoch || '';
+  const unitsOf = (m        ) => (chartable().find(x => x.metric === m) || { units: '' }).units;
+  const epochOf = (m        ) => (chartable().find(x => x.metric === m) || {}).epoch || '';
   const rate = () => RATES.includes(unitsOf(metricSel.value));
   const metricName = () => LABELS[metricSel.value] || metricSel.value;
+  const cost = () => metricSel.value === 'cost';
   // Only power and the energy counter are offered; a per-day bar is the counter's rise across that day.
-  const chartable = () => METRICS.filter(m => epochOf(m.metric) !== 'period');
-  const energyFor = (_range        ) => chartable().find(m => !RATES.includes(m.units));
+  const measured = () => METRICS.filter(m => m.metric !== 'cost' && (m.epoch || '') !== 'period');
+  const energyFor = (_range        ) => measured().find(m => !RATES.includes(m.units));
+  // Cost is the energy counter priced, offered once a price is set.
+  const chartable = ()           => {
+    const energy = energyFor(''), price = energyPrice();
+    return energy && price ? [...measured(), { metric: 'cost', units: currency(), epoch: energy.epoch }] : measured();
+  };
+  // What the history backend is asked for: cost is read as the energy it prices.
+  const asked = () => cost() ? (energyFor('')?.metric || 'energy') : metricSel.value;
+  const priced = (b     ) => { const price = energyPrice(); if (cost() && b?.ok && price) toCost(b, price); };
   const impliedMetric = () => {
     const found = rangeOf().wants === 'power' ? chartable().find(m => RATES.includes(m.units)) : energyFor(rangeSel.value);
     return (found || chartable()[0]).metric;
@@ -11286,7 +11313,7 @@ function trendsPage(nav     , sections     , spec            ) {
     const step = choice === 'auto' || choice === 'day' ? fit : Math.max(Number(choice), fit);
     const query = `from=${encodeURIComponent(new Date(span.from).toISOString())}`
       + `&to=${encodeURIComponent(new Date(span.to).toISOString())}`
-      + `&step=${step}&metric=${encodeURIComponent(metricSel.value)}`;
+      + `&step=${step}&metric=${encodeURIComponent(asked())}`;
     let r     ;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
@@ -11295,6 +11322,7 @@ function trendsPage(nav     , sections     , spec            ) {
     const b = r.body;
     const epoch = epochOf(metricSel.value);
     if (b?.ok && (epoch === 'lifetime' || epoch === 'period')) toDeltas(b);
+    priced(b);
     body = b?.ok ? b : whole;
     draw();
     if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
@@ -11307,12 +11335,13 @@ function trendsPage(nav     , sections     , spec            ) {
     // A counter's first day needs the reading before it, so one more day-end is asked for and dropped after differencing.
     const lead = p.used == null && counterEpoch === 'lifetime';
     const range = lead ? rangeSel.value.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : rangeSel.value;
-    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(metricSel.value);
+    const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(asked());
     let r     ;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     body = r.body;
     if (body?.ok && (counterEpoch === 'lifetime' || (!body.days && counterEpoch === 'period'))) toDeltas(body);
+    priced(body);
     if (body?.ok && lead && body.days?.length > 1) {
       body.days = body.days.slice(1);
       if (body.at) body.at = body.at.slice(1);
@@ -11336,7 +11365,7 @@ function trendsPage(nav     , sections     , spec            ) {
   };
 
   const page             = {
-    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName,
+    sec, charts, status, body: () => body, load, draw, days, perDay, summable, rate, metricName, cost,
     stacked: () => stackBox.checked && chartSel.value !== 'line',
     kind: () => chartSel.value                           , fitTo, leadHeight, section, statusLine, showRange,
   };
@@ -11507,7 +11536,9 @@ function addTrendsSection(nav     , sections     ) {
       }));
       const shown = columns.filter(([, v]) => v && v.some(x => x != null))                                 ;
       if (p.summable() && shown.length) {
-        const num = (v               ) => (v == null ? '—' : Math.round(v * 10) / 10 === 0 ? '0' : (Math.round(v * 10) / 10).toLocaleString('en-US'));
+        // Cost reads to the cent.
+        const scale = p.cost() ? 100 : 10;
+        const num = (v               ) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
         const why                         = {
           Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',
