@@ -1,3 +1,4 @@
+using rPDU2MQTT.Models.PDU;
 using Microsoft.Extensions.DependencyInjection;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
@@ -54,7 +55,8 @@ public class LocalHistoryProviderTests : IDisposable
 
         var stored = writer.Sweep(At(0));
 
-        Assert.Equal(3, stored);
+        // grid's and main's readings, and grid's energy, which the graph works out from main's.
+        Assert.Equal(4, stored);
         var found = await history.ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None);
         Assert.Equal(800, found["grid"]);
         Assert.Equal(780, found["main"]);
@@ -64,17 +66,61 @@ public class LocalHistoryProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task ANodeReadingNothingIsNotStored_SoItIsNotReadBackAsAZero()
+    public async Task ANodeWithNoValueIsNotStored_SoItIsNotReadBackAsAZero()
+    {
+        var cfg = Configured(root);
+        // Nothing reads it and nothing feeds it, so the graph has no value for it either.
+        cfg.EnergyFlow.Nodes.Add(new() { Id = "spare", Kind = "panel" });
+        var live = new Live(new() { ["grid|realpower"] = 800 });
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+        new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
+
+        var found = await new LocalFlowHistory(cfg, store).ValuesAtAsync(["grid", "spare"], "realpower", At(0), CancellationToken.None);
+
+        Assert.Equal(800, found["grid"]);
+        Assert.False(found.ContainsKey("spare"));
+    }
+
+    /// <summary>What the exports send is what is kept: a node the graph works out (main, grid's only child) is stored as it is exported.</summary>
+    [Fact]
+    public async Task ANodeTheGraphWorksOutIsStoredAsItIsExported()
     {
         var cfg = Configured(root);
         var live = new Live(new() { ["grid|realpower"] = 800 });
         var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
         new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        var found = await new LocalFlowHistory(cfg, store).ValuesAtAsync(["grid", "main"], "realpower", At(0), CancellationToken.None);
+        var exported = FlowGraphBuilder.Build(new PduData(), cfg.EnergyFlow, "realpower", live).Nodes.Single(n => n.Id == "main").Value;
+        var found = await new LocalFlowHistory(cfg, store).ValuesAtAsync(["main"], "realpower", At(0), CancellationToken.None);
 
-        Assert.Equal(800, found["grid"]);
-        Assert.False(found.ContainsKey("main"));
+        Assert.Equal(exported, found["main"]);
+    }
+
+    /// <summary>An outlet's reading comes from the PDU, not from any bound source, so it is only in the graph. It was never recorded.</summary>
+    [Fact]
+    public async Task APduOutletIsStored()
+    {
+        var cfg = Configured(root);
+        var outlet = new Outlet { Key = 3, Entity_Name = "o3", Entity_DisplayName = "Kube05", State = "on" };
+        outlet.Measurements.Add(new Measurement { Type = "realpower", Value = "125", Units = "W" });
+        var device = new Device { Key = "pdu_1", Entity_Name = "pdu_1", Entity_DisplayName = "PDU 1" };
+        device.Outlets.Add(outlet);
+        var data = new PduData();
+        data.Devices.Add(device);
+        var store = new LocalSeriesStore(root, rawIntervalSeconds: 10);
+
+        new LocalHistoryWriterService(cfg, new Live([]), store, new OneSnapshot(data)).Sweep(At(0));
+
+        var id = FlowGraphBuilder.Build(data, cfg.EnergyFlow, "realpower", new Live([])).Nodes.Single(n => n.Kind == "outlet").Id;
+        var found = await new LocalFlowHistory(cfg, store).ValuesAtAsync([id], "realpower", At(0), CancellationToken.None);
+        Assert.Equal(125, found[id]);
+    }
+
+    private sealed class OneSnapshot(PduData data) : rPDU2MQTT.Core.ISnapshotCache
+    {
+        public rPDU2MQTT.Core.PduSnapshot? Latest { get; } = new("pdu", DateTime.UtcNow, data);
+        public rPDU2MQTT.Core.PduSnapshot? Get(string instanceId) => Latest;
+        public IReadOnlyCollection<rPDU2MQTT.Core.PduSnapshot> All => [Latest!];
     }
 
     [Fact]
@@ -112,7 +158,8 @@ public class LocalHistoryProviderTests : IDisposable
 
         var stored = new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        Assert.Equal(rPDU2MQTT.Core.Flow.FlowUnits.Metrics.Length, stored);
+        // Every one of grid's, and whatever the graph works out for main from them.
+        Assert.True(stored >= rPDU2MQTT.Core.Flow.FlowUnits.Metrics.Length);
         foreach (var (metric, i) in rPDU2MQTT.Core.Flow.FlowUnits.Metrics.Select((m, i) => (m, i)))
             Assert.Equal(i + 1, store.ValueAt("grid", metric, At(0), At(1)));
         // …including the ones a hardcoded list forgot: the power factor, a percentage, a temperature.
@@ -150,7 +197,7 @@ public class LocalHistoryProviderTests : IDisposable
 
         var stored = new LocalHistoryWriterService(cfg, live, store).Sweep(At(0));
 
-        Assert.Equal(1, stored);
+        Assert.True(stored >= 1);
         Assert.Equal(800, store.ValueAt("grid", "realpower", At(0), At(1)));
         // …while the pages still read from the backend that was chosen.
         Assert.Equal("prometheus", new FlowHistoryRouter(new HttpClient(), cfg, store).Id);
@@ -210,6 +257,7 @@ public class LocalHistoryProviderTests : IDisposable
         new LocalHistoryWriterService(cfg, new Live(new() { ["grid|realpower"] = 5 }), store).Sweep(At(0));
         var (okAgain, withSeries) = await history.ProbeAsync(CancellationToken.None);
         Assert.True(okAgain);
-        Assert.Contains("1 series", withSeries);
+        // grid, and main worked out from it.
+        Assert.Contains("2 series", withSeries);
     }
 }

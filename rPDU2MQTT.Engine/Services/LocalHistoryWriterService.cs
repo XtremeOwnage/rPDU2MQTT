@@ -73,22 +73,27 @@ public sealed class LocalHistoryWriterService(Config cfg, IFlowValueSource live,
     internal int Sweep(DateTime now)
     {
         var data = snapshots?.Latest?.Data ?? new PduData();
-        var graph = FlowGraphBuilder.Build(data, cfg.EnergyFlow, FlowGraphBuilder.DefaultMetric, live);
 
+        // The same graphs the exports send, one per metric: a node whose value is worked out from the PDU
+        // readings (an outlet, a PDU total, a breaker) is only in the graph, never in the live source.
         var readings = new List<(string Node, string Metric, double Value)>();
-        foreach (var node in graph.Nodes)
+        var seen = new HashSet<(string, string)>();
+        void Add(string node, string metric, double value)
         {
-            foreach (var metric in Metrics)
-                if (live.TryGetValue(node.Id, metric, out var value) && double.IsFinite(value))
-                    readings.Add((node.Id, metric, value));
-
-            // The return lane of a bidirectional node — battery charge, grid export — is stored as a series
-            // of its own, exactly as it is exported, so a read of it is the same question as any other.
-            foreach (var metric in Metrics)
+            if (double.IsFinite(value) && seen.Add((node, metric))) readings.Add((node, metric, value));
+        }
+        foreach (var metric in Metrics)
+        {
+            var graph = FlowGraphBuilder.Build(data, cfg.EnergyFlow, metric, live);
+            foreach (var node in graph.Nodes)
             {
-                var lane = metric + FlowMetricKey.InSuffix;
-                if (live.TryGetValue(node.Id, lane, out var back) && double.IsFinite(back))
-                    readings.Add((node.Id + FlowMetricKey.InSuffix, metric, back));
+                if (live.TryGetValue(node.Id, metric, out var value)) Add(node.Id, metric, value);
+                // The unmetered remainder is arithmetic about the hierarchy, and is not stored, as it is not exported.
+                else if (node.Value is { } computed && FlowExport.ToMetricsStore(node)) Add(node.Id, metric, computed);
+
+                // The return lane of a bidirectional node — battery charge, grid export — is stored as a series
+                // of its own, exactly as it is exported, so a read of it is the same question as any other.
+                if (live.TryGetValue(node.Id, metric + FlowMetricKey.InSuffix, out var back)) Add(node.Id + FlowMetricKey.InSuffix, metric, back);
             }
         }
 
