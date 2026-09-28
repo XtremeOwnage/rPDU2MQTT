@@ -165,42 +165,6 @@ public static class ServiceConfiguration
         if (worker)
             services.AddHostedService<Services.ModbusPollService>();
 
-
-
-        // Reads prefer the in-process MQTT source cache: the GUI/exporters get the exact value the broker
-        // callback just wrote, and crucially it carries the direction-qualified (e.g. realpower#in — battery
-        // charge / grid export), state-of-charge (soc) and energy-in keys that the flow sink drops because
-        // they are not canonical Metric names (Metrics.TryParse fails). Without this the battery SoC and
-        // every in-direction reading show "—" even though the ingest has them.
-        // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
-        // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
-        // integrate real readings rather than its own output.
-        // Period (daily) totals are a separate concern from integration and default ON: they are the rise of
-        // counters that already exist, not an estimate standing in for a missing meter. They are also what
-        // makes the energy diagram add up at all, so the service is hosted for either reason.
-        var aggregationOn = cfg.EnergyFlow.Aggregation.Enabled;
-        var periodsOn = cfg.EnergyFlow.Aggregation.TrackPeriods;
-        if (aggregationOn || periodsOn)
-        {
-            services.AddSingleton(sp => new Services.EnergyAggregationService(
-                cfg,
-                new Core.Flow.CompositeFlowValueSource(
-                    sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues),
-                sp.GetRequiredService<Core.Flow.IEnergyStore>(),
-                sp.GetRequiredService<Core.ISnapshotCache>(),
-                sp.GetService<LeaderState>()));
-            // Accumulating is data production, so only the worker does it — otherwise every replica would
-            // integrate the same readings into its own copy of the counter.
-            if (worker)
-                services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyAggregationService>());
-            // Every other role still needs the numbers, and reading is not producing. Without this a split
-            // deployment's GUI/exporters held a service that was never started, so every energy and daily
-            // total read as no-data while the worker had them all.
-            else if (api || ui)
-                services.AddHostedService(sp => new Services.EnergyStoreReaderService(
-                    cfg, sp.GetRequiredService<Services.EnergyAggregationService>()));
-        }
-
         // Externally loaded plugins: reference Core, implement IIntegration, drop the DLL in plugins/.
         // A plugin that will not load is reported and skipped — a third-party DLL cannot stop the bridge.
         var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
@@ -242,6 +206,42 @@ public static class ServiceConfiguration
         var pluginSources = pluginIntegrations.OfType<Core.Integrations.IValueSourcePlugin>()
             .Cast<Core.Flow.IFlowValueSource>()
             .ToArray();
+
+        // Reads prefer the in-process MQTT source cache: the GUI/exporters get the exact value the broker
+        // callback just wrote, and crucially it carries the direction-qualified (e.g. realpower#in — battery
+        // charge / grid export), state-of-charge (soc) and energy-in keys that the flow sink drops because
+        // they are not canonical Metric names (Metrics.TryParse fails). Without this the battery SoC and
+        // every in-direction reading show "—" even though the ingest has them.
+        // Energy derived from power, for nodes that report watts but no cumulative kWh. It reads the
+        // MEASURED sources only — passing it the composite it belongs to would be a cycle, and it must
+        // integrate real readings rather than its own output.
+        // Period (daily) totals are a separate concern from integration and default ON: they are the rise of
+        // counters that already exist, not an estimate standing in for a missing meter. They are also what
+        // makes the energy diagram add up at all, so the service is hosted for either reason.
+        var aggregationOn = cfg.EnergyFlow.Aggregation.Enabled;
+        var periodsOn = cfg.EnergyFlow.Aggregation.TrackPeriods;
+        if (aggregationOn || periodsOn)
+        {
+            services.AddSingleton(sp => new Services.EnergyAggregationService(
+                cfg,
+                // Every ingest a node can be bound to: a panel read from an EmonCMS feed has a daily total too.
+                new Core.Flow.CompositeFlowValueSource(
+                    [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues, haSource,
+                     sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(), .. pluginSources]),
+                sp.GetRequiredService<Core.Flow.IEnergyStore>(),
+                sp.GetRequiredService<Core.ISnapshotCache>(),
+                sp.GetService<LeaderState>()));
+            // Accumulating is data production, so only the worker does it — otherwise every replica would
+            // integrate the same readings into its own copy of the counter.
+            if (worker)
+                services.AddHostedService(sp => sp.GetRequiredService<Services.EnergyAggregationService>());
+            // Every other role still needs the numbers, and reading is not producing. Without this a split
+            // deployment's GUI/exporters held a service that was never started, so every energy and daily
+            // total read as no-data while the worker had them all.
+            else if (api || ui)
+                services.AddHostedService(sp => new Services.EnergyStoreReaderService(
+                    cfg, sp.GetRequiredService<Services.EnergyAggregationService>()));
+        }
 
         // Values worked out from other values (current = power ÷ voltage) wrap the whole composite: the two
         // readings they divide may arrive from different ingests, and a measured reading still wins.
