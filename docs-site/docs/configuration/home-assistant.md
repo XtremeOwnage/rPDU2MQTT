@@ -7,7 +7,7 @@ title: Home Assistant
 rPDU2MQTT talks to Home Assistant two ways: **MQTT discovery**, which creates the devices and entities,
 and the optional **Energy Dashboard sync**, which uses Home Assistant's own API.
 
-![Home Assistant settings page](../assets/screenshots/home-assistant.png)
+![Home Assistant settings page](../assets/screenshots/home-assistant.webp)
 
 ## Discovery
 
@@ -57,7 +57,7 @@ Which nodes make up the dashboard's grid, solar and battery sources comes from
 [`EnergyFlow.Balance`](../energy-flow/index.md#the-energy-balance-what-counts-as-solar-grid-battery-and-home).
 `NodeTags.Include` / `NodeTags.Exclude` limit which nodes are sent.
 
-![HA Energy Mapping page](../assets/screenshots/ha-energy-mapping.png)
+![HA Energy Mapping page](../assets/screenshots/ha-energy-mapping.webp)
 
 The **HA Energy Mapping** page (under Destinations) syncs on demand with **Sync now**, can clear what it
 created with **Clear energy dashboard**, and turns on a periodic sync.

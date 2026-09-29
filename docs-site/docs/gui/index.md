@@ -12,7 +12,7 @@ flow. It is off by default; turn it on with `Gui.Enabled` (see [Configuration GU
     outlets), simulated Solar Assistant and IotaWatt topics on a local Mosquitto broker, and 30 days of
     generated history. The house, its numbers and its floor plan are made up.
 
-![Overview page](../assets/screenshots/overview.png)
+![Overview page](../assets/screenshots/overview.webp)
 
 ## Layout
 

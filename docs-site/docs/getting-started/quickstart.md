@@ -74,7 +74,7 @@ docker compose logs -f
 - **Health:** `http://<host>:8081/healthz` answers `OK`; `/readyz` answers `READY` once MQTT is
   connected and a PDU poll has succeeded. See [Health checks](../reference/health.md).
 
-![Status page: every hop from sources to destinations](../assets/screenshots/status.png)
+![Status page: every hop from sources to destinations](../assets/screenshots/status.webp)
 
 ## Next
 

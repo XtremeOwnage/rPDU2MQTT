@@ -7,7 +7,7 @@ title: MQTT topics
 Everything is published under `MQTT.ParentTopic` (default `rPDU2MQTT`). The examples below were captured
 from the demo setup: one PDU instance whose device serial is `A0AE260C851900C3`, with ten outlets.
 
-![Paths page: the MQTT topic, Prometheus metric and EmonCMS key for each measurement](../assets/screenshots/paths.png)
+![Paths page: the MQTT topic, Prometheus metric and EmonCMS key for each measurement](../assets/screenshots/paths.webp)
 
 The GUI's **Paths** page lists the exact topic for every measurement, including the effect of your
 [overrides](../configuration/overrides.md). Use it rather than working topics out by hand.

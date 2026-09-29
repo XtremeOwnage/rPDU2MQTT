@@ -13,7 +13,7 @@ and still is one, but a PDU is now one tier of a bigger picture: every producer,
 measured wherever it can be measured, joined into one hierarchy and rolled up so each tier's number is the
 sum of what's beneath it.
 
-![Overview page: live solar, grid, battery and home flow with today's totals](assets/screenshots/overview.png)
+![Overview page: live solar, grid, battery and home flow with today's totals](assets/screenshots/overview.webp)
 
 !!! note "About the screenshots"
     Every screenshot on this site is the real rPDU2MQTT 2.0.0 GUI in dark mode. The data behind them comes
