@@ -707,6 +707,7 @@
   .ld-toolbar > select, .history-bar > select { width:auto; min-width:130px; max-width:100%; }
   .ld-toolbar label, .ld-inst { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; }
   .ld-inst select { width:auto; }
+  .trend-opts { display:none; }
   .ld-count { color:var(--faint); font-size:12px; }
 
   /* The Flow page's controls. Each row was a block with its own margin, so they stacked down the page while
@@ -2049,3 +2050,26 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .balance-val { color: var(--faint); font-family: var(--mono); font-size: 12px; }
 .balance-x { background: none; border: 0; padding: 0 6px; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; }
 .balance-x:hover { color: var(--bad); }
+
+@media (max-width: 560px) {
+  /* Periods and filter chips scroll sideways as one line each instead of stacking. */
+  .period-row, .trend-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .period-row > *, .trend-filters button { flex:none; }
+  .period-row > .desc { display:none; }
+  .trend-bar { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2); }
+  .trend-bar .ld-inst { min-width:0; }
+  .trend-bar .ld-inst select { flex:1; min-width:0; }
+  .trend-bar > .ld-count { grid-column:1 / -1; }
+  .trend-bar > .trend-opts { display:block; grid-column:1 / -1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .trend-bar:not(.opts-open) > :not(.trend-opts):not(.trend-refresh):not(.ld-count) { display:none; }
+  .trend-bar:not(.opts-open) { grid-template-columns:1fr auto; }
+  .trend-bar > .trend-refresh { justify-self:start; }
+  .trend-bar:not(.opts-open) > .trend-opts { grid-column:auto; }
+  .trend-timeline-head .desc { font-size:12px; }
+  .trend-timeline-tools { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .trend-timeline-tools button.small { flex:none; padding:4px 9px; }
+  .trends-page table.ld th, .trends-page table.ld td { padding:7px 8px; }
+  .trends-page table.ld th { letter-spacing:.03em; }
+  .trends-page table.ld td.num { white-space:nowrap; }
+  .trends-page table.ld .col-full { display:none; }
+}

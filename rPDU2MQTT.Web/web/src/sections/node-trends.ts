@@ -83,7 +83,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
 
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
   const kindRow = el('div', { style: { display: 'contents' } });
-  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
+  const filterRow = el('div', { class: 'ld-toolbar trend-filters', style: { gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
     const kinds = [...new Set(all().map(kindOf))]
@@ -224,7 +224,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     });
 
     const perDay = p.perDay();
-    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string }[] = [
+    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string; cls?: string }[] = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
       { head: p.summable() ? `Total (${units})` : `Peak (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
@@ -240,7 +240,9 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         title: !perDay || !partial ? undefined
           : `Over the days that reported. ${partial} is one of them and is only part-way through, so the mean reads low until it ends.` },
       { head: `${perDay ? 'Days' : 'Samples'} with data`, num: true,
-        text: r => `${r.covered} of ${days.length}`, sort: r => r.covered },
+        text: r => `${r.covered} of ${days.length}`, sort: r => r.covered,
+        // Nothing to say when every row is complete; phones drop it then.
+        cls: rows.every((r: any) => r.covered === days.length) ? 'col-full' : '' },
       { head: perDay ? 'Peak day' : 'Peak at', num: false,
         text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
         sort: r => r.peakAt },
@@ -257,7 +259,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const t = el('table', { class: 'ld' });
     const head = el('tr');
     cols.forEach((c, i) => {
-      const th = el('th', { class: c.num ? 'num sortable' : 'sortable' });
+      const th = el('th', { class: (c.num ? 'num sortable ' : 'sortable ') + (c.cls || '') });
       th.append(c.head + (sort.col === i ? (sort.desc ? ' ▾' : ' ▴') : ''));
       th.title = (c.title ? c.title + '\n' : '') + 'Click to sort by this column.';
       th.onclick = () => { if (sort.col === i) sort.desc = !sort.desc; else { sort.col = i; sort.desc = c.num; } p.draw(); };
@@ -267,7 +269,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const tb = el('tbody');
     rows.forEach((r: any) => {
       const tr = el('tr');
-      cols.forEach(c => tr.appendChild(el('td', { class: c.num ? 'num' : '', text: c.text(r) })));
+      cols.forEach(c => tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), text: c.text(r) })));
       tb.appendChild(tr);
     });
     t.appendChild(tb);
