@@ -9752,11 +9752,11 @@ function addOverviewSection(nav     , sections     ) {
   };
 
   /// A figure with its name, and the sub-line that says what it means. Clicking opens that node's day.
-  const tile = (kind        , icon        , label        , value        , sub        , ids          ) => {
+  const tile = (kind        , icon        , label        , value               , sub        , ids          ) => {
     const t = el('div', { class: 'ov-tile ov-' + kind });
     t.append(
       el('div', { class: 'ov-tile-head' }, el('span', { class: 'ov-icon', text: icon }), el('span', { text: label })),
-      el('div', { class: 'ov-value', text: value }),
+      typeof value === 'string' ? el('div', { class: 'ov-value', text: value }) : value,
       el('div', { class: 'ov-sub', text: sub }));
     if (ids.length) {
       t.classList.add('is-link');
@@ -10044,7 +10044,15 @@ function addOverviewSection(nav     , sections     ) {
     const note = originNote();
     if (note) todayRow.appendChild(note);
     if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
-    if (gridIds.length) todayRow.appendChild(tile('grid', '⚡', 'Grid imported', fmtKwh(eGridOut), eGridIn ? `${fmtKwh(eGridIn)} exported` : 'nothing exported', gridIds));
+    if (gridIds.length) {
+      // Net only when both directions were measured.
+      const eGridNet = eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn;
+      const cols = el('div', { class: 'ov-cols' },
+        el('div', {}, el('div', { class: 'ov-col-label', text: 'Imported' }), el('div', { class: 'ov-value', text: fmtKwh(eGridOut) })),
+        el('div', {}, el('div', { class: 'ov-col-label', text: 'Exported' }), el('div', { class: 'ov-value', text: fmtKwh(eGridIn) })));
+      todayRow.appendChild(tile('grid', '⚡', 'Grid', cols, eGridNet == null ? 'net needs both import and export'
+        : `net ${fmtKwh(Math.abs(eGridNet))} ${eGridNet < 0 ? 'exported' : 'imported'}`, gridIds));
+    }
     todayRow.appendChild(tile('home', '⌂', 'Home used', fmtKwh(eHome), eHome == null ? 'no measured sources' : 'everything the house drew', []));
     const pct = selfSufficiencyPct(eHome, eGridOut);
     todayRow.appendChild(tile('self', '◔', 'Self-sufficiency', pct == null ? '—' : `${Math.round(pct)}%`,
