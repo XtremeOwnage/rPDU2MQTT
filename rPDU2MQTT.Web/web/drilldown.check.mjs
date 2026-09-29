@@ -36,6 +36,7 @@ const series = {
     { node: 'mppt_1', label: 'MPPT 1', kind: 'solar', balance: 'solar', values: [10, 900, 2100] },
     { node: 'mppt_2', label: 'MPPT 2', kind: 'solar', balance: 'solar', values: [12, 850, 1900] },
     { node: 'grid', label: 'Grid', kind: 'grid', balance: 'grid', values: [1400, 1000, 800] },
+    { node: 'grid#in', label: 'Grid (export)', kind: 'grid', balance: 'grid', values: [0, 300, 0] },
   ],
 };
 
@@ -86,9 +87,20 @@ const on = (node) => chips.some(c => c.includes(node) && c.startsWith('●'));
 const off = (node) => chips.some(c => c.includes(node) && c.startsWith('○'));
 if (!on('MPPT 1') || !on('MPPT 2'))
   fail(`the solar nodes are not charted after clicking Solar; chips: ${JSON.stringify(chips)}`);
-if (!off('Grid'))
+if (!off('Grid') || !off('Grid (export)'))
   fail(`the grid is still charted after clicking Solar — the answer is about different nodes than the `
      + `number that was clicked; chips: ${JSON.stringify(chips)}`);
+
+// A grid tile brings its export lane with it.
+navTo('Energy').click();
+await new Promise(r => setTimeout(r, 120));
+const gridTile = query(getEl('sections'), '.energy-tile', true).find(t => t.classList.has('grid'));
+if (!gridTile) fail('no grid tile to click');
+gridTile.dispatch('click', { preventDefault() {} });
+await new Promise(r => setTimeout(r, 150));
+const gridChips = query(trendsSection, 'button', true).map(b => b.textContent || '');
+if (!gridChips.some(c => c.startsWith('● Grid (export)')))
+  fail(`clicking Grid did not chart its export; chips: ${JSON.stringify(gridChips)}`);
 
 // And the request is one-shot: going back and returning must not re-apply it over a fresh choice.
 navTo('Energy').click();
