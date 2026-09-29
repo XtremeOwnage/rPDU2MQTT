@@ -1263,6 +1263,9 @@
   .ov-icon { font-size: 14px; }
   .ov-value { font-size: 26px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
   .ov-sub { font-size: 11.5px; color: var(--faint); }
+  .ov-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+  .ov-cols .ov-value { margin-top: 0; }
+  .ov-col-label { font-size: 11.5px; color: var(--muted); }
 
   /* Healthy is one line; anything wrong is a card you cannot scroll past. */
   .ov-allgood {
