@@ -1,0 +1,269 @@
+---
+title: How data flows
+---
+
+# How data flows
+
+How a reading gets from a source to a destination, traced from the code. Class names are given so each
+step can be found in the repository. Everything here runs in one process under the default role (`all`);
+the [roles](#roles) section says which parts each role runs.
+
+## The whole picture
+
+```mermaid
+flowchart LR
+  subgraph SRC["Sources"]
+    PDU["`Vertiv / Geist PDUs
+HTTP API`"]
+    MQ["MQTT topics"]
+    MB["Modbus TCP registers"]
+    EC["EmonCMS feeds"]
+    HA["Home Assistant entities"]
+    PL["Plugin sources"]
+  end
+
+  subgraph CORE["rPDU2MQTT"]
+    POLL["DevicePollService"]
+    BUS["Message bus"]
+    SNAP["`SnapshotCache
+latest per PDU`"]
+    LIVE["`Live values
+IFlowValueSource`"]
+    AGG["`EnergyAggregationService
+kWh from W, daily totals`"]
+    PASS["`DestinationHost
+one ExportPass per poll`"]
+    GRAPH["`Flow graphs
+power, energy, energy_d`"]
+  end
+
+  subgraph DST["Destinations"]
+    MQTTOUT["`MQTT
++ Home Assistant discovery`"]
+    PROM["`Prometheus /metrics
+and Pushgateway`"]
+    EMON["EmonCMS"]
+    HAED["HA Energy Dashboard"]
+    HIST["Local history store"]
+  end
+
+  PDU --> POLL --> BUS --> SNAP
+  MQ --> LIVE
+  MB --> LIVE
+  EC --> LIVE
+  HA --> LIVE
+  PL --> LIVE
+  LIVE --> AGG --> LIVE
+  SNAP --> PASS
+  LIVE --> PASS
+  PASS --> GRAPH
+  GRAPH --> MQTTOUT
+  GRAPH --> PROM
+  GRAPH --> EMON
+  LIVE --> HIST
+  SNAP --> HAED
+  LIVE --> HAED
+
+  SNAP --> UI["GUI and REST API"]
+  LIVE --> UI
+```
+
+Two kinds of data move through it:
+
+- **PDU snapshots** — a whole PDU's devices, outlets and measurements, read in one poll.
+- **Live values** — one reading per node and metric, from any bound source.
+
+Both meet in the **flow graph**, which the destinations are handed once per poll.
+
+## PDU readings
+
+```mermaid
+sequenceDiagram
+  participant PDU as PDU (HTTP API)
+  participant Poll as DevicePollService
+  participant Bus as Message bus
+  participant Cache as SnapshotCache
+  participant Host as DestinationHost
+  participant Dest as Destinations
+
+  loop every PollInterval
+    Poll->>PDU: read devices, outlets, measurements
+    PDU-->>Poll: JSON
+    Poll->>Bus: PduSnapshot (instance, time, data)
+    Bus->>Cache: keep latest per instance
+  end
+  loop every poll interval of the primary PDU
+    Host->>Cache: fresh snapshots only
+    Host->>Host: ExportPass.Build
+    Host->>Dest: SendAsync(pass), each on its own
+  end
+```
+
+- `DevicePollService` polls every configured PDU instance, plus any device a plugin supplies, and
+  publishes each snapshot on the in-process bus (`ChannelMessageBus`).
+- The bus gives each subscriber its own bounded channel; a slow consumer drops its own oldest snapshot
+  rather than stalling the poller.
+- `SnapshotCache` keeps the latest snapshot per instance. The GUI and the REST API read it, never the
+  PDU, so a page load does not cause a poll.
+- `DestinationHost` skips snapshots that have gone stale, so a PDU that stopped answering is not
+  re-published as if it were current.
+
+## Live values for energy-flow nodes
+
+Every node binding (`EnergyFlow.Nodes[].Sources`) is read through one seam, `IFlowValueSource`. The
+sources are asked in order and **the first one with a fresh reading wins**:
+
+```mermaid
+flowchart TD
+  Q["Value for node + metric?"] --> D["`DerivedFlowValueSource
+V×I, P÷PF … when bound as derived`"]
+  D --> C["CompositeFlowValueSource"]
+  C --> S1["`1. MQTT ingest
+EnergyFlowMqttSourceService`"]
+  S1 -->|nothing fresh| S2["`2. Live value cache
+Modbus and plugin sources write here`"]
+  S2 -->|nothing fresh| S3["3. Home Assistant entities"]
+  S3 -->|nothing fresh| S4["4. EmonCMS feeds"]
+  S4 -->|nothing fresh| S5["5. Other plugin sources"]
+  S5 -->|nothing fresh| S6["`6. EnergyAggregationService
+kWh integrated from W, daily totals`"]
+  S6 -->|nothing fresh| S7["`7. History fallback
+only with History.ValueFallback`"]
+  S7 -->|nothing| N["`No data
+never 0`"]
+```
+
+- **MQTT** (`EnergyFlowMqttSourceService`) subscribes to the bound topics and keeps the latest value.
+  Subscriptions are reconciled on a timer, so a topic bound in the GUI works without a restart.
+- **Modbus** (`ModbusPollService`) polls each physical device (`host:port:unitId`) once, however many
+  connections name it, because many RS485 gateways accept one client at a time.
+- **Home Assistant, EmonCMS and plugin sources** are kept in step with their bindings by
+  `ValueSourcePluginHost`.
+- **Aggregation** reads the measured sources only (never its own output), integrates watts into kWh for
+  nodes with no energy counter when `Aggregation.Enabled` is on, and keeps each node's total since the
+  period boundary when `TrackPeriods` is on. Those totals are saved to the cache (Valkey/Redis) when
+  `Cache.Enabled`, otherwise to `energy-totals.json`. See
+  [Totals and counters](../energy-flow/totals.md).
+- A reading older than its binding's `StaleAfterSeconds` is not fresh, so the next source gets a turn,
+  and with none left the node reads *no data*.
+
+## The export pass
+
+Once per poll, `DestinationHost` builds one `ExportPass` and offers it to every destination that is
+switched on:
+
+```mermaid
+flowchart LR
+  SNAP["Fresh PduSnapshots"] --> M["`Merge devices
+across instances`"]
+  M --> R["`Readings
+every PDU measurement`"]
+  M --> G["FlowTiers.Graphs"]
+  LIVE["IFlowValueSource"] --> G
+  CFG["`EnergyFlow config
+nodes, links, groups,
+panels, sites`"] --> G
+  G --> T1["Graph: realpower"]
+  G --> T2["Graph: energy"]
+  G --> T3["Graph: energy_d"]
+  R --> P["ExportPass"]
+  T1 --> P
+  T2 --> P
+  T3 --> P
+  P --> MQ["MQTT"]
+  P --> PR["Prometheus"]
+  P --> EM["EmonCMS"]
+  P --> PLG["Plugin destinations"]
+```
+
+- The graphs are built **once per pass** and shared, so every destination sees the same hierarchy.
+- PDU devices and outlets become nodes (`pdu:<device>`, `outlet:<device>:<n>`) automatically; your
+  nodes, links, groups, breakers and rooms are added from `EnergyFlow`.
+- Each tier's value comes from a live value, a PDU measurement, or the sum of its children. See
+  [Energy flow › Accuracy](../energy-flow/index.md#accuracy-what-the-flow-will-and-wont-infer).
+- Each destination applies its own node-tag filter (`TiersFor`). A filter chooses which nodes are sent;
+  it never changes a value.
+- One destination failing is recorded against that destination on the Status board and does not stop
+  the others.
+
+### What each destination does with it
+
+| Destination | PDU readings | Flow tiers |
+| --- | --- | --- |
+| MQTT (`MqttPduIntegration`, `MqttIntegration`) | `<parent>/<serial>/…` topics | `<parent>/energyflow/<id>` JSON, when `EnergyFlow.MqttExport` is on |
+| Home Assistant discovery | a device per PDU, outlet and group | a device per exported tier |
+| Prometheus | `rpdu2mqtt_<type>` gauges | `rpdu2mqtt_flow_*` gauges |
+| EmonCMS | inputs / feeds | flow-node feeds |
+
+Topic and metric names are listed under [MQTT topics](../reference/mqtt-topics.md) and on the GUI's
+**Paths** page.
+
+## Slower paths
+
+Not everything runs once per poll:
+
+```mermaid
+flowchart LR
+  CPH["`ConfigurationPublisherHost
+own cadence, default 5 min`"] --> DISC["`Home Assistant discovery
+MQTT and EmonCMS config`"]
+  HAS["HA Energy Dashboard sync"] --> HAWS["`Home Assistant
+WebSocket API`"]
+  LHW["`LocalHistoryWriterService
+timer, leader only`"] --> STORE["`LocalSeriesStore
+fixed-interval files`"]
+  STORE --> ROUTER["`FlowHistoryRouter
+History.Provider`"]
+  PROMR["Prometheus"] --> ROUTER
+  EMR["EmonCMS"] --> ROUTER
+  HAR["Home Assistant"] --> ROUTER
+  ROUTER --> PAGES["`Trends, Node Trends,
+history sheets`"]
+```
+
+- **Configuration is not a reading.** Discovery documents and other configuration are republished on
+  their own cadence by `ConfigurationPublisherHost`, not every poll.
+- **History is written and read separately.** `LocalHistoryWriterService` records every node's readings
+  into the local store whatever `History.Provider` says; the pages read through whichever backend
+  `Provider` names. See [History](../configuration/history.md).
+
+## Commands back to the PDU
+
+Control flows the other way, and only when `ActionsEnabled` is on:
+
+```mermaid
+flowchart RL
+  HAB["Home Assistant switch / button"] -->|"…/outlets/n/set, /reboot"| OCS["OutletCommandService"]
+  GUI["GUI: PDU Control"] --> IOC["`IOutletControl
+DeviceOutletControl`"]
+  OCS --> IOC
+  API["`REST API
+X-Api-Key`"] --> PDUOBJ["PDU client"]
+  IOC --> PDUOBJ
+  PDUOBJ -->|HTTP| DEV["PDU"]
+```
+
+The next poll reads the new state back, so Home Assistant and the GUI show what the PDU reports rather
+than what was asked for.
+
+## Roles
+
+With `RPDU2MQTT_ROLE` / `--role` (see [Command line](../reference/cli.md#roles)), a process runs only
+part of this:
+
+| Part | worker | api | ui |
+| --- | --- | --- | --- |
+| PDU polling, MQTT and Modbus ingest, plugin sources | ✓ | | |
+| Energy aggregation | writes | reads | reads |
+| Destinations, discovery, outlet commands | ✓ | | |
+| REST API | | ✓ | |
+| GUI | | | ✓ |
+
+The health endpoints run in every role.
+
+### Leader lease
+
+With `RPDU2MQTT_LEADER_LEASE=true` (the chart sets it for graceful rollouts), only the process holding
+the lease does work that must happen once: destinations that publish to a shared broker or server, and
+writing local history. Prometheus is the exception: every process serves its own `/metrics`, so each one
+refreshes its own gauges.

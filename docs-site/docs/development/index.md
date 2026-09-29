@@ -18,6 +18,10 @@ title: Development
 | `charts/rpdu2mqtt` | The Helm chart. |
 | `docs-site` | This documentation, built with [Netdocs](https://github.com/XtremeOwnage/Netdocs). |
 
+## How it works
+
+- [How data flows](data-flow.md) — sources to destinations, with diagrams.
+
 ## Plugins
 
 - [Writing plugins](writing-plugins.md) — the author's guide, with the `HelloWorld` example.
