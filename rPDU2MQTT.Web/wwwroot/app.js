@@ -10590,6 +10590,20 @@ function addNodeDataSection(nav     , sections     ) {
   let live                      = {};
   const keyOf = (r     ) => `${r.node.Id}|${r.metric}`;
 
+  // Column index and direction; -1 keeps the configured order.
+  const sort = { col: -1, desc: false };
+  const shownOf = (r     ) => {
+    if (r.fixed != null) return r.fixed;
+    const v = live[keyOf(r)];
+    return v ? (v.reported != null ? v.reported : v.value) : null;
+  };
+  const SORT_KEYS                      = [
+    r => String(r.node.Label || r.node.Id).toLowerCase(),
+    r => metricName(r.metric).toLowerCase(),
+    r => shownOf(r) ?? -Infinity,
+    r => r.fixed != null ? -1 : live[keyOf(r)]?.atUtc == null ? Infinity : live[keyOf(r)].ageSeconds ?? 0,
+  ];
+
   const draw = () => {
     const f = (filter.value || '').trim().toLowerCase();
     drawTags();
@@ -10603,6 +10617,15 @@ function addNodeDataSection(nav     , sections     ) {
       return r.fixed == null && (!v || (v.reported == null && v.value == null) || v.fresh === false);
     });
 
+    if (sort.col >= 0 && !(past() && sort.col === 3)) {
+      const key = SORT_KEYS[sort.col];
+      list.sort((a, b) => {
+        const x = key(a), y = key(b);
+        const c = typeof x === 'string' ? x.localeCompare(y) : (x < y ? -1 : x > y ? 1 : 0);
+        return sort.desc ? -c : c;
+      });
+    }
+
     wrap.innerHTML = '';
     if (!list.length) {
       wrap.appendChild(el('div', { class: 'desc', text: !all.length ? 'No nodes have sources bound yet. Bind one on the Nodes tab.'
@@ -10614,7 +10637,12 @@ function addNodeDataSection(nav     , sections     ) {
     const head = el('tr');
     // A past moment has no age to show: the reading is whatever history held then.
     (past() ? ['Node', 'Metric', 'Value'] : ['Node', 'Metric', 'Value', 'Updated'])
-      .forEach((h, i) => head.appendChild(el('th', { class: i === 2 ? 'num' : '', text: h })));
+      .forEach((h, i) => {
+        const th = el('th', { class: i === 2 ? 'num sortable' : 'sortable',
+          text: h + (sort.col === i ? (sort.desc ? ' ▾' : ' ▴') : ''), title: 'Click to sort by this column.' });
+        th.onclick = () => { if (sort.col === i) sort.desc = !sort.desc; else { sort.col = i; sort.desc = i === 2; } draw(); };
+        head.appendChild(th);
+      });
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
 
@@ -10630,7 +10658,7 @@ function addNodeDataSection(nav     , sections     ) {
       // `reported` is the reading including one that has expired, and it only exists where the ingest can
       // date its readings. `value` is the live figure the roll-up is using. Reading the first alone meant a
       // source that cannot report ages showed "—" here while the diagram beside it drew that very number.
-      const shown = v ? (v.reported != null ? v.reported : v.value) : null;
+      const shown = r.fixed != null ? null : shownOf(r);
       const val = el('td', { class: 'num' });
       if (r.fixed != null) val.append(el('span', { text: `${formatNum(r.fixed)} ${metricUnit(r.metric)}`.trim() }));
       else if (shown != null) val.append(el('span', { text: `${formatNum(shown)} ${metricUnit(r.metric)}`.trim() }));

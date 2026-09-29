@@ -1,4 +1,4 @@
-// Node Data (#495): pick the metrics shown and filter by tag, both remembered.
+// Node Data (#495): pick the metrics shown and filter by tag, both remembered; columns sort.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -73,5 +73,14 @@ if (r2.length !== 2 || r2.some(x => !x.includes('Power') || x.includes('Inverter
 // All brings every metric back.
 query(sec, 'button', true).find(b => b.textContent === 'All').click();
 if (rowsOf(sec).length !== 4) fail(`All did not restore metrics: ${JSON.stringify(rowsOf(sec))}`);
+
+// Headers sort: Node descending on a second click.
+const th = (name) => query(sec, 'th', true).find(t => t.textContent.startsWith(name));
+th('Node').click();
+if (!rowsOf(sec)[0].startsWith('Breaker 1')) fail(`Node ascending: ${JSON.stringify(rowsOf(sec))}`);
+th('Node').click();
+if (!rowsOf(sec)[0].startsWith('Breaker 2')) fail(`Node descending: ${JSON.stringify(rowsOf(sec))}`);
+th('Metric').click();
+if (!rowsOf(sec)[0].includes('Current')) fail(`Metric ascending: ${JSON.stringify(rowsOf(sec))}`);
 
 console.log('node data filters check: OK');
