@@ -445,10 +445,13 @@ export function rankChart(opts: {
 }): { svg: any; gaps: number } {
   const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
   const total = items.reduce((s, i) => s + i.value, 0);
-  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(420, opts.fitTo) : 720;
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : 720;
   const rowH = 22, padT = 8;
   const ring = opts.share && total > 0 ? 180 : 0;
-  const H = Math.max(ring, padT * 2 + items.length * rowH);
+  // Too narrow for the ring beside the bars: it goes above them.
+  const narrow = W < 560;
+  const rowsTop = narrow ? ring : 0;
+  const H = narrow ? ring + padT * 2 + items.length * rowH : Math.max(ring, padT * 2 + items.length * rowH);
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart trend-rank' });
   const pct = (v: number) => `${(v / total * 100).toFixed(1)}%`;
   const titled = (node: any, text: string) => {
@@ -461,7 +464,7 @@ export function rankChart(opts: {
     `${it.label}: ${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
 
   if (ring) {
-    const cx = ring / 2, cy = H / 2, r = 70, inner = 42;
+    const cx = narrow ? W / 2 : ring / 2, cy = narrow ? ring / 2 : H / 2, r = 70, inner = 42;
     const at = (rad: number, a: number) => `${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`;
     let angle = -Math.PI / 2;
     items.forEach(it => {
@@ -479,18 +482,23 @@ export function rankChart(opts: {
     });
   }
 
-  const x0 = ring + 160, valueW = 190;
-  const barMax = Math.max(40, W - x0 - valueW - 8);
+  const valueText = (it: typeof items[number]) =>
+    `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+  const nameW = narrow ? Math.round(W * 0.3) : 160;
+  const maxChars = narrow ? Math.max(6, Math.floor((nameW - 8) / 6.5)) : 24;
+  const x0 = (narrow ? 0 : ring) + nameW;
+  const valueW = Math.min(190, Math.max(0, ...items.map(it => valueText(it).length)) * 6 + 8);
+  const barMax = Math.max(24, W - x0 - valueW - 8);
   const top = items.length ? items[0].value : 1;
   items.forEach((it, i) => {
-    const yy = padT + i * rowH;
+    const yy = rowsTop + padT + i * rowH;
     const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
-    name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
+    name.textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
     svg.appendChild(name);
     const w = Math.max(1, (it.value / top) * barMax);
     svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
     const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
-    value.textContent = `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+    value.textContent = valueText(it);
     svg.appendChild(value);
   });
   return { svg, gaps: 0 };

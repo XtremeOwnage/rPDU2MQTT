@@ -2059,5 +2059,11 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .trend-bar .ld-inst { min-width:0; }
   .trend-bar .ld-inst select { flex:1; min-width:0; }
   .trend-bar > .ld-count { grid-column:1 / -1; }
-  .trend-timeline-tools button.small { padding:4px 9px; }
+  .trend-bar > button { justify-self:start; }
+  .trend-timeline-tools { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .trend-timeline-tools button.small { flex:none; padding:4px 9px; }
+  .trends-page table.ld th, .trends-page table.ld td { padding:7px 8px; }
+  .trends-page table.ld th { letter-spacing:.03em; }
+  .trends-page table.ld td.num { white-space:nowrap; }
+  .trends-page table.ld .col-full { display:none; }
 }
