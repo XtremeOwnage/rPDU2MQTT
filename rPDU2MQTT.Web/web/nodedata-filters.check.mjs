@@ -74,6 +74,13 @@ if (r2.length !== 2 || r2.some(x => !x.includes('Power') || x.includes('Inverter
 query(sec, 'button', true).find(b => b.textContent === 'All').click();
 if (rowsOf(sec).length !== 4) fail(`All did not restore metrics: ${JSON.stringify(rowsOf(sec))}`);
 
+// None clears every metric; one chip then brings back just that one.
+query(sec, 'button', true).find(b => b.textContent === 'None').click();
+if (rowsOf(sec).length) fail(`None left rows: ${JSON.stringify(rowsOf(sec))}`);
+chip(sec, 'Current').click();
+if (rowsOf(sec).length !== 2 || rowsOf(sec).some(r => !r.includes('Current'))) fail(`None then Current: ${JSON.stringify(rowsOf(sec))}`);
+query(sec, 'button', true).find(b => b.textContent === 'All').click();
+
 // Headers sort: Node descending on a second click.
 const th = (name) => query(sec, 'th', true).find(t => t.textContent.startsWith(name));
 th('Node').click();

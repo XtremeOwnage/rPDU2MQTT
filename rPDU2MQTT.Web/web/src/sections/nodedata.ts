@@ -137,7 +137,9 @@ export function addNodeDataSection(nav: any, sections: any) {
     });
     const allBtn = btn('All');
     allBtn.onclick = () => { metricsOff.clear(); remember(METRICS_OFF_KEY, '[]'); draw(); };
-    metricBar.appendChild(allBtn);
+    const none = btn('None');
+    none.onclick = () => { metricsOff = new Set(metrics); remember(METRICS_OFF_KEY, JSON.stringify(metrics)); draw(); };
+    metricBar.append(allBtn, none);
   };
 
   let live: Record<string, any> = {};
