@@ -12223,7 +12223,8 @@ function addNodeTrendsSection(nav     , sections     ) {
     loaded: () => {
       if (pending) {
         off.clear();
-        const wanted = new Set(pending.nodes);
+        // A node's return lane comes with it: export is part of the grid's day.
+        const wanted = new Set(pending.nodes.flatMap(id => [id, id + '#in']));
         all().forEach((s     ) => { if (!wanted.has(s.node)) off.add(s.node); });
         // None of what was asked for is in this window: fall back rather than chart nothing.
         if (off.size === all().length) resetSelection();
