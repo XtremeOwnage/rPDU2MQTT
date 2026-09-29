@@ -11554,7 +11554,7 @@ function trendsPage(nav     , sections     , spec            ) {
     if (where) strip.draw({ lines: spec.timeline (page, whole), points: where.points, bounds: where.bounds, width: fitTo() });
   };
 
-  const draw = () => { hideCard(); charts.innerHTML = ''; describe(); spec.render(page); drawStrip(); };
+  const draw = () => { hideCard(); charts.innerHTML = ''; describe(); summarise(); spec.render(page); drawStrip(); };
 
   /// The stretch picked on the timeline, sampled finely enough to fill the chart.
   const loadPicked = async () => {
@@ -11582,6 +11582,11 @@ function trendsPage(nav     , sections     , spec            ) {
     if (!b?.ok) status.textContent = b?.message || 'Could not load that stretch of time.';
   };
 
+  function summarise() {
+    const pick = (s                   ) => s.selectedOptions?.[0]?.text || s.value;
+    opts.textContent = `${pick(rangeSel)} · ${pick(metricSel)} ${bar.classList.contains('opts-open') ? '▴' : '▾'}`;
+    opts.title = 'Chart options';
+  }
   const load = async () => {
     status.textContent = 'loading…';
     const p = plan();
@@ -11625,7 +11630,12 @@ function trendsPage(nav     , sections     , spec            ) {
   };
 
   sec.appendChild(periods.row);
-  bar.append(refresh,
+  // Phones fold the options behind one button that says what is charted.
+  const opts = btn('');
+  opts.classList.add('trend-opts');
+  opts.onclick = () => { bar.classList.toggle('opts-open'); summarise(); };
+  refresh.classList.add('trend-refresh');
+  bar.append(opts, refresh,
     el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
