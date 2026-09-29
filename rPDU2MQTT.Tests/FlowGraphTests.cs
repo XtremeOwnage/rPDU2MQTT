@@ -280,6 +280,54 @@ public class FlowGraphTests
     }
 
     [Fact]
+    public void Build_LoadFedByTwoPanels_IsNotSplitBetweenThem()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "a", Label = "A", Kind = "panel", Value = 500 },
+                new EnergyFlowNode { Id = "b", Label = "B", Kind = "panel", Value = 500 },
+                new EnergyFlowNode { Id = "l", Label = "L", Kind = "load", Value = 400 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "a", To = "l" },
+                new EnergyFlowLink { From = "b", To = "l" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "l" && l.Value > 0);
+    }
+
+    [Fact]
+    public void Build_TwoResidualFeeders_AreNotSplit()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "r1", Label = "R1", Mode = "residual" },
+                new EnergyFlowNode { Id = "r2", Label = "R2", Mode = "residual" },
+                new EnergyFlowNode { Id = "l", Label = "L", Kind = "load", Value = 400 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "r1", To = "l" },
+                new EnergyFlowLink { From = "r2", To = "l" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "l" && l.Value > 0);
+    }
+
+    [Fact]
     public void Build_DiamondPaths_AreUnknown_UntilOnePathIsDesignated()
     {
         // A panel reachable from the boss both directly AND via a sub-panel. The 100W of load is real, but

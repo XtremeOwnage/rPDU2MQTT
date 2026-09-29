@@ -335,7 +335,9 @@ public static class FlowGraphBuilder
             var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
 
             // A designated residual is told what it carries, so its own flow is determined.
-            if (unmeasured.Any(f => Mode(f) == "residual")) return Mode(from) == "residual";
+            if (feeders.Where(leaf.ContainsKey).Any(f => Undetermined(f, to))) return false;
+            var residuals = unmeasured.Count(f => Mode(f) == "residual");
+            if (residuals > 0) return Mode(from) == "residual" && residuals == 1;
 
             // One unmeasured path is determined by conservation. Several is a real unknown.
             if (HasAlternatives(to) && !flow.InferFromConservation) return false;
@@ -346,17 +348,26 @@ public static class FlowGraphBuilder
         // among, and nothing measured beneath this one.
         bool Undetermined(string from, string to)
         {
-            if (leaf.ContainsKey(to) || Inert(Mode(to))) return false;
+            if (Inert(Mode(to))) return false;
             var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
             var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
-            if (untracked.Count > 0) return Mode(to) == "untracked" && untracked.Count > 1;
+            if (untracked.Count > 0)
+                return Mode(to) != "untracked"
+                    ? MultiFed(to)
+                    : untracked.Count > 1 || kids.Any(c => Mode(c) != "untracked" && MultiFed(c));
             var metered = kids.Count > 1 || Distributes(from) ? kids.Where(leaf.ContainsKey).ToList() : new List<string>();
+            if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return MultiFed(to);
+            if (leaf.ContainsKey(to)) return false;
             var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
             if (metered.Count == 0 && kids.Count <= 1) return false;
-            if (estimated.Count <= 1) return false;
-            if (estimated.Count(c => Mode(c) == "residual") == 1 && Mode(to) == "residual") return false;
-            return Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
+            var fromSpare = estimated.Count == 1
+                || (estimated.Count(c => Mode(c) == "residual") == 1 && Mode(to) == "residual");
+            if (fromSpare) return metered.Any(MultiFed);
+            return MultiFed(to) || Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
         }
+
+        // A child with several feeders: what each one supplies is not measured.
+        bool MultiFed(string id) => incoming.TryGetValue(id, out var f) && f.Count > 1;
 
         // EdgeFlow(from -> to): how much flows along one link.
         double EdgeFlow(string from, string to, HashSet<string> path)
