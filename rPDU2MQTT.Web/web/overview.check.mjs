@@ -79,6 +79,8 @@ if (!/0 W/.test(text())) fail('a measured zero is not shown');
 // Today: 28.9 solar, 23 imported less 4.2 exported, so the house took 47.7 kWh.
 if (!/28\.9 kWh/.test(text())) fail(`today's solar is missing: ${text().slice(0, 300)}`);
 if (!/47\.7 kWh/.test(text())) fail(`the house's own use is not the balance of the day: ${text().slice(0, 400)}`);
+if (!/Imported23 kWh/.test(text()) || !/Exported4\.2 kWh/.test(text())) fail(`grid import and export are not shown side by side: ${text().slice(0, 400)}`);
+if (!/net 18\.8 kWh imported/.test(text())) fail(`today's net grid energy is missing: ${text().slice(0, 400)}`);
 
 // The battery: how full, in the place people look for it.
 if (!/74%/.test(text())) fail('the battery percentage is not shown');
