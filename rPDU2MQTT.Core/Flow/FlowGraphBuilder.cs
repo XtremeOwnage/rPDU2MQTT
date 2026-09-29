@@ -325,7 +325,7 @@ public static class FlowGraphBuilder
             // An intensive metric — voltage, frequency, power factor, state of charge, temperature.
             if (!FlowUnits.IsAdditive(metric)) return false;
 
-            if (leaf.ContainsKey(from)) return true;         // a measured producer supplies a real figure
+            if (leaf.ContainsKey(from)) return !Undetermined(from, to);   // a measured producer supplies a real figure
             if (Inert(Mode(from))) return true;              // 'none'/'static': deliberately contributes nothing
 
             // A feeder whose own source has stopped reporting carries an unknowable amount — not zero.
@@ -335,12 +335,39 @@ public static class FlowGraphBuilder
             var unmeasured = feeders.Where(f => !leaf.ContainsKey(f) && !Inert(Mode(f)) && !Unavailable(f)).ToList();
 
             // A designated residual is told what it carries, so its own flow is determined.
-            if (unmeasured.Any(f => Mode(f) == "residual")) return Mode(from) == "residual";
+            if (feeders.Where(leaf.ContainsKey).Any(f => Undetermined(f, to))) return false;
+            var residuals = unmeasured.Count(f => Mode(f) == "residual");
+            if (residuals > 0) return Mode(from) == "residual" && residuals == 1;
 
             // One unmeasured path is determined by conservation. Several is a real unknown.
             if (HasAlternatives(to) && !flow.InferFromConservation) return false;
             return unmeasured.Count <= 1;
         }
+
+        // A child's share of a measured parent that nothing determines: more than one child left to apportion
+        // among, and nothing measured beneath this one.
+        bool Undetermined(string from, string to)
+        {
+            if (Inert(Mode(to))) return false;
+            var kids = outgoing.TryGetValue(from, out var k) ? k : new List<string>();
+            var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
+            if (untracked.Count > 0)
+                return Mode(to) != "untracked"
+                    ? MultiFed(to)
+                    : untracked.Count > 1 || kids.Any(c => Mode(c) != "untracked" && MultiFed(c));
+            var metered = kids.Count > 1 || Distributes(from) ? kids.Where(leaf.ContainsKey).ToList() : new List<string>();
+            if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return MultiFed(to);
+            if (leaf.ContainsKey(to)) return false;
+            var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
+            if (metered.Count == 0 && kids.Count <= 1) return false;
+            var fromSpare = estimated.Count == 1
+                || (estimated.Count(c => Mode(c) == "residual") == 1 && Mode(to) == "residual");
+            if (fromSpare) return metered.Any(MultiFed);
+            return MultiFed(to) || Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
+        }
+
+        // A child with several feeders: what each one supplies is not measured.
+        bool MultiFed(string id) => incoming.TryGetValue(id, out var f) && f.Count > 1;
 
         // EdgeFlow(from -> to): how much flows along one link.
         double EdgeFlow(string from, string to, HashSet<string> path)
@@ -355,7 +382,7 @@ public static class FlowGraphBuilder
                 {
                     var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
                     var spare = Math.Max(0, produced - trackedDraw);
-                    return Mode(to) == "untracked" ? spare / untracked.Count : DemandShare(to, path);
+                    return Mode(to) == "untracked" ? spare : DemandShare(to, path);
                 }
 
                 // A metered circuit draws what its own clamp says, not a share of its parent scaled to
@@ -386,24 +413,25 @@ public static class FlowGraphBuilder
                 if (metered.Count > 0)
                 {
                     var meteredDraw = metered.Sum(c => DemandShare(c, path));
-                    // What the parent emits is still the ceiling: a link cannot carry more than its source
-                    // produces, so meters asking for more than there is are scaled to fit.
-                    var fit = meteredDraw > produced && meteredDraw > 0 ? produced / meteredDraw : 1.0;
-
-                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path) * fit;
+                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path);
                     if (Inert(Mode(to))) return 0;
 
-                    // Whatever the metered children leave is divided among the ones nothing measures.
+                    // What the metered children leave goes to the one child nothing measures; with several, each
+                    // carries only what is measured beneath it.
                     var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
                     if (estimated.Count == 0) return 0;
-                    var spare = Math.Max(0, produced - meteredDraw * fit);
-                    var demand = estimated.Sum(c => Need(c, path));
-                    return demand > 0 ? spare * Need(to, path) / demand : spare / estimated.Count;
+                    var spare = Math.Max(0, produced - meteredDraw);
+                    if (estimated.Count == 1) return spare;
+                    var residual = estimated.Where(c => Mode(c) == "residual").ToList();
+                    if (residual.Count == 1)
+                        return Mode(to) == "residual"
+                            ? Math.Max(0, spare - estimated.Where(c => Mode(c) != "residual").Sum(c => Need(c, path)))
+                            : Need(to, path);
+                    return Need(to, path);
                 }
 
                 if (kids.Count <= 1) return produced;
-                var totalDemand = kids.Sum(c => Need(c, path));
-                return totalDemand > 0 ? produced * Need(to, path) / totalDemand : produced / kids.Count;
+                return Need(to, path);
             }
 
             if (Inert(Mode(from))) return 0;

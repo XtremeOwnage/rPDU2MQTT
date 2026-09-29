@@ -197,10 +197,8 @@ public class FlowGraphTests
     }
 
     [Fact]
-    public void Build_ProducerFeedingMultipleConsumers_SplitsGenerationByDemand()
+    public void Build_ProducerFeedingMultipleConsumers_CarriesWhatEachDraws()
     {
-        // Solar powers two PDUs drawing 100W and 300W. Its 800W generation must split 1:3 across the two
-        // links (200 / 600), not show 800 on each — i.e. the producer isn't counted once per consumer.
         var d1 = new Device { Key = "pdu1", Entity_Name = "pdu1", Entity_DisplayName = "PDU 1" };
         d1.Outlets.Add(Outlet(0, "LoadA", "realpower", "100"));
         var d2 = new Device { Key = "pdu2", Entity_Name = "pdu2", Entity_DisplayName = "PDU 2" };
@@ -221,15 +219,14 @@ public class FlowGraphTests
 
         var graph = FlowGraphBuilder.Build(data, flow);
 
-        Assert.Equal(200, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu1").Value);
-        Assert.Equal(600, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu2").Value);
-        Assert.Equal(800, graph.Links.Where(l => l.Source == "solar").Sum(l => l.Value)); // total generation preserved
+        Assert.Equal(100, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu1").Value);
+        Assert.Equal(300, graph.Links.Single(l => l.Source == "solar" && l.Target == "pdu:pdu2").Value);
+        Assert.Equal(400, graph.Links.Single(l => l.Source == "solar" && l.Target == "solar#unmeasured").Value);
     }
 
     [Fact]
-    public void Build_ProducerFeedingConsumersWithNoDemand_SplitsEqually()
+    public void Build_ProducerFeedingConsumersWithNoDemand_DoesNotGuessASplit()
     {
-        // No downstream load yet (modelling before sensors bind): fall back to an even split of generation.
         var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
         var flow = new EnergyFlowConfig
         {
@@ -250,7 +247,84 @@ public class FlowGraphTests
 
         var graph = FlowGraphBuilder.Build(data, flow);
 
-        Assert.All(new[] { "a", "b", "c" }, t => Assert.Equal(300, graph.Links.Single(l => l.Source == "solar" && l.Target == t).Value));
+        Assert.All(new[] { "a", "b", "c" }, t => Assert.Null(graph.Nodes.Single(n => n.Id == t).Value));
+        Assert.Equal(900, graph.Nodes.Single(n => n.Id == "solar").Value);
+    }
+
+    [Fact]
+    public void Build_PanelLeftover_IsNotSplitAcrossUnmeteredCircuits()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "panel", Label = "Panel", Kind = "panel", Value = 1000 },
+                new EnergyFlowNode { Id = "m", Label = "M", Kind = "breaker", Value = 200 },
+                new EnergyFlowNode { Id = "x", Label = "X", Kind = "breaker" },
+                new EnergyFlowNode { Id = "y", Label = "Y", Kind = "breaker" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "panel", To = "m" },
+                new EnergyFlowLink { From = "panel", To = "x" },
+                new EnergyFlowLink { From = "panel", To = "y" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.Null(graph.Nodes.Single(n => n.Id == "x").Value);
+        Assert.Null(graph.Nodes.Single(n => n.Id == "y").Value);
+        Assert.Equal(800, graph.Links.Single(l => l.Source == "panel" && l.Target == "panel#unmeasured").Value);
+    }
+
+    [Fact]
+    public void Build_LoadFedByTwoPanels_IsNotSplitBetweenThem()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "a", Label = "A", Kind = "panel", Value = 500 },
+                new EnergyFlowNode { Id = "b", Label = "B", Kind = "panel", Value = 500 },
+                new EnergyFlowNode { Id = "l", Label = "L", Kind = "load", Value = 400 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "a", To = "l" },
+                new EnergyFlowLink { From = "b", To = "l" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "l" && l.Value > 0);
+    }
+
+    [Fact]
+    public void Build_TwoResidualFeeders_AreNotSplit()
+    {
+        var data = OnePdu(Outlet(0, "Load", "realpower", "10"));
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "r1", Label = "R1", Mode = "residual" },
+                new EnergyFlowNode { Id = "r2", Label = "R2", Mode = "residual" },
+                new EnergyFlowNode { Id = "l", Label = "L", Kind = "load", Value = 400 },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "r1", To = "l" },
+                new EnergyFlowLink { From = "r2", To = "l" },
+            },
+        };
+
+        var graph = FlowGraphBuilder.Build(data, flow);
+
+        Assert.DoesNotContain(graph.Links, l => l.Target == "l" && l.Value > 0);
     }
 
     [Fact]
