@@ -75,6 +75,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/node-trends.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nodetrendskinds.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nodedata-history.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nodedata-filters.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/trendsrecent.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/circuitfinder.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/panelschedule.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

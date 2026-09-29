@@ -32,6 +32,11 @@ const NODE_DATA_WINDOWS: [number, string][] = [[60, '1 hour'], [360, '6 hours'],
 const STRIP_POINTS = 300;
 const STRIP_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)'];
 
+const METRICS_OFF_KEY = 'rpdu-nodedata-metrics-off';
+const TAG_KEY = 'rpdu-nodedata-tag';
+const recall = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* this session only */ } };
+
 const ago = (s: number) => s < 1 ? 'just now'
   : s < 90 ? Math.round(s) + 's ago'
   : s < 5400 ? Math.round(s / 60) + 'm ago'
@@ -60,8 +65,11 @@ export function addNodeDataSection(nav: any, sections: any) {
   // The day the timeline ends on; blank is now.
   const dayIn = el('input', { type: 'date', title: 'The day the timeline ends on. Blank for now.' }) as HTMLInputElement;
   const pastTools = el('span', { style: { display: 'contents' } }, windowSel, el('span', { class: 'desc', style: { margin: '0' }, text: 'ending' }), dayIn);
-  bar.append(refresh, filter, problemsLab, pastLab, pastTools, count);
+  const tagSel = el('select', { title: 'Show only the nodes carrying this tag.' }) as HTMLSelectElement;
+  bar.append(refresh, filter, tagSel, problemsLab, pastLab, pastTools, count);
   sec.appendChild(bar);
+  const metricBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
+  sec.appendChild(metricBar);
   const strip = timelineStrip(span => { if (span) { at = span.from; load(); } }, undefined, { moment: true });
   sec.appendChild(strip.el);
   const wrap = el('div'); sec.appendChild(wrap);
@@ -97,12 +105,50 @@ export function addNodeDataSection(nav: any, sections: any) {
     : s.Type === 'modbus' ? `${s.Connection || 'modbus'} · register ${s.Register}`
     : (s.Topic || '') + (s.JsonField ? ` · ${s.JsonField}` : '');
 
+  let metricsOff = new Set<string>((() => { try { return JSON.parse(recall(METRICS_OFF_KEY) || '[]'); } catch { return []; } })());
+  let tag = recall(TAG_KEY) || '';
+  const tagsOf = (n: any): string[] => (n.Tags || []).map((t: any) => String(t).trim()).filter(Boolean);
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+  const drawTags = () => {
+    const tags = [...new Set(rows().flatMap(r => tagsOf(r.node)))].sort((a, b) => a.localeCompare(b));
+    tagSel.innerHTML = '';
+    tagSel.appendChild(el('option', { value: '', text: 'All tags' }));
+    tags.forEach(t => tagSel.appendChild(el('option', { value: t, text: t })));
+    tagSel.value = tags.find(t => same(t, tag)) || '';
+    tagSel.classList[tags.length ? 'remove' : 'add']('is-hidden');
+  };
+
+  const drawMetrics = () => {
+    metricBar.innerHTML = '';
+    const metrics = [...new Set(rows().map(r => r.metric))].sort((a, b) => metricName(a).localeCompare(metricName(b)));
+    if (metrics.length < 2) return;
+    metricBar.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Metrics:' }));
+    metrics.forEach(m => {
+      const on = !metricsOff.has(m);
+      const chip = btn((on ? '● ' : '○ ') + metricName(m));
+      if (on) chip.classList.add('chip-on');
+      chip.onclick = () => {
+        if (on) metricsOff.add(m); else metricsOff.delete(m);
+        remember(METRICS_OFF_KEY, JSON.stringify([...metricsOff]));
+        draw();
+      };
+      metricBar.appendChild(chip);
+    });
+    const allBtn = btn('All');
+    allBtn.onclick = () => { metricsOff.clear(); remember(METRICS_OFF_KEY, '[]'); draw(); };
+    metricBar.appendChild(allBtn);
+  };
+
   let live: Record<string, any> = {};
   const keyOf = (r: any) => `${r.node.Id}|${r.metric}`;
 
   const draw = () => {
     const f = (filter.value || '').trim().toLowerCase();
-    let list = rows();
+    drawTags();
+    drawMetrics();
+    const all = rows();
+    let list = all.filter(r => !metricsOff.has(r.metric) && (!tagSel.value || tagsOf(r.node).some(t => same(t, tagSel.value))));
     list = list.filter(r => !f || `${r.node.Label || ''} ${r.node.Id} ${metricName(r.metric)} ${describe(r.src)}`.toLowerCase().includes(f));
     if (onlyProblems.checked && !past()) list = list.filter(r => {
       const v = live[keyOf(r)];
@@ -112,7 +158,8 @@ export function addNodeDataSection(nav: any, sections: any) {
 
     wrap.innerHTML = '';
     if (!list.length) {
-      wrap.appendChild(el('div', { class: 'desc', text: onlyProblems.checked && !past() ? 'Nothing stale or missing — every bound source is reporting.' : 'No nodes have sources bound yet. Bind one on the Nodes tab.' }));
+      wrap.appendChild(el('div', { class: 'desc', text: !all.length ? 'No nodes have sources bound yet. Bind one on the Nodes tab.'
+        : onlyProblems.checked && !past() ? 'Nothing stale or missing — every bound source is reporting.' : 'No readings match the filters.' }));
       return;
     }
 
@@ -227,6 +274,7 @@ export function addNodeDataSection(nav: any, sections: any) {
   refresh.onclick = refreshAll;
   filter.oninput = draw;
   onlyProblems.onchange = draw;
+  tagSel.onchange = () => { tag = tagSel.value; remember(TAG_KEY, tag); draw(); };
   pastOn.onchange = () => { at = null; syncPast(); refreshAll(); };
   windowSel.onchange = () => loadStrip();
   dayIn.onchange = () => { at = null; loadStrip(); };
