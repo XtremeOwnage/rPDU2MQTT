@@ -32,7 +32,7 @@ export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: str
 
 /// A row of one-click periods, with the one being shown marked.
 export function periodRow(onPick: (key: PeriodKey) => void): { row: HTMLElement; mark: (key: PeriodKey | null) => void } {
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);

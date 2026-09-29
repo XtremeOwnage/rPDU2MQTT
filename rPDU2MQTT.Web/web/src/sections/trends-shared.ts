@@ -105,13 +105,13 @@ export type TrendsSpec = {
 export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const link = navLink(nav, spec.label, spec.icon);
   link.dataset.section = 'EnergyFlow';
-  const sec = el('div', { class: 'section' }); sections.appendChild(sec);
+  const sec = el('div', { class: 'section trends-page' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: spec.label }));
   // Written when the answer arrives, so it describes what was actually charted.
   const desc = el('div', { class: 'desc' });
   sec.appendChild(desc);
 
-  const bar = el('div', { class: 'ld-toolbar' });
+  const bar = el('div', { class: 'ld-toolbar trend-bar' });
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });

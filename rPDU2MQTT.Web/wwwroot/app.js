@@ -1470,7 +1470,7 @@ function periodWindow(key           , now       = new Date())                   
 
 /// A row of one-click periods, with the one being shown marked.
 function periodRow(onPick                          )                                                              {
-  const row = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px', margin: '0 0 8px' } });
+  const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);
@@ -1688,7 +1688,7 @@ function barChart(opts
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
   // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
-  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(360, opts.fitTo) : Math.max(720, days.length * 26);
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : Math.max(720, days.length * 26);
   const H = opts.height && opts.height > 0 ? opts.height : 240;
   const padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -1697,6 +1697,11 @@ function barChart(opts
   const barW = Math.min(Math.max(3, slot * 0.72), 48);
   const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
   const zeroY = y(0);
+  // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
+  const tickText = (day        ) => /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
+  // As many axis labels as fit the width, at most 12.
+  const labelPx = Math.max(1, ...days.map(dd => tickText(dd).length)) * 6.5 + 12;
+  const every = Math.ceil(days.length / Math.max(2, Math.min(12, Math.floor(plotW / labelPx))));
 
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
 
@@ -1760,11 +1765,9 @@ function barChart(opts
       }
     }
 
-    const every = Math.ceil(days.length / 12);
     if (d % every === 0) {
       const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
-      // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
-      t.textContent = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
+      t.textContent = tickText(day);
       svg.appendChild(t);
     }
   });
@@ -11244,13 +11247,13 @@ const signed = (s     )                    =>
 function trendsPage(nav     , sections     , spec            ) {
   const link = navLink(nav, spec.label, spec.icon);
   link.dataset.section = 'EnergyFlow';
-  const sec = el('div', { class: 'section' }); sections.appendChild(sec);
+  const sec = el('div', { class: 'section trends-page' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: spec.label }));
   // Written when the answer arrives, so it describes what was actually charted.
   const desc = el('div', { class: 'desc' });
   sec.appendChild(desc);
 
-  const bar = el('div', { class: 'ld-toolbar' });
+  const bar = el('div', { class: 'ld-toolbar trend-bar' });
   const refresh = btn('Refresh');
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
@@ -11902,7 +11905,7 @@ function addNodeTrendsSection(nav     , sections     ) {
 
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
   const kindRow = el('div', { style: { display: 'contents' } });
-  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
+  const filterRow = el('div', { class: 'ld-toolbar trend-filters', style: { gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
     const kinds = [...new Set(all().map(kindOf))]

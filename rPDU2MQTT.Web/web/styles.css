@@ -2035,3 +2035,15 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .balance-val { color: var(--faint); font-family: var(--mono); font-size: 12px; }
 .balance-x { background: none; border: 0; padding: 0 6px; color: var(--faint); cursor: pointer; font-size: 14px; line-height: 1; }
 .balance-x:hover { color: var(--bad); }
+
+@media (max-width: 560px) {
+  /* Periods and filter chips scroll sideways as one line each instead of stacking. */
+  .period-row, .trend-filters { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+  .period-row > *, .trend-filters button { flex:none; }
+  .period-row > .desc { display:none; }
+  .trend-bar { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2); }
+  .trend-bar .ld-inst { min-width:0; }
+  .trend-bar .ld-inst select { flex:1; min-width:0; }
+  .trend-bar > .ld-count { grid-column:1 / -1; }
+  .trend-timeline-tools button.small { padding:4px 9px; }
+}

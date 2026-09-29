@@ -83,7 +83,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
 
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
   const kindRow = el('div', { style: { display: 'contents' } });
-  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
+  const filterRow = el('div', { class: 'ld-toolbar trend-filters', style: { gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
     const kinds = [...new Set(all().map(kindOf))]
