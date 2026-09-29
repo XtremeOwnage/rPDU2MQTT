@@ -1319,6 +1319,17 @@
   .ov-peak { margin-left: auto; font-weight: 400; color: var(--faint); letter-spacing: 0; }
   .ov-strip .ov-value { font-size: 22px; }
   .ov-strip .spark-hit { cursor: crosshair; }
+  /* The overrides editor's .ov-sub is monospace; these are sentences. */
+  .ov-tile .ov-sub, .ov-batt-read .ov-sub { font-family: inherit; }
+  @media (max-width: 560px) {
+    .ov-batt-side { flex: 1 1 100%; }
+    .ov-batt-shell { width: 40px; height: 72px; }
+    .ov-tiles { display: grid; grid-template-columns: 1fr 1fr; grid-auto-flow: dense; gap: 10px; }
+    .ov-tiles > .ov-note, .ov-tiles > .desc, .ov-grid, .ov-self, .ov-strip { grid-column: 1 / -1; }
+    .ov-tile { min-width: 0; padding: 10px 12px; }
+    .ov-value, .ov-strip .ov-value { font-size: 21px; }
+    .ov-strip .spark { height: 56px; }
+  }
 
   /* A credential field and its show/hide button. */
   .reveal-wrap { display:flex; gap:6px; align-items:center; }
