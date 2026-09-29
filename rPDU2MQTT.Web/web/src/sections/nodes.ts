@@ -237,7 +237,8 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''].forEach(h => {
+  const cols = ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''];
+  cols.forEach(h => {
     const th = el('th', { text: h });
     if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
     if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
@@ -340,6 +341,8 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     };
     actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
+    // Labels for the stacked phone layout.
+    Array.from(tr.children).forEach((td: any, i: number) => { if (cols[i]) td.dataset.label = cols[i]; });
     body.appendChild(tr);
   });
   tbl.appendChild(body);
