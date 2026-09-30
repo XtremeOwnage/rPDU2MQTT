@@ -77,7 +77,7 @@ credentials:
 
 ## Notes
 
-- **Graceful rollout.** With a cache, the new pod starts as a standby and takes the leader lease when the old pod stops. Only the lease holder polls and publishes. The old pod keeps serving for `RPDU2MQTT_SHUTDOWN_DRAIN_SECONDS` (10 s) with `/readyz` failing. A killed pod holds the lease for at most `RPDU2MQTT_LEADER_LEASE_SECONDS` (15 s). GUI **Restart** rolls the Deployment.
+- **Graceful rollout.** With a cache, the new pod starts as a standby and takes the leader lease when the old pod stops. Only the lease holder polls and publishes. The old pod keeps serving for `RPDU2MQTT_SHUTDOWN_DRAIN_SECONDS` (10 s) with `/readyz` failing. A killed pod holds the lease for at most `RPDU2MQTT_LEADER_LEASE_SECONDS` (15 s). GUI **Restart** rolls the Deployment. See [Updates and restarts](updates.md).
 - **Replicas.** Without the leader lease keep `replicaCount: 1` (`Recreate` strategy). With it, extra replicas are standbys.
 - **Split roles.** With `split.enabled`, the `worker` Deployment runs the PDU session, Modbus and exporters; `api` and `ui` only read. Keep `worker` at one replica. History needs a `ReadWriteMany` class.
 - **Scheduled restarts.** `autoRestart.enabled` adds a CronJob running `kubectl rollout restart` on this release's Deployments, with its own ServiceAccount (`get`, `list`, `patch` on Deployments). Missed runs are skipped.

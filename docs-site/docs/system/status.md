@@ -54,17 +54,4 @@ With the Kubernetes config source, also pod logs and recent events (needs the RB
 
 ## Operator
 
-Kubernetes only. Needs the Kubernetes config source and the `operator` role. Turn on with `Operator.Enabled: true`.
-
-| Setting | Default | Notes |
-| --- | --- | --- |
-| `Operator.CheckForUpdates` | `true` | Reports newer images in the CR status and on Diagnostics |
-| `Operator.CheckIntervalHours` | `6` | |
-| `Operator.Policy` | `Minor` | `Patch`, `Minor`, `Major` |
-| `Operator.AutoUpdate` | `false` | Rolls the Deployment to the newest eligible release |
-| `Operator.Registry` | current image's registry | |
-| `Operator.Repository` | current image's repository | |
-
-The **Operator** page appears in the GUI when enabled.
-
-All settings: [Operator settings reference](../reference/settings/operator.md).
+Kubernetes only. See [Updates and restarts](../deployment/updates.md#automatic-updates).
