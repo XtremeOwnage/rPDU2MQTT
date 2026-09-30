@@ -16677,7 +16677,7 @@ function addDiscoveryCleanup(sec     ) {
     lastDevices = devices;
     devOut.innerHTML = '';
     devDelete.disabled = !devices.length;
-    if (!devices.length) { devOut.textContent = 'Nothing stale — every device of ours in Home Assistant still has entities.'; return; }
+    if (!devices.length) { devOut.textContent = 'Nothing stale — every device of ours in Home Assistant still has live entities.'; return; }
     devOut.appendChild(el('div', { text: `${devices.length} stale device(s) would be deleted from Home Assistant:` }));
     const list = el('ul', { style: { margin: '4px 0 0 18px' } });
     devices.forEach((d     ) => list.appendChild(el('li', {},

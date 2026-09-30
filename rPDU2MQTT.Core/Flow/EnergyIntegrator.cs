@@ -29,6 +29,7 @@ namespace rPDU2MQTT.Core.Flow;
 /// discards it. Exists so one stray zero cannot re-baseline the mark and turn the next ordinary reading into
 /// a lifetime's worth of energy.
 /// </param>
+/// <param name="Bridged">Advanced from power while the counter was missing; the counter's next reading re-baselines.</param>
 public readonly record struct EnergyState(
     double KWh,
     DateTime LastSampleUtc,
@@ -37,7 +38,8 @@ public readonly record struct EnergyState(
     string? PeriodKey = null,
     double PeriodStartKWh = 0,
     double? LastCounterKWh = null,
-    double? PendingResetKWh = null)
+    double? PendingResetKWh = null,
+    bool Bridged = false)
 {
     public static readonly EnergyState Empty = new(0, default, 0, 0);
 

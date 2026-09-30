@@ -117,15 +117,12 @@ public static class EnergyDashboardSync
                 // object — NOT the flow_from/flow_to arrays older docs show (those are "extra keys" to the
                 // current schema, which is what save_prefs rejected). cost_adjustment_day is required.
                 //
-                // No stat_rate: save_prefs accepts one on a grid, and the dashboard then reads the power
-                // sensor as an energy figure — a grid reading -5110 W rendered as "-5,110 kWh exported" and
-                // was carried into the balance and the self-sufficiency gauge (22,642%). Solar takes one,
-                // and a battery takes its own through power_config, which HA mirrors back to a top-level
-                // stat_rate itself. A grid has no such handling, so it is not given one.
+                // Power goes in power_config, as for a battery: a top-level stat_rate on a grid was read as energy.
                 case "grid" when !string.IsNullOrEmpty(outStat) || !string.IsNullOrEmpty(inStat):
                     var grid = new JsonObject { ["type"] = "grid", ["cost_adjustment_day"] = 0.0 };
                     if (!string.IsNullOrEmpty(outStat)) grid["stat_energy_from"] = outStat;
                     if (!string.IsNullOrEmpty(inStat)) grid["stat_energy_to"] = inStat;
+                    if (!string.IsNullOrEmpty(power)) grid["power_config"] = new JsonObject { ["stat_rate"] = power };
                     sources.Add(grid);
                     break;
             }
@@ -161,6 +158,12 @@ public static class EnergyDashboardSync
                producedNow.Contains(stat)
                || (uniqueByEntity.TryGetValue(stat, out var uid)
                    && uid.StartsWith(OwnedUniqueIdPrefix, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>Is this individual-device entry one we put there, including a sensor of ours no longer produced?</summary>
+    public static bool IsOurDevice(string stat, IReadOnlyDictionary<string, string> uniqueByEntity, IReadOnlySet<string> managed)
+        => managed.Contains(stat)
+           || (uniqueByEntity.TryGetValue(stat, out var uid)
+               && uid.StartsWith(OwnedUniqueIdPrefix, StringComparison.OrdinalIgnoreCase));
 
     public static IEnumerable<string> StatsOf(JsonObject source)
     {

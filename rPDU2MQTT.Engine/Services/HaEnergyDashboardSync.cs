@@ -168,9 +168,11 @@ public sealed class HaEnergyDashboardSync
         // must NOT apply here: a grid tier that's momentarily energy-unknown would otherwise fall through the
         // gap — not in `managed` so never removed, not in `devices` so never re-added — and linger forever.
         var managed = ManagedStats(entityByUniqueId);
+        var uniqueByEntity = Reverse(entityByUniqueId);
         var keep = new JsonArray();
         foreach (var existingDevice in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
-            if (existingDevice is JsonObject o && !managed.Contains((string?)o["stat_consumption"] ?? ""))
+            if (existingDevice is JsonObject o
+                && !EnergyDashboardSync.IsOurDevice((string?)o["stat_consumption"] ?? "", uniqueByEntity, managed))
                 keep.Add(o.DeepClone());
         foreach (var d in devices)
             keep.Add(JsonSerializer.SerializeToNode(d, Json)!);
@@ -181,7 +183,6 @@ public sealed class HaEnergyDashboardSync
         // not by type), so a hand-added second grid/solar survives.
         var sources = BuildEnergySources(entityByUniqueId);
         var ourStats = sources.SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var uniqueByEntity = Reverse(entityByUniqueId);
         var keepSources = new JsonArray();
         foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
             if (existing is JsonObject o && !EnergyDashboardSync.IsOurs(o, uniqueByEntity, ourStats))
@@ -247,10 +248,22 @@ public sealed class HaEnergyDashboardSync
         var devices = (await call("config/device_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
         var entities = (await call("config/entity_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
 
+        // HA marks an entity no integration provides any more with restored: true.
+        var states = (await call("get_states", null))?["result"]?.AsArray() ?? new JsonArray();
+        var restored = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var st in states)
+            if ((bool?)st?["attributes"]?["restored"] == true && (string?)st?["entity_id"] is { Length: > 0 } eid)
+                restored.Add(eid);
+
         var perDevice = new Dictionary<string, int>(StringComparer.Ordinal);
+        var orphaned = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var e in entities)
             if ((string?)e?["device_id"] is { Length: > 0 } id)
+            {
                 perDevice[id] = perDevice.TryGetValue(id, out var n) ? n + 1 : 1;
+                if ((string?)e?["entity_id"] is { } eid && restored.Contains(eid))
+                    orphaned[id] = orphaned.TryGetValue(id, out var r) ? r + 1 : 1;
+            }
 
         var all = new List<Core.HomeAssistant.HaDevice>();
         foreach (var d in devices)
@@ -270,7 +283,8 @@ public sealed class HaEnergyDashboardSync
 
             all.Add(new Core.HomeAssistant.HaDevice(
                 id, (string?)d?["name_by_user"] ?? (string?)d?["name"], idents,
-                perDevice.TryGetValue(id, out var c) ? c : 0, entries));
+                perDevice.TryGetValue(id, out var c) ? c : 0, entries,
+                orphaned.TryGetValue(id, out var o) ? o : 0));
         }
         return Core.HomeAssistant.HaStaleDevices.Stale(all);
     }
