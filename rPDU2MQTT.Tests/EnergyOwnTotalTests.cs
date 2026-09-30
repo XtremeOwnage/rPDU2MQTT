@@ -210,4 +210,20 @@ public class EnergyOwnTotalTests
         Assert.Null(parts["energyflow_grid_energy_today"]!["unique_id"]);
         Assert.NotNull(parts["energyflow_grid_energy"]!["unique_id"]);
     }
+
+    [Fact]
+    public void ADashboardDeviceOfOursNoLongerProducedIsOurs()
+    {
+        var uniqueByEntity = new Dictionary<string, string>
+        {
+            ["sensor.office_minisplit_energy_2"] = "energyflow_breaker_sub_panel_1_5_energy",
+            ["sensor.fridge_plug_energy"] = "0x00124b_energy",
+        };
+        var managed = new HashSet<string> { "sensor.office_minisplit_energy" };
+
+        Assert.True(EnergyDashboardSync.IsOurDevice("sensor.office_minisplit_energy", uniqueByEntity, managed));
+        Assert.True(EnergyDashboardSync.IsOurDevice("sensor.office_minisplit_energy_2", uniqueByEntity, managed));
+        Assert.False(EnergyDashboardSync.IsOurDevice("sensor.fridge_plug_energy", uniqueByEntity, managed));
+        Assert.False(EnergyDashboardSync.IsOurDevice("sensor.not_in_registry", uniqueByEntity, managed));
+    }
 }

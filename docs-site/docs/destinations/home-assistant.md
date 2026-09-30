@@ -37,7 +37,7 @@ Availability follows the MQTT Last Will ([MQTT](../integrations/mqtt.md)).
 | Republish discovery | Reloads the saved config, re-reads the PDU and republishes. Applies name, override and template edits without a restart. |
 | Clear discovery | Removes the retained discovery messages. Entities disappear until discovery runs again. |
 | Find orphaned configs / Clear them | Lists retained discovery configs under this bridge's prefix that the current setup no longer publishes, and retracts them. |
-| Find stale devices / Delete them | Lists this bridge's Home Assistant devices with no entities left and deletes them through Home Assistant's API. Needs the Energy Dashboard URL and token. |
+| Find stale devices / Delete them | Lists this bridge's Home Assistant devices with no entities left, or only entities no longer provided, and deletes them through Home Assistant's API. Needs the Energy Dashboard URL and token. |
 
 ## Energy Dashboard
 

@@ -162,6 +162,12 @@ public static class EnergyDashboardSync
                || (uniqueByEntity.TryGetValue(stat, out var uid)
                    && uid.StartsWith(OwnedUniqueIdPrefix, StringComparison.OrdinalIgnoreCase)));
 
+    /// <summary>Is this individual-device entry one we put there, including a sensor of ours no longer produced?</summary>
+    public static bool IsOurDevice(string stat, IReadOnlyDictionary<string, string> uniqueByEntity, IReadOnlySet<string> managed)
+        => managed.Contains(stat)
+           || (uniqueByEntity.TryGetValue(stat, out var uid)
+               && uid.StartsWith(OwnedUniqueIdPrefix, StringComparison.OrdinalIgnoreCase));
+
     public static IEnumerable<string> StatsOf(JsonObject source)
     {
         if ((string?)source["stat_energy_from"] is { Length: > 0 } from) yield return from;
