@@ -70,22 +70,4 @@ Namespaced Role: `get`, `list`, `watch`, `patch` on `rpduconfigs`; `patch` on `r
 
 ## Operator
 
-Separate role (`--role operator` or `RPDU2MQTT_ROLE=operator`); not part of `all`.
-
-- Checks the registry for newer images under `Operator.Policy` (`Patch`, `Minor`, `Major`). Pre-releases and moving tags are never targets.
-- Writes the result to `.status.update` and the Diagnostics page.
-- With `Operator.AutoUpdate: true`, rolls the Deployment to the newest eligible tag.
-
-```yaml
-operator:
-  enabled: true
-kubernetesConfigSource:
-  enabled: true
-config:
-  Operator:
-    Enabled: true
-    Policy: Minor
-    AutoUpdate: false
-```
-
-Settings: [Operator](../system/status.md#operator).
+Registry update checks and automatic updates with `config.Operator.Enabled: true`. See [Updates and restarts](updates.md#automatic-updates).

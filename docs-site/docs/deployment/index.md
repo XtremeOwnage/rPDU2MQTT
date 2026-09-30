@@ -11,6 +11,7 @@ title: Deployment
 | Kubernetes, Helm | [Helm chart](helm.md) |
 | Kubernetes, GitOps | [Argo CD](argo-cd.md) |
 | Kubernetes, writable config | [Kubernetes CRD](kubernetes-crd.md) |
+| Kubernetes, seamless restarts and automatic updates | [Updates and restarts](updates.md) |
 | Kubernetes, no Helm | [`manifests.yaml`](https://github.com/XtremeOwnage/rPDU2MQTT/blob/main/Examples/Kubernetes/manifests.yaml), [CRD manifests](https://github.com/XtremeOwnage/rPDU2MQTT/blob/main/Examples/Kubernetes/crd/README.md) |
 
 Requirements: network access to the MQTT broker and the PDU, and a `config.yaml` ([Configuration](../getting-started/configuration.md)).
@@ -52,7 +53,7 @@ Releases follow [SemVer](https://semver.org/). Non-release builds report a versi
 
 - Compose: `docker compose pull && docker compose up -d`
 - Helm: `helm upgrade rpdu2mqtt ./charts/rpdu2mqtt -n rpdu2mqtt -f my-values.yaml`
-- With Valkey on, the Helm chart rolls the Deployment with no gap (`gracefulRollout.enabled`, default). Elsewhere, set `RPDU2MQTT_LEADER_LEASE=true` on every instance with `Cache` enabled; only the lease holder polls and publishes.
+- With Valkey on, the Helm chart rolls the Deployment with no gap (`gracefulRollout.enabled`, default). See [Updates and restarts](updates.md). Elsewhere, set `RPDU2MQTT_LEADER_LEASE=true` on every instance with `Cache` enabled; only the lease holder polls and publishes.
 
 ## Troubleshooting
 

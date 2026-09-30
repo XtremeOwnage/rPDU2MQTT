@@ -48,7 +48,7 @@ No file found: the searched paths are logged, and the process exits after 15 sec
 | `History` | [History](../system/history.md) | [settings](../reference/settings/history.md) |
 | `Logging`, `Debug` | [Logging](../system/logging.md) | [logging](../reference/settings/logging.md), [debug](../reference/settings/debug.md) |
 | `Gui` | [GUI and authentication](../system/gui.md) | [settings](../reference/settings/gui.md) |
-| `Operator` | [Operator](../system/status.md#operator) | [settings](../reference/settings/operator.md) |
+| `Operator` | [Updates and restarts](../deployment/updates.md#automatic-updates) | [settings](../reference/settings/operator.md) |
 | `Api` | [REST API](../reference/rest-api.md) | [settings](../reference/settings/api.md) |
 | `Health` | [Health checks](../reference/health.md) | [settings](../reference/settings/health.md) |
 | `PlanStorage` | [Floor plans](../energy-flow/floor-plans.md#plan-storage) | [settings](../reference/settings/planstorage.md) |
