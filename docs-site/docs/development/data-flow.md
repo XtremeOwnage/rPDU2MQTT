@@ -10,14 +10,17 @@ Source to destination, with the class names used in the code. All of it runs in 
 
 ```mermaid
 flowchart LR
-  subgraph SRC["Sources"]
-    PDU["`Vertiv / Geist PDUs
-HTTP API`"]
-    MQ["MQTT topics"]
-    MB["Modbus TCP registers"]
-    EC["EmonCMS feeds"]
-    HA["Home Assistant entities"]
-    PL["Plugin sources"]
+  subgraph SRC["Source integrations"]
+    PDU["`Vertiv rPDU
+VertivDeviceReader`"]
+    DP["`Device plugins
+IDeviceSourcePlugin`"]
+    MQ["MQTT"]
+    MB["Modbus TCP"]
+    EC["EmonCMS"]
+    HA["Home Assistant"]
+    PL["`Value plugins
+IValueSourcePlugin`"]
   end
 
   subgraph CORE["rPDU2MQTT"]
@@ -45,13 +48,17 @@ and Pushgateway`"]
     HIST["Local history store"]
   end
 
-  PDU --> POLL --> BUS --> SNAP
+  PDU --> POLL
+  DP --> POLL
+  POLL --> BUS --> SNAP
   MQ --> LIVE
   MB --> LIVE
   EC --> LIVE
   HA --> LIVE
   PL --> LIVE
-  LIVE --> AGG --> LIVE
+  LIVE --> AGG
+  SNAP -- outlet energy --> AGG
+  AGG --> LIVE
   SNAP --> PASS
   LIVE --> PASS
   PASS --> GRAPH
@@ -68,6 +75,7 @@ and Pushgateway`"]
 
 - **PDU snapshots** — a whole PDU's devices, outlets and measurements, read in one poll.
 - **Live values** — one reading per node and metric, from any bound source.
+- **EnergyAggregationService** — daily totals from live values and from PDU outlet energy counters.
 
 Both feed the flow graph, handed to the destinations once per poll.
 
