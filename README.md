@@ -5,13 +5,15 @@
 
 **Map the energy flow of an entire house, end to end — from individual solar panels to individual appliances — and publish it to MQTT, Home Assistant, Prometheus and EmonCMS.**
 
+📖 **Documentation: [xtremeownage.github.io/rPDU2MQTT](https://xtremeownage.github.io/rPDU2MQTT/)**
+
 rPDU2MQTT is a small, container-friendly .NET service. It started as a bridge for Vertiv/Geist rack PDUs (it still is one, and a good one), but that turned out to be a single tier of a much bigger picture. The job now is the whole chain: every producer, every panel, every circuit and every device, measured wherever it can be measured, joined into one hierarchy, and rolled up so each tier's number is the sum of what's beneath it.
 
 Data comes in over **MQTT**, **Modbus TCP**, **EmonCMS feeds**, **Home Assistant entities** and the PDUs' own HTTP API; it goes out to **MQTT**, **Home Assistant** (auto-discovery, including the Energy Dashboard), **Prometheus** and **EmonCMS**. There's a built-in GUI for wiring it all up, and a **Helm chart + CRD** for Kubernetes.
 
 > New to these PDUs? See this [blog post on metered/switched PDUs](https://static.xtremeownage.com/blog/2024/metered-switch-pdu/) for background on the units and their capabilities.
 
-![rPDU2MQTT Live Data](docs/images/gui-live-data.webp)
+![rPDU2MQTT Overview](docs-site/docs/assets/screenshots/home-overview.webp)
 
 ---
 
@@ -78,7 +80,10 @@ Should you use it? That's up to you. I built it for me, but made it public and t
 - **Any source per node** — bind a node's power/energy/current/… to an **MQTT topic** (Solar Assistant, ESPHome, Tasmota, anything already on your broker), a **Modbus TCP register** (inverters, meters, PLCs), an **EmonCMS feed** (IotaWatt, emonTx — anything already posting there), a **Home Assistant entity**, a PDU outlet, or a fixed value.
 - **Browse instead of guess** — autocomplete over the topics actually on your broker (with the metric and unit inferred from the payload), a Modbus explorer that reads a block of registers and shows each decoding, and a feed picker that lists what EmonCMS actually holds with its latest reading.
 - **Untracked consumption** — a residual node reports what a measured parent's metered children don't account for, the way Home Assistant's energy dashboard does.
-- **Sankey flow view** — the live diagram, editable by dragging, with per-tier MQTT export and Home Assistant Energy Dashboard sync.
+- **Flow views** — Sankey, sunburst and treemap, with per-tier MQTT export and Home Assistant Energy Dashboard sync.
+- **Breaker panels** — panel schedule with slots, breakers, wire labels, gauge, rating and live load per circuit; circuit finder.
+- **Floor plans** — rooms, outlets, lights and appliances, with the cable runs from the panel to each one.
+- **Trends and history** — built-in history store, per-node trends, daily totals and cost charts.
 - **Device templates** — ready-made node/register sets for known hardware (EG4 inverters, meters, …) to import and adjust.
 
 ### The PDU bridge
@@ -93,11 +98,31 @@ Should you use it? That's up to you. I built it for me, but made it public and t
 - **Prometheus** — scrape (`/metrics`) and/or Pushgateway, with a **customizable metric-name template**.
 - **EmonCMS** — pushes inputs on each poll.
 - **Kubernetes-native** — Helm chart, optional **`RpduConfig` CRD** as a writable config source, Argo CD example, health probes, NetworkPolicy, and Gateway API `HTTPRoute`.
-- **Secrets-friendly** — credentials via `RPDU2MQTT_*` env vars / `*_FILE` Docker secrets, never required in the config file (see [environment variables & precedence](./Examples/Configuration/environment-variables.md)).
+- **Secrets-friendly** — credentials via `RPDU2MQTT_*` env vars / `*_FILE` Docker secrets, never required in the config file (see [environment variables](https://xtremeownage.github.io/rPDU2MQTT/system/environment-variables/)).
 
 ---
 
 ## 📸 Screenshots
+
+More in the [documentation](https://xtremeownage.github.io/rPDU2MQTT/).
+
+### Energy flow
+
+![Sankey diagram](docs-site/docs/assets/screenshots/home-sankey.webp)
+
+![Treemap](docs-site/docs/assets/screenshots/home-treemap.webp)
+
+### Breaker panel
+
+![Panel schedule](docs-site/docs/assets/screenshots/home-panel.webp)
+
+### Floor plan and circuit mapping
+
+![Floor plan](docs-site/docs/assets/screenshots/home-floor-plan.webp)
+
+### Trends
+
+![Trends](docs-site/docs/assets/screenshots/trends.webp)
 
 ### Home Assistant
 
@@ -119,17 +144,17 @@ Standard Home Assistant history, dashboards, and automations come for free:
 
 ### Configuration & control GUI
 
-The structured **configuration** form (every option, generated from the model):
+Every setting has a page, e.g. **MQTT**:
 
-![GUI configuration](docs/images/gui-config.webp)
+![GUI MQTT settings](docs-site/docs/assets/screenshots/mqtt.webp)
 
-The **Control** tab — per-outlet On/Off/Reboot/Reset + editable label, plus group actions:
+**PDU Control** — per-outlet On/Off/Reboot/Reset + editable label, plus group actions:
 
-![GUI control tab](docs/images/gui-control.webp)
+![GUI PDU control](docs-site/docs/assets/screenshots/pdu-control.webp)
 
-The **Paths** tab — the generated MQTT topic / Prometheus metric / EmonCMS key for every measurement:
+**Paths** — the generated MQTT topic / Prometheus metric / EmonCMS key for every measurement:
 
-![GUI paths](docs/images/gui-paths.webp)
+![GUI paths](docs-site/docs/assets/screenshots/paths.webp)
 
 ### Metrics (Prometheus / EmonCMS)
 
@@ -149,7 +174,7 @@ services:
     ports:
       - "8080:8080"   # optional GUI
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
+      - ./config.yaml:/config/config.yaml   # writable, so the GUI can save
     environment:
       RPDU2MQTT_MQTT_PASSWORD: "your-mqtt-password"
       RPDU2MQTT_PDU_PASSWORD: "your-pdu-password"   # only needed for outlet control
@@ -161,30 +186,37 @@ A minimal `config.yaml`:
 Mqtt:
   Connection: { Host: mqtt.example.com, Port: 1883 }
   ParentTopic: rPDU2MQTT
-Pdu:
-  Connection: { Host: pdu.example.com, Port: 80 }
-  PollInterval: 5
+Pdus:
+  default:
+    Connection: { Host: pdu.example.com, Port: 80 }
+    PollInterval: 5
 HomeAssistant:
   DiscoveryEnabled: true
   DiscoveryTopic: homeassistant
 Gui:
   Enabled: true
+  Username: admin
   Password: "change-me"
 ```
 
-Then browse to `http://<host>:8080` for the GUI. See the full guides below.
+Then browse to `http://<host>:8080` and configure the rest in the GUI. See the [quick start](https://xtremeownage.github.io/rPDU2MQTT/getting-started/quickstart/).
 
 ---
 
 ## 📚 Documentation
 
+Full documentation: **[xtremeownage.github.io/rPDU2MQTT](https://xtremeownage.github.io/rPDU2MQTT/)**
+
 | Guide | What's inside |
 | --- | --- |
-| [Configuration](./docs/Configuration.md) | Every config option — MQTT, PDU, overrides, control, Prometheus, EmonCMS, the GUI (incl. OIDC) and health checks. |
-| [Environment variables & precedence](./Examples/Configuration/environment-variables.md) | All `RPDU2MQTT_*` vars and what overrides what (env vs config file vs CRD). |
-| [Deployment](./docs/Deployment.md) | Docker, Docker Compose, Helm, Argo CD, the CRD config source, secrets, and verification. |
-| [Aggregation (OneView)](./docs/Aggregation.md) | Multi-PDU clusters: rollup sensors and group actions. |
-| [Kubernetes CRD](./docs/KubernetesCRD.md) | Using an `RpduConfig` custom resource as a writable config source. |
+| [Getting started](https://xtremeownage.github.io/rPDU2MQTT/getting-started/) | Installation, quick start, configuration, upgrading to 2.0. |
+| [Vertiv rPDU](https://xtremeownage.github.io/rPDU2MQTT/vertiv/) | PDUs, overrides, OneView, outlet control. |
+| [Energy flow](https://xtremeownage.github.io/rPDU2MQTT/energy-flow/) | Nodes, flow views, panels, floor plans, trends, totals. |
+| [Integrations](https://xtremeownage.github.io/rPDU2MQTT/integrations/mqtt/) | MQTT, MQTT import, Modbus TCP. |
+| [Destinations](https://xtremeownage.github.io/rPDU2MQTT/destinations/home-assistant/) | Home Assistant, Prometheus, EmonCMS. |
+| [Deployment](https://xtremeownage.github.io/rPDU2MQTT/deployment/) | Docker, Docker Compose, Helm, Argo CD, Kubernetes CRD. |
+| [Settings reference](https://xtremeownage.github.io/rPDU2MQTT/reference/settings/) | Every setting, generated from the code. |
+| [Changelog](https://xtremeownage.github.io/rPDU2MQTT/changelog/) | What changed in 1.0 and 2.0. |
 
 ---
 

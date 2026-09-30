@@ -810,7 +810,9 @@
     position:fixed; right:var(--sp-4); bottom:var(--sp-3); z-index:10;
     font-size:11px; color:var(--faint); text-decoration:none; opacity:.65; transition:opacity .12s, color .12s;
   }
-  .project-link:hover { opacity:1; color:var(--accent); }
+  .project-link:hover { opacity:1; }
+  .project-link a { color:inherit; text-decoration:none; }
+  .project-link a:hover { color:var(--accent); }
   /* Never let it sit under the save bar or a toast. */
   body:has(#savebar:not(.is-hidden)) .project-link, body:has(.toasts .toast) .project-link { display:none; }
   @media (max-width: 860px) { .project-link { display:none; } }
