@@ -1,17 +1,24 @@
 name: CI
 
-# A branch with an open PR used to run this twice for one `git push` — once for the push, once for the
-# synchronize — and both runs tested the same commit. `push` is now main only (the merge commit, which no
-# pull_request event covers); everything on a branch is covered by its PR.
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    paths:
+      - 'rPDU2MQTT*/**'
+      - 'Examples/Kubernetes/crd/crd.yaml'
+      - 'charts/**'
+      - 'rPDU2MQTT.sln'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'rPDU2MQTT*/**'
+      - 'Examples/Kubernetes/crd/crd.yaml'
+      - 'charts/**'
+      - 'rPDU2MQTT.sln'
+      - '.github/workflows/ci.yml'
 
-# Pushing twice in a row supersedes the first run. Nothing is published here, so there is nothing to leave
-# half-done by cancelling it — main is excluded anyway, since its history is what the badge reports on.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -39,8 +46,6 @@ jobs:
         run: helm template rpdu2mqtt charts/rpdu2mqtt > /dev/null
       - name: helm template (CRD config source)
         run: helm template rpdu2mqtt charts/rpdu2mqtt --set kubernetesConfigSource.enabled=true > /dev/null
-      # Plugins are off by default, so the default render never reaches the volume/mount they add. Both
-      # combinations, because the mount block is shared with the config volume and the two gate separately.
       - name: helm template (plugins)
         run: |
           helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true | grep -q 'mountPath: /app/plugins'
@@ -51,9 +56,6 @@ jobs:
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set split.enabled=true \
             --set config.Gui.Enabled=true --set config.Prometheus.Exporter=true)
-          # Count the ROLE Deployments by name, not every Deployment in the chart — the Valkey instance is
-          # a legitimate fourth. A bare total would have let a missing role slip through as soon as anything
-          # else was added, which is exactly what happened when Valkey arrived.
           roles=$(echo "$out" | grep -cE '^  name: rpdu2mqtt-(worker|api|ui)$')
           [ "$roles" = 3 ] || { echo "expected 3 role Deployments, found $roles"; exit 1; }
           for role in worker api ui; do
@@ -63,9 +65,6 @@ jobs:
 
       - name: helm template (no cluster coordination)
         run: |
-          # v4 coordinates in one process: nothing in this chart should still be wiring a cluster together.
-          # Checked across every combination, because these blocks used to be gated by a helper that turned
-          # them on for split roles, the operator, or replicaCount > 1 — three ways to reach dead template.
           for args in "" "--set split.enabled=true" "--set operator.enabled=true" "--set replicaCount=3" \
                       "--set networkPolicy.enabled=true --set networkPolicy.restrictEgress=true"; do
             out=$(helm template rpdu2mqtt charts/rpdu2mqtt $args --include-crds)
@@ -77,9 +76,6 @@ jobs:
 
       - name: helm template (graceful rollout)
         run: |
-          # #506: with the cache the chart deploys, the new pod is Ready before the old one stops, and the two
-          # coordinate through the leader lease. Without a cache there is nothing to coordinate through, so it
-          # must stay Recreate — two uncoordinated pods would both poll and publish.
           main() { helm template rpdu2mqtt charts/rpdu2mqtt "$@" | awk '/^kind: Deployment/{d=1} d&&/^  name: rpdu2mqtt$/{p=1} p&&/^---/{exit} p'; }
           out=$(main)
           echo "$out" | grep -q 'type: RollingUpdate' || { echo "default should roll"; exit 1; }
@@ -96,23 +92,18 @@ jobs:
 
       - name: helm template (scheduled restart)
         run: |
-          # Off by default: no CronJob, and no RBAC granted for one.
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt)
           echo "$out" | grep -q 'kind: CronJob' && { echo "CronJob should not render by default"; exit 1; }
 
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set autoRestart.enabled=true --set autoRestart.schedule='30 3 * * 0')
           echo "$out" | grep -q 'kind: CronJob' || { echo "missing CronJob"; exit 1; }
           echo "$out" | grep -q 'schedule: "30 3 \* \* 0"' || { echo "schedule not applied"; exit 1; }
-          # It must restart by label (this release only), never a bare 'rollout restart deployment'.
           echo "$out" | grep -q 'app.kubernetes.io/instance=rpdu2mqtt' || { echo "restart must be scoped by label"; exit 1; }
-          # Its own ServiceAccount, not the app's.
           echo "$out" | grep -q 'name: rpdu2mqtt-restart' || { echo "missing restart ServiceAccount/Role"; exit 1; }
 
       - name: helm template (CRD config source, unmanaged resource)
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt \
             --set kubernetesConfigSource.enabled=true --set kubernetesConfigSource.manageResource=false)
-          # Anchored: the CRD the chart renders names RpduConfig as the kind it defines, indented under
-          # spec.names, and an unanchored match counts that as the resource itself.
           echo "$out" | grep -q '^kind: RpduConfig' && { echo "RpduConfig should not be rendered"; exit 1; }
           echo "$out" | grep -q 'RPDU2MQTT_CONFIG_SOURCE' || { echo "app should still read from the CR"; exit 1; }
