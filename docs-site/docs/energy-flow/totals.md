@@ -61,7 +61,7 @@ Or **Developer tools › Statistics** in Home Assistant, one entity at a time.
 | Destination | Fields |
 | --- | --- |
 | MQTT tier export | `value`, `power`, `energy`, `energy_out`, `energy_in`, `energy_d`, `soc` |
-| Home Assistant | Power and Energy sensors per tier (Energy In and Energy Out on grid and battery) |
+| Home Assistant | Power and Energy sensors per tier (Energy Import and Export on the grid, Energy Charged and Discharged on a battery) |
 | Prometheus | `rpdu2mqtt_flow_realpower`, `rpdu2mqtt_flow_energy`, `rpdu2mqtt_flow_energy_d`, labels `node`, `name`, `kind`, `tier` |
 
 A tier with no value is absent from the scrape.

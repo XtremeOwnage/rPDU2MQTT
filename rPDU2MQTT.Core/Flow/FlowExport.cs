@@ -244,10 +244,17 @@ public static class FlowExport
         if (includeEnergyIn)
         {
             var units = string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits;
+            // Out is toward the home (import, discharge); named from the home's side where that is the usual word.
+            var (outName, inName) = node.Kind?.ToLowerInvariant() switch
+            {
+                "grid" => ("Energy Import", "Energy Export"),
+                "battery" => ("Energy Discharged", "Energy Charged"),
+                _ => ("Energy Out", "Energy In"),
+            };
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
-                Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", units, "{{ value_json.energy_in }}");
+                Sensor($"{id}_energy_in", inName, "energy", "total_increasing", units, "{{ value_json.energy_in }}");
             doc["components"]!.AsObject()[$"{id}_energy_out"] =
-                Sensor($"{id}_energy_out", "Energy Out", "energy", "total_increasing", units, "{{ value_json.energy_out }}");
+                Sensor($"{id}_energy_out", outName, "energy", "total_increasing", units, "{{ value_json.energy_out }}");
         }
         // Daily sensors this used to publish: platform only removes them from Home Assistant.
         foreach (var retired in new[] { $"{id}_energy_d", $"{id}_energy_today" })

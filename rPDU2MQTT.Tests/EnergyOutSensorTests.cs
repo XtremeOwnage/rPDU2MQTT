@@ -129,8 +129,8 @@ public class EnergyOutSensorTests
         var parts = doc["components"]!.AsObject();
 
         Assert.Equal("Energy", (string?)parts["energyflow_grid_energy"]!["name"]);
-        Assert.Equal("Energy Out", (string?)parts["energyflow_grid_energy_out"]!["name"]);
-        Assert.Equal("Energy In", (string?)parts["energyflow_grid_energy_in"]!["name"]);
+        Assert.Equal("Energy Import", (string?)parts["energyflow_grid_energy_out"]!["name"]);
+        Assert.Equal("Energy Export", (string?)parts["energyflow_grid_energy_in"]!["name"]);
     }
 
     [Fact]
