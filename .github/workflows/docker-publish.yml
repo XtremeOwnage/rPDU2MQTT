@@ -18,14 +18,14 @@ on:
         - '**'
     # Publish semver tags as releases.
     tags: [ 'v*.*.*' ]
-    paths-ignore:
-      - 'docs-site/**'
-      - 'docs/**'
-      - '**.md'
-      - '.github/workflows/docs.yml'
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/lifecycle-management.yml'
-      - '.github/workflows/sync-upstream-repo.yaml'
+    paths:
+      - 'rPDU2MQTT*/**'
+      - '!rPDU2MQTT.Tests/**'
+      - 'Examples/Configuration/**'
+      - 'rPDU2MQTT.sln'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/docker-publish.yml'
 
 # A second push to the same branch makes the first image obsolete before it is finished. Releases and main
 # are never cancelled — those images are the ones people pull by tag.
