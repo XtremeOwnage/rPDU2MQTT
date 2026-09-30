@@ -23,6 +23,6 @@ PDU instances to bridge, keyed by instance name.
 | `Pdus.<name>.PollInterval` | int | `5` | How often (seconds) to poll the PDU and publish readings. Range 1–2147483647. |
 | `Pdus.<name>.ActionsEnabled` | bool | `false` | Allow the bridge to make changes on the PDU (e.g. toggle outlets). When off, no switches or other write controls are exposed to Home Assistant. Requires PDU credentials. |
 | `Pdus.<name>.RemapModel` | bool | `false` | Replace each outlet/group's Model (shown in the Home Assistant device info) with contextual text (e.g. parent PDU + name) instead of the PDU's hardware model. |
-| `Pdus.<name>.RemapManufacturer` | bool | `false` | Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer. |
+| `Pdus.<name>.RemapMake` | bool | `false` | Replace each entity's Manufacturer (shown in Home Assistant) with the entity type (Outlet, Group, etc.) instead of the hardware manufacturer. |
 | `Pdus.<name>.EmonCmsTag` | string |  | EmonCMS tag this PDU's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {device} (the PDU's name), {instance} (this entry's key), e.g. '{device}'. |
 | `Pdus.<name>.EmonCmsVirtualTag` | string |  | EmonCMS tag this PDU's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {device}, {instance}, e.g. '{device}-virtual'. |

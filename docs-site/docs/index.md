@@ -1,54 +1,107 @@
 ---
 title: rPDU2MQTT
-description: Map the energy flow of a house end to end and publish it to MQTT, Home Assistant, Prometheus and EmonCMS.
+description: Whole-house energy monitoring. Solar, battery, grid, breaker panels, circuits, outlets and floor plans, published to MQTT, Home Assistant, Prometheus and EmonCMS.
 ---
 
 # rPDU2MQTT
 
-**Map the energy flow of an entire house, end to end — from individual solar panels to individual
-appliances — and publish it to MQTT, Home Assistant, Prometheus and EmonCMS.**
+Whole-house energy monitoring, from the solar array to the outlet. Configured in a web GUI.
 
-rPDU2MQTT is a small, container-friendly .NET service. It started as a bridge for Vertiv/Geist rack PDUs,
-and still is one, but a PDU is now one tier of a bigger picture: every producer, panel, circuit and device,
-measured wherever it can be measured, joined into one hierarchy and rolled up so each tier's number is the
-sum of what's beneath it.
+- Reads PDUs, MQTT, Modbus TCP, EmonCMS and Home Assistant.
+- Builds one hierarchy: grid, solar, battery, inverter, panels, breakers, circuits, devices, outlets.
+- Publishes to MQTT, Home Assistant (including the Energy Dashboard), Prometheus and EmonCMS.
 
-![Overview page: live solar, grid, battery and home flow with today's totals](assets/screenshots/overview.webp)
+[Install](getting-started/installation.md){ .md-button .md-button--primary } [Quick start](getting-started/quickstart.md){ .md-button }
 
-!!! note "About the screenshots"
-    Every screenshot on this site is the real rPDU2MQTT 2.0.0 GUI in dark mode. The data behind them comes
-    from a demo setup: a simulated Vertiv PDU, simulated Solar Assistant and IotaWatt topics on a local
-    broker, and 30 days of generated history. None of it is a live installation.
+![Overview: solar, grid, battery and home, with today's totals](assets/screenshots/home-overview.webp)
 
-## What it does
+## Energy flow
 
-- **Sources in:** the PDUs' own HTTP API, **MQTT** topics, **Modbus TCP** registers, **EmonCMS** feeds
-  and **Home Assistant** entities.
-- **Destinations out:** **MQTT**, **Home Assistant** (auto-discovery, including the Energy Dashboard),
-  **Prometheus** and **EmonCMS**.
-- **Energy flow:** a user-defined hierarchy of nodes (grid, solar, battery, inverter, panels, breakers,
-  loads) that rolls up per metric, drawn as a Sankey, sunburst or treemap.
-- **PDU bridge:** per-outlet measurements, Home Assistant devices and alarms, opt-in outlet control, and
-  OneView cluster roll-ups with group actions.
-- **Web GUI:** configuration, live data, outlet control, trends, panel schedules and floor plans.
-- **Kubernetes:** a Helm chart, an optional `RpduConfig` custom resource as a writable config source,
-  health probes and graceful rollouts.
-- **Plugins:** every integration implements one set of contracts; an external plugin is a .NET class
-  library dropped into `plugins/`.
+Every node, every metric, live. Sankey, sunburst or treemap.
 
-## Where to start
+![Sankey diagram: solar and grid through the inverter and main panel to circuits and PDU outlets](assets/screenshots/home-sankey.webp)
 
-| If you want to… | Read |
+=== "Treemap"
+
+    ![Treemap of the house load](assets/screenshots/home-treemap.webp)
+
+=== "Sunburst"
+
+    ![Sunburst of the house load](assets/screenshots/home-sunburst.webp)
+
+[Energy flow](energy-flow/flow.md)
+
+## Breaker panels
+
+The panel schedule as it is in the box: slot, breaker, wire, gauge, rating and live load per circuit.
+
+![Panel schedule with live watts per breaker](assets/screenshots/home-panel.webp)
+
+[Panels and circuits](energy-flow/panels.md)
+
+## Floor plans and circuit mapping
+
+Rooms, doors and windows, outlets, lights and appliances, and the cable runs between them. Rooms are shaded by what they draw.
+
+![Floor plan with circuits drawn from the panel to each outlet and appliance](assets/screenshots/home-floor-plan.webp)
+
+Click an item for its circuit, meter and wiring.
+
+![Floor plan with the fridge selected](assets/screenshots/home-floor-plan-item.webp)
+
+Draw rooms, place items and route wires in the editor.
+
+![Floor plan editor](assets/screenshots/home-floor-plan-edit.webp)
+
+[Floor plans](energy-flow/floor-plans.md)
+
+## Vertiv / Geist rack PDUs
+
+Per-outlet power, energy, current and voltage. Outlet on, off and reboot from the GUI or Home Assistant. OneView cluster roll-ups and group actions.
+
+![PDU Control page](assets/screenshots/pdu-control.webp)
+
+[Vertiv rPDU](vertiv/index.md)
+
+## Everything in the GUI
+
+Every setting has a page. No YAML needed.
+
+=== "MQTT"
+
+    ![MQTT settings page](assets/screenshots/mqtt.webp)
+
+=== "Home Assistant"
+
+    ![Home Assistant settings page](assets/screenshots/home-assistant.webp)
+
+=== "Nodes"
+
+    ![Node editor](assets/screenshots/node-editor-ev.webp)
+
+=== "Trends"
+
+    ![Trends page](assets/screenshots/trends.webp)
+
+## Sources and destinations
+
+| Sources | Destinations |
 | --- | --- |
-| Run it for the first time | [Installation](getting-started/installation.md), then the [Quick start](getting-started/quickstart.md) |
-| Upgrade from 1.x | [Upgrading to 2.0](getting-started/upgrading-to-2.0.md) |
-| Look up a setting | [Configuration](configuration/index.md) and the generated [settings reference](reference/settings/index.md) |
-| Model solar, battery, panels and circuits | [Energy flow](energy-flow/index.md) |
-| See every GUI page | [Web GUI tour](gui/index.md) |
-| Deploy to Docker or Kubernetes | [Deployment](deployment/index.md) |
-| Integrate over MQTT or HTTP | [MQTT topics](reference/mqtt-topics.md), [REST API](reference/rest-api.md) |
+| Vertiv / Geist PDUs (HTTP API) | MQTT |
+| MQTT topics (Solar Assistant, IotaWatt, ESPHome, Tasmota, …) | Home Assistant discovery and Energy Dashboard |
+| Modbus TCP registers | Prometheus (`/metrics`, Pushgateway) |
+| EmonCMS feeds | EmonCMS |
+| Home Assistant entities | Local history store |
+| Plugins | Plugins |
+
+## Deployment
+
+Docker, Docker Compose, Helm chart, Argo CD, optional `RpduConfig` custom resource. [Deployment](deployment/index.md)
 
 ## Help
 
-- Ask in [Discord](https://static.xtremeownage.com/discord) (tag **@XtremeOwnage**).
-- Or open a [new issue](https://github.com/XtremeOwnage/rPDU2MQTT/issues/new/choose).
+- [Discord](https://static.xtremeownage.com/discord) (tag **@XtremeOwnage**)
+- [GitHub issues](https://github.com/XtremeOwnage/rPDU2MQTT/issues/new/choose)
+
+!!! note "Screenshots"
+    Screenshots are rPDU2MQTT 2.0.0 running against simulated devices.

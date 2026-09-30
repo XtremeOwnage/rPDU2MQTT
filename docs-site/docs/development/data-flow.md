@@ -4,9 +4,7 @@ title: How data flows
 
 # How data flows
 
-How a reading gets from a source to a destination, traced from the code. Class names are given so each
-step can be found in the repository. Everything here runs in one process under the default role (`all`);
-the [roles](#roles) section says which parts each role runs.
+Source to destination, with the class names used in the code. All of it runs in one process under the default role (`all`); see [Roles](#roles) for the split.
 
 ## The whole picture
 
@@ -68,12 +66,10 @@ and Pushgateway`"]
   LIVE --> UI
 ```
 
-Two kinds of data move through it:
-
 - **PDU snapshots** — a whole PDU's devices, outlets and measurements, read in one poll.
 - **Live values** — one reading per node and metric, from any bound source.
 
-Both meet in the **flow graph**, which the destinations are handed once per poll.
+Both feed the flow graph, handed to the destinations once per poll.
 
 ## PDU readings
 
@@ -101,12 +97,10 @@ sequenceDiagram
 
 - `DevicePollService` polls every configured PDU instance, plus any device a plugin supplies, and
   publishes each snapshot on the in-process bus (`ChannelMessageBus`).
-- The bus gives each subscriber its own bounded channel; a slow consumer drops its own oldest snapshot
-  rather than stalling the poller.
+- Each bus subscriber has its own bounded channel. A slow consumer drops its oldest snapshot.
 - `SnapshotCache` keeps the latest snapshot per instance. The GUI and the REST API read it, never the
   PDU, so a page load does not cause a poll.
-- `DestinationHost` skips snapshots that have gone stale, so a PDU that stopped answering is not
-  re-published as if it were current.
+- `DestinationHost` skips stale snapshots.
 
 ## Live values for energy-flow nodes
 
@@ -135,8 +129,7 @@ never 0`"]
 
 - **MQTT** (`EnergyFlowMqttSourceService`) subscribes to the bound topics and keeps the latest value.
   Subscriptions are reconciled on a timer, so a topic bound in the GUI works without a restart.
-- **Modbus** (`ModbusPollService`) polls each physical device (`host:port:unitId`) once, however many
-  connections name it, because many RS485 gateways accept one client at a time.
+- **Modbus** (`ModbusPollService`) polls each physical device (`host:port:unitId`) once per cycle, however many connections name it.
 - **Home Assistant, EmonCMS and plugin sources** are kept in step with their bindings by
   `ValueSourcePluginHost`.
 - **Aggregation** reads the measured sources only (never its own output), integrates watts into kWh for
@@ -144,8 +137,7 @@ never 0`"]
   period boundary when `TrackPeriods` is on. Those totals are saved to the cache (Valkey/Redis) when
   `Cache.Enabled`, otherwise to `energy-totals.json`. See
   [Totals and counters](../energy-flow/totals.md).
-- A reading older than its binding's `StaleAfterSeconds` is not fresh, so the next source gets a turn,
-  and with none left the node reads *no data*.
+- A reading older than its binding's `StaleAfterSeconds` is skipped; the next source is tried. With none left, the node has no value.
 
 ## The export pass
 
@@ -176,15 +168,13 @@ panels, sites`"] --> G
   P --> PLG["Plugin destinations"]
 ```
 
-- The graphs are built **once per pass** and shared, so every destination sees the same hierarchy.
+- The graphs are built once per pass and shared by every destination.
 - PDU devices and outlets become nodes (`pdu:<device>`, `outlet:<device>:<n>`) automatically; your
   nodes, links, groups, breakers and rooms are added from `EnergyFlow`.
 - Each tier's value comes from a live value, a PDU measurement, or the sum of its children. See
-  [Energy flow › Accuracy](../energy-flow/index.md#accuracy-what-the-flow-will-and-wont-infer).
-- Each destination applies its own node-tag filter (`TiersFor`). A filter chooses which nodes are sent;
-  it never changes a value.
-- One destination failing is recorded against that destination on the Status board and does not stop
-  the others.
+  [Energy flow › Accuracy](../energy-flow/index.md#how-a-node-gets-its-value).
+- Each destination applies its own node-tag filter (`TiersFor`).
+- A failing destination is shown on the Status board; the others continue.
 
 ### What each destination does with it
 
@@ -199,8 +189,6 @@ Topic and metric names are listed under [MQTT topics](../reference/mqtt-topics.m
 **Paths** page.
 
 ## Slower paths
-
-Not everything runs once per poll:
 
 ```mermaid
 flowchart LR
@@ -221,15 +209,14 @@ History.Provider`"]
 history sheets`"]
 ```
 
-- **Configuration is not a reading.** Discovery documents and other configuration are republished on
-  their own cadence by `ConfigurationPublisherHost`, not every poll.
-- **History is written and read separately.** `LocalHistoryWriterService` records every node's readings
+- **Configuration.** `ConfigurationPublisherHost` republishes discovery and other configuration on its own interval.
+- **History.** `LocalHistoryWriterService` records every node's readings
   into the local store whatever `History.Provider` says; the pages read through whichever backend
-  `Provider` names. See [History](../configuration/history.md).
+  `Provider` names. See [History](../system/history.md).
 
 ## Commands back to the PDU
 
-Control flows the other way, and only when `ActionsEnabled` is on:
+Only when `ActionsEnabled` is on:
 
 ```mermaid
 flowchart RL
@@ -243,13 +230,11 @@ X-Api-Key`"] --> PDUOBJ["PDU client"]
   PDUOBJ -->|HTTP| DEV["PDU"]
 ```
 
-The next poll reads the new state back, so Home Assistant and the GUI show what the PDU reports rather
-than what was asked for.
+The next poll reads the new state back.
 
 ## Roles
 
-With `RPDU2MQTT_ROLE` / `--role` (see [Command line](../reference/cli.md#roles)), a process runs only
-part of this:
+`RPDU2MQTT_ROLE` / `--role` ([Command line](../reference/cli.md#roles)):
 
 | Part | worker | api | ui |
 | --- | --- | --- | --- |
@@ -263,7 +248,4 @@ The health endpoints run in every role.
 
 ### Leader lease
 
-With `RPDU2MQTT_LEADER_LEASE=true` (the chart sets it for graceful rollouts), only the process holding
-the lease does work that must happen once: destinations that publish to a shared broker or server, and
-writing local history. Prometheus is the exception: every process serves its own `/metrics`, so each one
-refreshes its own gauges.
+With `RPDU2MQTT_LEADER_LEASE=true` (set by the chart for graceful rollouts), only the lease holder runs destinations and writes local history. Every process serves and refreshes its own Prometheus `/metrics`.

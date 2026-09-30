@@ -9,6 +9,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "docs", "reference", "settings")
+# Schema keys are JSON names; these differ in YAML ([YamlMember(Alias)]).
+YAML_KEYS = {"RemapManufacturer": "RemapMake"}
+MAX_ENUM = 30
 
 
 def cell(text):
@@ -29,6 +32,8 @@ def fmt_type(n):
     t = n.get("type", "")
     if t == "enum":
         vals = [v for v in n.get("enumValues", []) if v != ""]
+        if len(vals) > MAX_ENUM:
+            return f"one of {len(vals)} values, e.g. " + ", ".join(f"`{v}`" for v in vals[:3])
         return "one of " + ", ".join(f"`{v}`" for v in vals)
     if t == "password":
         return "string (secret)"
@@ -48,6 +53,10 @@ def notes(n):
     return " ".join(parts)
 
 
+def key(c):
+    return YAML_KEYS.get(c["key"], c["key"])
+
+
 def rows(n, path, out):
     kids = n.get("properties")
     t = n.get("type")
@@ -55,13 +64,13 @@ def rows(n, path, out):
         out.append(f"| `{path}` | {cell(fmt_type(n))} | {fmt_default(n.get('default'))} | {cell(notes(n))} |")
     if t == "object" and kids:
         for c in kids:
-            rows(c, f"{path}.{c['key']}" if path else c["key"], out)
+            rows(c, f"{path}.{key(c)}" if path else key(c), out)
     elif t == "list" and n.get("valueSchema"):
         for c in n["valueSchema"].get("properties") or []:
-            rows(c, f"{path}[].{c['key']}", out)
+            rows(c, f"{path}[].{key(c)}", out)
     elif t == "dictionary" and n.get("valueSchema"):
         for c in n["valueSchema"].get("properties") or []:
-            rows(c, f"{path}.<name>.{c['key']}", out)
+            rows(c, f"{path}.<name>.{key(c)}", out)
 
 
 def main(schema_path):

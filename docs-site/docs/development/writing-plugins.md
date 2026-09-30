@@ -4,11 +4,9 @@ title: Writing a plugin
 
 # Writing a plugin
 
-A plugin is an ordinary .NET class library. Reference `rPDU2MQTT.Core`, implement `IIntegration` plus
-whichever capabilities apply, and drop the DLL into the bridge's `plugins/` directory.
+A .NET class library that references `rPDU2MQTT.Core` and implements `IIntegration` plus any capabilities. Copy the DLL into `plugins/`.
 
-[HelloWorld](https://github.com/XtremeOwnage/rPDU2MQTT/tree/main/Examples/Plugins/HelloWorld) is a complete working example in about sixty lines — a destination that writes
-every reading and every energy-flow tier to a file. Copy it and change the middle.
+Example: [HelloWorld](https://github.com/XtremeOwnage/rPDU2MQTT/tree/main/Examples/Plugins/HelloWorld), a destination that writes every reading and tier to a file.
 
 ## The project
 
@@ -19,36 +17,32 @@ every reading and every energy-flow tier to a file. Copy it and change the middl
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Private/ExcludeAssets so you ship only your own DLL. The host already has Core loaded, and a
-         plugin carrying its own copy implements an interface the runtime considers a different type. -->
+    <!-- Ship only your own DLL; the host provides Core. -->
     <ProjectReference Include="path/to/rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>
 ```
 
-`rPDU2MQTT.Core` is the whole SDK: the contracts, the config model, the flow engine and the helpers. It
-references no ASP.NET and no MQTT client, so you inherit none of them.
+`rPDU2MQTT.Core` contains the contracts, config model, flow engine and helpers. No ASP.NET or MQTT client dependency.
 
 ## The identity
 
 ```csharp
 public sealed class MyPlugin : IIntegration
 {
-    public string Id => "influx";                            // lowercase, stable — this is your address
-    public string DisplayName => "InfluxDB";                 // nav label, banner, status card
+    public string Id => "influx";                            // lowercase, stable
+    public string DisplayName => "InfluxDB";                 // nav label, status card
     public IntegrationGroup Group => IntegrationGroup.Destinations;
-    public bool Enabled(Config cfg) => settings.Enabled;     // read live, so a GUI toggle needs no restart
+    public bool Enabled(Config cfg) => settings.Enabled;     // read live
 
-    // Optional: why you cannot run as configured. A fault disables you and is reported; it never stops
-    // the bridge, because nothing a toggle can do should be able to.
+    // Optional: a non-null reason disables the plugin and is reported.
     public string? Misconfigured(Config cfg) => ...;
 }
 ```
 
 ## The capabilities
 
-Implement the ones that apply. A plugin is a vendor, not a single interface — EmonCMS is a destination
-*and* a history provider *and* a configuration publisher, all on one config section.
+Implement any combination. EmonCMS, for example, is a destination, a history provider and a configuration publisher.
 
 | Interface | For |
 | --- | --- |
@@ -68,26 +62,20 @@ Implement the ones that apply. A plugin is a vendor, not a single interface — 
 ```csharp
 public Task SendAsync(ExportPass pass, CancellationToken ct)
 {
-    foreach (var r in pass.Readings)          // every PDU measurement, each knowing its node and instance
+    foreach (var r in pass.Readings)              // every PDU measurement
         Send(r.NodeId, r.Type, r.Value, r.Units);
 
-    foreach (var t in pass.TiersFor(Tags(cfg)))   // the hierarchy, filtered by your own tag filter
+    foreach (var t in pass.TiersFor(Tags(cfg)))   // flow tiers, filtered by tag
         Send(t.Node.Id, t.Metric, t.Value, t.Units);
 
     return Task.CompletedTask;
 }
 ```
 
-`ExportPass` is built once per poll and handed to every destination, so you cannot be given a different
-view of the world than anyone else. Throwing is how you report a bad pass: it is recorded against your id
-and the other destinations still run.
-
-Two things worth knowing:
-
-- **Unknown is not zero.** A tier with no determined value is absent from `Tiers`, not present as `0`.
-  Never fill that gap with a number.
-- **`LeaderGated` defaults to true**, so exactly one process in a cluster calls you. Set it false only if
-  your output is per-process — Prometheus does, because every replica serves its own `/metrics`.
+- `ExportPass` is built once per poll and shared by every destination.
+- An exception is recorded against the plugin id; other destinations still run.
+- A tier with no value is absent from `Tiers`.
+- `LeaderGated` defaults to `true`: one process in a cluster calls you. Set `false` for per-process output (Prometheus does).
 
 ## Your settings
 
@@ -95,7 +83,7 @@ Two things worth knowing:
 public sealed class MySettings
 {
     [DefaultValue(false)]
-    [Description("Send readings to InfluxDB.")]     // this text appears under the field in the GUI
+    [Description("Send readings to InfluxDB.")]     // shown under the field in the GUI
     public bool Enabled { get; set; }
 
     [Description("Base URL, e.g. http://influx:8086.")]
@@ -107,11 +95,9 @@ public Type ConfigType => typeof(MySettings);
 public void ApplyConfig(object s) => settings = (MySettings)s;
 ```
 
-That is all the UI you write. The GUI's form is generated from a schema built by reflection at startup —
-not compiled into its bundle — so your settings class becomes a page with typed inputs, defaults and
-descriptions.
+The GUI generates a settings page from the class: typed inputs, defaults, descriptions.
 
-Your settings are stored under `Plugins:` in the config file, keyed by your id:
+Stored under `Plugins:`, keyed by id:
 
 ```yaml
 Plugins:
@@ -122,14 +108,14 @@ Plugins:
 
 ## Your actions
 
-The standard ones are derived from what you implement, so you declare nothing to get them:
+Standard actions come from the implemented interfaces:
 
 | Action | Comes from |
 | --- | --- |
 | `probe` | `IIntegration` — always present |
 | `publish`, `sweep` | `IConfigurationPublisher` |
 
-Anything else is yours:
+Custom actions:
 
 ```csharp
 public IReadOnlyList<IntegrationAction> Actions =>
@@ -139,14 +125,13 @@ public IReadOnlyList<IntegrationAction> Actions =>
 ];
 ```
 
-Every action is reachable at `POST /api/integrations/{yourId}/{action}` and gets a button on your settings
-page. `ActionEffect.Destructive` makes the GUI confirm, and say what will be removed, before calling you.
-
-You never see an `HttpContext`: query and form values arrive flattened on the context you are given.
+- Each action is at `POST /api/integrations/{id}/{action}` and gets a button on the settings page.
+- `ActionEffect.Destructive` makes the GUI confirm first.
+- Query and form values arrive on the action context.
 
 ## Supplying values, or being a device
 
-A plugin does not have to be a destination. Two capabilities read *into* the bridge:
+Two capabilities read into the bridge:
 
 ```csharp
 // A node binds { Type: "mything", Metric: "realpower", Settings: { … } } and you supply the value.
@@ -155,8 +140,7 @@ public string SourceTypeLabel => "My Thing";
 
 public Task ReconcileAsync(Config cfg, IReadOnlyList<SourceBinding> bindings, CancellationToken ct)
 {
-    // You are handed exactly your own bindings — never another type's — and called again whenever the
-    // configuration changes, so a binding added in the GUI takes effect without a restart.
+    // Called with this source type's bindings, and again whenever the configuration changes.
     foreach (var b in bindings) values[b.NodeId + "|" + b.Key()] = Read(b.Setting("Address"));
     return Task.CompletedTask;
 }
@@ -165,8 +149,7 @@ public bool TryGetValue(string nodeId, string metric, out double value) => value
 ```
 
 ```csharp
-// Or poll hardware. The snapshot goes where the built-in poller's does, so MQTT publishing, HA discovery,
-// the flow graph and every destination work on it unchanged — none of them asks what kind of device it is.
+// Or poll hardware. The snapshot goes through the same pipeline as a Vertiv PDU's.
 public string InstanceId => "mydevice";
 public Task<PduData?> PollAsync(Config cfg, CancellationToken ct) => …;
 
@@ -175,16 +158,9 @@ public bool Supports(string action) => action is "on" or "off";
 public Task<string> ControlOutletAsync(Config cfg, string deviceId, int outlet, string action, CancellationToken ct) => …;
 ```
 
-Two rules that are not negotiable, because the whole hierarchy depends on them:
-
-- **Return null, never an empty snapshot.** Null means "nothing to report" and the previous reading is left
-  to go stale. An empty one reads downstream as every outlet having gone to zero — a reading nobody took.
-- **Report what happened, not what was asked.** A control that echoes "on" for a command the hardware
-  rejected produces an echo that contradicts the next poll, and the operator watches the outlet flip back
-  with no explanation.
-
-You never write a poll timer, a leader gate, or a lock around a shared device. The host owns all three —
-including the single-owner lease that stops two replicas hammering one serial gateway.
+- Return `null` when there is nothing to report. An empty snapshot reads as every outlet at zero.
+- Return the result the hardware reports, not the requested state.
+- The host provides the poll timer, leader gate and device lock.
 
 ## Installing it
 
@@ -193,17 +169,12 @@ dotnet build
 cp bin/Debug/net10.0/MyPlugin.dll  <bridge>/plugins/
 ```
 
-Restart the bridge. It logs `Plugin loaded: MyPlugin.dll — influx.` Set `RPDU2MQTT_PLUGINS` to load from
-somewhere else.
+Restart. The log shows `Plugin loaded: MyPlugin.dll — influx.` `RPDU2MQTT_PLUGINS` sets another directory.
 
-Each plugin gets its own load context, so two plugins can depend on different versions of the same library.
-A plugin that fails to load is reported and skipped — it cannot stop the bridge starting.
+- Each plugin has its own load context.
+- A plugin that fails to load is reported and skipped.
 
-## What a plugin does not get
+## Limits
 
-**A place in the Kubernetes CRD.** The CRD is a compile-time contract published to the API server and
-cannot describe a type that exists only on your machine. Under Kubernetes your settings still work — they
-live in the `Plugins` map, which the CRD leaves open — but they are not validated by it.
-
-**Bespoke UI.** You get a generated settings page and buttons for your actions. A custom editor (the MQTT
-topic picker, the Modbus register browser) is built into the GUI bundle and needs a change there.
+- The Kubernetes CRD does not validate plugin settings. They are stored in the open `Plugins` map.
+- No custom editors. Plugins get the generated settings page and action buttons.

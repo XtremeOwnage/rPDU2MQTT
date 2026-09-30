@@ -4,57 +4,42 @@ title: Docker Compose
 
 # Docker Compose
 
-This guide will help you deploy the `rpdu2mqtt` service using Docker Compose.
+`docker-compose.yaml` ([example](https://github.com/XtremeOwnage/rPDU2MQTT/blob/main/Examples/Docker-Compose/docker-compose.yaml)):
 
-## Prerequisites
+```yaml
+services:
+  rpdu2mqtt:
+    image: ghcr.io/xtremeownage/rpdu2mqtt:stable
+    container_name: rpdu2mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/config/config.yaml
+      - ./history:/data/history
+    environment:
+      RPDU2MQTT_HISTORY_DIRECTORY: /data/history
+      RPDU2MQTT_MQTT_USERNAME: rpdu2mqtt
+      RPDU2MQTT_MQTT_PASSWORD: "change-me"
+      RPDU2MQTT_PDU_USERNAME: hass
+      RPDU2MQTT_PDU_PASSWORD: "change-me"
+    ports:
+      - "8080:8080"   # GUI
+      - "9184:9184"   # Prometheus /metrics
 
-Before you begin, ensure you have the following installed on your system:
+  # Optional: durable daily totals. Set Cache.Enabled: true and Cache.Connection: valkey:6379.
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["--appendonly", "yes", "--dir", "/data"]
+    volumes:
+      - valkey-data:/data
 
-- [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
-
-## Step 1: Prepare the Configuration File
-
-Create a `config.yaml` file that will be used to configure the `rpdu2mqtt` service. This file should contain your specific configuration settings.
-
-For help on setting up `config.yaml`, please see [Configuration Documentation](../configuration/index.md)
-
-```bash
-touch config.yaml
+volumes:
+  valkey-data:
 ```
 
-Populate the `config.yaml` file with your desired configuration settings.
-
-## Step 2: Create the Docker Compose File
-
-Create a `docker-compose.yml`. 
-
-See [docker-compose.yaml](https://github.com/XtremeOwnage/rPDU2MQTT/blob/main/Examples/Docker-Compose/docker-compose.yaml)
-
-This file defines the Docker service and specifies the necessary security and resource constraints.
-
-## Step 3: Deploy the Service
-
-Navigate to the directory containing your `docker-compose.yml` and `config.yaml` files, then deploy the service using Docker Compose:
-
 ```bash
-docker-compose up -d
+docker compose up -d
+docker compose logs -f
 ```
 
-This command will download the required Docker image and start the `rpdu2mqtt` service in detached mode.
-
-## Step 4: Verify the Deployment
-
-To ensure the service is running correctly, use the following command:
-
-```bash
-docker-compose ps
-```
-
-This will show the status of the `rpdu2mqtt` container.
-
-You can also view the logs to check for any errors or important information:
-
-```bash
-docker-compose logs -f
-```
+Without Valkey, daily totals are kept in `energy-totals.json` beside the binary.

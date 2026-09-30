@@ -4,47 +4,36 @@ title: Helm chart
 
 # Helm chart
 
-Deploys [rPDU2MQTT](https://github.com/XtremeOwnage/rPDU2MQTT) — a bridge from a Vertiv/Geist rPDU to
-MQTT, with Home Assistant discovery and optional Prometheus/EmonCMS exporters.
-
-## Install
+Chart: `charts/rpdu2mqtt` in the repository.
 
 ```bash
-# From a checkout of the repo:
-helm install rpdu2mqtt ./charts/rpdu2mqtt -n rpdu2mqtt --create-namespace \
-  -f my-values.yaml
+helm install rpdu2mqtt ./charts/rpdu2mqtt -n rpdu2mqtt --create-namespace -f my-values.yaml
 ```
 
-A minimal `my-values.yaml`:
+Minimal `my-values.yaml`:
 
 ```yaml
 config:
   MQTT:
     Connection: { Host: mqtt.lan, Port: 1883 }
-    ParentTopic: rPDU2MQTT
   Pdus:
     default:
       Connection: { Host: pdu.lan, Port: 80 }
-      PollInterval: 5
   HomeAssistant:
     DiscoveryEnabled: true
-    DiscoveryTopic: homeassistant
+  Gui:
+    Enabled: true
 
 credentials:
-  mqtt: { username: rpdu2mqtt, password: "s3cret" }
-  pdu:  { username: hass, password: "homeassistant" }
+  mqtt: { username: rpdu2mqtt, password: "change-me" }
+  pdu:  { username: hass, password: "change-me" }
 ```
 
-## How it works
-
-- The entire `config:` block is rendered verbatim into a **ConfigMap** mounted at `/config/config.yaml`
-  — it is the single source of truth for app behaviour. See
-  [docs/Configuration.md](../configuration/index.md) for every option.
-- `credentials.*` (or `existingSecret`) become `RPDU2MQTT_*` env vars via a **Secret**, so passwords
-  stay out of the ConfigMap. With `kubernetesConfigSource.enabled`, the GUI also writes credentials
-  (incl. the OIDC client secret) **into this Secret** — kept out of the CR `spec` — and the chart grants
-  the pod `get,patch,update` on just that Secret. Create-once preserves GUI-written values on upgrade.
-- The pod rolls automatically when the rendered config changes (config checksum annotation).
+- `config:` is rendered into a ConfigMap at `/config/config.yaml`. All keys: [Configuration](../getting-started/configuration.md).
+- `credentials.*` (or `existingSecret`) become `RPDU2MQTT_*` variables from a Secret.
+- The pod restarts when the rendered config changes.
+- A ConfigMap is read-only, so GUI Save is disabled. For GUI Save set `kubernetesConfigSource.enabled: true` ([Kubernetes CRD](kubernetes-crd.md)).
+- Valkey is deployed by default (`valkey.enabled: true`, 1Gi volume).
 
 ## Key values
 
@@ -54,33 +43,33 @@ credentials:
 | `config` | see `values.yaml` | The full app config (rendered to `config.yaml`). |
 | `credentials.{mqtt,pdu}.{username,password}` | `""` | Injected as `RPDU2MQTT_*`; chart creates a Secret. |
 | `credentials.emoncmsApiKey` | `""` | EmonCMS write key (`RPDU2MQTT_EMONCMS_APIKEY`). |
-| `credentials.apiKey` | `""` | REST API key enabling its write/control endpoints (`RPDU2MQTT_API_KEY`). Required to use control via the API when `kubernetesConfigSource.enabled`, since secrets are stripped from the CR. |
+| `credentials.apiKey` | `""` | REST API key (`RPDU2MQTT_API_KEY`). Required for API control with `kubernetesConfigSource.enabled`. |
 | `credentials.plansSecretKey` | `""` | Secret access key for an S3-compatible floor plan image store (`RPDU2MQTT_PLANS_SECRET_KEY`). |
-| `history.persistence.enabled` | `true` | Create a PVC for the bridge's own history and mount it at `history.mountPath` (`/data/history`) on every pod. Readings kept anywhere else go with the container the next time it restarts. The claim is kept on uninstall. |
-| `history.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `5Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. About 1 GB per year for two hundred series at the default retention. With `split.enabled` the readings are written by the worker and read by the ui, so give it a class that allows `ReadWriteMany` — or keep history on one pod. |
-| `floorPlans.persistence.enabled` | `false` | Create a PVC for floor plan images and mount it at `floorPlans.mountPath` (`/data/plans`) on the pod serving the GUI. Images never go in the config or CR. The claim is kept on uninstall. |
+| `history.persistence.enabled` | `true` | PVC for local history, mounted at `history.mountPath` (`/data/history`). Kept on uninstall. |
+| `history.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `5Gi` / `""` / `ReadWriteOnce` | Existing claim, or size of the created one. About 1 GB per year for 200 series. With `split.enabled`, use `ReadWriteMany`. |
+| `floorPlans.persistence.enabled` | `false` | PVC for floor plan images, mounted at `floorPlans.mountPath` (`/data/plans`) on the GUI pod. Kept on uninstall. |
 | `floorPlans.persistence.existingClaim` / `.size` / `.storageClass` / `.accessMode` | `""` / `1Gi` / `""` / `ReadWriteOnce` | Use your own claim, or size the one the chart creates. |
-| `gracefulRollout.enabled` | `true` | Bring the new pod up and wait for it to be Ready before stopping the old one on an update or restart (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`). The two pods coordinate through a leader lease in Valkey, so it takes effect only with a cache (`valkey.enabled`, or `config.Cache.Enabled`); otherwise the Deployment stays `Recreate`. A `ReadWriteOnce` history/plans volume keeps the pods on one node; `ReadWriteOncePod` turns this off. See *Graceful rollout* under [Notes](#notes). |
+| `gracefulRollout.enabled` | `true` | Start the new pod and wait for Ready before stopping the old one (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`). Needs a cache (`valkey.enabled` or `config.Cache.Enabled`); otherwise `Recreate`. `ReadWriteOncePod` volumes turn it off. See [Notes](#notes). |
 | `existingSecret` | `""` | Use a Secret you manage instead of creating one. |
-| `split.enabled` | `false` | Deploy the app's roles as separate Deployments (`-worker`, `-api`, `-ui`) so they scale independently. Off = one Deployment runs every role. The gui Service targets the `ui` pods and the metrics Service the `worker` pods. |
-| `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role Deployment (only with `split.enabled`). Keep `worker` at `1` — it owns the single PDU session. |
+| `split.enabled` | `false` | Run roles as separate Deployments (`-worker`, `-api`, `-ui`). The gui Service targets `ui`, the metrics Service `worker`. |
+| `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role (with `split.enabled`). Keep `worker` at `1`. |
 | `split.{worker,api,ui}.resources` | `{}` | Per-role resource requests/limits (falls back to `resources`). |
 | `service.gui.enabled` | `true` | Create a Service for the GUI (when `config.Gui.Enabled`). |
 | `service.api.enabled` | `true` | Create a Service for the REST API + its OpenAPI/Scalar docs (when `config.Api.Enabled`). |
 | `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Exporter`). |
 | `serviceMonitor.enabled` | `false` | Create a Prometheus Operator `ServiceMonitor` for `/metrics`. |
 | `serviceMonitor.labels` | `{}` | Extra labels so your Prometheus adopts the ServiceMonitor (e.g. `release: <kube-prometheus-stack release>`); without a match it is silently ignored. |
-| `crds.enabled` | `true` | Render the `RpduConfig` CRD as part of the release, so `helm upgrade` keeps its schema matching the app. Helm only ever *installs* a `crds/` directory, so a chart that keeps it there ships a schema that drifts — and an API server prunes every field its schema does not know, taking settings out of the saved config without saying so. Turn it off only if something else owns the CRD. Kept on uninstall. |
-| `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR (writable by the GUI) instead of a ConfigMap; creates the CR + RBAC and wires the app to read it. Requires the CRD, which this chart renders (`crds.enabled`). |
-| `kubernetesConfigSource.preserveExisting` | `true` | Create-once: keep the live CR `spec` on upgrade so GUI edits aren't reverted (`values.config` only seeds it on install). Set `false` for declarative config. Relies on Helm `lookup`, so it is a **no-op under Argo CD** (`helm template`) — see *Argo CD and GUI edits* under [Notes](#notes). |
-| `kubernetesConfigSource.manageResource` | `true` | Whether the chart renders the `RpduConfig` CR and the GUI-written credentials `Secret`. Set `false` to manage them out of band so GitOps (Argo/Flux) never syncs over GUI edits; RBAC + the config source stay on, but you must create the CR (and Secret, if used) once yourself. |
+| `crds.enabled` | `true` | Render the `RpduConfig` CRD with the release so its schema matches the app. Kept on uninstall. Turn off only if something else owns the CRD. |
+| `kubernetesConfigSource.enabled` | `false` | Store config in an `RpduConfig` CR writable by the GUI; creates the CR and RBAC. |
+| `kubernetesConfigSource.preserveExisting` | `true` | Keep the live CR `spec` on upgrade; `values.config` seeds it on install only. `false` applies `values.config` every upgrade. No effect under Argo CD. |
+| `kubernetesConfigSource.manageResource` | `true` | `false`: the chart renders neither the CR nor the credentials Secret; create them once yourself. RBAC and the config source stay on. |
 | `ingress.enabled` | `false` | Expose the GUI and/or REST API via an Ingress. Each `ingress.hosts[].paths[]` entry takes an optional `service:` of `gui` (default) or `api`. |
 | `httpRoute.enabled` | `false` | Expose the GUI and/or REST API via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
 | `httpRoute.paths` | `[]` | Path-based rules mirroring `ingress`, each with an optional `service:` (`gui`/`api`). Empty routes everything to the GUI. `httpRoute.rules` overrides this with raw rules. |
 | `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
-| `networkPolicy.enabled` | `false` | Restrict pod access: GUI/API/metrics ingress only from `networkPolicy.guiIngressFrom` / `apiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
+| `networkPolicy.enabled` | `false` | Restrict ingress to GUI, API and metrics from `networkPolicy.guiIngressFrom` / `apiIngressFrom` / `metricsIngressFrom`. Health probes always allowed. Egress: `restrictEgress` + `egress`. Needs a NetworkPolicy CNI. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |
-| `autoRestart.enabled` | `false` | Add a CronJob that rolling-restarts this release's Deployment(s) on a schedule. Also re-pulls the image when the tag is mutable (`stable`/`latest`), so it doubles as an update mechanism. |
+| `autoRestart.enabled` | `false` | CronJob that rolling-restarts this release's Deployments on a schedule. Re-pulls mutable tags. |
 | `autoRestart.schedule` | `"0 4 * * *"` | When to restart (standard cron). |
 | `autoRestart.timeZone` | `""` | IANA zone for the schedule (Kubernetes 1.27+); empty uses the cluster's. |
 | `autoRestart.image.repository` / `.tag` | `bitnami/kubectl` / `1.34` | Image the restart job runs. |
@@ -88,97 +77,34 @@ credentials:
 
 ## Notes
 
-- **Where the device work runs (`split.enabled`):** roles decide which background services start in each
-  pod, and in v4 that is the whole story — the device work (the PDU session, a Modbus device, the exporters)
-  runs in the process that starts those services, which is the `worker`. The api/ui pods read what the
-  worker produced and never open a device.
+- **Graceful rollout.** With a cache, the new pod starts as a standby and takes the leader lease when the old pod stops. Only the lease holder polls and publishes. The old pod keeps serving for `RPDU2MQTT_SHUTDOWN_DRAIN_SECONDS` (10 s) with `/readyz` failing. A killed pod holds the lease for at most `RPDU2MQTT_LEADER_LEASE_SECONDS` (15 s). GUI **Restart** rolls the Deployment.
+- **Replicas.** Without the leader lease keep `replicaCount: 1` (`Recreate` strategy). With it, extra replicas are standbys.
+- **Split roles.** With `split.enabled`, the `worker` Deployment runs the PDU session, Modbus and exporters; `api` and `ui` only read. Keep `worker` at one replica. History needs a `ReadWriteMany` class.
+- **Scheduled restarts.** `autoRestart.enabled` adds a CronJob running `kubectl rollout restart` on this release's Deployments, with its own ServiceAccount (`get`, `list`, `patch` on Deployments). Missed runs are skipped.
+- **Metrics.** Set `config.Prometheus.Exporter: true` and `serviceMonitor.enabled: true`. Set `serviceMonitor.labels` to match your Prometheus `serviceMonitorSelector` (e.g. `release: kube-prometheus-stack`).
+- **Argo CD.** See [Argo CD](argo-cd.md) for `ignoreDifferences` with the CRD source.
 
-- **Graceful rollout (#506):** with a cache, an update or a restart starts the replacement pod first. It
-  comes up as a *standby*: it serves the GUI and the API, mirrors the energy totals, and reports Ready once
-  it is connected to the broker and can reach the lease. Only then is the old pod stopped. On SIGTERM the old
-  pod writes its energy totals, lets go of the leader lease, and the standby takes it within a second and
-  starts polling, publishing, accumulating and writing history. The old pod then keeps answering the GUI and
-  API for 10 s (`RPDU2MQTT_SHUTDOWN_DRAIN_SECONDS`) with `/readyz` failing, so the gateway stops routing to
-  it before it closes its listeners; a new pod is not Ready until its GUI and API are listening. Only the lease holder does any of that, so
-  at no point do two processes produce at once, and a pod killed without warning holds the lease for
-  15 s at most (`RPDU2MQTT_LEADER_LEASE_SECONDS`). While the cache is unreachable nobody can prove they
-  hold the lease, so nothing polls until it is back. The Status board's node card says which pod is
-  leading. Restart from the GUI rolls the Deployment instead of deleting the pod.
+## Exposing the REST API
 
-- **Replicas:** without the leader lease, two replicas would each poll the PDUs and each run the
-  publishers — duplicate device sessions, duplicate output — so keep `replicaCount: 1`. With it (see
-  above), extra replicas are standbys that take over if the leader goes.
+```yaml
+config:
+  Api:
+    Enabled: true
+ingress:
+  enabled: true
+  hosts:
+    - host: rpdu2mqtt.example.com
+      paths:
+        - path: /
+          pathType: Prefix          # GUI
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /scalar
+          pathType: Prefix
+          service: api
+```
 
-- **Scheduled restarts:** `autoRestart.enabled=true` adds a CronJob that runs
-  `kubectl rollout restart` against the Deployments *this release* renders — matched by label, so it can
-  never wander onto anything else in the namespace. It gets its own ServiceAccount with nothing but
-  `get`/`list`/`patch` on Deployments (a rollout restart is a patch of the pod template's annotations).
-  Missed runs are skipped rather than fired on recovery. With a mutable tag this is also how you get
-  updated images without a `helm upgrade`.
-
-- **GUI in Kubernetes:** by default the config is mounted read-only from a ConfigMap, so the GUI's
-  *Save* is disabled — change config by editing values and running `helm upgrade`. To make the GUI
-  *Save* work, set `kubernetesConfigSource.enabled=true` to store config in a writable `RpduConfig`
-  custom resource (see [docs/KubernetesCRD.md](kubernetes-crd.md)).
-- **Metrics scraping:** enable `config.Prometheus.Exporter` and `serviceMonitor.enabled` (requires the
-  Prometheus Operator) to have Prometheus auto-discover the `/metrics` endpoint. A Prometheus only
-  adopts ServiceMonitors matching its `serviceMonitorSelector` — for kube-prometheus-stack that's
-  usually `release: <your-stack>`, so set `serviceMonitor.labels` to match or the ServiceMonitor is
-  silently ignored.
-- **Argo CD and GUI edits:** if you let the GUI write config (`kubernetesConfigSource.enabled`), Argo
-  will sync `values.config` back over those edits — `preserveExisting` cannot help, because the Helm
-  `lookup` it relies on is always empty under `helm template`. Add this to your **Application**:
-
-  ```yaml
-  spec:
-    ignoreDifferences:
-      - group: rpdu2mqtt.xtremeownage.com
-        kind: RpduConfig
-        jsonPointers:
-          - /spec
-      - group: ""
-        kind: Secret
-        name: <release-name>   # only if the GUI manages credentials
-        jsonPointers:
-          - /data
-    syncPolicy:
-      syncOptions:
-        - RespectIgnoreDifferences=true
-  ```
-
-  **`ignoreDifferences` alone is not enough:** without `RespectIgnoreDifferences=true` it only hides the
-  OutOfSync status while the sync still reverts your config — a green "Synced" app that clobbers you
-  anyway. The first sync still seeds the CR from `values.config` (the option has no effect on resources
-  that don't exist yet), so this behaves exactly like `preserveExisting` does under plain Helm.
-
-  Prefer not to touch the Application? Set `kubernetesConfigSource.manageResource: false` and create the
-  CR yourself once — the chart then renders neither the CR nor the Secret, so Argo never manages them.
-  See [docs/KubernetesCRD.md](kubernetes-crd.md).
-- **Exposing the REST API:** enable `config.Api.Enabled` (the chart then creates a `<release>-api`
-  Service on `config.Api.Port`), then route to it with `service: api` on an Ingress or HTTPRoute path:
-
-  ```yaml
-  config:
-    Api:
-      Enabled: true
-  ingress:
-    enabled: true
-    hosts:
-      - host: rpdu2mqtt.example.com
-        paths:
-          - path: /
-            pathType: Prefix          # -> GUI
-          - path: /api
-            pathType: Prefix
-            service: api              # -> REST API
-          - path: /scalar             # the docs UI; add /openapi too if you want the raw document
-            pathType: Prefix
-            service: api
-  ```
-
-  The API's docs live at `/scalar/v1` and `/openapi/v1.json` — routing only `/api` leaves them
-  unreachable, so give the API its own host or add those paths as above. Routing to `service: api`
-  while the API is disabled fails the render rather than emitting a dangling backend. The API is
-  unauthenticated for reads: put auth at your ingress, or restrict `networkPolicy.apiIngressFrom`.
-- **Single replica:** the bridge owns a PDU session. Without a cache there is no leader lease, so keep
-  `replicaCount: 1` (the Deployment uses the `Recreate` strategy); with one, see *Graceful rollout* above.
+- API docs: `/scalar/v1` and `/openapi/v1.json`.
+- `service: api` with the API disabled fails the render.
+- Reads are unauthenticated. Put auth at the ingress, or restrict `networkPolicy.apiIngressFrom`.

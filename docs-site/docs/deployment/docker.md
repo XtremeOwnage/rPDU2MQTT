@@ -4,35 +4,27 @@ title: Docker
 
 # Docker
 
-The simplest way to run the service — a single `docker run`. (Prefer [Docker Compose](docker-compose.md) for anything long-lived.)
-
-## 1. Create a config file
-
-Create a `config.yaml` next to where you'll run the command. See the
-[Configuration guide](../configuration/index.md) and the
-[examples](https://github.com/XtremeOwnage/rPDU2MQTT/tree/main/Examples/Configuration) (`minimum-configuration-example.yaml` is a good start).
-
-## 2. Run it
-
 ```bash
 docker run -d \
   --name rpdu2mqtt \
   --restart unless-stopped \
-  -v "$(pwd)/config.yaml:/config/config.yaml:ro" \
+  -v "$(pwd)/config.yaml:/config/config.yaml" \
   -e RPDU2MQTT_MQTT_PASSWORD="change-me" \
   -e RPDU2MQTT_PDU_PASSWORD="change-me" \
   -p 8080:8080 \
   ghcr.io/xtremeownage/rpdu2mqtt:stable
 ```
 
-- `-v .../config.yaml:/config/config.yaml:ro` — mount your config (drop `:ro` to let the GUI save edits).
-- `-e RPDU2MQTT_*` — keep credentials out of the file (see [Credentials & secrets](../configuration/environment-variables.md)); `*_FILE` variants are supported for Docker secrets.
-- `-p 8080:8080` — only needed if `Gui.Enabled`. Add `-p 9184:9184` for the Prometheus exporter and `-p 8081:8081` for health checks if you enable them.
+| Option | Purpose |
+| --- | --- |
+| `-v …:/config/config.yaml` | Config file. Add `:ro` to block GUI Save |
+| `-e RPDU2MQTT_*` | Secrets. See [Environment variables](../system/environment-variables.md) |
+| `-p 8080:8080` | GUI |
+| `-p 9184:9184` | Prometheus exporter |
+| `-p 8081:8081` | Health checks |
 
-## 3. Verify
+Mount a volume for local history and set `History.LocalPath` or `RPDU2MQTT_HISTORY_DIRECTORY` to it.
 
 ```bash
 docker logs -f rpdu2mqtt
 ```
-
-You should see it connect to MQTT and start publishing. With `HomeAssistant.DiscoveryEnabled`, the devices appear in Home Assistant automatically.

@@ -4,19 +4,18 @@ title: Health checks
 
 # Health checks
 
-The bridge exposes lightweight HTTP health endpoints for container/orchestrator probes, enabled by
-default on their own port:
+On by default, on their own port. Config file only.
 
 ```yaml
 Health:
-  Enabled: true   # default
-  Port: 8081      # default
+  Enabled: true
+  Port: 8081
 ```
 
-| Endpoint | Meaning |
+| Endpoint | Returns |
 | --- | --- |
-| `GET /healthz` | **Liveness** — the process is up (always `200 OK` while running). |
-| `GET /readyz` | **Readiness** — `200` when MQTT is connected and the PDU has been polled recently; otherwise `503`. |
+| `GET /healthz` | `200 OK` while the process runs |
+| `GET /readyz` | `200 READY` when MQTT is connected and the PDU was polled recently; else `503 NOT READY: <reason>` |
+| `GET /health/integrations` | JSON status of each integration. Does not affect readiness |
 
-The Helm chart wires these as `livenessProbe` / `readinessProbe` automatically (toggle with
-`healthProbes.enabled`, default on). For Docker Compose you can point a `healthcheck` at `/healthz`.
+The Helm chart uses `/healthz` and `/readyz` as liveness and readiness probes (`healthProbes.enabled`, default on).

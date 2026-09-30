@@ -4,8 +4,7 @@ title: Command line
 
 # Command line
 
-rPDU2MQTT is started as `dotnet rPDU2MQTT.dll` (the container's entry point). It takes a few
-arguments, and reads the same settings from environment variables.
+`dotnet rPDU2MQTT.dll` (the container entry point).
 
 | Argument | What it does |
 | --- | --- |
@@ -15,8 +14,7 @@ arguments, and reads the same settings from environment variables.
 
 ## Roles
 
-`--role` (or `RPDU2MQTT_ROLE`) takes one role or a list separated by commas, spaces or semicolons,
-for example `api,ui`. Unset, or nothing recognised, runs everything.
+One role or a list separated by commas, spaces or semicolons, e.g. `api,ui`. Unset or unrecognised runs everything.
 
 | Value | Role |
 | --- | --- |
@@ -26,7 +24,7 @@ for example `api,ui`. Unset, or nothing recognised, runs everything.
 | `ui`, `gui`, `web` | The web GUI. |
 | `operator`, `op` | The Kubernetes operator. |
 
-The Helm chart sets roles for you when `split` is enabled; see [Helm chart](../deployment/helm.md).
+The Helm chart sets roles when `split.enabled` is on ([Helm chart](../deployment/helm.md)).
 
 ## Regenerating the settings reference
 

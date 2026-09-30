@@ -4,13 +4,11 @@ title: MQTT topics
 
 # MQTT topics
 
-Everything is published under `MQTT.ParentTopic` (default `rPDU2MQTT`). The examples below were captured
-from the demo setup: one PDU instance whose device serial is `A0AE260C851900C3`, with ten outlets.
+Everything is published under `MQTT.ParentTopic` (default `rPDU2MQTT`).
 
 ![Paths page: the MQTT topic, Prometheus metric and EmonCMS key for each measurement](../assets/screenshots/paths.webp)
 
-The GUI's **Paths** page lists the exact topic for every measurement, including the effect of your
-[overrides](../configuration/overrides.md). Use it rather than working topics out by hand.
+**Sources › Paths** lists the topic for every measurement, with [overrides](../vertiv/overrides.md) applied.
 
 ## Bridge
 
@@ -22,8 +20,7 @@ The GUI's **Paths** page lists the exact topic for every measurement, including 
 
 ## PDU devices
 
-A lone PDU instance publishes without a namespace. With several instances, each is published under a
-namespace of its own (see [PDUs](../configuration/pdus.md)).
+A single PDU instance publishes without a namespace. With several, each has its own namespace ([Vertiv rPDU](../vertiv/index.md)).
 
 | Topic | Example payload |
 | --- | --- |
@@ -42,8 +39,7 @@ namespace of its own (see [PDUs](../configuration/pdus.md)).
 
 ### Outlet commands
 
-With `Pdus.<name>.ActionsEnabled: true` and PDU credentials, Home Assistant discovery wires these command
-topics (from the outlet device's discovery payload):
+With `ActionsEnabled: true` and PDU credentials:
 
 | Topic | Entity |
 | --- | --- |
@@ -55,9 +51,7 @@ topics (from the outlet device's discovery payload):
 
 ## Energy-flow tiers
 
-With `EnergyFlow.MqttExport: true`, every tier is published as JSON to
-`EnergyFlow.MqttTopicTemplate` (default `{parent}/energyflow/{id}`). Rooms, floors and sites are tiers
-too (`location_<id>`), as are PDUs (`pdu_<device>`), outlets (`outlet_<device>_<n>`), groups and breakers.
+With `EnergyFlow.MqttExport: true`, every tier is published as JSON to `EnergyFlow.MqttTopicTemplate` (default `{parent}/energyflow/{id}`). Tiers include rooms, floors and sites (`location_<id>`), PDUs (`pdu_<device>`), outlets (`outlet_<device>_<n>`), groups and breakers.
 
 `rPDU2MQTT/energyflow/solar`:
 
@@ -76,11 +70,11 @@ too (`location_<id>`), as are PDUs (`pdu_<device>`), outlets (`outlet_<device>_<
 | `soc` | state of charge, for nodes with a `soc` source |
 | `timestamp` | time of the reading; for a rolled-up tier, the oldest contributing reading |
 
-A value nothing determines is `null`, never `0`.
+Unknown values are `null`.
 
 ## Home Assistant discovery
 
-Discovery uses device-based payloads under `HomeAssistant.DiscoveryTopic`:
+Device-based payloads under `HomeAssistant.DiscoveryTopic`:
 
 - `<discovery>/device/rPDU2MQTT/config` — the bridge.
 - `<discovery>/device/rPDU2MQTT_<serial>/config` — each PDU device.

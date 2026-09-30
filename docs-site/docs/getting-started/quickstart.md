@@ -4,49 +4,34 @@ title: Quick start
 
 # Quick start
 
-## 1. Write a config
+## 1. Minimal config
 
-The smallest working `config.yaml` (from `Examples/Configuration/minimum-configuration-example.yaml`):
+`config.yaml`. Feature switches (`Gui.Enabled`, `HomeAssistant.DiscoveryEnabled`) are only set in the file.
 
 ```yaml
 Mqtt:
   Connection:
-    Host: "your-mqtt-broker-ip-or-hostname"
+    Host: "mqtt.lan"
     Port: 1883
-  Credentials:
-    Username: "admin"
-    Password: "password"
 
 Pdus:
   default:
     Connection:
-      Host: your-pdu-ip-or-hostname
+      Host: "pdu.lan"
       Port: 80
 
-HomeAssistant:
-  DiscoveryEnabled: true
-  DiscoveryTopic: "homeassistant"
-```
-
-Keys are case-insensitive. Credentials can come from the environment instead of the file; see
-[Environment variables](../configuration/environment-variables.md).
-
-## 2. Turn on the GUI
-
-The GUI is off by default. Add:
-
-```yaml
 Gui:
   Enabled: true
   Port: 8080
   AuthType: Basic
   Username: admin
   Password: "change-me"
+
+HomeAssistant:
+  DiscoveryEnabled: true
 ```
 
-For the GUI's **Save** to work in a container, mount `config.yaml` writable (no `:ro`).
-
-## 3. Run it
+## 2. Run
 
 ```yaml
 services:
@@ -56,27 +41,52 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./config.yaml:/config/config.yaml
+      - ./config.yaml:/config/config.yaml   # writable, so the GUI can save
 ```
 
 ```bash
 docker compose up -d
-docker compose logs -f
 ```
 
-## 4. Check it
+Browse to `http://<host>:8080` and sign in.
 
-- **GUI:** browse to `http://<host>:8080`. The **Overview** page shows what the system is doing and
-  whether every component is healthy; **Status** shows each hop on its own.
-- **MQTT:** readings appear under the `ParentTopic` (default `rPDU2MQTT`). See
-  [MQTT topics](../reference/mqtt-topics.md).
-- **Home Assistant:** with discovery on, the bridge, each PDU and each outlet appear as devices.
-- **Health:** `http://<host>:8081/healthz` answers `OK`; `/readyz` answers `READY` once MQTT is
-  connected and a PDU poll has succeeded. See [Health checks](../reference/health.md).
+## 3. MQTT
 
-![Status page: every hop from sources to destinations](../assets/screenshots/status.webp)
+**Integrations › MQTT**. Set credentials and press **Test MQTT connection**. **Save**.
 
-## Next
+![MQTT settings page](../assets/screenshots/mqtt.webp)
 
-- Add solar, battery, grid and circuits: [Energy flow](../energy-flow/index.md).
-- Tour every page: [Web GUI](../gui/index.md).
+Details: [MQTT](../integrations/mqtt.md).
+
+## 4. PDU
+
+**Sources › Vertiv rPDU**. Check host and port, set credentials. Turn on **Enable Write Actions** for outlet control. **Save**.
+
+![Vertiv rPDU page](../assets/screenshots/vertiv-rpdu.webp)
+
+Details: [Vertiv rPDU](../vertiv/index.md).
+
+## 5. Home Assistant
+
+**Destinations › Home Assistant**. Check **Discovery Topic** matches Home Assistant's prefix. **Save**, then **Republish discovery**.
+
+![Home Assistant settings page](../assets/screenshots/home-assistant.webp)
+
+Details: [Home Assistant](../destinations/home-assistant.md).
+
+## 6. Energy flow
+
+**Energy Flow › Nodes**. Add nodes for grid, solar, battery, panels and circuits, and bind each to a source.
+
+![Nodes page](../assets/screenshots/nodes.webp)
+
+Details: [Nodes](../energy-flow/nodes.md), [Panels](../energy-flow/panels.md), [Floor plans](../energy-flow/floor-plans.md).
+
+## 7. Check
+
+**System › Status**. Every card green, or grey for not configured.
+
+![Status page](../assets/screenshots/status.webp)
+
+- MQTT: readings under `rPDU2MQTT/`. See [MQTT topics](../reference/mqtt-topics.md).
+- Health: `http://<host>:8081/healthz` returns `OK`. See [Health checks](../reference/health.md).

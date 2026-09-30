@@ -15,9 +15,9 @@ public class GuiConfig
     [FeatureToggle]
     public bool Enabled { get; set; }
 
-    /// <summary>Show the link back to the project's GitHub page in the GUI footer.</summary>
+    /// <summary>Show the documentation and GitHub links in the GUI footer.</summary>
     [DefaultValue(true)]
-    [Description("Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
+    [Description("Show links to the documentation and the GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
     public bool ShowProjectLink { get; set; } = true;
 
     [DefaultValue("auto")]
