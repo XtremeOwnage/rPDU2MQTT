@@ -30,13 +30,17 @@ When totals do not carry over, the log says `Daily energy totals did not carry o
 
 ## Lifetime counters never go backwards
 
-`energy` and `energy_in` are published as `state_class: total_increasing`. A value lower than one already published is held back and logged:
+`energy`, `energy_out` and `energy_in` are published as `state_class: total_increasing`.
+
+- For a node the bridge keeps a running total for (any node with an energy or power source), the value is that total. It keeps counting from power when the node's energy counter stops arriving.
+- The first value continues from the last one published, and a drop in the total is absorbed, so the sensor never goes backwards.
+- For a roll-up tier with no source of its own, a value lower than one already published is held back and logged:
 
 ```
 Holding back main_panel|energy: 9800 is below the 14616.54 already published.
 ```
 
-Publishing resumes when the value passes the old figure (`… is being published again`), or after a restart. `energy_d` is not held back.
+The offsets are stored with the high-water marks (`<key>@offset`). `energy_d` is not held back.
 
 ## Repairing Home Assistant statistics
 
@@ -57,7 +61,7 @@ Or **Developer tools › Statistics** in Home Assistant, one entity at a time.
 | Destination | Fields |
 | --- | --- |
 | MQTT tier export | `value`, `power`, `energy`, `energy_out`, `energy_in`, `energy_d`, `soc` |
-| Home Assistant | Power, Energy, Energy Daily sensors per tier |
+| Home Assistant | Power and Energy sensors per tier (Energy In and Energy Out on grid and battery) |
 | Prometheus | `rpdu2mqtt_flow_realpower`, `rpdu2mqtt_flow_energy`, `rpdu2mqtt_flow_energy_d`, labels `node`, `name`, `kind`, `tier` |
 
 A tier with no value is absent from the scrape.

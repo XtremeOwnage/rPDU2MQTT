@@ -197,7 +197,7 @@ public static class FlowExport
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
         string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
-        bool includeEnergyDaily = false, string? area = null)
+        string? area = null)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -249,10 +249,9 @@ public static class FlowExport
             doc["components"]!.AsObject()[$"{id}_energy_out"] =
                 Sensor($"{id}_energy_out", "Energy Out", "energy", "total_increasing", units, "{{ value_json.energy_out }}");
         }
-        // Energy since local midnight.
-        if (includeEnergyDaily)
-            doc["components"]!.AsObject()[$"{id}_energy_d"] =
-                Sensor($"{id}_energy_d", "Energy Daily", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_d }}");
+        // Daily sensors this used to publish: platform only removes them from Home Assistant.
+        foreach (var retired in new[] { $"{id}_energy_d", $"{id}_energy_today" })
+            doc["components"]!.AsObject()[retired] = new JsonObject { ["platform"] = "sensor" };
         // A battery tier with a state-of-charge source publishes it too, so HA's battery source can show %.
         if (includeSoc)
             doc["components"]!.AsObject()[$"{id}_soc"] =
