@@ -19,7 +19,9 @@ const HISTORY_DEFAULT = 'minutes=1440&step=900';
 export const HISTORY_METRICS: [string, string][] = [
   ['realpower', 'Power (W)'],
   ['current', 'Current (A)'],
+  ['voltage', 'Voltage (V)'],
   ['apparentpower', 'Apparent (VA)'],
+  ['temperature', 'Temperature (°C)'],
   ['energy_d', 'Energy (kWh)'],
 ];
 /// The last window picked, kept per browser: the same question tends to be asked over the same span.

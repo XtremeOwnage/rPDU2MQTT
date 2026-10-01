@@ -2075,3 +2075,64 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .trends-page table.ld td.num { white-space:nowrap; }
   .trends-page table.ld .col-full { display:none; }
 }
+
+/* --- Solar Array ------------------------------------------------------------------------------------- */
+/* Strings as rows of panels; a panel's fill is its share of the best panel's output, so the odd one out
+   is visible across the roof at a glance. */
+.sa-head { display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; margin-bottom:var(--sp-3); }
+.sa-head h2 { margin:0 auto 0 0; }
+.sa-show { display:inline-flex; border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden; }
+.sa-show-btn { border:0; border-radius:0; background:transparent; color:var(--muted); padding:6px 12px; font-size:12.5px; }
+.sa-show-btn + .sa-show-btn { border-left:1px solid var(--line); }
+.sa-show-btn.is-on { background:var(--accent); color:var(--accent-fg); }
+.sa-buses { display:flex; flex-direction:column; gap:6px; margin-bottom:var(--sp-3); }
+.sa-bus { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; font-size:12.5px; color:var(--muted); }
+.sa-bus::before { content:'●'; color:var(--warn); }
+.sa-bus.is-good::before { color:var(--good); }
+.sa-note { padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel2); font-size:13px; }
+.sa-note.is-bad { border-color:var(--bad); }
+.sa-array { display:flex; flex-direction:column; gap:var(--sp-3); }
+.sa-string { border:1px solid var(--line); border-radius:8px; padding:var(--sp-3); background:var(--panel); }
+.sa-string-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:var(--sp-2); }
+.sa-string-title { font-size:14px; }
+.sa-arrow { color:var(--muted); font-size:12.5px; }
+.sa-string-total { margin-left:auto; font:600 12.5px/1.4 var(--mono); color:var(--muted); }
+.sa-string-head input.sa-string-name { width:12em; flex:none; max-width:100%; }
+.sa-string-head select.sa-mppt { width:auto; max-width:16em; }
+.sa-mppt { width:auto; }
+.sa-panels { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:8px; min-height:60px; }
+.sa-panel {
+  --sa-fill:0; position:relative; display:flex; flex-direction:column; gap:2px; padding:8px; min-height:84px;
+  border:1px solid var(--line); border-radius:6px; overflow:hidden; color:var(--fg);
+  /* A PV cell's blue, brighter with output. */
+  background:linear-gradient(160deg, hsl(212 55% calc(14% + 34% * var(--sa-fill))), hsl(218 60% calc(10% + 26% * var(--sa-fill))));
+}
+.sa-panel::after { content:''; position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+  background-size:100% 25%, 33.4% 100%; }
+.sa-panel.is-link { cursor:pointer; }
+.sa-panel.is-link:hover { outline:2px solid var(--accent); outline-offset:-2px; }
+.sa-panel.is-low { border-color:var(--warn); box-shadow:inset 0 0 0 1px var(--warn); }
+.sa-panel.is-quiet { opacity:.55; }
+.sa-panel.is-editing { cursor:grab; }
+.sa-panel-label { font-weight:700; font-size:12px; color:#e9edf4; }
+.sa-panel-value { font:700 17px/1.2 var(--mono); color:#fff; font-variant-numeric:tabular-nums; }
+.sa-panel-sub { font-size:10.5px; color:rgba(233,237,244,.75); overflow-wrap:anywhere; }
+.sa-panel input.sa-panel-name { position:relative; z-index:1; width:100%; min-width:0; height:26px; margin-top:4px; padding:2px 6px; font-size:12px; }
+.sa-panel-edit { display:grid; grid-template-columns:1fr 1fr; gap:4px; align-items:center; margin-top:4px; position:relative; z-index:1; }
+.sa-panel-edit select.sa-panel-move { grid-column:1 / -1; order:3; }
+.sa-panel-edit .small { padding:2px 7px; }
+.sa-panel select.sa-panel-move { width:100%; min-width:0; height:24px; padding:0 16px 0 4px; font-size:11px; background-position:right 3px center; }
+.sa-empty { grid-column:1/-1; font-size:12.5px; color:var(--muted); padding:var(--sp-3); border:1px dashed var(--line); border-radius:6px; text-align:center; }
+.sa-actions { display:flex; gap:var(--sp-2); }
+.sa-loose { margin-top:var(--sp-4); }
+.sa-loose h3 { margin:0 0 4px; font-size:14px; }
+.sa-loose-row { display:flex; gap:var(--sp-3); align-items:center; flex-wrap:wrap; padding:6px 0; border-bottom:1px solid var(--line-soft, var(--line)); }
+.sa-loose-row code { font-size:12px; }
+.sa-loose-val { font:12.5px var(--mono); color:var(--muted); min-width:9em; }
+.sa-adopt { width:auto; }
+@media (max-width: 560px) {
+  .sa-panels { grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:6px; }
+  .sa-string-total { margin-left:0; flex-basis:100%; }
+}
+.sa-panel-edit .small { justify-content:center; text-align:center; }

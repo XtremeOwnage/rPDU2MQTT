@@ -34,6 +34,9 @@
 		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Api\rPDU2MQTT.Api.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Web\rPDU2MQTT.Web.csproj" />
+		<!-- Bundled plugins: built with the bridge but not referenced by it — nothing here may call into them, so
+		     they stay plugins. Their DLLs are copied to plugins/<name>/, where the plugin loader picks them up. -->
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -53,4 +56,21 @@
 		</None>
 	</ItemGroup>
 
+
+	<!-- Copy each bundled plugin's DLL into plugins/<name>/ beside the build and the publish output. The path is
+	     asked of the plugin project itself, so `dotnet build -o` and a plain build both find it. -->
+	<ItemGroup>
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" PluginDir="tigo" />
+	</ItemGroup>
+	<Target Name="ResolveBundledPlugins">
+		<MSBuild Projects="@(BundledPlugin)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+			<Output TaskParameter="TargetOutputs" ItemName="BundledPluginDll" />
+		</MSBuild>
+	</Target>
+	<Target Name="CopyBundledPlugins" AfterTargets="Build" DependsOnTargets="ResolveBundledPlugins">
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(OutDir)plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+	</Target>
+	<Target Name="PublishBundledPlugins" AfterTargets="Publish" DependsOnTargets="ResolveBundledPlugins">
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(PublishDir)plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+	</Target>
 </Project>

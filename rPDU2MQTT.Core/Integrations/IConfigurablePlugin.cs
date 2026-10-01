@@ -120,6 +120,13 @@ public static class PluginConfigBinder
                 foreach (var item in list) arr.Add(ToJson(item));
                 return arr;
             }
+            // Scalars that are already typed — a section built in code, or read from JSON rather than YAML —
+            // keep their type; as text, `true` would no longer bind to a bool.
+            case bool flag: return JsonValue.Create(flag);
+            case int or long or short or byte or uint or ulong or ushort or sbyte:
+                return JsonValue.Create(Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture));
+            case double or float or decimal:
+                return JsonValue.Create(Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture));
             default: return JsonValue.Create(value.ToString());
         }
     }

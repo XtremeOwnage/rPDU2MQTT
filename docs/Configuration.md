@@ -1222,6 +1222,51 @@ The same seam, pointed at an HA entity: `Type: homeassistant` with the entity id
 token. Useful when the thing measuring a circuit is already in Home Assistant through some other
 integration. An entity that is `unavailable` or non-numeric supplies nothing — never zero.
 
+### Live sources from Tigo optimizers (plugin)
+
+Per-panel readings from Tigo TS4 optimizers, taken off the TAP's RS485 bus through an RS485-to-Ethernet
+gateway in raw TCP mode (38400 baud, 8N1). Shipped as a separate library, `plugins/rPDU2MQTT.Plugin.Tigo`,
+loaded at startup from `plugins/tigo/` like any external plugin. The protocol is the reverse-engineered one
+from [openTAPtoX](https://github.com/jontubs/openTAPtoX) (MIT), not a Tigo API.
+
+```yaml
+Plugins:
+  tigo:
+    Enabled: true
+    StaleSeconds: 180          # quiet longer than this: 0 W while the TAP still answers
+    Connections:
+      - Id: roof
+        Host: 192.168.1.50
+        Port: 4196
+        Mode: Listen           # Listen | Poll
+        GatewayId: ""          # Poll only; hex, blank = learn from the bus
+        PollIntervalMs: 1000
+```
+
+| Mode | Bus | Transmits |
+|------|-----|-----------|
+| `Listen` | A Tigo CCA polls the TAP; the bridge reads the traffic | Never |
+| `Poll` | No CCA; the bridge polls the TAP and pages its node table | Yes. Stands down if another controller is heard |
+
+- **Serials.** An optimizer is named by its serial once a node table (or topology report) has been seen;
+  until then it shows as `node-<gateway>-<n>`. In Listen mode that happens when the CCA next reads the table.
+- **One client per gateway.** Each connection runs under the single-owner lease keyed by `host:port`; other
+  replicas show Standby.
+- **Readings.** Input volts, input amps, power (vin × iin), output volts, temperature, duty, RSSI.
+  `AmpsScale` corrects the current if it disagrees with a clamp meter.
+
+**Solar Array page.** Lists strings with their panels in wiring order, each panel showing live Power, Volts,
+Amps or Temp. Low panels (under 0.75× the string median) and quiet panels are marked; click a panel to see
+its history. **Arrange** reorders panels, moves them between strings, renames them and picks each string's
+MPPT. Optimizers not yet assigned are listed below; adding one creates:
+
+- a panel: a `solar` node bound `Type: tigo` for `realpower`, `voltage`, `current` and `temperature`, with
+  `Settings.Optimizer: <serial>`;
+- a link panel → string;
+- a string: a `solar` node tagged `pv-string`, linked string → MPPT node.
+
+All of it is ordinary flow configuration, so energy and history follow from the existing writers.
+
 ### Device templates (Nodes tab → "Import device template")
 
 Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:

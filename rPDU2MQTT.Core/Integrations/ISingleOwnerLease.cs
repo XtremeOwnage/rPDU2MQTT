@@ -42,3 +42,18 @@ public sealed class SoleOwnerLease : ISingleOwnerLease
         return true;
     }
 }
+
+/// <summary>
+/// An integration that needs the cluster's <see cref="ISingleOwnerLease"/>, handed to it by the host.
+///
+/// <para>
+/// A plugin is constructed with no arguments, so it cannot take the lease in a constructor the way a built-in
+/// service does. Declaring this is how it asks: the host calls <see cref="UseLease"/> once, before the
+/// integration is first used. Until then — and in any test that never calls it — the integration should
+/// behave as the only process there is (<see cref="SoleOwnerLease"/>).
+/// </para>
+/// </summary>
+public interface ISingleOwnerLeaseUser
+{
+    void UseLease(ISingleOwnerLease lease);
+}
