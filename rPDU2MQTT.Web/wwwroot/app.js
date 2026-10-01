@@ -17589,9 +17589,12 @@ function renderList(node     , arr       , path          ) {
 /// and `child: true` then indents it under whatever schema section happened to sort last — which is how
 /// "HA Energy Mapping" ended up hanging off EmonCMS.
 
+/** The PDU's pages, last first: its tabs go after Overrides, or after the PDU page when Overrides is absent. */
+const PDU_BLOCK = ['Overrides', 'Pdus'];
 const NAV_GROUPS                                        = [
-  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children, anchored
+  // to it so a plugin's Sources page (Tigo TAP) cannot end up as their parent.
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addSolarArraySection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
@@ -17932,11 +17935,15 @@ function build() {
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
   NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
-    // A tool that names its parent section sits directly after it; everything else keeps to the end.
-    const after = 'after' in it ? it.after : undefined;
-    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
-    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
-    else navGroups[i].items.push(it);
+    // A tool that names its parent section sits directly after it (the first named that is present), behind
+    // any tools already placed there so they keep their listed order; everything else keeps to the end.
+    const items = navGroups[i].items;
+    const after = 'after' in it && it.after ? ([]            ).concat(it.after) : [];
+    let at = -1;
+    for (const key of after) { at = items.findIndex(x => 'schema' in x && x.schema === key); if (at >= 0) break; }
+    if (at < 0) { items.push(it); return; }
+    while (at + 1 < items.length && 'tool' in items[at + 1] && (items[at + 1]       ).after === it.after) at++;
+    items.splice(at + 1, 0, it);
   }));
 
   // The landing page: what the system is doing now, rendered first so it's the default tab (#395).

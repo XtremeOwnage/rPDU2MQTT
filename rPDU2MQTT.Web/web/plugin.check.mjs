@@ -23,7 +23,12 @@ const pluginSection = {
     { key: 'BatchSize', label: 'BatchSize', type: 'int', default: 100, min: 1, max: 1000 },
   ],
 };
-const schema = [...base, pluginSection];
+// A Sources plugin (Tigo TAP is one): it sorts after the PDU's pages and must not adopt the PDU's tabs.
+const sourceSection = {
+  key: 'busreader', label: 'Bus Reader', type: 'object', isPlugin: true, group: 'Sources',
+  properties: [{ key: 'Enabled', label: 'Enabled', type: 'bool', default: false }],
+};
+const schema = [...base, pluginSection, sourceSection];
 
 const cfg = { EnergyFlow: { Nodes: [], Links: [] } };
 const integrations = {
@@ -53,6 +58,15 @@ await new Promise(r => setTimeout(r, 60));
 const links = query(getEl('nav'), 'a', true);
 const link = links.find(a => a.dataset.label === 'Acme Flux');
 if (!link) fail(`no nav entry for the plugin; saw ${links.map(a => a.dataset.label).join(', ')}`);
+
+// The PDU's tabs stay under the PDU, and a Sources plugin sits beside it, not above them.
+const order = links.map(a => a.dataset.label);
+const want = ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths', 'Bus Reader'];
+const got = order.filter(l => want.includes(l));
+if (got.join() !== want.join()) fail(`Sources is ordered ${got.join(', ')}, not ${want.join(', ')}`);
+const busLink = links.find(a => a.dataset.label === 'Bus Reader');
+if (busLink.classList.contains('nav-child')) fail('the Sources plugin is indented as a child');
+if (!links.find(a => a.dataset.label === 'Live Data').classList.contains('nav-child')) fail('the PDU tabs are not indented under the PDU');
 
 const groupTitles = query(getEl('nav'), '.nav-group-title', true).map(t => t.textContent);
 if (groupTitles.length && !groupTitles.includes('Destinations'))
